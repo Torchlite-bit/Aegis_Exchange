@@ -113,6 +113,48 @@ function util.Trim(str)
     return result   -- discard gsub's 2nd return (substitution count)
 end
 
+-- Pull the numeric itemID out of an item link or item string
+-- ("|Hitem:2589:0:0:0|h..." or "item:2589:0:0:0"). Returns nil when the
+-- argument is not a link. string.find with a capture; NOT string.match.
+function util.ItemIdFromLink(link)
+    if type(link) ~= "string" then return nil end
+    local _, _, id = string.find(link, "item:(%d+)")
+    return tonumber(id)
+end
+
+-- ---------------------------------------------------------------------------
+-- Time
+-- ---------------------------------------------------------------------------
+
+-- Format a duration in seconds compactly: "42s", "38m", "2h 14m".
+function util.FormatDuration(sec)
+    sec = math.floor(sec or 0)
+    if sec < 0 then sec = 0 end
+    if sec < 60 then
+        return sec .. "s"
+    elseif sec < 3600 then
+        return math.ceil(sec / 60) .. "m"
+    end
+    local h = math.floor(sec / 3600)
+    local m = math.floor(math.mod(sec, 3600) / 60)
+    return h .. "h " .. m .. "m"
+end
+
+-- Format "how long ago": "just now", "5m ago", "2h 14m ago", "3d ago".
+function util.FormatAgo(sec)
+    sec = math.floor(sec or 0)
+    if sec < 60 then
+        return "just now"
+    elseif sec < 3600 then
+        return math.floor(sec / 60) .. "m ago"
+    elseif sec < 86400 then
+        local h = math.floor(sec / 3600)
+        local m = math.floor(math.mod(sec, 3600) / 60)
+        return h .. "h " .. m .. "m ago"
+    end
+    return math.floor(sec / 86400) .. "d ago"
+end
+
 -- ---------------------------------------------------------------------------
 -- Tables
 -- ---------------------------------------------------------------------------

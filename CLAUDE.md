@@ -107,10 +107,12 @@ Aegis_Exchange/
   Aegis_Exchange.toc     -- Interface 11200; declares SavedVariables + load order
   core/init.lua          -- namespace (AegisExchange) + event dispatcher + OnLoad queue
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
-  core/db.lua            -- SavedVariables price DB scaffolding
-  core/scan.lua          -- auction scanner module (stub)
-  ui/frame.lua           -- Aegis tab attach on AuctionFrame (stub)
-  ui/tooltip.lua         -- GameTooltip hook (stub)
+  core/db.lua            -- SavedVariables price DB (daily-min + weighted-median market)
+  core/scan.lua          -- page-by-page auction scanner state machine
+  ui/frame.lua           -- Aegis tab + scan strip on AuctionFrame
+  ui/tooltip.lua         -- GameTooltip price lines (save/replace hooks)
+  design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
+                         -- never ported to Lua verbatim, NEVER in the .toc
   CLAUDE.md              -- this file
 ```
 
