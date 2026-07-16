@@ -300,19 +300,27 @@ function ui.AttachTab()
     -- Vanilla ships Browse/Bids/Auctions (numTabs == 3); ours is next. The
     -- tab is NAMED "AuctionFrameTab"..index so PanelTemplates_SetTab and
     -- Blizzard's own AuctionFrameTab_OnClick manage its visuals for free.
+    -- The virtual template is "AuctionTabTemplate" — the one the stock
+    -- AuctionFrameTab1..3 inherit in Blizzard_AuctionUI.xml (verified against
+    -- the Turtle 1.12 UI source; AuctionatorVanilla creates its tab the same
+    -- way). There is NO template named "AuctionFrameTab".
     local index = (AuctionFrame.numTabs or 3) + 1
     local prevTab = getglobal("AuctionFrameTab" .. (index - 1))
 
     local tab = CreateFrame("Button", "AuctionFrameTab" .. index,
-        AuctionFrame, "AuctionFrameTab")
+        AuctionFrame, "AuctionTabTemplate")
     tab:SetID(index)
     tab:SetText("Aegis")
     tab:SetPoint("LEFT", prevTab, "RIGHT", -8, 0)
+    tab:Show()
 
     if PanelTemplates_SetNumTabs then
         PanelTemplates_SetNumTabs(AuctionFrame, index)
     else
         AuctionFrame.numTabs = index
+    end
+    if PanelTemplates_EnableTab then
+        PanelTemplates_EnableTab(AuctionFrame, index)
     end
 
     BuildPanel()
