@@ -97,22 +97,27 @@ end
 -- ---------------------------------------------------------------------------
 
 local function BuildPanel()
-    -- Content frame shown when the Aegis tab is selected. It spans the whole
-    -- usable region below the title bar and draws an OPAQUE backdrop: the
-    -- AuctionFrame keeps the corner art of whichever stock tab was selected
-    -- last (Blizzard's OnClick only swaps textures for tabs 1-3), so without
-    -- this the leftover Browse/Bids/Auctions wells show through.
+    -- Content frame shown when the Aegis tab is selected.
+    --
+    -- On our tab, Blizzard's AuctionFrameTab_OnClick hides the Browse/Bid/
+    -- Auctions sub-frames but leaves the AuctionFrame's own parchment art
+    -- (and the AuctionFrameMoneyFrame) showing whatever the last stock tab
+    -- set. To read as a native panel rather than a black patch (the approach
+    -- AuctionatorVanilla uses), we cover the ENTIRE interior edge-to-edge with
+    -- an opaque parchment backdrop built from an in-game asset, raised above
+    -- the stale art. Corner anchors keep it independent of the 832x447 frame
+    -- size; the small insets clear the outer gold border, and we stop below
+    -- the title bar so the close button and title stay clickable/visible.
     local panel = CreateFrame("Frame", "AegisExchangePanel", AuctionFrame)
-    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 12, -45)
-    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -12, 35)
+    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 11, -40)
+    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -11, 12)
+    panel:SetFrameLevel(AuctionFrame:GetFrameLevel() + 4)   -- above stale art
     panel:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 24,
+        insets = { left = 6, right = 6, top = 6, bottom = 6 },
     })
-    panel:SetBackdropColor(0.06, 0.055, 0.04, 1)
-    panel:SetBackdropBorderColor(0.30, 0.26, 0.16)
     panel:Hide()
     ui.panel = panel
 
@@ -212,13 +217,55 @@ local function BuildPanel()
     statusText:SetJustifyH("CENTER")
     ui.statusText = statusText
 
-    -- Placeholder for the empty region below the strip (sub-tabs come in a
-    -- later phase) so it reads as intentional rather than missing.
-    local hint = panel:CreateFontString(
-        "AegisExchangeHintText", "ARTWORK", "GameFontDisableSmall")
-    hint:SetPoint("CENTER", panel, "CENTER", 0, -30)
-    hint:SetText("Scan data feeds item tooltips — browse and sell tools arrive in a later phase.")
-    ui.hint = hint
+    -- Info / disclaimer well filling the region below the strip. The Aegis
+    -- tab is a scan console for now, so it explains what scanning does and how
+    -- long it takes rather than leaving dead space (sub-tabs land later).
+    local info = CreateFrame("Frame", "AegisExchangeInfoWell", panel)
+    info:SetPoint("TOPLEFT", strip, "BOTTOMLEFT", 0, -10)
+    info:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 10)
+    info:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    info:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
+    info:SetBackdropBorderColor(0.79, 0.64, 0.15)
+    ui.info = info
+
+    local infoTitle = info:CreateFontString(
+        "AegisExchangeInfoTitle", "ARTWORK", "GameFontNormal")
+    infoTitle:SetPoint("TOPLEFT", info, "TOPLEFT", 14, -12)
+    infoTitle:SetText("How scanning works")
+    infoTitle:SetTextColor(1, 0.82, 0)
+
+    -- Body copy. Two anchors give the FontString a width so it word-wraps.
+    local infoBody = info:CreateFontString(
+        "AegisExchangeInfoBody", "ARTWORK", "GameFontHighlightSmall")
+    infoBody:SetPoint("TOPLEFT", infoTitle, "BOTTOMLEFT", 0, -8)
+    infoBody:SetPoint("RIGHT", info, "RIGHT", -14, 0)
+    infoBody:SetJustifyH("LEFT")
+    infoBody:SetJustifyV("TOP")
+    infoBody:SetText(
+        "A Full Scan reads every page of the auction house to build a price "
+        .. "database. The 1.12 server limits how often pages can be requested, "
+        .. "so Aegis waits about " .. A.scan.PAGE_DELAY .. " seconds between "
+        .. "pages: a busy auction house of 1,000+ pages can take 15 minutes or "
+        .. "more.\n\n"
+        .. "You can Pause and Resume at any time, and a scan picks up where it "
+        .. "left off if you step away from the auctioneer. You don't have to "
+        .. "run a full scan to collect data \226\128\148 browsing the Browse "
+        .. "tab normally records every auction Aegis sees.\n\n"
+        .. "Collected prices appear as market value and minimum buyout lines on "
+        .. "item tooltips.")
+    ui.infoBody = infoBody
+
+    -- Live database stat, pinned to the bottom of the well.
+    local statText = info:CreateFontString(
+        "AegisExchangeStatText", "ARTWORK", "GameFontDisableSmall")
+    statText:SetPoint("BOTTOMLEFT", info, "BOTTOMLEFT", 14, 12)
+    statText:SetJustifyH("LEFT")
+    ui.statText = statText
 
     -- Throttled refresh while the panel is visible. OnUpdate receives no
     -- args on this client; elapsed is the GLOBAL arg1.
@@ -241,6 +288,17 @@ end
 function ui.Refresh()
     if not ui.panel then return end
     local p = A.scan.GetProgress()
+
+    -- Live DB stat in the info well.
+    if ui.statText then
+        local count = A.db.ItemCount()
+        if count == 1 then
+            ui.statText:SetText("Tracking prices for 1 item.")
+        else
+            ui.statText:SetText(
+                "Tracking prices for " .. count .. " items.")
+        end
+    end
 
     -- Header summary (design 1a: "Last full scan: 2h 14m ago · 1,832 pages").
     local last = A.db.GetLastScan()
@@ -358,9 +416,15 @@ function ui.AttachTab()
             i = this:GetID()
         end
         if i == index then
+            -- AuctionFrameMoneyFrame is a direct child of AuctionFrame (the
+            -- player's gold, bottom-left) that the stock tabs all keep shown;
+            -- hide it while our full-cover panel is up so it doesn't poke
+            -- through, and restore it when leaving our tab.
+            if AuctionFrameMoneyFrame then AuctionFrameMoneyFrame:Hide() end
             ui.panel:Show()
             ui.Refresh()
         else
+            if AuctionFrameMoneyFrame then AuctionFrameMoneyFrame:Show() end
             ui.panel:Hide()
         end
     end

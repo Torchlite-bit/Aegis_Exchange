@@ -137,11 +137,15 @@ local function HookMethod(name, source)
             tooltip.current = nil
         end
         -- SetBagItem returns hasCooldown, repairCost on 1.12; pass both up.
+        -- The client fills the sell-price money line via SetTooltipMoney
+        -- DURING this original call, so tooltip.current must stay set across
+        -- it. We deliberately do NOT clear current afterward — the next Set*
+        -- call overwrites it — so a slightly-late money callback still finds
+        -- the right item.
         local r1, r2 = tooltip.orig[name](self, a1, a2)
         if id then
             tooltip.Extend(self, id, count)
         end
-        tooltip.current = nil
         return r1, r2
     end
 end
@@ -169,7 +173,8 @@ function tooltip.Install()
         SetTooltipMoney = function(frame, money)
             tooltip.orig_SetTooltipMoney(frame, money)
             local cur = tooltip.current
-            if cur and cur.source == "bag" and money and money > 0
+            if cur and (cur.source == "bag" or cur.source == "inventory")
+                and money and money > 0
                 and frame == GameTooltip
                 and MerchantFrame and MerchantFrame:IsVisible() then
                 A.db.SetVendor(cur.id,
