@@ -97,31 +97,45 @@ end
 -- ---------------------------------------------------------------------------
 
 local function BuildPanel()
-    -- Content frame shown when the Aegis tab is selected. Anchored inside
-    -- AuctionFrame's usable region (below the 1.12 frame's title art).
+    -- Content frame shown when the Aegis tab is selected. It spans the whole
+    -- usable region below the title bar and draws an OPAQUE backdrop: the
+    -- AuctionFrame keeps the corner art of whichever stock tab was selected
+    -- last (Blizzard's OnClick only swaps textures for tabs 1-3), so without
+    -- this the leftover Browse/Bids/Auctions wells show through.
     local panel = CreateFrame("Frame", "AegisExchangePanel", AuctionFrame)
-    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 22, -80)
-    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -40, 40)
+    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 12, -45)
+    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -12, 35)
+    panel:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    panel:SetBackdropColor(0.06, 0.055, 0.04, 1)
+    panel:SetBackdropBorderColor(0.30, 0.26, 0.16)
     panel:Hide()
     ui.panel = panel
 
-    -- Header: title left, last-full-scan summary right (design 1a).
+    -- Title, centered in the AuctionFrame's title bar (the stock panels each
+    -- carry their own title there and take it with them when hidden).
+    -- Parented to the panel so it appears/disappears with our tab.
     local title = panel:CreateFontString(
         "AegisExchangePanelTitle", "ARTWORK", "GameFontNormal")
-    title:SetPoint("TOPLEFT", panel, "TOPLEFT", 4, -2)
+    title:SetPoint("TOP", AuctionFrame, "TOP", 0, -18)
     title:SetText("Aegis: Exchange")
     ui.title = title
 
+    -- Last-full-scan summary, top right inside the panel (design 1a).
     local lastScanText = panel:CreateFontString(
         "AegisExchangeLastScanText", "ARTWORK", "GameFontHighlightSmall")
-    lastScanText:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -4, -4)
+    lastScanText:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -12)
     lastScanText:SetJustifyH("RIGHT")
     ui.lastScanText = lastScanText
 
     -- The scan strip: a recessed well holding buttons, bar, and status text.
     local strip = CreateFrame("Frame", "AegisExchangeScanStrip", panel)
-    strip:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -22)
-    strip:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -22)
+    strip:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -30)
+    strip:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -30)
     strip:SetHeight(86)
     strip:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -197,6 +211,14 @@ local function BuildPanel()
     statusText:SetPoint("TOP", bar, "BOTTOM", 0, -6)
     statusText:SetJustifyH("CENTER")
     ui.statusText = statusText
+
+    -- Placeholder for the empty region below the strip (sub-tabs come in a
+    -- later phase) so it reads as intentional rather than missing.
+    local hint = panel:CreateFontString(
+        "AegisExchangeHintText", "ARTWORK", "GameFontDisableSmall")
+    hint:SetPoint("CENTER", panel, "CENTER", 0, -30)
+    hint:SetText("Scan data feeds item tooltips — browse and sell tools arrive in a later phase.")
+    ui.hint = hint
 
     -- Throttled refresh while the panel is visible. OnUpdate receives no
     -- args on this client; elapsed is the GLOBAL arg1.
