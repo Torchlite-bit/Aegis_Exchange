@@ -80,7 +80,11 @@ or silent breakage on the 1.12 / Lua 5.0 client.
     building `"AuctionFrameTab" .. n`).
 14. Build frames with **`CreateFrame`** using **vanilla templates only**, e.g.
     `UIPanelButtonTemplate`, `FauxScrollFrameTemplate`, `GameTooltipTemplate`,
-    `AuctionFrameTab`.
+    `AuctionTabTemplate`.
+    - **AH tabs inherit `AuctionTabTemplate`** (what the stock
+      `AuctionFrameTab1..3` inherit; verified in-game and against the Turtle
+      1.12 UI source). There is **NO** template named `AuctionFrameTab` —
+      using it throws `Couldn't find inherited node`.
 
 ---
 
