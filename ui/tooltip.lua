@@ -40,7 +40,8 @@ tooltip.hooked = false
 function tooltip.Extend(gtt, itemId, count)
     local market = A.db.MarketValue(itemId)
     local minBuy = A.db.MinBuyout(itemId)
-    if not market and not minBuy then return end
+    local vendor = A.db.GetVendor(itemId)
+    if not market and not minBuy and not vendor then return end
 
     if market then
         gtt:AddDoubleLine("Aegis Market",
@@ -55,6 +56,15 @@ function tooltip.Extend(gtt, itemId, count)
                 .. util.FormatMoney(minBuy * count, true) .. ")"
         end
         gtt:AddDoubleLine("Aegis Min Buyout", right,
+            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
+    end
+    if vendor then
+        local right = util.FormatMoney(vendor, true)
+        if count and count > 1 then
+            right = right .. " (x" .. count .. " = "
+                .. util.FormatMoney(vendor * count, true) .. ")"
+        end
+        gtt:AddDoubleLine("Aegis Vendor Price", right,
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
     end
     gtt:Show()
