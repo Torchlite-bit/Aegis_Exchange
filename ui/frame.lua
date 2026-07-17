@@ -103,14 +103,19 @@ local function BuildPanel()
     -- Auctions sub-frames but leaves the AuctionFrame's own parchment art
     -- (and the AuctionFrameMoneyFrame) showing whatever the last stock tab
     -- set. To read as a native panel rather than a black patch (the approach
-    -- AuctionatorVanilla uses), we cover the ENTIRE interior edge-to-edge with
-    -- an opaque parchment backdrop built from an in-game asset, raised above
-    -- the stale art. Corner anchors keep it independent of the 832x447 frame
-    -- size; the small insets clear the outer gold border, and we stop below
-    -- the title bar so the close button and title stay clickable/visible.
+    -- AuctionatorVanilla uses), we cover the interior with an opaque parchment
+    -- backdrop built from an in-game asset, raised above the stale art.
+    --
+    -- Because the panel is raised, its border would draw OVER the frame's own
+    -- chrome wherever it overlaps. The auctioneer portrait (verified in the
+    -- 1.12 source: 58x58 at 12,-8, i.e. x 12..70 / y -8..-66) bulges into the
+    -- top-left, so the panel starts BELOW it (-72). The header band above the
+    -- panel is native parchment/title bar; the close button and title sit
+    -- there and stay clickable. Corner anchors keep this independent of the
+    -- 832x447 frame size.
     local panel = CreateFrame("Frame", "AegisExchangePanel", AuctionFrame)
-    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 11, -40)
-    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -11, 12)
+    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 16, -72)
+    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -16, 14)
     panel:SetFrameLevel(AuctionFrame:GetFrameLevel() + 4)   -- above stale art
     panel:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
