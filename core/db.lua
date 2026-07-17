@@ -218,6 +218,16 @@ function db.IdFromName(name)
     return db.account.names[name]
 end
 
+-- Number of distinct items with any recorded price data.
+function db.ItemCount()
+    if not db.account then return 0 end
+    local n = 0
+    for _ in pairs(db.account.items) do
+        n = n + 1
+    end
+    return n
+end
+
 -- Per-character record of the last completed full scan.
 function db.SetLastScan(pages, auctions)
     if not db.char then return end
