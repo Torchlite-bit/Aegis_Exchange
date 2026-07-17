@@ -96,56 +96,90 @@ end
 -- Panel construction
 -- ---------------------------------------------------------------------------
 
+-- The AuctionFrame's own chrome (verified against the 1.12 Blizzard_AuctionUI
+-- source). On our tab the Browse/Bid/Auctions sub-frames are hidden by
+-- Blizzard, but these elements belong to AuctionFrame itself and stay up,
+-- showing through as a "husk". Rather than overlay them (which always leaves
+-- edges peeking), we hide them and let our panel BE the frame — the approach
+-- AuctionatorVanilla uses. They are restored when leaving our tab; Blizzard's
+-- tab handler re-textures the quadrants but SetTexture does not re-Show a
+-- hidden texture, so we must Show() them ourselves.
+local HUSK = {
+    "AuctionPortraitTexture",
+    "AuctionFrameTopLeft", "AuctionFrameTop", "AuctionFrameTopRight",
+    "AuctionFrameBotLeft", "AuctionFrameBot", "AuctionFrameBotRight",
+    "AuctionFrameMoneyFrame",
+}
+
+-- Hide (shown=false) or restore (shown=true) the stock frame chrome.
+function ui.SetHusk(shown)
+    local n = table.getn(HUSK)
+    local i = 1
+    while i <= n do
+        local f = getglobal(HUSK[i])
+        if f then
+            if shown then f:Show() else f:Hide() end
+        end
+        i = i + 1
+    end
+end
+
 local function BuildPanel()
-    -- Content frame shown when the Aegis tab is selected.
-    --
-    -- On our tab, Blizzard's AuctionFrameTab_OnClick hides the Browse/Bid/
-    -- Auctions sub-frames but leaves the AuctionFrame's own parchment art
-    -- (and the AuctionFrameMoneyFrame) showing whatever the last stock tab
-    -- set. To read as a native panel rather than a black patch (the approach
-    -- AuctionatorVanilla uses), we cover the interior with an opaque parchment
-    -- backdrop built from an in-game asset, raised above the stale art.
-    --
-    -- Because the panel is raised, its border would draw OVER the frame's own
-    -- chrome wherever it overlaps. The auctioneer portrait (verified in the
-    -- 1.12 source: 58x58 at 12,-8, i.e. x 12..70 / y -8..-66) bulges into the
-    -- top-left, so the panel starts BELOW it (-72). The header band above the
-    -- panel is native parchment/title bar; the close button and title sit
-    -- there and stay clickable. Corner anchors keep this independent of the
-    -- 832x447 frame size.
+    -- Our panel replaces the AuctionFrame's interior entirely. With the husk
+    -- hidden (ui.SetHusk), the frame body behind us is empty, so we cover the
+    -- full footprint and supply our own parchment + border from an in-game
+    -- asset. Corner anchors keep it independent of the 832x447 frame size; the
+    -- 4px inset leaves the very outer edge for the toplevel frame's own hit
+    -- area. Raised above any remaining frame layers.
     local panel = CreateFrame("Frame", "AegisExchangePanel", AuctionFrame)
-    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 16, -72)
-    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -16, 14)
-    panel:SetFrameLevel(AuctionFrame:GetFrameLevel() + 4)   -- above stale art
+    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 4, -4)
+    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -4, 4)
+    panel:SetFrameLevel(AuctionFrame:GetFrameLevel() + 2)
     panel:SetBackdrop({
         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
         edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 24,
-        insets = { left = 6, right = 6, top = 6, bottom = 6 },
+        tile = true, tileSize = 32, edgeSize = 32,
+        insets = { left = 11, right = 11, top = 12, bottom = 11 },
     })
     panel:Hide()
     ui.panel = panel
 
-    -- Title, centered in the AuctionFrame's title bar (the stock panels each
-    -- carry their own title there and take it with them when hidden).
-    -- Parented to the panel so it appears/disappears with our tab.
+    -- Raise the AuctionFrame close button above our panel so it stays
+    -- clickable on our tab. It remains a child of AuctionFrame (NOT reparented
+    -- to the panel) so it keeps working on the stock tabs when our panel is
+    -- hidden; its top-right corner position already sits on our rebuilt frame.
+    if AuctionFrameCloseButton then
+        AuctionFrameCloseButton:SetFrameLevel(panel:GetFrameLevel() + 10)
+    end
+
+    -- Title bar: a header strip across the top of the rebuilt frame, with the
+    -- title centered on it (our panel is the whole frame now, so we draw our
+    -- own title rather than borrowing the stock one).
+    local titleBar = panel:CreateTexture("AegisExchangeTitleBar", "ARTWORK")
+    titleBar:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
+    titleBar:SetWidth(320)
+    titleBar:SetHeight(64)
+    titleBar:SetPoint("TOP", panel, "TOP", 0, 12)
+    ui.titleBar = titleBar
+
     local title = panel:CreateFontString(
-        "AegisExchangePanelTitle", "ARTWORK", "GameFontNormal")
-    title:SetPoint("TOP", AuctionFrame, "TOP", 0, -18)
+        "AegisExchangePanelTitle", "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", panel, "TOP", 0, -5)
     title:SetText("Aegis: Exchange")
     ui.title = title
 
-    -- Last-full-scan summary, top right inside the panel (design 1a).
+    -- Last-full-scan summary, below the title bar on the right (clear of the
+    -- close button now anchored at the panel's top-right corner).
     local lastScanText = panel:CreateFontString(
         "AegisExchangeLastScanText", "ARTWORK", "GameFontHighlightSmall")
-    lastScanText:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -12)
+    lastScanText:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -16, -34)
     lastScanText:SetJustifyH("RIGHT")
     ui.lastScanText = lastScanText
 
     -- The scan strip: a recessed well holding buttons, bar, and status text.
     local strip = CreateFrame("Frame", "AegisExchangeScanStrip", panel)
-    strip:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -30)
-    strip:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -30)
+    strip:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -52)
+    strip:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -14, -52)
     strip:SetHeight(86)
     strip:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -421,16 +455,14 @@ function ui.AttachTab()
             i = this:GetID()
         end
         if i == index then
-            -- AuctionFrameMoneyFrame is a direct child of AuctionFrame (the
-            -- player's gold, bottom-left) that the stock tabs all keep shown;
-            -- hide it while our full-cover panel is up so it doesn't poke
-            -- through, and restore it when leaving our tab.
-            if AuctionFrameMoneyFrame then AuctionFrameMoneyFrame:Hide() end
+            -- Rebuild: hide the stock frame chrome so only our panel shows.
+            ui.SetHusk(false)
             ui.panel:Show()
             ui.Refresh()
         else
-            if AuctionFrameMoneyFrame then AuctionFrameMoneyFrame:Show() end
+            -- Restore the stock chrome for Browse/Bid/Auctions.
             ui.panel:Hide()
+            ui.SetHusk(true)
         end
     end
 
