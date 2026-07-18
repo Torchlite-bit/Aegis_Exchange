@@ -162,10 +162,26 @@ local function BuildPanel()
     end)
     ui.pauseBtn = pauseBtn
 
-    -- Progress bar across the content area, under the buttons.
+    -- Info columns (Auctionator "Info" style: gold header, value below),
+    -- laid directly on the native content area right under the title bar.
+    ui.lastScanText = InfoColumn(panel, 24,  -62, "Last Full Scan")
+    ui.statText     = InfoColumn(panel, 300, -62, "Items Tracked")
+    local feed      = InfoColumn(panel, 470, -62, "Data Source")
+    feed:SetText("Full scans + browsing")
+
+    -- Status line (idle message, or live scan progress text).
+    local statusText = panel:CreateFontString(
+        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
+    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -112)
+    statusText:SetJustifyH("LEFT")
+    ui.statusText = statusText
+
+    -- Progress bar under the status line. Shown ONLY during a scan (hidden
+    -- when idle so it does not leave an empty box on the content area).
     local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", panel)
-    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -84)
-    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -84)
+    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -130)
+    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -130)
+    bar:SetWidth(760)   -- explicit width too, in case 2-point stretch is flaky
     bar:SetHeight(16)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetStatusBarColor(COLOR_BAR.r, COLOR_BAR.g, COLOR_BAR.b)
@@ -179,26 +195,13 @@ local function BuildPanel()
     })
     bar:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
     bar:SetBackdropBorderColor(0.4, 0.35, 0.2)
+    bar:Hide()
     ui.bar = bar
-
-    -- Status line under the bar.
-    local statusText = panel:CreateFontString(
-        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 2, -6)
-    statusText:SetJustifyH("LEFT")
-    ui.statusText = statusText
-
-    -- Info columns (Auctionator "Info" style: gold header, value below),
-    -- laid directly on the native content area.
-    ui.lastScanText = InfoColumn(panel, 24,  -120, "Last Full Scan")
-    ui.statText     = InfoColumn(panel, 300, -120, "Items Tracked")
-    local feed      = InfoColumn(panel, 470, -120, "Data Source")
-    feed:SetText("Full scans + browsing")
 
     -- "How scanning works" section, on the native content area.
     local infoTitle = panel:CreateFontString(
         "AegisExchangeInfoTitle", "OVERLAY", "GameFontNormal")
-    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -172)
+    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -162)
     infoTitle:SetText("How scanning works")
     infoTitle:SetTextColor(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b)
 
@@ -270,6 +273,7 @@ function ui.Refresh()
         if totalPages < 1 then totalPages = 1 end
         ui.bar:SetMinMaxValues(0, totalPages)
         ui.bar:SetValue(p.pagesDone)
+        ui.bar:Show()
         if p.totalPages > 0 then
             ui.statusText:SetText(string.format(
                 "Page %d / %d \226\128\162 ~%s remaining \226\128\162 %s auctions/sec",
@@ -282,22 +286,23 @@ function ui.Refresh()
         ui.statusText:SetTextColor(
             COLOR_TEXT.r, COLOR_TEXT.g, COLOR_TEXT.b)
     elseif p.phase == "paused" then
-        -- Paused: Resume takes over.
+        -- Paused: Resume takes over. Bar stays visible to show where we are.
         ui.fullScanBtn:Enable()
         ui.pauseBtn:Disable()
         ui.resumeBtn:Enable()
+        ui.bar:Show()
         ui.statusText:SetText(string.format(
             "Paused at page %d / %d — Resume to continue",
             p.pagesDone, p.totalPages))
         ui.statusText:SetTextColor(
             COLOR_AMBER.r, COLOR_AMBER.g, COLOR_AMBER.b)
     else
-        -- Idle.
+        -- Idle: no bar (avoid an empty box on the content area).
         ui.fullScanBtn:Enable()
         ui.pauseBtn:Disable()
         ui.resumeBtn:Disable()
-        ui.bar:SetMinMaxValues(0, 1)
         ui.bar:SetValue(0)
+        ui.bar:Hide()
         if last and last.when then
             local age = time() - last.when
             if age > STALE_SECONDS then
