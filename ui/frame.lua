@@ -94,6 +94,32 @@ end
 -- Panel construction
 -- ---------------------------------------------------------------------------
 
+-- The AuctionFrame's background is six quadrant textures. Blizzard swaps them
+-- per tab; our tab inherits whatever the last stock tab set — and the Browse
+-- set has a TWO-PANE recess (narrow filter pane + wide list pane), which shows
+-- as a stray "left box". The Auctions set is a single full-width pane, so we
+-- point the background at it on our tab (verified paths from the 1.12
+-- AuctionFrameTab_OnClick index==3 branch). Leaving our tab, Blizzard's own
+-- handler re-textures these for the destination tab.
+local AUCTION_BG = {
+    { "AuctionFrameTopLeft",  "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-TopLeft" },
+    { "AuctionFrameTop",      "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-Top" },
+    { "AuctionFrameTopRight", "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-TopRight" },
+    { "AuctionFrameBotLeft",  "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-BotLeft" },
+    { "AuctionFrameBot",      "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-Bot" },
+    { "AuctionFrameBotRight", "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-BotRight" },
+}
+
+function ui.SetAuctionsBackground()
+    local n = table.getn(AUCTION_BG)
+    local i = 1
+    while i <= n do
+        local t = getglobal(AUCTION_BG[i][1])
+        if t then t:SetTexture(AUCTION_BG[i][2]) end
+        i = i + 1
+    end
+end
+
 -- Small helper: a labelled info column (gold header, value below), placed on
 -- the native content area at a fixed x. Returns the value FontString.
 local function InfoColumn(parent, x, y, header)
@@ -163,25 +189,24 @@ local function BuildPanel()
     ui.pauseBtn = pauseBtn
 
     -- Info columns (Auctionator "Info" style: gold header, value below),
-    -- laid directly on the native content area right under the title bar.
-    ui.lastScanText = InfoColumn(panel, 24,  -62, "Last Full Scan")
-    ui.statText     = InfoColumn(panel, 300, -62, "Items Tracked")
-    local feed      = InfoColumn(panel, 470, -62, "Data Source")
+    -- below the button row so they never collide with it.
+    ui.lastScanText = InfoColumn(panel, 24,  -84, "Last Full Scan")
+    ui.statText     = InfoColumn(panel, 300, -84, "Items Tracked")
+    local feed      = InfoColumn(panel, 470, -84, "Data Source")
     feed:SetText("Full scans + browsing")
 
-    -- Status line (idle message, or live scan progress text).
+    -- Status line, above the bar.
     local statusText = panel:CreateFontString(
         "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -112)
+    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -122)
     statusText:SetJustifyH("LEFT")
     ui.statusText = statusText
 
-    -- Progress bar under the status line. Shown ONLY during a scan (hidden
-    -- when idle so it does not leave an empty box on the content area).
+    -- Progress bar spanning the whole window, just above the content area.
+    -- Always visible (empty when idle) so it reads as a fixed part of the tab.
     local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", panel)
-    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -130)
-    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -130)
-    bar:SetWidth(760)   -- explicit width too, in case 2-point stretch is flaky
+    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -138)
+    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -138)
     bar:SetHeight(16)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetStatusBarColor(COLOR_BAR.r, COLOR_BAR.g, COLOR_BAR.b)
@@ -195,13 +220,12 @@ local function BuildPanel()
     })
     bar:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
     bar:SetBackdropBorderColor(0.4, 0.35, 0.2)
-    bar:Hide()
     ui.bar = bar
 
-    -- "How scanning works" section, on the native content area.
+    -- "How scanning works" section, in the content area below the bar.
     local infoTitle = panel:CreateFontString(
         "AegisExchangeInfoTitle", "OVERLAY", "GameFontNormal")
-    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -162)
+    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -168)
     infoTitle:SetText("How scanning works")
     infoTitle:SetTextColor(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b)
 
@@ -273,7 +297,6 @@ function ui.Refresh()
         if totalPages < 1 then totalPages = 1 end
         ui.bar:SetMinMaxValues(0, totalPages)
         ui.bar:SetValue(p.pagesDone)
-        ui.bar:Show()
         if p.totalPages > 0 then
             ui.statusText:SetText(string.format(
                 "Page %d / %d \226\128\162 ~%s remaining \226\128\162 %s auctions/sec",
@@ -290,19 +313,18 @@ function ui.Refresh()
         ui.fullScanBtn:Enable()
         ui.pauseBtn:Disable()
         ui.resumeBtn:Enable()
-        ui.bar:Show()
         ui.statusText:SetText(string.format(
             "Paused at page %d / %d — Resume to continue",
             p.pagesDone, p.totalPages))
         ui.statusText:SetTextColor(
             COLOR_AMBER.r, COLOR_AMBER.g, COLOR_AMBER.b)
     else
-        -- Idle: no bar (avoid an empty box on the content area).
+        -- Idle.
         ui.fullScanBtn:Enable()
         ui.pauseBtn:Disable()
         ui.resumeBtn:Disable()
+        ui.bar:SetMinMaxValues(0, 1)
         ui.bar:SetValue(0)
-        ui.bar:Hide()
         if last and last.when then
             local age = time() - last.when
             if age > STALE_SECONDS then
@@ -373,6 +395,9 @@ function ui.AttachTab()
             i = this:GetID()
         end
         if i == index then
+            -- Point the frame background at the single-pane Auctions art so
+            -- the content area is one full-width box (no Browse left pane).
+            ui.SetAuctionsBackground()
             ui.panel:Show()
             ui.Refresh()
         else
