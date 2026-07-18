@@ -94,28 +94,20 @@ end
 -- Panel construction
 -- ---------------------------------------------------------------------------
 
--- The AuctionFrame's background is six quadrant textures. Blizzard swaps them
--- per tab; our tab inherits whatever the last stock tab set — and the Browse
--- set has a TWO-PANE recess (narrow filter pane + wide list pane), which shows
--- as a stray "left box". The Auctions set is a single full-width pane, so we
--- point the background at it on our tab (verified paths from the 1.12
--- AuctionFrameTab_OnClick index==3 branch). Leaving our tab, Blizzard's own
--- handler re-textures these for the destination tab.
-local AUCTION_BG = {
-    { "AuctionFrameTopLeft",  "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-TopLeft" },
-    { "AuctionFrameTop",      "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-Top" },
-    { "AuctionFrameTopRight", "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-TopRight" },
-    { "AuctionFrameBotLeft",  "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-BotLeft" },
-    { "AuctionFrameBot",      "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-Bot" },
-    { "AuctionFrameBotRight", "Interface\\AuctionFrame\\UI-AuctionFrame-Auction-BotRight" },
-}
+-- The default AuctionFrame sub-panels. Each is a full panel that owns its own
+-- result buttons, sort headers, sell slot, list insets, etc. On our tab we
+-- hide these PARENTS (hiding a frame hides all its children), which clears the
+-- "holes" and inset art and lets the native frame interior show through with
+-- no overlay of our own. The stock AuctionFrameTab_OnClick re-shows the right
+-- one when the player returns to a default tab.
+local DEFAULT_PANELS = { "AuctionFrameBrowse", "AuctionFrameBid", "AuctionFrameAuctions" }
 
-function ui.SetAuctionsBackground()
-    local n = table.getn(AUCTION_BG)
+function ui.HideDefaultPanels()
+    local n = table.getn(DEFAULT_PANELS)
     local i = 1
     while i <= n do
-        local t = getglobal(AUCTION_BG[i][1])
-        if t then t:SetTexture(AUCTION_BG[i][2]) end
+        local f = getglobal(DEFAULT_PANELS[i])
+        if f then f:Hide() end
         i = i + 1
     end
 end
@@ -188,31 +180,28 @@ local function BuildPanel()
     end)
     ui.pauseBtn = pauseBtn
 
-    -- Content box: ONE opaque panel that replaces the native content recess.
-    -- Both stock backgrounds bake pane structure into the frame art (Browse =
-    -- a two-pane filter/list recess; Auctions = the create-auction item slots),
-    -- so neither gives a clean surface. Following how AuctionatorVanilla builds
-    -- its panels, we keep the native OUTER frame (border, title bar, portrait,
-    -- money frame, tabs) and cover just the busy content region with a single
-    -- clean box built from an in-game asset. It starts below the auctioneer
-    -- portrait (top-left, 58x58 at 12,-8) and above the money frame.
-    local box = CreateFrame("Frame", "AegisExchangeContentBox", panel)
-    box:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -68)
-    box:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -14, 34)
-    box:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    box:SetBackdropColor(0.06, 0.05, 0.04, 1)   -- opaque; hides the native art
-    box:SetBackdropBorderColor(0.5, 0.42, 0.24)
-    ui.box = box
+    -- Content sits DIRECTLY on the native frame interior — no backdrop, no
+    -- border, no box. With the default panels hidden the native art shows
+    -- through, so our tab reads flush like the stock tabs (no frame-in-frame).
 
-    -- Progress bar across the top of the content box, full width.
-    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", box)
-    bar:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -12)
-    bar:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, -12)
+    -- Info columns (gold header, value below), under the button row.
+    ui.lastScanText = InfoColumn(panel, 30,  -84, "Last Full Scan")
+    ui.statText     = InfoColumn(panel, 300, -84, "Items Tracked")
+    local feed      = InfoColumn(panel, 470, -84, "Data Source")
+    feed:SetText("Full scans + browsing")
+
+    -- Status line.
+    local statusText = panel:CreateFontString(
+        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
+    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 30, -122)
+    statusText:SetJustifyH("LEFT")
+    ui.statusText = statusText
+
+    -- Progress bar spanning the interior, just below the status line. Only a
+    -- functional StatusBar with its own thin track — not a panel background.
+    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", panel)
+    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 30, -140)
+    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -40, -140)
     bar:SetHeight(16)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetStatusBarColor(COLOR_BAR.r, COLOR_BAR.g, COLOR_BAR.b)
@@ -224,36 +213,23 @@ local function BuildPanel()
         tile = true, tileSize = 16, edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    bar:SetBackdropColor(0.02, 0.02, 0.02, 1)
+    bar:SetBackdropColor(0.03, 0.03, 0.03, 0.85)
     bar:SetBackdropBorderColor(0.4, 0.35, 0.2)
     ui.bar = bar
 
-    -- Info columns inside the box, under the bar.
-    ui.lastScanText = InfoColumn(box, 16,  -40, "Last Full Scan")
-    ui.statText     = InfoColumn(box, 300, -40, "Items Tracked")
-    local feed      = InfoColumn(box, 470, -40, "Data Source")
-    feed:SetText("Full scans + browsing")
-
-    -- Status line under the columns.
-    local statusText = box:CreateFontString(
-        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", box, "TOPLEFT", 16, -88)
-    statusText:SetJustifyH("LEFT")
-    ui.statusText = statusText
-
-    -- "How scanning works" section, lower in the content box.
-    local infoTitle = box:CreateFontString(
+    -- "How scanning works" section, below the bar.
+    local infoTitle = panel:CreateFontString(
         "AegisExchangeInfoTitle", "OVERLAY", "GameFontNormal")
-    infoTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 16, -116)
+    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 30, -170)
     infoTitle:SetText("How scanning works")
     infoTitle:SetTextColor(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b)
 
     -- Body copy. Two horizontal anchors give the FontString a width so it
     -- word-wraps.
-    local infoBody = box:CreateFontString(
+    local infoBody = panel:CreateFontString(
         "AegisExchangeInfoBody", "OVERLAY", "GameFontHighlightSmall")
     infoBody:SetPoint("TOPLEFT", infoTitle, "BOTTOMLEFT", 0, -8)
-    infoBody:SetPoint("RIGHT", box, "RIGHT", -16, 0)
+    infoBody:SetPoint("RIGHT", panel, "RIGHT", -40, 0)
     infoBody:SetJustifyH("LEFT")
     infoBody:SetJustifyV("TOP")
     infoBody:SetText(
@@ -403,25 +379,30 @@ function ui.AttachTab()
     BuildPanel()
 
     -- Save-and-replace hook on the Blizzard tab handler (NOT hooksecurefunc;
-    -- it does not exist on 1.12). The original hides Browse/Bid/Auctions and
-    -- updates tab visuals; we then just toggle our content by the clicked
-    -- index. The native frame chrome is left entirely alone.
+    -- it does not exist on 1.12).
+    --   * Non-Aegis tab: delegate to the original so Browse/Bid/Auctions show
+    --     and behave exactly as stock (it re-shows the panel we hid).
+    --   * Aegis tab: do NOT call the original (index has no stock branch).
+    --     Hide the default panels ourselves, mark our tab selected via
+    --     PanelTemplates_SetTab, and show our content — flush on the native
+    --     frame with nothing of our own drawn behind it.
     ui.orig_AuctionFrameTab_OnClick = AuctionFrameTab_OnClick
     AuctionFrameTab_OnClick = function(clickedIndex)
-        ui.orig_AuctionFrameTab_OnClick(clickedIndex)
         local i = clickedIndex
         if not i and this and this.GetID then
             i = this:GetID()
         end
-        if i == index then
-            -- Point the frame background at the single-pane Auctions art so
-            -- the content area is one full-width box (no Browse left pane).
-            ui.SetAuctionsBackground()
-            ui.panel:Show()
-            ui.Refresh()
-        else
-            ui.panel:Hide()
+        ui.panel:Hide()   -- always start hidden
+        if i ~= index then
+            ui.orig_AuctionFrameTab_OnClick(clickedIndex)
+            return
         end
+        ui.HideDefaultPanels()
+        if PanelTemplates_SetTab then
+            PanelTemplates_SetTab(AuctionFrame, index)
+        end
+        ui.panel:Show()
+        ui.Refresh()
     end
 
     ui.tab = tab
@@ -429,9 +410,11 @@ function ui.AttachTab()
     ui.tabAttached = true
 end
 
--- Attach as soon as the auction UI addon loads.
+-- Attach as soon as the auction UI addon loads. AuctionFrame is load-on-demand
+-- (it does NOT exist at login), so this is the correct, earliest moment to
+-- attach. Case-insensitive match; AttachTab self-guards against re-fires.
 A.RegisterEvent("ADDON_LOADED", function(evt, loadedName)
-    if loadedName == "Blizzard_AuctionUI" then
+    if loadedName and string.lower(loadedName) == "blizzard_auctionui" then
         ui.AttachTab()
     end
 end)
