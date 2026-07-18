@@ -1,30 +1,28 @@
 -- Aegis: Exchange
 -- ui/frame.lua
 --
--- "Aegis" tab on the Blizzard AuctionFrame plus the scan strip, built to
--- match design/01-scan-strip.png and design/overview.png with vanilla 1.12
--- templates only:
+-- "Aegis" tab on the Blizzard AuctionFrame. Modeled on AuctionatorVanilla's
+-- own tabs (e.g. its "Info" panel): we KEEP the entire native auction house
+-- frame — portrait, gold border, title bar, the player money frame, the tab
+-- strip — and simply lay our content directly on the native content area.
+-- Nothing is overlaid or hidden, so there is no chrome "husk" to peek through;
+-- on our tab the frame is just the stock auction house frame with our tab up
+-- (Blizzard already hides the Browse/Bid/Auctions sub-frames for us).
 --
---   [Full Scan] [Pause] [Resume]            Last full scan: 2h 14m ago · ...
---   [==================         progress StatusBar                       ]
---             Page 412 / 1832 · ~38m remaining · 5.1 auctions/sec
---
--- Idle shows "Last scan: Xh ago"; past ~24h it turns amber with a
--- "prices may be outdated" warning (design panel 1c).
---
--- The auction UI is load-on-demand (Blizzard_AuctionUI): AuctionFrame does
--- not exist until the player first opens an auctioneer, so everything is
--- built from that addon's ADDON_LOADED (AUCTION_HOUSE_SHOW as fallback).
+-- The auction UI is load-on-demand (Blizzard_AuctionUI): AuctionFrame does not
+-- exist until the player first opens an auctioneer, so everything is built
+-- from that addon's ADDON_LOADED (AUCTION_HOUSE_SHOW as fallback).
 
 local A = AegisExchange
 A.ui = A.ui or {}
 local ui = A.ui
 local util = A.util
 
--- Palette from the design (approximate in 0-1 space).
-local COLOR_TEXT  = { r = 0.87, g = 0.82, b = 0.69 }   -- #ddd0b0
-local COLOR_AMBER = { r = 0.88, g = 0.65, b = 0.19 }   -- #e0a530
-local COLOR_BAR   = { r = 0.25, g = 0.56, b = 0.20 }   -- #3f8f34
+-- Palette (0-1 space).
+local COLOR_TEXT  = { r = 0.87, g = 0.82, b = 0.69 }   -- body text
+local COLOR_AMBER = { r = 0.88, g = 0.65, b = 0.19 }   -- stale / paused
+local COLOR_BAR   = { r = 0.25, g = 0.56, b = 0.20 }   -- progress fill
+local COLOR_GOLD  = { r = 1.00, g = 0.82, b = 0.00 }   -- section headers
 
 -- Last scan older than this is "stale" and rendered amber.
 local STALE_SECONDS = 24 * 60 * 60
@@ -96,133 +94,55 @@ end
 -- Panel construction
 -- ---------------------------------------------------------------------------
 
--- The AuctionFrame's own chrome (verified against the 1.12 Blizzard_AuctionUI
--- source). On our tab the Browse/Bid/Auctions sub-frames are hidden by
--- Blizzard, but these elements belong to AuctionFrame itself and stay up,
--- showing through as a "husk". Rather than overlay them (which always leaves
--- edges peeking), we hide them and let our panel BE the frame — the approach
--- AuctionatorVanilla uses. They are restored when leaving our tab; Blizzard's
--- tab handler re-textures the quadrants but SetTexture does not re-Show a
--- hidden texture, so we must Show() them ourselves.
-local HUSK = {
-    "AuctionPortraitTexture",
-    "AuctionFrameTopLeft", "AuctionFrameTop", "AuctionFrameTopRight",
-    "AuctionFrameBotLeft", "AuctionFrameBot", "AuctionFrameBotRight",
-    "AuctionFrameMoneyFrame",
-}
-
--- Hide (shown=false) or restore (shown=true) the stock frame chrome.
-function ui.SetHusk(shown)
-    local n = table.getn(HUSK)
-    local i = 1
-    while i <= n do
-        local f = getglobal(HUSK[i])
-        if f then
-            if shown then f:Show() else f:Hide() end
-        end
-        i = i + 1
-    end
+-- Small helper: a labelled info column (gold header, value below), placed on
+-- the native content area at a fixed x. Returns the value FontString.
+local function InfoColumn(parent, x, y, header)
+    local h = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    h:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    h:SetText(header)
+    h:SetTextColor(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b)
+    local v = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    v:SetPoint("TOPLEFT", h, "BOTTOMLEFT", 0, -5)
+    v:SetJustifyH("LEFT")
+    return v
 end
 
 local function BuildPanel()
-    -- Our panel replaces the AuctionFrame's interior entirely. With the husk
-    -- hidden (ui.SetHusk), the frame body behind us is empty, so we cover the
-    -- full footprint and supply our own parchment + border from an in-game
-    -- asset. Corner anchors keep it independent of the 832x447 frame size; the
-    -- 4px inset leaves the very outer edge for the toplevel frame's own hit
-    -- area. Raised above any remaining frame layers.
+    -- Transparent container across the whole frame, shown/hidden with our tab.
+    -- No backdrop: the native AH content background shows through, so our tab
+    -- matches the stock frames exactly.
     local panel = CreateFrame("Frame", "AegisExchangePanel", AuctionFrame)
-    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 4, -4)
-    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", -4, 4)
-    panel:SetFrameLevel(AuctionFrame:GetFrameLevel() + 2)
-    panel:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 11, right = 11, top = 12, bottom = 11 },
-    })
+    panel:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 0, 0)
+    panel:SetPoint("BOTTOMRIGHT", AuctionFrame, "BOTTOMRIGHT", 0, 0)
     panel:Hide()
     ui.panel = panel
 
-    -- Raise the AuctionFrame close button above our panel so it stays
-    -- clickable on our tab. It remains a child of AuctionFrame (NOT reparented
-    -- to the panel) so it keeps working on the stock tabs when our panel is
-    -- hidden; its top-right corner position already sits on our rebuilt frame.
-    if AuctionFrameCloseButton then
-        AuctionFrameCloseButton:SetFrameLevel(panel:GetFrameLevel() + 10)
-    end
-
-    -- Title bar: a header strip across the top of the rebuilt frame, with the
-    -- title centered on it (our panel is the whole frame now, so we draw our
-    -- own title rather than borrowing the stock one).
-    local titleBar = panel:CreateTexture("AegisExchangeTitleBar", "ARTWORK")
-    titleBar:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
-    titleBar:SetWidth(320)
-    titleBar:SetHeight(64)
-    titleBar:SetPoint("TOP", panel, "TOP", 0, 12)
-    ui.titleBar = titleBar
-
+    -- Title in the native title bar (the stock sub-frames set their own title
+    -- here and clear it when hidden; ours shows with our tab).
     local title = panel:CreateFontString(
         "AegisExchangePanelTitle", "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", panel, "TOP", 0, -5)
+    title:SetPoint("TOP", panel, "TOP", 0, -18)
     title:SetText("Aegis: Exchange")
     ui.title = title
 
-    -- Last-full-scan summary, below the title bar on the right (clear of the
-    -- close button now anchored at the panel's top-right corner).
-    local lastScanText = panel:CreateFontString(
-        "AegisExchangeLastScanText", "ARTWORK", "GameFontHighlightSmall")
-    lastScanText:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -16, -34)
-    lastScanText:SetJustifyH("RIGHT")
-    ui.lastScanText = lastScanText
-
-    -- The scan strip: a recessed well holding buttons, bar, and status text.
-    local strip = CreateFrame("Frame", "AegisExchangeScanStrip", panel)
-    strip:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -52)
-    strip:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -14, -52)
-    strip:SetHeight(86)
-    strip:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    strip:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
-    strip:SetBackdropBorderColor(0.79, 0.64, 0.15)   -- gold-bevel edge
-    ui.strip = strip
-
-    -- Button row (design 1b: Full Scan | Pause | Resume).
-    local fullScanBtn = CreateFrame(
-        "Button", "AegisExchangeFullScanButton", strip,
-        "UIPanelButtonTemplate")
-    fullScanBtn:SetWidth(100)
-    fullScanBtn:SetHeight(21)
-    fullScanBtn:SetPoint("TOPLEFT", strip, "TOPLEFT", 10, -10)
+    -- Action buttons, top-right below the title bar (Auctionator puts its
+    -- actions there). Right-to-left: Full Scan (primary) | Resume | Pause.
+    local fullScanBtn = CreateFrame("Button", "AegisExchangeFullScanButton",
+        panel, "UIPanelButtonTemplate")
+    fullScanBtn:SetWidth(104)
+    fullScanBtn:SetHeight(22)
+    fullScanBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -52)
     fullScanBtn:SetText("Full Scan")
     fullScanBtn:SetScript("OnClick", function()
         ui.ConfirmFullScan()
     end)
     ui.fullScanBtn = fullScanBtn
 
-    local pauseBtn = CreateFrame(
-        "Button", "AegisExchangePauseButton", strip,
-        "UIPanelButtonTemplate")
-    pauseBtn:SetWidth(70)
-    pauseBtn:SetHeight(21)
-    pauseBtn:SetPoint("LEFT", fullScanBtn, "RIGHT", 6, 0)
-    pauseBtn:SetText("Pause")
-    pauseBtn:SetScript("OnClick", function()
-        A.scan.Pause()
-        ui.Refresh()
-    end)
-    ui.pauseBtn = pauseBtn
-
-    local resumeBtn = CreateFrame(
-        "Button", "AegisExchangeResumeButton", strip,
-        "UIPanelButtonTemplate")
-    resumeBtn:SetWidth(70)
-    resumeBtn:SetHeight(21)
-    resumeBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 6, 0)
+    local resumeBtn = CreateFrame("Button", "AegisExchangeResumeButton",
+        panel, "UIPanelButtonTemplate")
+    resumeBtn:SetWidth(74)
+    resumeBtn:SetHeight(22)
+    resumeBtn:SetPoint("RIGHT", fullScanBtn, "LEFT", -6, 0)
     resumeBtn:SetText("Resume")
     resumeBtn:SetScript("OnClick", function()
         A.scan.Continue()
@@ -230,11 +150,23 @@ local function BuildPanel()
     end)
     ui.resumeBtn = resumeBtn
 
-    -- Progress bar: one flat-fill StatusBar over a dark well (design 1b).
-    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", strip)
-    bar:SetPoint("TOPLEFT", strip, "TOPLEFT", 10, -38)
-    bar:SetPoint("TOPRIGHT", strip, "TOPRIGHT", -10, -38)
-    bar:SetHeight(18)
+    local pauseBtn = CreateFrame("Button", "AegisExchangePauseButton",
+        panel, "UIPanelButtonTemplate")
+    pauseBtn:SetWidth(74)
+    pauseBtn:SetHeight(22)
+    pauseBtn:SetPoint("RIGHT", resumeBtn, "LEFT", -6, 0)
+    pauseBtn:SetText("Pause")
+    pauseBtn:SetScript("OnClick", function()
+        A.scan.Pause()
+        ui.Refresh()
+    end)
+    ui.pauseBtn = pauseBtn
+
+    -- Progress bar across the content area, under the buttons.
+    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", panel)
+    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -84)
+    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -84)
+    bar:SetHeight(16)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetStatusBarColor(COLOR_BAR.r, COLOR_BAR.g, COLOR_BAR.b)
     bar:SetMinMaxValues(0, 1)
@@ -245,44 +177,37 @@ local function BuildPanel()
         tile = true, tileSize = 16, edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    bar:SetBackdropColor(0.09, 0.06, 0.03, 1)   -- #2b1a0c well
+    bar:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
     bar:SetBackdropBorderColor(0.4, 0.35, 0.2)
     ui.bar = bar
 
-    -- Status line, centered under the bar.
-    local statusText = strip:CreateFontString(
-        "AegisExchangeStatusText", "ARTWORK", "GameFontHighlightSmall")
-    statusText:SetPoint("TOP", bar, "BOTTOM", 0, -6)
-    statusText:SetJustifyH("CENTER")
+    -- Status line under the bar.
+    local statusText = panel:CreateFontString(
+        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
+    statusText:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 2, -6)
+    statusText:SetJustifyH("LEFT")
     ui.statusText = statusText
 
-    -- Info / disclaimer well filling the region below the strip. The Aegis
-    -- tab is a scan console for now, so it explains what scanning does and how
-    -- long it takes rather than leaving dead space (sub-tabs land later).
-    local info = CreateFrame("Frame", "AegisExchangeInfoWell", panel)
-    info:SetPoint("TOPLEFT", strip, "BOTTOMLEFT", 0, -10)
-    info:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 10)
-    info:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    info:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
-    info:SetBackdropBorderColor(0.79, 0.64, 0.15)
-    ui.info = info
+    -- Info columns (Auctionator "Info" style: gold header, value below),
+    -- laid directly on the native content area.
+    ui.lastScanText = InfoColumn(panel, 24,  -120, "Last Full Scan")
+    ui.statText     = InfoColumn(panel, 300, -120, "Items Tracked")
+    local feed      = InfoColumn(panel, 470, -120, "Data Source")
+    feed:SetText("Full scans + browsing")
 
-    local infoTitle = info:CreateFontString(
-        "AegisExchangeInfoTitle", "ARTWORK", "GameFontNormal")
-    infoTitle:SetPoint("TOPLEFT", info, "TOPLEFT", 14, -12)
+    -- "How scanning works" section, on the native content area.
+    local infoTitle = panel:CreateFontString(
+        "AegisExchangeInfoTitle", "OVERLAY", "GameFontNormal")
+    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -172)
     infoTitle:SetText("How scanning works")
-    infoTitle:SetTextColor(1, 0.82, 0)
+    infoTitle:SetTextColor(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b)
 
-    -- Body copy. Two anchors give the FontString a width so it word-wraps.
-    local infoBody = info:CreateFontString(
-        "AegisExchangeInfoBody", "ARTWORK", "GameFontHighlightSmall")
+    -- Body copy. Two horizontal anchors give the FontString a width so it
+    -- word-wraps.
+    local infoBody = panel:CreateFontString(
+        "AegisExchangeInfoBody", "OVERLAY", "GameFontHighlightSmall")
     infoBody:SetPoint("TOPLEFT", infoTitle, "BOTTOMLEFT", 0, -8)
-    infoBody:SetPoint("RIGHT", info, "RIGHT", -14, 0)
+    infoBody:SetPoint("RIGHT", panel, "RIGHT", -26, 0)
     infoBody:SetJustifyH("LEFT")
     infoBody:SetJustifyV("TOP")
     infoBody:SetText(
@@ -297,17 +222,11 @@ local function BuildPanel()
         .. "tab normally records every auction Aegis sees.\n\n"
         .. "Collected prices appear as market value and minimum buyout lines on "
         .. "item tooltips.")
+    infoBody:SetTextColor(COLOR_TEXT.r, COLOR_TEXT.g, COLOR_TEXT.b)
     ui.infoBody = infoBody
 
-    -- Live database stat, pinned to the bottom of the well.
-    local statText = info:CreateFontString(
-        "AegisExchangeStatText", "ARTWORK", "GameFontDisableSmall")
-    statText:SetPoint("BOTTOMLEFT", info, "BOTTOMLEFT", 14, 12)
-    statText:SetJustifyH("LEFT")
-    ui.statText = statText
-
-    -- Throttled refresh while the panel is visible. OnUpdate receives no
-    -- args on this client; elapsed is the GLOBAL arg1.
+    -- Throttled refresh while the panel is visible. OnUpdate receives no args
+    -- on this client; elapsed is the GLOBAL arg1.
     ui.refreshAccum = 0
     panel:SetScript("OnUpdate", function()
         ui.refreshAccum = ui.refreshAccum + arg1
@@ -328,29 +247,22 @@ function ui.Refresh()
     if not ui.panel then return end
     local p = A.scan.GetProgress()
 
-    -- Live DB stat in the info well.
+    -- Items-tracked column value.
     if ui.statText then
-        local count = A.db.ItemCount()
-        if count == 1 then
-            ui.statText:SetText("Tracking prices for 1 item.")
-        else
-            ui.statText:SetText(
-                "Tracking prices for " .. count .. " items.")
-        end
+        ui.statText:SetText(tostring(A.db.ItemCount()))
     end
 
-    -- Header summary (design 1a: "Last full scan: 2h 14m ago · 1,832 pages").
+    -- Last-full-scan column value.
     local last = A.db.GetLastScan()
     if last and last.when then
-        ui.lastScanText:SetText(string.format(
-            "Last full scan: %s · %d pages",
+        ui.lastScanText:SetText(string.format("%s \226\128\162 %d pages",
             util.FormatAgo(time() - last.when), last.pages or 0))
     else
-        ui.lastScanText:SetText("Last full scan: never")
+        ui.lastScanText:SetText("never")
     end
 
     if p.phase == "wait_query" or p.phase == "wait_results" then
-        -- Scanning (design 1b).
+        -- Scanning.
         ui.fullScanBtn:Disable()
         ui.pauseBtn:Enable()
         ui.resumeBtn:Disable()
@@ -360,7 +272,7 @@ function ui.Refresh()
         ui.bar:SetValue(p.pagesDone)
         if p.totalPages > 0 then
             ui.statusText:SetText(string.format(
-                "Page %d / %d · ~%s remaining · %s auctions/sec",
+                "Page %d / %d \226\128\162 ~%s remaining \226\128\162 %s auctions/sec",
                 p.page, p.totalPages,
                 util.FormatDuration(p.eta),
                 string.format("%.1f", p.rate)))
@@ -370,7 +282,7 @@ function ui.Refresh()
         ui.statusText:SetTextColor(
             COLOR_TEXT.r, COLOR_TEXT.g, COLOR_TEXT.b)
     elseif p.phase == "paused" then
-        -- Paused: Resume takes over (design 1b caption).
+        -- Paused: Resume takes over.
         ui.fullScanBtn:Enable()
         ui.pauseBtn:Disable()
         ui.resumeBtn:Enable()
@@ -380,7 +292,7 @@ function ui.Refresh()
         ui.statusText:SetTextColor(
             COLOR_AMBER.r, COLOR_AMBER.g, COLOR_AMBER.b)
     else
-        -- Idle (design 1a/1c).
+        -- Idle.
         ui.fullScanBtn:Enable()
         ui.pauseBtn:Disable()
         ui.resumeBtn:Disable()
@@ -390,13 +302,13 @@ function ui.Refresh()
             local age = time() - last.when
             if age > STALE_SECONDS then
                 ui.statusText:SetText(string.format(
-                    "Last scan: %s — prices may be outdated",
+                    "Last scan %s — prices may be outdated",
                     util.FormatAgo(age)))
                 ui.statusText:SetTextColor(
                     COLOR_AMBER.r, COLOR_AMBER.g, COLOR_AMBER.b)
             else
                 ui.statusText:SetText(
-                    "Last scan: " .. util.FormatAgo(age))
+                    "Idle — data is current.")
                 ui.statusText:SetTextColor(
                     COLOR_TEXT.r, COLOR_TEXT.g, COLOR_TEXT.b)
             end
@@ -446,7 +358,8 @@ function ui.AttachTab()
 
     -- Save-and-replace hook on the Blizzard tab handler (NOT hooksecurefunc;
     -- it does not exist on 1.12). The original hides Browse/Bid/Auctions and
-    -- updates tab visuals; we then toggle our panel by the clicked index.
+    -- updates tab visuals; we then just toggle our content by the clicked
+    -- index. The native frame chrome is left entirely alone.
     ui.orig_AuctionFrameTab_OnClick = AuctionFrameTab_OnClick
     AuctionFrameTab_OnClick = function(clickedIndex)
         ui.orig_AuctionFrameTab_OnClick(clickedIndex)
@@ -455,14 +368,10 @@ function ui.AttachTab()
             i = this:GetID()
         end
         if i == index then
-            -- Rebuild: hide the stock frame chrome so only our panel shows.
-            ui.SetHusk(false)
             ui.panel:Show()
             ui.Refresh()
         else
-            -- Restore the stock chrome for Browse/Bid/Auctions.
             ui.panel:Hide()
-            ui.SetHusk(true)
         end
     end
 
