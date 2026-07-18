@@ -157,7 +157,7 @@ local function BuildPanel()
         panel, "UIPanelButtonTemplate")
     fullScanBtn:SetWidth(104)
     fullScanBtn:SetHeight(22)
-    fullScanBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -52)
+    fullScanBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -26, -44)
     fullScanBtn:SetText("Full Scan")
     fullScanBtn:SetScript("OnClick", function()
         ui.ConfirmFullScan()
@@ -188,25 +188,31 @@ local function BuildPanel()
     end)
     ui.pauseBtn = pauseBtn
 
-    -- Info columns (Auctionator "Info" style: gold header, value below),
-    -- below the button row so they never collide with it.
-    ui.lastScanText = InfoColumn(panel, 24,  -84, "Last Full Scan")
-    ui.statText     = InfoColumn(panel, 300, -84, "Items Tracked")
-    local feed      = InfoColumn(panel, 470, -84, "Data Source")
-    feed:SetText("Full scans + browsing")
+    -- Content box: ONE opaque panel that replaces the native content recess.
+    -- Both stock backgrounds bake pane structure into the frame art (Browse =
+    -- a two-pane filter/list recess; Auctions = the create-auction item slots),
+    -- so neither gives a clean surface. Following how AuctionatorVanilla builds
+    -- its panels, we keep the native OUTER frame (border, title bar, portrait,
+    -- money frame, tabs) and cover just the busy content region with a single
+    -- clean box built from an in-game asset. It starts below the auctioneer
+    -- portrait (top-left, 58x58 at 12,-8) and above the money frame.
+    local box = CreateFrame("Frame", "AegisExchangeContentBox", panel)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -68)
+    box:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -14, 34)
+    box:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    box:SetBackdropColor(0.06, 0.05, 0.04, 1)   -- opaque; hides the native art
+    box:SetBackdropBorderColor(0.5, 0.42, 0.24)
+    ui.box = box
 
-    -- Status line, above the bar.
-    local statusText = panel:CreateFontString(
-        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
-    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -122)
-    statusText:SetJustifyH("LEFT")
-    ui.statusText = statusText
-
-    -- Progress bar spanning the whole window, just above the content area.
-    -- Always visible (empty when idle) so it reads as a fixed part of the tab.
-    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", panel)
-    bar:SetPoint("TOPLEFT", panel, "TOPLEFT", 22, -138)
-    bar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -22, -138)
+    -- Progress bar across the top of the content box, full width.
+    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", box)
+    bar:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -12)
+    bar:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, -12)
     bar:SetHeight(16)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetStatusBarColor(COLOR_BAR.r, COLOR_BAR.g, COLOR_BAR.b)
@@ -218,23 +224,36 @@ local function BuildPanel()
         tile = true, tileSize = 16, edgeSize = 8,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    bar:SetBackdropColor(0.05, 0.05, 0.04, 0.9)
+    bar:SetBackdropColor(0.02, 0.02, 0.02, 1)
     bar:SetBackdropBorderColor(0.4, 0.35, 0.2)
     ui.bar = bar
 
-    -- "How scanning works" section, in the content area below the bar.
-    local infoTitle = panel:CreateFontString(
+    -- Info columns inside the box, under the bar.
+    ui.lastScanText = InfoColumn(box, 16,  -40, "Last Full Scan")
+    ui.statText     = InfoColumn(box, 300, -40, "Items Tracked")
+    local feed      = InfoColumn(box, 470, -40, "Data Source")
+    feed:SetText("Full scans + browsing")
+
+    -- Status line under the columns.
+    local statusText = box:CreateFontString(
+        "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
+    statusText:SetPoint("TOPLEFT", box, "TOPLEFT", 16, -88)
+    statusText:SetJustifyH("LEFT")
+    ui.statusText = statusText
+
+    -- "How scanning works" section, lower in the content box.
+    local infoTitle = box:CreateFontString(
         "AegisExchangeInfoTitle", "OVERLAY", "GameFontNormal")
-    infoTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -168)
+    infoTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 16, -116)
     infoTitle:SetText("How scanning works")
     infoTitle:SetTextColor(COLOR_GOLD.r, COLOR_GOLD.g, COLOR_GOLD.b)
 
     -- Body copy. Two horizontal anchors give the FontString a width so it
     -- word-wraps.
-    local infoBody = panel:CreateFontString(
+    local infoBody = box:CreateFontString(
         "AegisExchangeInfoBody", "OVERLAY", "GameFontHighlightSmall")
     infoBody:SetPoint("TOPLEFT", infoTitle, "BOTTOMLEFT", 0, -8)
-    infoBody:SetPoint("RIGHT", panel, "RIGHT", -26, 0)
+    infoBody:SetPoint("RIGHT", box, "RIGHT", -16, 0)
     infoBody:SetJustifyH("LEFT")
     infoBody:SetJustifyV("TOP")
     infoBody:SetText(
