@@ -113,7 +113,7 @@ Aegis_Exchange/
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
   core/db.lua            -- SavedVariables price DB (daily-min + weighted-median market)
   core/scan.lua          -- page-by-page auction scanner state machine
-  ui/frame.lua           -- Aegis tab + scan strip on AuctionFrame
+  ui/frame.lua           -- standalone Aegis window (replaces the AH) + sub-tabs
   ui/tooltip.lua         -- GameTooltip price lines (save/replace hooks)
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
                          -- never ported to Lua verbatim, NEVER in the .toc
