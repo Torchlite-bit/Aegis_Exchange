@@ -35,14 +35,21 @@ scan.REPLY_TIMEOUT = 15
 --   "wait_query"    counting down cooldown, then polling CanSendAuctionQuery
 --   "wait_results"  query sent, waiting for AUCTION_ITEM_LIST_UPDATE
 --   "paused"        user pause / AH closed; Continue() picks the scan back up
+-- A scan walks a LIST of category queries back-to-back (a full scan is just a
+-- one-element list holding an empty query; a targeted scan holds one query per
+-- selected class/subclass). The page/totalPages/lastCompleted fields track the
+-- CURRENT category; queryIndex/pagesDoneTotal track the run across categories.
 scan.state = {
     phase         = "idle",
-    query         = nil,   -- normalized query table
-    page          = 0,     -- next page to request (0-indexed)
-    lastCompleted = -1,    -- last fully processed page
-    totalPages    = 0,     -- known after the first page arrives
+    queries       = nil,   -- array of query tables (categories to scan)
+    queryIndex    = 1,     -- which category we're on
+    query         = nil,   -- normalized query table (queries[queryIndex])
+    page          = 0,     -- next page to request in this category (0-indexed)
+    lastCompleted = -1,    -- last fully processed page in this category
+    totalPages    = 0,     -- pages in this category (known after page 0)
     totalAuctions = 0,
-    scanned       = 0,     -- auctions recorded this scan
+    pagesDoneTotal = 0,    -- pages completed in FINISHED categories
+    scanned       = 0,     -- auctions recorded this whole run
     elapsed       = 0,     -- seconds actually spent scanning (pauses excluded)
     cooldown      = 0,     -- seconds left before the next query may be sent
     timeout       = 0,     -- seconds left waiting for the current reply
@@ -122,19 +129,44 @@ end)
 -- Page arrival
 -- ---------------------------------------------------------------------------
 
+-- Was the whole run a full (unfiltered) scan? True only for a single query
+-- with no class filter — used so the DB can distinguish full vs targeted.
+local function IsFullRun(st)
+    return table.getn(st.queries) == 1 and st.queries[1]
+        and st.queries[1].class == nil and st.queries[1].name == nil
+end
+
 local function Finish()
     local st = scan.state
     local stats = {
-        pages    = st.totalPages,
-        auctions = st.scanned,
-        duration = st.elapsed,
+        pages      = st.pagesDoneTotal,
+        auctions   = st.scanned,
+        duration   = st.elapsed,
+        categories = table.getn(st.queries),
     }
-    A.db.SetLastScan(st.totalPages, st.scanned)
+    A.db.SetLastScan(st.pagesDoneTotal, st.scanned, IsFullRun(st))
     st.phase = "idle"
     scan.driver:Hide()
     if st.callbacks and st.callbacks.onComplete then
         st.callbacks.onComplete(stats)
     end
+end
+
+-- Begin the current category (queries[queryIndex]) at page 0.
+local function StartCurrentQuery()
+    local st = scan.state
+    st.query = st.queries[st.queryIndex]
+    st.page = 0
+    st.lastCompleted = -1
+    st.totalPages = 0
+    st.phase = "wait_query"
+    -- First category goes immediately; later categories wait a polite gap.
+    if st.queryIndex == 1 then
+        st.cooldown = 0
+    else
+        st.cooldown = scan.PAGE_DELAY
+    end
+    st.timeout = 0
 end
 
 function scan.OnListUpdate()
@@ -156,7 +188,14 @@ function scan.OnListUpdate()
         st.callbacks.onPage(st.page + 1, st.totalPages)
     end
     if st.page + 1 >= st.totalPages then
-        Finish()
+        -- Current category finished; move to the next, or finish the run.
+        st.pagesDoneTotal = st.pagesDoneTotal + st.totalPages
+        if st.queryIndex < table.getn(st.queries) then
+            st.queryIndex = st.queryIndex + 1
+            StartCurrentQuery()
+        else
+            Finish()
+        end
     else
         st.page = st.page + 1
         st.phase = "wait_query"
@@ -168,23 +207,30 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
--- Begin a scan. `query` = { name, minLevel, maxLevel, invType, class,
--- subclass, quality } — any nil field means no filter, {} is a full scan.
--- `callbacks` (optional) = { onPage = fn(page1based, totalPages),
--- onComplete = fn(stats) }.
-function scan.Start(query, callbacks)
+-- Begin a scan. Accepts EITHER a single query table OR a list of them:
+--   scan.Start({})                         -- full scan (whole AH)
+--   scan.Start({ class = 5, subclass = 1 }) -- one category
+--   scan.Start({ {class=5,subclass=1}, {class=2} }) -- several categories
+-- A query = { name, minLevel, maxLevel, invType, class, subclass, quality };
+-- any nil field means "no filter". `callbacks` (optional) =
+-- { onPage = fn(page1based, totalPages), onComplete = fn(stats) }.
+function scan.Start(queryOrList, callbacks)
     local st = scan.state
-    st.query         = query or {}
-    st.callbacks     = callbacks
-    st.page          = 0
-    st.lastCompleted = -1
-    st.totalPages    = 0
-    st.totalAuctions = 0
-    st.scanned       = 0
-    st.elapsed       = 0
-    st.cooldown      = 0     -- first query goes as soon as the client allows
-    st.timeout       = 0
-    st.phase         = "wait_query"
+    local queries
+    if type(queryOrList) == "table" and type(queryOrList[1]) == "table" then
+        queries = queryOrList       -- already a list of queries
+    else
+        queries = { queryOrList or {} }
+    end
+    st.queries        = queries
+    st.queryIndex     = 1
+    st.callbacks      = callbacks
+    st.pagesDoneTotal = 0
+    st.totalAuctions  = 0
+    st.scanned        = 0
+    st.elapsed        = 0
+    StartCurrentQuery()
+    st.cooldown       = 0    -- first query goes as soon as the client allows
     scan.driver:Show()
 end
 
@@ -236,27 +282,58 @@ end
 -- measured per-page pace so it absorbs real-world lag.
 function scan.GetProgress()
     local st = scan.state
-    local pagesDone = st.lastCompleted + 1
+    local pagesDone = st.lastCompleted + 1            -- within this category
+    local overallDone = (st.pagesDoneTotal or 0) + pagesDone
     local rate = 0
     if st.elapsed > 0 then
         rate = st.scanned / st.elapsed
     end
     local secPerPage = scan.PAGE_DELAY + 1
-    if pagesDone > 0 then
-        secPerPage = st.elapsed / pagesDone
+    if overallDone > 0 then
+        secPerPage = st.elapsed / overallDone
     end
+    -- ETA covers the remaining pages of the CURRENT category; future
+    -- categories' page counts are unknown until we query them.
     local remaining = st.totalPages - pagesDone
     if remaining < 0 then remaining = 0 end
     return {
-        page       = st.page + 1,
-        totalPages = st.totalPages,
-        pagesDone  = pagesDone,
-        scanned    = st.scanned,
-        elapsed    = st.elapsed,
-        rate       = rate,
-        eta        = remaining * secPerPage,
-        phase      = st.phase,
+        page        = st.page + 1,
+        totalPages  = st.totalPages,
+        pagesDone   = pagesDone,
+        overallDone = overallDone,
+        catIndex    = st.queryIndex or 1,
+        catCount    = st.queries and table.getn(st.queries) or 1,
+        scanned     = st.scanned,
+        elapsed     = st.elapsed,
+        rate        = rate,
+        eta         = remaining * secPerPage,
+        phase       = st.phase,
     }
+end
+
+-- The auction house category tree, from the 1.12 API (only valid while the AH
+-- is open). Returns a list of
+--   { name, class = classIndex, subs = { { name, class, subclass }, ... } }
+-- suitable for a class -> subclass picker.
+function scan.GetCategories()
+    local classNames = { GetAuctionItemClasses() }
+    local out = {}
+    local nc = table.getn(classNames)
+    local ci = 1
+    while ci <= nc do
+        local cat = { name = classNames[ci], class = ci, subs = {} }
+        local subNames = { GetAuctionItemSubClasses(ci) }
+        local ns = table.getn(subNames)
+        local si = 1
+        while si <= ns do
+            table.insert(cat.subs,
+                { name = subNames[si], class = ci, subclass = si })
+            si = si + 1
+        end
+        table.insert(out, cat)
+        ci = ci + 1
+    end
+    return out
 end
 
 -- ---------------------------------------------------------------------------

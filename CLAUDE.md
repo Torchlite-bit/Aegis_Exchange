@@ -65,10 +65,19 @@ or silent breakage on the 1.12 / Lua 5.0 client.
     query. Leave **~4 seconds between pages**. Wait for the
     **`AUCTION_ITEM_LIST_UPDATE`** event before reading a page.
 11. **Page size is 50.**
+12. **Hiding `AuctionFrame` ENDS the AH session.** `AuctionFrame`'s XML
+    `<OnHide>` runs **`CloseAuctionHouse()`**, so **any** `AuctionFrame:Hide()`
+    / `HideUIPanel(AuctionFrame)` closes the server session and every following
+    `QueryAuctionItems` becomes a silent no-op (a scan spins forever on
+    "Requesting first page…"). Our standalone window replaces the Blizzard AH,
+    so it must hide `AuctionFrame` **without** letting that `<OnHide>` body run:
+    save-and-replace its `OnHide`, and while *we* are the one hiding it, skip
+    the default body so the session survives. See `ui.HideBlizzardAH` /
+    `ui.HookAuctionFrame` in `ui/frame.lua`.
 
 ### SavedVariables
 
-12. **SavedVariables are `nil` until `ADDON_LOADED` fires for
+13. **SavedVariables are `nil` until `ADDON_LOADED` fires for
     `"Aegis_Exchange"`.** Do all DB setup from the ADDON_LOADED path (queue via
     `AegisExchange.OnLoad(fn)`), never at file scope.
     - `AegisExchangeDB` — account-wide (declared `## SavedVariables`).
@@ -76,9 +85,9 @@ or silent breakage on the 1.12 / Lua 5.0 client.
 
 ### Frames & globals
 
-13. Use **`getglobal()` / `setglobal()`** for dynamic frame names (e.g.
+14. Use **`getglobal()` / `setglobal()`** for dynamic frame names (e.g.
     building `"AuctionFrameTab" .. n`).
-14. Build frames with **`CreateFrame`** using **vanilla templates only**, e.g.
+15. Build frames with **`CreateFrame`** using **vanilla templates only**, e.g.
     `UIPanelButtonTemplate`, `FauxScrollFrameTemplate`, `GameTooltipTemplate`,
     `AuctionTabTemplate`.
     - **AH tabs inherit `AuctionTabTemplate`** (what the stock
