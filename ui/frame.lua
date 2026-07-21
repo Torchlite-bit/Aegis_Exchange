@@ -98,10 +98,29 @@ function ui.BuildWindow()
     f:Hide()
     ui.frame = f
 
-    -- Title bar (also the drag handle).
+    -- ESC closes our window (and, via OnHide below, the AH session). Without
+    -- this the client swallows ESC while our top-level frame is up instead of
+    -- opening the game menu.
+    if UISpecialFrames then
+        table.insert(UISpecialFrames, "AegisExchangeFrame")
+    end
+
+    -- Hiding our window is the single close path: whether it's the close
+    -- button, ESC, or an AUCTION_HOUSE_CLOSED from walking away, end the AH
+    -- session here. Skipped only during the /aegis hand-off to the Blizzard AH,
+    -- which needs the session to stay open.
+    f:SetScript("OnHide", function()
+        if not ui.showBlizzard then
+            CloseAuctionHouse()
+        end
+    end)
+
+    -- Title bar (also the drag handle). It stops well short of the top-right
+    -- corner so its mouse-enabled drag region never overlaps the close button
+    -- (otherwise the button is only clickable along its top edge).
     local titleBar = CreateFrame("Frame", "AegisExchangeTitleBar", f)
     titleBar:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -12)
-    titleBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -12)
+    titleBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -40, -12)
     titleBar:SetHeight(26)
     titleBar:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -126,10 +145,13 @@ function ui.BuildWindow()
     subTitle:SetText("Turtle WoW 1.12")
     subTitle:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    -- Close button (top-right) — closes the auction house.
+    -- Close button (top-right) — closes the auction house. Its frame level is
+    -- raised above the title bar so the whole button is clickable, not just the
+    -- sliver above the drag region.
     local close = CreateFrame("Button", "AegisExchangeCloseButton", f,
         "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -8)
+    close:SetFrameLevel(f:GetFrameLevel() + 10)
     close:SetScript("OnClick", function()
         ui.CloseWindow()
     end)
@@ -721,39 +743,66 @@ end
 -- Lifecycle: replace the Blizzard AH window while the AH is open
 -- ---------------------------------------------------------------------------
 
--- Anti-flash hook: save AuctionFrame's OnShow and replace it so the moment the
--- Blizzard window is shown it hides itself again (unless we deliberately asked
--- for it via /aegis). Save-original-and-replace — no hooksecurefunc.
+-- CRITICAL: AuctionFrame's XML <OnHide> runs CloseAuctionHouse(), which ends
+-- the server-side AH session — after which QueryAuctionItems does nothing and a
+-- scan just spins on "Requesting first page...". So we must NEVER let the
+-- Blizzard window's OnHide fire its default body while we're driving the
+-- session. We hook it (save-original-and-replace, no hooksecurefunc) and, when
+-- WE are the one hiding it, suppress that body so the session stays alive.
+--
+-- The OnShow hook neutralises the anti-flash case the same way: the instant the
+-- client shows its AH we hide it back — but through ui.HideBlizzardAH, which
+-- sets the suppress flag so the hide doesn't close the session.
 function ui.HookAuctionFrame()
     if ui.ahHooked then return end
     if not AuctionFrame then return end
+
     ui.orig_AuctionFrame_OnShow = AuctionFrame:GetScript("OnShow")
     AuctionFrame:SetScript("OnShow", function()
         if ui.orig_AuctionFrame_OnShow then
             ui.orig_AuctionFrame_OnShow()
         end
         if not ui.showBlizzard then
-            AuctionFrame:Hide()
+            ui.HideBlizzardAH()
         end
     end)
+
+    ui.orig_AuctionFrame_OnHide = AuctionFrame:GetScript("OnHide")
+    AuctionFrame:SetScript("OnHide", function()
+        -- keepSessionOpen: we hid it ourselves to show Aegis; the session must
+        -- live, so skip the default body (PlaySound + CloseAuctionHouse + ...).
+        if ui.keepSessionOpen then return end
+        if ui.orig_AuctionFrame_OnHide then
+            ui.orig_AuctionFrame_OnHide()
+        end
+    end)
+
     ui.ahHooked = true
+end
+
+-- Hide the Blizzard AH window WITHOUT closing the AH session (see the OnHide
+-- suppression above). Normal HideUIPanel bookkeeping, minus the session teardown.
+function ui.HideBlizzardAH()
+    if not AuctionFrame then return end
+    ui.keepSessionOpen = true
+    HideUIPanel(AuctionFrame)
+    ui.keepSessionOpen = false
 end
 
 function ui.OpenWindow()
     ui.BuildWindow()
     ui.HookAuctionFrame()
     ui.showBlizzard = false
-    if AuctionFrame then
-        HideUIPanel(AuctionFrame)
-    end
+    ui.HideBlizzardAH()   -- hide Blizzard's AH but keep the session open
     ui.frame:Show()
     ui.SelectSubTab(ui.selectedSubTab or "Buy")
     ui.Refresh()
 end
 
+-- Closing our window ends the session via the frame's OnHide (set in
+-- BuildWindow), so all we do here is hide it.
 function ui.CloseWindow()
     if ui.frame then ui.frame:Hide() end
-    CloseAuctionHouse()   -- fires AUCTION_HOUSE_CLOSED
 end
 
 -- Install the OnShow hook as early as the load-on-demand AuctionFrame exists,
