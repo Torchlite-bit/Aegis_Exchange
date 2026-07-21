@@ -170,6 +170,17 @@ function ui.BuildWindow()
     end)
     ui.resumeBtn = resume
 
+    local cats = CreateFrame("Button", "AegisExchangeCategoriesButton", f,
+        "UIPanelButtonTemplate")
+    cats:SetWidth(94)
+    cats:SetHeight(22)
+    cats:SetPoint("LEFT", resume, "RIGHT", 6, 0)
+    cats:SetText("Categories")
+    cats:SetScript("OnClick", function()
+        ui.TogglePicker()
+    end)
+    ui.catsBtn = cats
+
     local status = f:CreateFontString(
         "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
     status:SetPoint("RIGHT", f, "RIGHT", -16, 0)
@@ -309,12 +320,17 @@ function ui.ConfirmFullScan()
     StaticPopup_Show("AEGIS_EXCHANGE_FULL_SCAN", pagesText, minutesText)
 end
 
-function ui.StartFullScan()
-    A.scan.Start({}, {
+-- Start a scan of `queries` (a single query, or a list — see scan.Start).
+function ui.StartScan(queries)
+    A.scan.Start(queries, {
         onPage     = function() ui.Refresh() end,
         onComplete = function(stats) ui.OnScanComplete(stats) end,
     })
     ui.Refresh()
+end
+
+function ui.StartFullScan()
+    ui.StartScan({})
 end
 
 function ui.OnScanComplete(stats)
@@ -340,10 +356,15 @@ function ui.Refresh()
         ui.bar:SetValue(p.pagesDone)
         ui.bar:Show()
         if p.totalPages > 0 then
-            ui.statusText:SetText(string.format(
+            local pageText = string.format(
                 "Page %d / %d \226\128\162 ~%s \226\128\162 %s/s",
                 p.page, p.totalPages, util.FormatDuration(p.eta),
-                string.format("%.1f", p.rate)))
+                string.format("%.1f", p.rate))
+            if p.catCount > 1 then
+                pageText = string.format("Cat %d / %d \226\128\162 ",
+                    p.catIndex, p.catCount) .. pageText
+            end
+            ui.statusText:SetText(pageText)
         else
             ui.statusText:SetText("Requesting first page...")
         end
@@ -363,18 +384,313 @@ function ui.Refresh()
         ui.bar:Hide()
         if last and last.when then
             local age = time() - last.when
+            local kind = ""
+            if not last.full then kind = " (targeted)" end
             if age > STALE_SECONDS then
-                ui.statusText:SetText(
-                    "Last scan: " .. util.FormatAgo(age) .. " \226\128\148 may be outdated")
+                ui.statusText:SetText("Last scan: " .. util.FormatAgo(age)
+                    .. kind .. " \226\128\148 may be outdated")
                 ui.statusText:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
             else
-                ui.statusText:SetText("Last scan: " .. util.FormatAgo(age))
+                ui.statusText:SetText(
+                    "Last scan: " .. util.FormatAgo(age) .. kind)
                 ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
             end
         else
             ui.statusText:SetText("Last scan: never")
             ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
         end
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Category picker (class -> subclass checklist) for a targeted scan
+-- ---------------------------------------------------------------------------
+
+local CAT_ROWS  = 13    -- reusable visible rows
+local CAT_ROW_H = 20
+
+-- Flatten the class tree into the currently visible rows (a class row, then
+-- its subclass rows when that class is expanded).
+function ui.FlattenCategories()
+    local flat = {}
+    local tree = ui.catTree or {}
+    local nc = table.getn(tree)
+    local ci = 1
+    while ci <= nc do
+        local cat = tree[ci]
+        table.insert(flat, {
+            kind = "class", name = cat.name, class = cat.class,
+            key = "c" .. cat.class,
+        })
+        if ui.catExpanded[cat.class] then
+            local ns = table.getn(cat.subs)
+            local si = 1
+            while si <= ns do
+                local sub = cat.subs[si]
+                table.insert(flat, {
+                    kind = "sub", name = sub.name, class = sub.class,
+                    subclass = sub.subclass,
+                    key = "c" .. sub.class .. "s" .. sub.subclass,
+                })
+                si = si + 1
+            end
+        end
+        ci = ci + 1
+    end
+    ui.catFlat = flat
+end
+
+-- Collect the checked selection into scanner queries. A checked class scans the
+-- whole class (one query, no subclass) and supersedes its subclasses; otherwise
+-- each checked subclass is its own query.
+function ui.CollectQueries()
+    local queries = {}
+    local tree = ui.catTree or {}
+    local ci = 1
+    while ci <= table.getn(tree) do
+        local cat = tree[ci]
+        if ui.catChecked["c" .. cat.class] then
+            table.insert(queries, { class = cat.class })
+        else
+            local si = 1
+            while si <= table.getn(cat.subs) do
+                local sub = cat.subs[si]
+                if ui.catChecked["c" .. sub.class .. "s" .. sub.subclass] then
+                    table.insert(queries,
+                        { class = sub.class, subclass = sub.subclass })
+                end
+                si = si + 1
+            end
+        end
+        ci = ci + 1
+    end
+    return queries
+end
+
+function ui.CountChecked()
+    local n = 0
+    for _ in pairs(ui.catChecked) do n = n + 1 end
+    return n
+end
+
+function ui.UpdateSelCount()
+    if not ui.scanSelBtn then return end
+    local n = ui.CollectQueries()
+    ui.scanSelBtn:SetText("Scan Selected (" .. table.getn(n) .. ")")
+    if table.getn(n) > 0 then
+        ui.scanSelBtn:Enable()
+    else
+        ui.scanSelBtn:Disable()
+    end
+end
+
+-- Paint the visible rows from ui.catFlat at the current scroll offset.
+function ui.UpdateCatList()
+    if not ui.catScroll then return end
+    local flat = ui.catFlat or {}
+    local total = table.getn(flat)
+    FauxScrollFrame_Update(ui.catScroll, total, CAT_ROWS, CAT_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.catScroll)
+    local i = 1
+    while i <= CAT_ROWS do
+        local row = ui.catRows[i]
+        local entry = flat[i + offset]
+        if entry then
+            row.entry = entry
+            row.label:SetText(entry.name)
+            row.check:SetChecked(ui.catChecked[entry.key] and 1 or nil)
+            if entry.kind == "class" then
+                row.expand:Show()
+                if ui.catExpanded[entry.class] then
+                    row.expand.text:SetText("-")
+                else
+                    row.expand.text:SetText("+")
+                end
+                row.check:ClearAllPoints()
+                row.check:SetPoint("LEFT", row, "LEFT", 20, 0)
+                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            else
+                row.expand:Hide()
+                row.check:ClearAllPoints()
+                row.check:SetPoint("LEFT", row, "LEFT", 40, 0)
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+function ui.ToggleExpand(entry)
+    if not entry or entry.kind ~= "class" then return end
+    if ui.catExpanded[entry.class] then
+        ui.catExpanded[entry.class] = nil
+    else
+        ui.catExpanded[entry.class] = true
+    end
+    ui.FlattenCategories()
+    ui.UpdateCatList()
+end
+
+function ui.ClearChecks()
+    ui.catChecked = {}
+    ui.UpdateSelCount()
+    ui.UpdateCatList()
+end
+
+function ui.ScanSelected()
+    local queries = ui.CollectQueries()
+    if table.getn(queries) == 0 then return end
+    ui.HidePicker()
+    ui.StartScan(queries)
+end
+
+function ui.BuildCategoryPicker()
+    if ui.picker then return end
+
+    local picker = CreateFrame("Frame", "AegisExchangePicker", ui.frame)
+    picker:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    picker:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    picker:SetFrameLevel(ui.content:GetFrameLevel() + 5)
+    picker:EnableMouse(true)   -- swallow clicks so they don't fall through
+    picker:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    picker:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    picker:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    picker:Hide()
+    ui.picker = picker
+
+    local title = picker:CreateFontString(
+        "AegisExchangePickerTitle", "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -10)
+    title:SetText("Scan which categories?")
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangePickerScroll",
+        picker, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -34)
+    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -30, 42)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(arg1, CAT_ROW_H, ui.UpdateCatList)
+    end)
+    ui.catScroll = scroll
+
+    ui.catRows = {}
+    local i = 1
+    while i <= CAT_ROWS do
+        local row = CreateFrame("Button", "AegisExchangePickerRow" .. i, picker)
+        row:SetHeight(CAT_ROW_H)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.catRows[i - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.catRows[i - 1], "BOTTOMRIGHT", 0, 0)
+        end
+
+        local expand = CreateFrame("Button", nil, row)
+        expand:SetWidth(16)
+        expand:SetHeight(16)
+        expand:SetPoint("LEFT", row, "LEFT", 2, 0)
+        local et = expand:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        et:SetPoint("CENTER", expand, "CENTER", 0, 0)
+        et:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        expand.text = et
+        expand:SetScript("OnClick", function()
+            ui.ToggleExpand(row.entry)
+        end)
+        row.expand = expand
+
+        local check = CreateFrame("CheckButton",
+            "AegisExchangePickerCheck" .. i, row, "UICheckButtonTemplate")
+        check:SetWidth(20)
+        check:SetHeight(20)
+        check:SetPoint("LEFT", row, "LEFT", 20, 0)
+        check:SetScript("OnClick", function()
+            local entry = row.entry
+            if entry then
+                if check:GetChecked() then
+                    ui.catChecked[entry.key] = true
+                else
+                    ui.catChecked[entry.key] = nil
+                end
+                ui.UpdateSelCount()
+            end
+        end)
+        row.check = check
+
+        local label = row:CreateFontString(
+            nil, "OVERLAY", "GameFontHighlightSmall")
+        label:SetPoint("LEFT", check, "RIGHT", 4, 0)
+        label:SetJustifyH("LEFT")
+        row.label = label
+
+        row:Hide()
+        ui.catRows[i] = row
+        i = i + 1
+    end
+
+    local scanSel = CreateFrame("Button", "AegisExchangePickerScanButton",
+        picker, "UIPanelButtonTemplate")
+    scanSel:SetWidth(150)
+    scanSel:SetHeight(22)
+    scanSel:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 12, 12)
+    scanSel:SetText("Scan Selected (0)")
+    scanSel:SetScript("OnClick", function()
+        ui.ScanSelected()
+    end)
+    ui.scanSelBtn = scanSel
+
+    local clear = CreateFrame("Button", "AegisExchangePickerClearButton",
+        picker, "UIPanelButtonTemplate")
+    clear:SetWidth(70)
+    clear:SetHeight(22)
+    clear:SetPoint("LEFT", scanSel, "RIGHT", 6, 0)
+    clear:SetText("Clear")
+    clear:SetScript("OnClick", function()
+        ui.ClearChecks()
+    end)
+
+    local closeBtn = CreateFrame("Button", "AegisExchangePickerCloseButton",
+        picker, "UIPanelButtonTemplate")
+    closeBtn:SetWidth(70)
+    closeBtn:SetHeight(22)
+    closeBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -12, 12)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function()
+        ui.HidePicker()
+    end)
+end
+
+function ui.ShowPicker()
+    ui.BuildCategoryPicker()
+    if not ui.catTree then
+        ui.catTree = A.scan.GetCategories()
+        ui.catExpanded = {}
+        ui.catChecked = {}
+    end
+    ui.FlattenCategories()
+    ui.picker:Show()
+    ui.UpdateSelCount()
+    ui.UpdateCatList()
+end
+
+function ui.HidePicker()
+    if ui.picker then ui.picker:Hide() end
+end
+
+function ui.TogglePicker()
+    if ui.picker and ui.picker:IsVisible() then
+        ui.HidePicker()
+    else
+        ui.ShowPicker()
     end
 end
 

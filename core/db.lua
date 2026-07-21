@@ -229,9 +229,11 @@ function db.ItemCount()
 end
 
 -- Per-character record of the last completed full scan.
-function db.SetLastScan(pages, auctions)
+function db.SetLastScan(pages, auctions, full)
     if not db.char then return end
-    db.char.lastScan = { when = time(), pages = pages, auctions = auctions }
+    db.char.lastScan = {
+        when = time(), pages = pages, auctions = auctions, full = full,
+    }
 end
 
 function db.GetLastScan()
