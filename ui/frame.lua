@@ -30,10 +30,15 @@ local C = {
     gold    = { 1.00, 0.82, 0.00 },
     goldDim = { 0.72, 0.58, 0.32 },
     text    = { 0.87, 0.82, 0.69 },
+    amber   = { 0.88, 0.65, 0.19 },
+    barFill = { 0.25, 0.56, 0.20 },
     tabOff  = { 0.21, 0.17, 0.12 },
     tabOn   = { 0.32, 0.27, 0.16 },
     border  = { 0.79, 0.64, 0.15 },
 }
+
+-- Last scan older than this is "stale" and rendered amber.
+local STALE_SECONDS = 24 * 60 * 60
 
 local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting" }
 
@@ -137,7 +142,7 @@ function ui.BuildWindow()
     fullScan:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 0, -12)
     fullScan:SetText("Full Scan")
     fullScan:SetScript("OnClick", function()
-        ChatMsg("Aegis: Full Scan (placeholder)")
+        ui.ConfirmFullScan()
     end)
     ui.fullScanBtn = fullScan
 
@@ -148,7 +153,8 @@ function ui.BuildWindow()
     pause:SetPoint("LEFT", fullScan, "RIGHT", 6, 0)
     pause:SetText("Pause")
     pause:SetScript("OnClick", function()
-        ChatMsg("Aegis: Pause (placeholder)")
+        A.scan.Pause()
+        ui.Refresh()
     end)
     ui.pauseBtn = pause
 
@@ -159,17 +165,40 @@ function ui.BuildWindow()
     resume:SetPoint("LEFT", pause, "RIGHT", 6, 0)
     resume:SetText("Resume")
     resume:SetScript("OnClick", function()
-        ChatMsg("Aegis: Resume (placeholder)")
+        A.scan.Continue()
+        ui.Refresh()
     end)
     ui.resumeBtn = resume
 
     local status = f:CreateFontString(
         "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
-    status:SetPoint("TOPRIGHT", titleBar, "BOTTOMRIGHT", -4, -18)
+    status:SetPoint("RIGHT", f, "RIGHT", -16, 0)
+    status:SetPoint("TOP", fullScan, "TOP", 0, -4)
     status:SetJustifyH("RIGHT")
     status:SetText("Last scan: never")
     status:SetTextColor(C.text[1], C.text[2], C.text[3])
     ui.statusText = status
+
+    -- Progress bar spanning the scan strip, under the buttons. Shown only
+    -- while a scan is running or paused (empty/hidden when idle).
+    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", f)
+    bar:SetPoint("TOPLEFT", fullScan, "BOTTOMLEFT", 0, -8)
+    bar:SetPoint("RIGHT", f, "RIGHT", -14, 0)
+    bar:SetHeight(14)
+    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    bar:SetStatusBarColor(C.barFill[1], C.barFill[2], C.barFill[3])
+    bar:SetMinMaxValues(0, 1)
+    bar:SetValue(0)
+    bar:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    bar:SetBackdropColor(0.03, 0.03, 0.03, 0.9)
+    bar:SetBackdropBorderColor(0.4, 0.35, 0.2)
+    bar:Hide()
+    ui.bar = bar
 
     -- Sub-tab row.
     ui.subtabs = {}
@@ -182,7 +211,7 @@ function ui.BuildWindow()
         if prev then
             tab:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else
-            tab:SetPoint("TOPLEFT", fullScan, "BOTTOMLEFT", 0, -12)
+            tab:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -10)
         end
         ui.subtabs[name] = tab
         prev = tab
@@ -191,7 +220,7 @@ function ui.BuildWindow()
 
     -- Content region (recessed well) below the sub-tabs.
     local content = CreateFrame("Frame", "AegisExchangeContent", f)
-    content:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -128)
+    content:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -134)
     content:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 16)
     content:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -221,7 +250,132 @@ function ui.BuildWindow()
         i = i + 1
     end
 
+    -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
+    -- while the window is shown, i.e. while the AH is open.
+    ui.refreshAccum = 0
+    f:SetScript("OnUpdate", function()
+        ui.refreshAccum = ui.refreshAccum + arg1
+        if ui.refreshAccum >= 0.3 then
+            ui.refreshAccum = 0
+            if A.scan.IsRunning() or A.scan.IsPaused() then
+                ui.Refresh()
+            end
+        end
+    end)
+
     ui.SelectSubTab("Buy")
+    ui.Refresh()
+end
+
+-- ---------------------------------------------------------------------------
+-- Scan strip: wire Full Scan / Pause / Resume to the real scanner
+-- ---------------------------------------------------------------------------
+
+-- Estimated pages for the confirm popup: prefer the last full scan's page
+-- count, else whatever the currently displayed query reports.
+local function EstimatePages()
+    local last = A.db.GetLastScan()
+    if last and last.pages and last.pages > 0 then
+        return last.pages
+    end
+    local _, totalAuctions = GetNumAuctionItems("list")
+    if totalAuctions and totalAuctions > 0 then
+        return math.ceil(totalAuctions / A.scan.PAGE_SIZE)
+    end
+    return nil
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_FULL_SCAN"] = {
+    text = "Full scan of ~%s pages will take about %s minutes. Continue?",
+    button1 = "Continue",
+    button2 = "Cancel",
+    OnAccept = function()
+        ui.StartFullScan()
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+}
+
+function ui.ConfirmFullScan()
+    local pages = EstimatePages()
+    local pagesText, minutesText
+    if pages then
+        pagesText = tostring(pages)
+        minutesText = tostring(math.ceil(pages * A.scan.PAGE_DELAY / 60))
+    else
+        pagesText, minutesText = "?", "?"
+    end
+    StaticPopup_Show("AEGIS_EXCHANGE_FULL_SCAN", pagesText, minutesText)
+end
+
+function ui.StartFullScan()
+    A.scan.Start({}, {
+        onPage     = function() ui.Refresh() end,
+        onComplete = function(stats) ui.OnScanComplete(stats) end,
+    })
+    ui.Refresh()
+end
+
+function ui.OnScanComplete(stats)
+    ui.Refresh()
+    ChatMsg(string.format(
+        "Aegis: scan complete \226\128\148 %d auctions across %d pages in %s.",
+        stats.auctions, stats.pages, util.FormatDuration(stats.duration)))
+end
+
+-- State -> scan strip widgets.
+function ui.Refresh()
+    if not ui.frame then return end
+    local p = A.scan.GetProgress()
+    local last = A.db.GetLastScan()
+
+    if p.phase == "wait_query" or p.phase == "wait_results" then
+        ui.fullScanBtn:Disable()
+        ui.pauseBtn:Enable()
+        ui.resumeBtn:Disable()
+        local totalPages = p.totalPages
+        if totalPages < 1 then totalPages = 1 end
+        ui.bar:SetMinMaxValues(0, totalPages)
+        ui.bar:SetValue(p.pagesDone)
+        ui.bar:Show()
+        if p.totalPages > 0 then
+            ui.statusText:SetText(string.format(
+                "Page %d / %d \226\128\162 ~%s \226\128\162 %s/s",
+                p.page, p.totalPages, util.FormatDuration(p.eta),
+                string.format("%.1f", p.rate)))
+        else
+            ui.statusText:SetText("Requesting first page...")
+        end
+        ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
+    elseif p.phase == "paused" then
+        ui.fullScanBtn:Enable()
+        ui.pauseBtn:Disable()
+        ui.resumeBtn:Enable()
+        ui.bar:Show()
+        ui.statusText:SetText(string.format(
+            "Paused at page %d / %d", p.pagesDone, p.totalPages))
+        ui.statusText:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
+    else
+        ui.fullScanBtn:Enable()
+        ui.pauseBtn:Disable()
+        ui.resumeBtn:Disable()
+        ui.bar:Hide()
+        if last and last.when then
+            local age = time() - last.when
+            if age > STALE_SECONDS then
+                ui.statusText:SetText(
+                    "Last scan: " .. util.FormatAgo(age) .. " \226\128\148 may be outdated")
+                ui.statusText:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
+            else
+                ui.statusText:SetText("Last scan: " .. util.FormatAgo(age))
+                ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+        else
+            ui.statusText:SetText("Last scan: never")
+            ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -278,6 +432,7 @@ function ui.OpenWindow()
     end
     ui.frame:Show()
     ui.SelectSubTab(ui.selectedSubTab or "Buy")
+    ui.Refresh()
 end
 
 function ui.CloseWindow()
