@@ -141,8 +141,10 @@ function ui.BuildWindow()
 
     local subTitle = titleBar:CreateFontString(
         nil, "OVERLAY", "GameFontHighlightSmall")
-    subTitle:SetPoint("RIGHT", titleBar, "RIGHT", -34, 0)
-    subTitle:SetText("Turtle WoW 1.12")
+    subTitle:SetPoint("RIGHT", titleBar, "RIGHT", -8, 0)
+    -- The version here is the quickest way to confirm which build is
+    -- actually installed when triaging a bug report.
+    subTitle:SetText("Turtle WoW 1.12 \226\128\162 v" .. (A.version or "?"))
     subTitle:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     -- Close button (top-right) — closes the auction house. Its frame level is
@@ -386,9 +388,25 @@ function ui.Refresh()
                 pageText = string.format("Cat %d / %d \226\128\162 ",
                     p.catIndex, p.catCount) .. pageText
             end
+            if p.retries > 0 then
+                pageText = pageText
+                    .. string.format(" (retry %d)", p.retries)
+            end
             ui.statusText:SetText(pageText)
         else
-            ui.statusText:SetText("Requesting first page...")
+            -- Still before the first page. Say WHICH leg we're on so a stall
+            -- is diagnosable from the strip alone (see /aegis debug for the
+            -- full trace).
+            if p.sent == 0 then
+                ui.statusText:SetText(
+                    "Starting scan \226\128\148 waiting for client...")
+            elseif p.retries > 0 then
+                ui.statusText:SetText(string.format(
+                    "Requesting first page... (no reply \226\128\148 retry %d)",
+                    p.retries))
+            else
+                ui.statusText:SetText("Requesting first page...")
+            end
         end
         ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
     elseif p.phase == "paused" then
@@ -428,7 +446,13 @@ end
 -- Category picker (class -> subclass checklist) for a targeted scan
 -- ---------------------------------------------------------------------------
 
-local CAT_ROWS  = 13    -- reusable visible rows
+-- Visible rows in the picker list. HARD BOTTOM: the picker is ~310px tall and
+-- the list starts 34px down; the button row occupies the bottom ~34px. 11 rows
+-- of 20px end at 254px — comfortably above the buttons. 13 rows reached 294px
+-- and drew the last rows OVER "Scan Selected". Keep
+--   34 + CAT_ROWS * CAT_ROW_H  <  picker height - 44
+-- true whenever either constant changes.
+local CAT_ROWS  = 11    -- reusable visible rows
 local CAT_ROW_H = 20
 
 -- Flatten the class tree into the currently visible rows (a class row, then
@@ -598,7 +622,9 @@ function ui.BuildCategoryPicker()
     local scroll = CreateFrame("ScrollFrame", "AegisExchangePickerScroll",
         picker, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -34)
-    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -30, 42)
+    -- Bottom edge matches the last visible row (34 + 11*20 = 254 from the
+    -- top of a ~310px picker) so the scrollbar spans exactly the list area.
+    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -30, 56)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(arg1, CAT_ROW_H, ui.UpdateCatList)
     end)
@@ -658,6 +684,13 @@ function ui.BuildCategoryPicker()
         ui.catRows[i] = row
         i = i + 1
     end
+
+    -- Visual hard bottom: a thin rule between the list and the button row.
+    local divider = picker:CreateTexture(nil, "ARTWORK")
+    divider:SetTexture(C.border[1], C.border[2], C.border[3], 0.5)
+    divider:SetHeight(1)
+    divider:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 10, 42)
+    divider:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -10, 42)
 
     local scanSel = CreateFrame("Button", "AegisExchangePickerScanButton",
         picker, "UIPanelButtonTemplate")
@@ -823,9 +856,21 @@ A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     if ui.frame then ui.frame:Hide() end
 end)
 
--- Escape hatch: /aegis shows the default Blizzard AH (e.g. if its UI is needed).
+-- /aegis        — escape hatch: show the default Blizzard AH.
+-- /aegis debug  — toggle the scanner's chat trace (core/scan.lua Debug).
 SLASH_AEGISEXCHANGE1 = "/aegis"
 SlashCmdList["AEGISEXCHANGE"] = function(msg)
+    local cmd = string.lower(msg or "")
+    if string.find(cmd, "debug", 1, true) then
+        A.debugScan = not A.debugScan
+        if A.debugScan then
+            ChatMsg("Aegis: scan debug ON \226\128\148 start a scan and"
+                .. " watch the trace lines.")
+        else
+            ChatMsg("Aegis: scan debug OFF")
+        end
+        return
+    end
     ui.showBlizzard = true
     if ui.frame then ui.frame:Hide() end
     if AuctionFrame then

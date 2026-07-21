@@ -18,7 +18,11 @@ AegisExchange = {}
 local A = AegisExchange
 
 A.name    = "Aegis_Exchange"   -- must match the folder / .toc / ADDON_LOADED
-A.version = "0.0.1"
+
+-- Shown in the window title bar and printed at load. Bump on EVERY push the
+-- user will test — it is the only reliable way to know which build produced
+-- an in-game bug report.
+A.version = "0.4.0"
 
 -- Detect Turtle WoW. Turtle exposes a global TURTLE_WOW_VERSION.
 A.isTurtle = (TURTLE_WOW_VERSION ~= nil)
@@ -92,5 +96,9 @@ A.RegisterEvent("ADDON_LOADED", function(evt, loadedName)
     while i <= n do
         cbs[i]()
         i = i + 1
+    end
+    if DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage(
+            "Aegis: Exchange v" .. A.version .. " loaded.", 0.35, 0.78, 0.98)
     end
 end)

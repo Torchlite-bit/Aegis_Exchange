@@ -61,6 +61,12 @@ or silent breakage on the 1.12 / Lua 5.0 client.
    ```
    - **`page` is 0-indexed.**
    - **There is NO working `getAll` on 1.12.** Do not attempt a bulk pull.
+   - Pass **strings** for `name` / `minLevel` / `maxLevel` — **`""` when
+     unused, never nil**. The stock browse UI sends `GetText()` results
+     (always strings) and Auctionator does the same; servers may silently
+     ignore a query with nils in those slots. The index/flag args
+     (`invType`, `class`, `subclass`, `isUsable`, `quality`) stay nil for
+     "no filter".
 10. **Throttle every query.** Poll **`CanSendAuctionQuery()`** before **every**
     query. Leave **~4 seconds between pages**. Wait for the
     **`AUCTION_ITEM_LIST_UPDATE`** event before reading a page.
