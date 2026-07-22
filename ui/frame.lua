@@ -107,7 +107,7 @@ function ui.BuildWindow()
 
     -- Hiding our window is the single close path: whether it's the close
     -- button, ESC, or an AUCTION_HOUSE_CLOSED from walking away, end the AH
-    -- session here. Skipped only during the /aegis hand-off to the Blizzard AH,
+    -- session here. Skipped only during the /aex hand-off to the Blizzard AH,
     -- which needs the session to stay open.
     f:SetScript("OnHide", function()
         if not ui.showBlizzard then
@@ -395,7 +395,7 @@ function ui.Refresh()
             ui.statusText:SetText(pageText)
         else
             -- Still before the first page. Say WHICH leg we're on so a stall
-            -- is diagnosable from the strip alone (see /aegis debug for the
+            -- is diagnosable from the strip alone (see /aex debug for the
             -- full trace).
             if p.sent == 0 then
                 ui.statusText:SetText(
@@ -776,6 +776,36 @@ end
 -- Lifecycle: replace the Blizzard AH window while the AH is open
 -- ---------------------------------------------------------------------------
 
+-- One-tick deferred hide of the Blizzard AH.
+--
+-- The client's AUCTION_HOUSE_SHOW path (AuctionFrame_Show() in
+-- Blizzard_AuctionUI.lua, called from UIParent.lua) is, verbatim from the
+-- Turtle UI source:
+--
+--     ShowUIPanel(AuctionFrame);
+--     if ( not AuctionFrame:IsVisible() ) then
+--         CloseAuctionHouse();
+--     end
+--
+-- So if anything hides AuctionFrame SYNCHRONOUSLY from its own OnShow, that
+-- IsVisible() check fails and the CLIENT closes the AH session — after which
+-- every QueryAuctionItems is a silent no-op (this was the "no reply — retry
+-- N" stall). The OnShow hook below therefore only QUEUES the hide; this
+-- driver performs it one OnUpdate tick later, safely past the guard. No
+-- flash is visible: our toplevel HIGH-strata window covers the Blizzard AH.
+local hider = CreateFrame("Frame", "AegisExchangeHider")
+hider:Hide()
+hider:SetScript("OnUpdate", function()
+    hider:Hide()
+    if not ui.showBlizzard and AuctionFrame and AuctionFrame:IsVisible() then
+        ui.HideBlizzardAH()
+    end
+end)
+
+function ui.QueueHideBlizzard()
+    hider:Show()
+end
+
 -- CRITICAL: AuctionFrame's XML <OnHide> runs CloseAuctionHouse(), which ends
 -- the server-side AH session — after which QueryAuctionItems does nothing and a
 -- scan just spins on "Requesting first page...". So we must NEVER let the
@@ -783,9 +813,8 @@ end
 -- session. We hook it (save-original-and-replace, no hooksecurefunc) and, when
 -- WE are the one hiding it, suppress that body so the session stays alive.
 --
--- The OnShow hook neutralises the anti-flash case the same way: the instant the
--- client shows its AH we hide it back — but through ui.HideBlizzardAH, which
--- sets the suppress flag so the hide doesn't close the session.
+-- The OnShow hook handles the client re-showing its AH — but it must NOT
+-- hide synchronously (see the hider above); it queues the hide instead.
 function ui.HookAuctionFrame()
     if ui.ahHooked then return end
     if not AuctionFrame then return end
@@ -796,7 +825,9 @@ function ui.HookAuctionFrame()
             ui.orig_AuctionFrame_OnShow()
         end
         if not ui.showBlizzard then
-            ui.HideBlizzardAH()
+            -- Deferred, never synchronous — a synchronous hide here trips
+            -- the client's IsVisible guard and closes the AH session.
+            ui.QueueHideBlizzard()
         end
     end)
 
@@ -826,7 +857,10 @@ function ui.OpenWindow()
     ui.BuildWindow()
     ui.HookAuctionFrame()
     ui.showBlizzard = false
-    ui.HideBlizzardAH()   -- hide Blizzard's AH but keep the session open
+    -- Synchronous hide is safe HERE: our AUCTION_HOUSE_SHOW handler runs
+    -- after the client's AuctionFrame_Show() has already passed its
+    -- IsVisible guard, and the OnHide suppression keeps the session open.
+    ui.HideBlizzardAH()
     ui.frame:Show()
     ui.SelectSubTab(ui.selectedSubTab or "Buy")
     ui.Refresh()
@@ -856,9 +890,13 @@ A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     if ui.frame then ui.frame:Hide() end
 end)
 
--- /aegis        — escape hatch: show the default Blizzard AH.
--- /aegis debug  — toggle the scanner's chat trace (core/scan.lua Debug).
-SLASH_AEGISEXCHANGE1 = "/aegis"
+-- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.
+-- /aex debug                — toggle the scanner's chat trace.
+-- Deliberately NOT "/aegis": other addons in the user's Aegis series (Aegis:
+-- Rally Power) already own that slash, and when two addons register the same
+-- slash text the client resolves it to only ONE of them.
+SLASH_AEGISEXCHANGE1 = "/aex"
+SLASH_AEGISEXCHANGE2 = "/aegisexchange"
 SlashCmdList["AEGISEXCHANGE"] = function(msg)
     local cmd = string.lower(msg or "")
     if string.find(cmd, "debug", 1, true) then

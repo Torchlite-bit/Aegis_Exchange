@@ -80,6 +80,18 @@ or silent breakage on the 1.12 / Lua 5.0 client.
     save-and-replace its `OnHide`, and while *we* are the one hiding it, skip
     the default body so the session survives. See `ui.HideBlizzardAH` /
     `ui.HookAuctionFrame` in `ui/frame.lua`.
+    - **A SECOND close path lives in `AuctionFrame_Show()`** (the client's
+      AUCTION_HOUSE_SHOW handler, verbatim from the Turtle UI source):
+      ```
+      ShowUIPanel(AuctionFrame);
+      if ( not AuctionFrame:IsVisible() ) then
+          CloseAuctionHouse();
+      end
+      ```
+      So hiding the Blizzard AH **synchronously from its own `OnShow`** also
+      kills the session. The takeover hide must be **deferred one OnUpdate
+      tick** (see `AegisExchangeHider` in `ui/frame.lua`). Hiding from our own
+      AUCTION_HOUSE_SHOW handler is safe — it runs after this guard.
 
 ### SavedVariables
 
