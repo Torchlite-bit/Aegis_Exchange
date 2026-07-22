@@ -360,3 +360,233 @@ function sell.Post(unitBuyout, unitStart, minutes)
     StartAuction(start, buyout, minutes)
     return true
 end
+
+-- ---------------------------------------------------------------------------
+-- Multi-stack posting (post N stacks of a chosen size)
+-- ---------------------------------------------------------------------------
+
+-- Seconds between the two legs of a post (assemble a stack, then fire it) and
+-- between consecutive posts, so the client settles and we never spam the server.
+local ASSEMBLE_DELAY = 0.25
+local POST_DELAY     = 0.45
+local MAX_RETRIES    = 4
+
+-- Total count of an item across all POSTABLE bag slots.
+function sell.CountInBags(itemId)
+    if not itemId then return 0 end
+    local total = 0
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                local _, count = GetContainerItemInfo(bag, slot)
+                total = total + (count or 0)
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return total
+end
+
+-- How many stacks of `stackSize` we can actually assemble by splitting (each
+-- split leaves the remainder in the same slot, so a slot of C yields
+-- floor(C / stackSize) stacks). This is honest about fragmentation — we never
+-- promise stacks we can't build without merging partials.
+function sell.MaxStacks(itemId, stackSize)
+    if not itemId or not stackSize or stackSize < 1 then return 0 end
+    local n = 0
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                local _, count = GetContainerItemInfo(bag, slot)
+                n = n + math.floor((count or 0) / stackSize)
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return n
+end
+
+-- Per-stack deposit estimate for a stack of `stackSize`, from the item's vendor
+-- unit price (nil if we have no vendor data). Turtle-scaled + approximate.
+function sell.DepositFor(itemId, stackSize, minutes, maxStack)
+    local vendorUnit = A.db.GetVendor(itemId)
+    if not vendorUnit or vendorUnit <= 0 or not minutes or minutes <= 0 then
+        return nil
+    end
+    maxStack = maxStack or stackSize
+    local price = vendorUnit * stackSize
+    local base = math.floor(price * (minutes / 120)
+        * (1 + (maxStack - stackSize) * 0.05) * 0.025)
+    if A.isTurtle then base = math.floor(base * sell.TURTLE_DEPOSIT_FACTOR) end
+    return base
+end
+
+-- First postable bag slot holding at least `minCount` of the item, or nil.
+local function FindStack(itemId, minCount)
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                local _, count = GetContainerItemInfo(bag, slot)
+                if (count or 0) >= minCount then return bag, slot end
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return nil
+end
+
+-- Return any item sitting in the sell slot back to the bags (the Auctionator
+-- clear pattern: pick it up, then ClearCursor drops it to its bag origin).
+function sell.ClearSlot()
+    if GetAuctionSellItemInfo() then
+        ClickAuctionSellItemButton()
+        ClearCursor()
+    end
+end
+
+sell.job = nil   -- active multi-stack posting job
+
+local function PostDriver()
+    if not sell._postDriver then
+        sell._postDriver = CreateFrame("Frame", "AegisExchangeSellDriver")
+        sell._postDriver:Hide()
+        sell._postDriver:SetScript("OnUpdate", function()
+            sell.PostTick(arg1)
+        end)
+    end
+    return sell._postDriver
+end
+
+local function FinishJob(reason)
+    local job = sell.job
+    sell.job = nil
+    if sell._postDriver then sell._postDriver:Hide() end
+    if job and job.callbacks and job.callbacks.onDone then
+        job.callbacks.onDone(job.posted, job.requested, reason)
+    end
+end
+
+-- Begin posting `numStacks` auctions of `stackSize` at the given per-unit
+-- prices. Non-destructive: each stack is split off a bag stack, so partials
+-- and other items are never shuffled. Returns (true) or (false, reason).
+function sell.StartPosting(itemId, itemName, stackSize, numStacks,
+                           unitBuyout, unitStart, minutes, callbacks)
+    if sell.job then return false, "Already posting." end
+    if not itemId then return false, "No item selected." end
+    if not stackSize or stackSize < 1 then return false, "Bad stack size." end
+    if not numStacks or numStacks < 1 then return false, "Bad stack count." end
+    if not minutes or minutes <= 0 then return false, "Pick a duration." end
+    if CursorHasItem() then
+        return false, "Clear your cursor first."
+    end
+    if not (unitBuyout and unitBuyout > 0) then
+        return false, "Enter a buyout."
+    end
+    local unitStartUse = unitStart or unitBuyout
+    if unitStartUse > unitBuyout then
+        return false, "Start bid can't exceed the buyout."
+    end
+    -- Don't exceed the account cap.
+    local room = sell.CAP - sell.OwnerCount()
+    if room <= 0 then return false, "You are at the auction cap." end
+    if numStacks > room then numStacks = room end
+    -- Don't promise more than we can assemble.
+    local avail = sell.MaxStacks(itemId, stackSize)
+    if avail < 1 then return false, "Not enough of that item to make a stack." end
+    if numStacks > avail then numStacks = avail end
+
+    sell.ClearSlot()
+    sell.job = {
+        itemId = itemId, itemName = itemName, stackSize = stackSize,
+        requested = numStacks, remaining = numStacks, posted = 0,
+        unitBuyout = unitBuyout, unitStart = unitStartUse, minutes = minutes,
+        phase = "assemble", cool = 0, retries = 0, callbacks = callbacks,
+    }
+    PostDriver():Show()
+    return true
+end
+
+function sell.PostTick(dt)
+    local job = sell.job
+    if not job then return end
+    job.cool = job.cool - (dt or 0)
+    if job.cool > 0 then return end
+
+    if job.remaining <= 0 then
+        FinishJob("done")
+        return
+    end
+    if sell.AtCap() then
+        FinishJob("cap")
+        return
+    end
+
+    if job.phase == "assemble" then
+        local it = sell.GetItem()
+        if it and it.itemId == job.itemId and it.count == job.stackSize then
+            job.phase = "post"           -- already assembled
+            return
+        end
+        if CursorHasItem() then ClearCursor() end
+        local bag, slot = FindStack(job.itemId, job.stackSize)
+        if not bag then
+            FinishJob("out")             -- can't build another stack
+            return
+        end
+        SplitContainerItem(bag, slot, job.stackSize)   -- stackSize onto cursor
+        ClickAuctionSellItemButton()                   -- cursor -> sell slot
+        job.phase = "verify"
+        job.cool = ASSEMBLE_DELAY
+    elseif job.phase == "verify" then
+        local it = sell.GetItem()
+        if it and it.itemId == job.itemId and it.count == job.stackSize then
+            local buyout = math.floor(job.unitBuyout * job.stackSize)
+            local start  = math.floor(job.unitStart * job.stackSize)
+            if start < 1 then start = 1 end
+            StartAuction(start, buyout, job.minutes)   -- posts, clears slot
+            job.posted = job.posted + 1
+            job.remaining = job.remaining - 1
+            job.retries = 0
+            job.phase = "assemble"
+            job.cool = POST_DELAY
+            if job.callbacks and job.callbacks.onProgress then
+                job.callbacks.onProgress(job.posted, job.requested)
+            end
+        else
+            -- Assembly didn't land yet; retry a few times, then give up.
+            job.retries = job.retries + 1
+            if job.retries > MAX_RETRIES then
+                FinishJob("stuck")
+                return
+            end
+            job.phase = "assemble"
+            job.cool = ASSEMBLE_DELAY
+        end
+    end
+end
+
+function sell.PostingActive()
+    return sell.job ~= nil
+end
+
+function sell.CancelPosting()
+    if sell.job then FinishJob("cancelled") end
+end
