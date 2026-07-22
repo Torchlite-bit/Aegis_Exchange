@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: Aegis: Exchange
 ## Notes: Clean auction house helper for Turtle WoW
-## Version: 0.9.1
+## Version: 0.9.2
 ## SavedVariables: AegisExchangeDB
 ## SavedVariablesPerCharacter: AegisExchangeCharDB
 

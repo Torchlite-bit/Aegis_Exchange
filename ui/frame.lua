@@ -534,16 +534,17 @@ end
 -- Buy tab: shopping-list sidebar + search + browse + buy / bid
 -- ---------------------------------------------------------------------------
 
--- Colour for a "% of market" cell: cheap = green, near market = gold, dear =
--- red. Shared by the Buy and Sell listing tables.
+-- Colour for a "% of market" cell (shared by the Buy and Sell tables):
+-- below market = red, exactly at market = yellow, above market = green.
 local function PctColor(pct)
     if pct < 100 then
-        return 0.35, 0.85, 0.35
-    elseif pct <= 110 then
-        return 0.90, 0.82, 0.35
+        return 0.90, 0.38, 0.38   -- under 100%: red
+    elseif pct == 100 then
+        return 0.90, 0.82, 0.35   -- at 100%: yellow
     end
-    return 0.90, 0.38, 0.38
+    return 0.35, 0.85, 0.35       -- over 100%: green
 end
+ui.PctColor = PctColor   -- exposed for tests
 
 local BUY_ROWS,  BUY_ROW_H  = 11, 20
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
@@ -1444,7 +1445,9 @@ function ui.BuildSellTab()
     ui.listRows = {}
     local li = 1
     while li <= LIST_ROWS do
-        local row = CreateFrame("Frame", nil, panel)
+        -- Buttons (not plain frames) so a click can copy that listing's unit
+        -- price into the buyout box -- one-click "match this seller".
+        local row = CreateFrame("Button", nil, panel)
         row:SetHeight(LIST_ROW_H)
         if li == 1 then
             row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", 0, 0)
@@ -1453,6 +1456,7 @@ function ui.BuildSellTab()
             row:SetPoint("TOPLEFT", ui.listRows[li - 1], "BOTTOMLEFT", 0, 0)
             row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)
         end
+        row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
         local mkCell = function(x, w, just)
             local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fs:SetPoint("LEFT", row, "LEFT", x, 0)
@@ -1465,6 +1469,13 @@ function ui.BuildSellTab()
         row.stack = mkCell(252, 130)
         row.pct   = mkCell(392, 48)
         row.you   = mkCell(446, 40)
+        row:SetScript("OnClick", function()
+            local g = row.group
+            if g and g.unit then
+                SetMoneyBox(ui.sellBuyout, g.unit)
+                ui.SyncSellPrices("unit")   -- price the whole stack from it
+            end
+        end)
         row:Hide()
         ui.listRows[li] = row
         li = li + 1
@@ -1606,7 +1617,7 @@ function ui.UpdateListingsList()
         local ago = when and util.FormatAgo(time() - when) or "just now"
         ui.listHeader:SetText(table.getn(groups)
             .. " price(s) \226\128\162 scanned " .. ago
-            .. " \226\128\162 lowest first")
+            .. " \226\128\162 click a row to use its price")
     else
         ui.listHeader:SetText("Select an item to see its listings")
     end
@@ -1616,6 +1627,7 @@ function ui.UpdateListingsList()
         local row = ui.listRows[i]
         local g = groups[i + offset]
         if g then
+            row.group = g   -- click copies g.unit into the buyout box
             row.unit:SetText(g.unit and util.FormatMoney(g.unit, true) or "\226\128\148")
             local avail
             if g.num > 1 then
@@ -1645,6 +1657,7 @@ function ui.UpdateListingsList()
             end
             row:Show()
         else
+            row.group = nil
             row:Hide()
         end
         i = i + 1
