@@ -53,9 +53,22 @@ scan.state = {
     elapsed       = 0,     -- seconds actually spent scanning (pauses excluded)
     cooldown      = 0,     -- seconds left before the next query may be sent
     timeout       = 0,     -- seconds left waiting for the current reply
+    sent          = 0,     -- queries actually handed to the client this run
+    retries       = 0,     -- re-sends of the CURRENT page (reply never came)
+    waitOk        = 0,     -- seconds spent blocked on CanSendAuctionQuery()
     callbacks     = nil,   -- { onPage = fn(page1, totalPages),
                            --   onComplete = fn(stats) }
 }
+
+-- Chat trace of every scanner transition; toggled with "/aegis debug". This is
+-- how we tell WHICH leg a stall is on: query never sent (CanSendAuctionQuery
+-- stays false) vs. query sent but no AUCTION_ITEM_LIST_UPDATE ever arrives
+-- (dead AH session / server rejected the query).
+function scan.Debug(msg)
+    if A.debugScan and DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff5fc8f8Aegis scan:|r " .. msg)
+    end
+end
 
 -- ---------------------------------------------------------------------------
 -- Recording
@@ -87,11 +100,19 @@ end
 local function SendQuery()
     local st = scan.state
     local q = st.query
-    -- The 9-arg 1.12 signature; any nil means "no filter".
-    QueryAuctionItems(q.name, q.minLevel, q.maxLevel, q.invType,
-                      q.class, q.subclass, st.page, nil, q.quality)
+    -- The 9-arg 1.12 signature. name/minLevel/maxLevel are sent as STRINGS
+    -- ("" when unused) because that is exactly what the stock browse UI sends
+    -- (it passes GetText() results) and what Auctionator sends — some servers
+    -- ignore a query with nils in those slots. The index args stay nil for
+    -- "no filter".
+    QueryAuctionItems(q.name or "", q.minLevel or "", q.maxLevel or "",
+                      q.invType, q.class, q.subclass, st.page, nil, q.quality)
+    st.sent = st.sent + 1
     st.phase = "wait_results"
     st.timeout = scan.REPLY_TIMEOUT
+    scan.Debug(string.format(
+        "query sent \226\128\148 cat %d, page %d (attempt %d)",
+        st.queryIndex, st.page, st.retries + 1))
 end
 
 -- ---------------------------------------------------------------------------
@@ -107,13 +128,32 @@ function scan.OnUpdate(dt)
     st.elapsed = st.elapsed + dt
     if st.phase == "wait_query" then
         st.cooldown = st.cooldown - dt
-        if st.cooldown <= 0 and CanSendAuctionQuery() then
-            SendQuery()
+        if st.cooldown <= 0 then
+            if CanSendAuctionQuery() then
+                st.waitOk = 0
+                SendQuery()
+            else
+                -- Client says "not yet". If this never clears, no query is
+                -- ever sent — one of the two stall legs. Trace it.
+                st.waitOk = st.waitOk + dt
+                if st.waitOk >= 5 then
+                    st.waitOk = st.waitOk - 5
+                    scan.Debug(
+                        "still blocked \226\128\148 CanSendAuctionQuery() "
+                        .. "has returned false for 5s+")
+                end
+            end
         end
     elseif st.phase == "wait_results" then
         st.timeout = st.timeout - dt
         if st.timeout <= 0 then
-            -- Reply lost; fall back and re-send the same page.
+            -- Reply lost; fall back and re-send the same page. Climbing
+            -- retries = queries go out but the server never answers (the
+            -- other stall leg: dead session / rejected query).
+            st.retries = st.retries + 1
+            scan.Debug(string.format(
+                "no reply for page %d after %ds \226\128\148 retry %d",
+                st.page, scan.REPLY_TIMEOUT, st.retries))
             st.phase = "wait_query"
             st.cooldown = 1
         end
@@ -159,6 +199,7 @@ local function StartCurrentQuery()
     st.page = 0
     st.lastCompleted = -1
     st.totalPages = 0
+    st.retries = 0
     st.phase = "wait_query"
     -- First category goes immediately; later categories wait a polite gap.
     if st.queryIndex == 1 then
@@ -184,6 +225,10 @@ function scan.OnListUpdate()
     if st.totalPages < 1 then st.totalPages = 1 end
     st.scanned = st.scanned + numOnPage
     st.lastCompleted = st.page
+    st.retries = 0
+    scan.Debug(string.format(
+        "page %d / %d received \226\128\148 %d on page, %d total",
+        st.page + 1, st.totalPages, numOnPage, totalAuctions))
     if st.callbacks and st.callbacks.onPage then
         st.callbacks.onPage(st.page + 1, st.totalPages)
     end
@@ -229,9 +274,14 @@ function scan.Start(queryOrList, callbacks)
     st.totalAuctions  = 0
     st.scanned        = 0
     st.elapsed        = 0
+    st.sent           = 0
+    st.retries        = 0
+    st.waitOk         = 0
     StartCurrentQuery()
     st.cooldown       = 0    -- first query goes as soon as the client allows
     scan.driver:Show()
+    scan.Debug("scan started \226\128\148 "
+        .. table.getn(queries) .. " category query(ies)")
 end
 
 -- Pause: stop querying but keep all progress. A reply already in flight is
@@ -307,6 +357,8 @@ function scan.GetProgress()
         elapsed     = st.elapsed,
         rate        = rate,
         eta         = remaining * secPerPage,
+        sent        = st.sent or 0,
+        retries     = st.retries or 0,
         phase       = st.phase,
     }
 end
