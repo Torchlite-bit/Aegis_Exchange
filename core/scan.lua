@@ -76,18 +76,28 @@ end
 
 -- Read every auction on the currently visible "list" page into the price DB.
 -- Runs on EVERY AUCTION_ITEM_LIST_UPDATE — manual browsing feeds the DB too.
--- Per-unit buyout = buyoutPrice / count; bid-only auctions (buyout 0) are
--- ignored, and so is `owner` (it may be nil until resolved; we never wait).
+-- Per-unit buyout = buyoutPrice / count; bid-only auctions (buyout 0) are not
+-- fed to the price DB. `owner` may be nil until it resolves; we never wait.
+--
+-- If the current run supplied an `onListing` callback (the Sell tab uses this
+-- to collect every listing of one item), it is invoked for EACH auction on the
+-- page as onListing(itemId, name, count, buyout, minBid, owner) — including
+-- bid-only ones, so the listings table can show them too.
 local function RecordVisiblePage(numOnPage)
+    local st = scan.state
+    local onListing = st.callbacks and st.callbacks.onListing
     for i = 1, numOnPage do
-        local name, _, count, _, _, _, _, _, buyoutPrice =
+        local name, _, count, _, _, _, minBid, _, buyoutPrice, _, _, owner =
             GetAuctionItemInfo("list", i)
-        if name and count and count > 0
-            and buyoutPrice and buyoutPrice > 0 then
+        if name and count and count > 0 then
             local itemId = util.ItemIdFromLink(GetAuctionItemLink("list", i))
-            if itemId then
+            if buyoutPrice and buyoutPrice > 0 and itemId then
                 A.db.RecordAuction(
                     itemId, math.floor(buyoutPrice / count), name)
+            end
+            if onListing then
+                onListing(itemId, name, count, buyoutPrice or 0,
+                          minBid or 0, owner)
             end
         end
     end
@@ -184,7 +194,11 @@ local function Finish()
         duration   = st.elapsed,
         categories = table.getn(st.queries),
     }
-    A.db.SetLastScan(st.pagesDoneTotal, st.scanned, IsFullRun(st))
+    -- Item scans (Sell tab price lookups) pass stampLast=false so they feed
+    -- the price DB WITHOUT resetting the Scan tab's "last full scan" marker.
+    if not (st.callbacks and st.callbacks.stampLast == false) then
+        A.db.SetLastScan(st.pagesDoneTotal, st.scanned, IsFullRun(st))
+    end
     st.phase = "idle"
     scan.driver:Hide()
     if st.callbacks and st.callbacks.onComplete then
@@ -258,7 +272,9 @@ end
 --   scan.Start({ {class=5,subclass=1}, {class=2} }) -- several categories
 -- A query = { name, minLevel, maxLevel, invType, class, subclass, quality };
 -- any nil field means "no filter". `callbacks` (optional) =
--- { onPage = fn(page1based, totalPages), onComplete = fn(stats) }.
+--   { onPage     = fn(page1based, totalPages),
+--     onComplete = fn(stats),
+--     onListing  = fn(itemId, name, count, buyout, minBid, owner) }  -- per row
 function scan.Start(queryOrList, callbacks)
     local st = scan.state
     local queries

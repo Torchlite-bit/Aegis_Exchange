@@ -477,8 +477,21 @@ function ui.Refresh()
 end
 
 -- ---------------------------------------------------------------------------
--- Sell tab: post the item in the sell slot, with Aegis price context
+-- Sell tab: bag browser + per-item listing scan + post
 -- ---------------------------------------------------------------------------
+
+local BAG_ROWS,  BAG_ROW_H  = 9, 19
+local LIST_ROWS, LIST_ROW_H = 9, 19
+
+-- Colour for a "% of market" cell: cheap = green, near market = gold, dear = red.
+local function PctColor(pct)
+    if pct < 100 then
+        return 0.35, 0.85, 0.35
+    elseif pct <= 110 then
+        return 0.90, 0.82, 0.35
+    end
+    return 0.90, 0.38, 0.38
+end
 
 -- A money entry box. Accepts "1g 50s 20c" style text (util.ParseMoney).
 local function MakeMoneyBox(parent, width)
@@ -492,7 +505,6 @@ local function MakeMoneyBox(parent, width)
     return e
 end
 
--- Read a money box as copper (per unit), or nil if empty/unparseable.
 local function ReadMoneyBox(e)
     local txt = util.Trim(e:GetText() or "")
     if txt == "" then return nil end
@@ -513,11 +525,11 @@ function ui.BuildSellTab()
     ui.sellBuilt = true
     ui.sellDuration = A.sell.DEFAULT_DURATION
 
-    -- Sell slot: drop or click an item in exactly like the stock AH sell slot.
+    -- ---- Header: sell slot + item context -------------------------------
     local slot = CreateFrame("Button", "AegisExchangeSellSlot", panel)
     slot:SetWidth(40)
     slot:SetHeight(40)
-    slot:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -14)
+    slot:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -12)
     slot:SetBackdrop({
         bgFile = "Interface\\Buttons\\UI-EmptySlot",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -532,84 +544,85 @@ function ui.BuildSellTab()
     icon:Hide()
     slot.icon = icon
     local place = function()
-        -- Moves the cursor item into the sell slot (or picks the slotted item
-        -- back up). Works off the AH session, not the Blizzard sell frame.
-        ClickAuctionSellItemButton()
+        ClickAuctionSellItemButton()   -- cursor item -> sell slot (session API)
         ui.RefreshSell()
     end
     slot:SetScript("OnClick", place)
     slot:SetScript("OnReceiveDrag", place)
     ui.sellSlot = slot
 
-    local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hint:SetPoint("LEFT", slot, "RIGHT", 10, 6)
-    hint:SetText("Drag an item here to sell")
-    hint:SetTextColor(C.text[1], C.text[2], C.text[3])
-    ui.sellName = hint
+    ui.sellName = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.sellName:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -1)
+    ui.sellName:SetJustifyH("LEFT")
+    ui.sellName:SetText("Click a bag item, or drag one here")
+    ui.sellName:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
-    local refs = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    refs:SetPoint("LEFT", slot, "RIGHT", 10, -10)
-    refs:SetJustifyH("LEFT")
-    refs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.sellRefs = refs
+    ui.sellCtx = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellCtx:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -20)
+    ui.sellCtx:SetJustifyH("LEFT")
+    ui.sellCtx:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    -- Buyout row.
+    ui.sellVendor = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellVendor:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -36)
+    ui.sellVendor:SetJustifyH("LEFT")
+
+    -- Deposit / total / cap count, right-aligned.
+    ui.sellDeposit = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellDeposit:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -12)
+    ui.sellDeposit:SetJustifyH("RIGHT")
+    ui.sellDeposit:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellTotal = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellTotal:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
+    ui.sellTotal:SetJustifyH("RIGHT")
+    ui.sellTotal:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellCap = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellCap:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -44)
+    ui.sellCap:SetJustifyH("RIGHT")
+
+    -- ---- Price row ------------------------------------------------------
     local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    buyLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -16)
-    buyLabel:SetWidth(96)
+    buyLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -12)
+    buyLabel:SetWidth(88)
     buyLabel:SetJustifyH("LEFT")
     buyLabel:SetText("Buyout / unit:")
     buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    ui.sellBuyout = MakeMoneyBox(panel, 110)
+    ui.sellBuyout = MakeMoneyBox(panel, 100)
     ui.sellBuyout:SetPoint("LEFT", buyLabel, "RIGHT", 6, 0)
 
     local mkQuick = function(text, w, anchorTo, fn)
         local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         b:SetWidth(w)
         b:SetHeight(18)
-        b:SetPoint("LEFT", anchorTo, "RIGHT", 6, 0)
+        b:SetPoint("LEFT", anchorTo, "RIGHT", 5, 0)
         b:SetText(text)
         b:SetScript("OnClick", fn)
         return b
     end
-    ui.sellMarketBtn = mkQuick("Market", 58, ui.sellBuyout, function()
+    ui.sellMarketBtn = mkQuick("Market", 54, ui.sellBuyout, function()
         local it = A.sell.GetItem()
-        local s = it and A.sell.Suggest(it.itemId)
-        if s and s.market then SetMoneyBox(ui.sellBuyout, s.market) end
+        local sg = it and A.sell.Suggest(it.itemId)
+        if sg and sg.market then SetMoneyBox(ui.sellBuyout, sg.market) end
     end)
-    ui.sellUnderBtn = mkQuick("Undercut", 66, ui.sellMarketBtn, function()
+    ui.sellUnderBtn = mkQuick("Undercut", 62, ui.sellMarketBtn, function()
         local it = A.sell.GetItem()
         local u = it and A.sell.UndercutUnit(it.itemId)
         if u then SetMoneyBox(ui.sellBuyout, u) end
     end)
-    ui.sellVendorBtn = mkQuick("Vendor", 56, ui.sellUnderBtn, function()
+    ui.sellVendorBtn = mkQuick("Vendor", 52, ui.sellUnderBtn, function()
         local it = A.sell.GetItem()
-        local s = it and A.sell.Suggest(it.itemId)
-        if s and s.vendor then SetMoneyBox(ui.sellBuyout, s.vendor) end
+        local sg = it and A.sell.Suggest(it.itemId)
+        if sg and sg.vendor then SetMoneyBox(ui.sellBuyout, sg.vendor) end
     end)
 
-    -- Start-bid row.
-    local startLabel = panel:CreateFontString(
-        nil, "OVERLAY", "GameFontNormalSmall")
-    startLabel:SetPoint("TOPLEFT", buyLabel, "BOTTOMLEFT", 0, -12)
-    startLabel:SetWidth(96)
-    startLabel:SetJustifyH("LEFT")
-    startLabel:SetText("Start / unit:")
-    startLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.sellStackText = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.sellStackText:SetPoint("LEFT", ui.sellVendorBtn, "RIGHT", 8, 0)
 
-    ui.sellStart = MakeMoneyBox(panel, 110)
-    ui.sellStart:SetPoint("LEFT", startLabel, "RIGHT", 6, 0)
-
-    local startHint = panel:CreateFontString(
-        nil, "OVERLAY", "GameFontDisableSmall")
-    startHint:SetPoint("LEFT", ui.sellStart, "RIGHT", 8, 0)
-    startHint:SetText("blank = same as buyout")
-    ui.sellStartHint = startHint
-
-    -- Duration row.
+    -- ---- Duration + Post row -------------------------------------------
     local durLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    durLabel:SetPoint("TOPLEFT", startLabel, "BOTTOMLEFT", 0, -14)
+    durLabel:SetPoint("TOPLEFT", buyLabel, "BOTTOMLEFT", 0, -12)
     durLabel:SetText("Duration:")
     durLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
@@ -619,7 +632,7 @@ function ui.BuildSellTab()
     while di <= table.getn(A.sell.DURATIONS) do
         local d = A.sell.DURATIONS[di]
         local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        b:SetWidth(50)
+        b:SetWidth(46)
         b:SetHeight(20)
         if prev then
             b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
@@ -637,77 +650,340 @@ function ui.BuildSellTab()
         di = di + 1
     end
 
-    -- Deposit + auction-count line.
-    ui.sellDeposit = panel:CreateFontString(
-        nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellDeposit:SetPoint("TOPLEFT", durLabel, "BOTTOMLEFT", 0, -14)
-    ui.sellDeposit:SetJustifyH("LEFT")
-    ui.sellDeposit:SetTextColor(C.text[1], C.text[2], C.text[3])
-
-    ui.sellCount = panel:CreateFontString(
-        nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellCount:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -14)
-    ui.sellCount:SetJustifyH("RIGHT")
-
-    -- Post button + footnote.
     local post = CreateFrame("Button", "AegisExchangeSellPostButton",
         panel, "UIPanelButtonTemplate")
-    post:SetWidth(150)
-    post:SetHeight(24)
-    post:SetPoint("TOPLEFT", ui.sellDeposit, "BOTTOMLEFT", 0, -16)
+    post:SetWidth(120)
+    post:SetHeight(22)
+    post:SetPoint("LEFT", prev, "RIGHT", 16, 0)
     post:SetText("Post Auction")
     post:SetScript("OnClick", function()
         ui.ConfirmPost()
     end)
     ui.sellPostBtn = post
 
-    local foot = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    foot:SetPoint("LEFT", post, "RIGHT", 10, 0)
-    foot:SetText("5% cut on sale \226\128\162 deposit is approximate")
+    -- ---- Divider --------------------------------------------------------
+    local div = panel:CreateTexture(nil, "ARTWORK")
+    div:SetTexture(C.border[1], C.border[2], C.border[3], 0.4)
+    div:SetHeight(1)
+    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -128)
+    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -128)
+
+    -- ---- Bottom-left: Your Bags ----------------------------------------
+    local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -138)
+    bagHdr:SetText("Your Bags")
+    bagHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
+        panel, "FauxScrollFrameTemplate")
+    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -156)
+    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 188, 10)
+    bagScroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(BAG_ROW_H, ui.UpdateBagList)
+    end)
+    ui.bagScroll = bagScroll
+
+    ui.bagRows = {}
+    local bi = 1
+    while bi <= BAG_ROWS do
+        local row = CreateFrame("Button", nil, panel)
+        row:SetHeight(BAG_ROW_H)
+        if bi == 1 then
+            row:SetPoint("TOPLEFT", bagScroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.bagRows[bi - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.bagRows[bi - 1], "BOTTOMRIGHT", 0, 0)
+        end
+        local ic = row:CreateTexture(nil, "ARTWORK")
+        ic:SetWidth(16)
+        ic:SetHeight(16)
+        ic:SetPoint("LEFT", row, "LEFT", 4, 0)
+        ic:Hide()
+        row.icon = ic
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", row, "LEFT", 24, 0)
+        lbl:SetJustifyH("LEFT")
+        row.label = lbl
+        row:SetScript("OnClick", function()
+            local e = row.entry
+            if e and e.kind == "item" then ui.SelectBagEntry(e.item) end
+        end)
+        row:Hide()
+        ui.bagRows[bi] = row
+        bi = bi + 1
+    end
+
+    -- ---- Bottom-right: listings table ----------------------------------
+    ui.listHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.listHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -138)
+    ui.listHeader:SetJustifyH("LEFT")
+    ui.listHeader:SetText("Select an item to see its listings")
+    ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    -- Column header labels.
+    local colX = { unit = 200, avail = 292, stack = 452, pct = 592, you = 646 }
+    local mkCol = function(x, text)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -155)
+        fs:SetJustifyH("LEFT")
+        fs:SetText(text)
+        return fs
+    end
+    mkCol(colX.unit, "Unit price")
+    mkCol(colX.avail, "Available")
+    mkCol(colX.stack, "Stack price")
+    mkCol(colX.pct, "% mkt")
+    mkCol(colX.you, "You?")
+
+    local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
+        panel, "FauxScrollFrameTemplate")
+    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -170)
+    listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 10)
+    listScroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(LIST_ROW_H, ui.UpdateListingsList)
+    end)
+    ui.listScroll = listScroll
+
+    ui.listRows = {}
+    local li = 1
+    while li <= LIST_ROWS do
+        local row = CreateFrame("Frame", nil, panel)
+        row:SetHeight(LIST_ROW_H)
+        if li == 1 then
+            row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", listScroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.listRows[li - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)
+        end
+        local mkCell = function(x, w, just)
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", row, "LEFT", x, 0)
+            fs:SetWidth(w)
+            fs:SetJustifyH(just or "LEFT")
+            return fs
+        end
+        row.unit  = mkCell(0, 86)
+        row.avail = mkCell(92, 158)
+        row.stack = mkCell(252, 130)
+        row.pct   = mkCell(392, 48)
+        row.you   = mkCell(446, 40)
+        row:Hide()
+        ui.listRows[li] = row
+        li = li + 1
+    end
 
     ui.RefreshSell()
 end
 
--- Compute the total buyout for the whole stack, for the confirm text/summary.
-local function SellTotals()
+-- Flatten the grouped bag structure into visible rows (category header, then
+-- its item rows).
+function ui.FlattenBags()
+    local flat = {}
+    local cats = ui.bagCats or {}
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local cat = cats[ci]
+        table.insert(flat, { kind = "cat", name = cat.name,
+            num = table.getn(cat.items) })
+        local ii = 1
+        while ii <= table.getn(cat.items) do
+            table.insert(flat, { kind = "item", item = cat.items[ii] })
+            ii = ii + 1
+        end
+        ci = ci + 1
+    end
+    ui.bagFlat = flat
+end
+
+function ui.RefreshBags()
+    if not ui.bagScroll then return end
+    ui.bagCats = A.sell.ScanBags()
+    ui.FlattenBags()
+    ui.UpdateBagList()
+end
+
+function ui.UpdateBagList()
+    if not ui.bagScroll then return end
+    local flat = ui.bagFlat or {}
+    FauxScrollFrame_Update(ui.bagScroll, table.getn(flat), BAG_ROWS, BAG_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.bagScroll)
+    local i = 1
+    while i <= BAG_ROWS do
+        local row = ui.bagRows[i]
+        local e = flat[i + offset]
+        if e then
+            row.entry = e
+            if e.kind == "cat" then
+                row.icon:Hide()
+                row.label:ClearAllPoints()
+                row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
+                row.label:SetText(e.name .. " (" .. e.num .. ")")
+                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            else
+                local it = e.item
+                if it.texture then
+                    row.icon:SetTexture(it.texture)
+                    row.icon:Show()
+                else
+                    row.icon:Hide()
+                end
+                row.label:ClearAllPoints()
+                row.label:SetPoint("LEFT", row, "LEFT", 24, 0)
+                local txt = it.name
+                if it.count and it.count > 1 then txt = txt .. " x" .. it.count end
+                row.label:SetText(txt)
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- Place a bag item into the sell slot; the NEW_AUCTION_UPDATE that follows
+-- refreshes the header and kicks off the per-item listing scan.
+function ui.SelectBagEntry(item)
+    if A.scan.IsRunning() or A.scan.IsPaused() then
+        ChatMsg("Aegis: a scan is in progress \226\128\148 try again in a moment.")
+        return
+    end
+    A.sell.PlaceFromBag(item.bag, item.slot)
+    ui.RefreshSell()
+end
+
+-- When the slot item changes, scan the AH for that item's listings (once).
+function ui.MaybeScanSlotItem()
     local it = A.sell.GetItem()
-    if not it then return nil end
-    local unitBuy = ReadMoneyBox(ui.sellBuyout)
-    local unitStart = ReadMoneyBox(ui.sellStart)
-    return it, unitBuy, unitStart
+    if not it or not it.itemId then
+        ui.lastScanItemId = nil
+        return
+    end
+    if it.itemId == ui.lastScanItemId then return end
+    ui.lastScanItemId = it.itemId
+    ui.sellListingGroups = nil
+    local started = A.sell.ScanItem(it.name, it.itemId, nil, function(rows)
+        ui.OnItemListings(rows)
+    end)
+    ui.sellScanState = started and "scanning" or "busy"
+    if not started then ui.lastScanItemId = nil end
+    ui.UpdateListingsList()
+end
+
+function ui.OnItemListings(rows)
+    local it = A.sell.GetItem()
+    if not it or not it.itemId or it.itemId ~= A.sell.scanItemId then
+        -- Slot changed mid-scan; results are stale. Re-scan the current item.
+        ui.lastScanItemId = nil
+        ui.MaybeScanSlotItem()
+        return
+    end
+    ui.sellScanState = "done"
+    local market = A.db.MarketValue(it.itemId)
+    ui.sellListingGroups = A.sell.GroupListings(rows, market)
+    -- Pre-fill the buyout from the undercut rule when the user hasn't typed one.
+    if util.Trim(ui.sellBuyout:GetText() or "") == "" then
+        local u = A.sell.UndercutUnit(it.itemId)
+        if u then SetMoneyBox(ui.sellBuyout, u) end
+    end
+    ui.UpdateListingsList()
+    ui.RefreshSell()
+end
+
+function ui.UpdateListingsList()
+    if not ui.listScroll then return end
+    local groups = ui.sellListingGroups or {}
+    FauxScrollFrame_Update(ui.listScroll, table.getn(groups), LIST_ROWS, LIST_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.listScroll)
+
+    if ui.sellScanState == "scanning" then
+        ui.listHeader:SetText("Scanning this item...")
+    elseif ui.sellScanState == "busy" then
+        ui.listHeader:SetText("Scanner busy \226\128\148 finish that scan first")
+    elseif ui.sellListingGroups then
+        local when = A.sell.scanWhen
+        local ago = when and util.FormatAgo(time() - when) or "just now"
+        ui.listHeader:SetText(table.getn(groups)
+            .. " price(s) \226\128\162 scanned " .. ago
+            .. " \226\128\162 lowest first")
+    else
+        ui.listHeader:SetText("Select an item to see its listings")
+    end
+
+    local i = 1
+    while i <= LIST_ROWS do
+        local row = ui.listRows[i]
+        local g = groups[i + offset]
+        if g then
+            row.unit:SetText(g.unit and util.FormatMoney(g.unit, true) or "\226\128\148")
+            local avail
+            if g.num > 1 then
+                avail = g.num .. " stacks of " .. g.count
+            else
+                avail = "1 stack of " .. g.count
+            end
+            row.avail:SetText(avail)
+            if g.buyout and g.buyout > 0 then
+                row.stack:SetText(util.FormatMoney(g.buyout, true))
+            else
+                row.stack:SetText("bid only")
+            end
+            if g.pct then
+                row.pct:SetText(g.pct .. "%")
+                row.pct:SetTextColor(PctColor(g.pct))
+            else
+                row.pct:SetText("\226\128\148")
+                row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            end
+            if g.mine then
+                row.you:SetText("yes")
+                row.you:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            else
+                row.you:SetText("no")
+                row.you:SetTextColor(0.5, 0.5, 0.5)
+            end
+            row:Show()
+        else
+            row:Hide()
+        end
+        i = i + 1
+    end
 end
 
 function ui.RefreshSell()
     if not ui.sellBuilt then return end
     local it = A.sell.GetItem()
 
-    -- Duration button highlight.
     local di = 1
     while di <= table.getn(ui.sellDurBtns) do
         local b = ui.sellDurBtns[di]
-        if b.minutes == ui.sellDuration then
-            b:LockHighlight()
-        else
-            b:UnlockHighlight()
-        end
+        if b.minutes == ui.sellDuration then b:LockHighlight() else b:UnlockHighlight() end
         di = di + 1
     end
 
     local count = A.sell.OwnerCount()
     local atCap = count >= A.sell.CAP
-    ui.sellCount:SetText("Your auctions: " .. count .. " / " .. A.sell.CAP)
+    ui.sellCap:SetText("Listings: " .. count .. " / " .. A.sell.CAP)
     if atCap then
-        ui.sellCount:SetTextColor(0.9, 0.3, 0.3)
+        ui.sellCap:SetTextColor(0.9, 0.35, 0.35)
     else
-        ui.sellCount:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.sellCap:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     end
 
     if not it then
         ui.sellSlot.icon:Hide()
-        ui.sellName:SetText("Drag an item here to sell")
-        ui.sellRefs:SetText("")
+        ui.sellName:SetText("Click a bag item, or drag one here")
+        ui.sellCtx:SetText("")
+        ui.sellVendor:SetText("")
         ui.sellDeposit:SetText("")
+        ui.sellTotal:SetText("")
+        ui.sellStackText:SetText("")
         ui.sellPostBtn:Disable()
+        ui.lastScanItemId = nil
         return
     end
 
@@ -717,18 +993,47 @@ function ui.RefreshSell()
     end
     ui.sellName:SetText(it.name .. "  (x" .. it.count .. ")")
 
-    local s = A.sell.Suggest(it.itemId)
-    if s and (s.market or s.minBuyout) then
-        local parts = {}
-        if s.market then
-            table.insert(parts, "Market " .. util.FormatMoney(s.market, true))
-        end
-        if s.minBuyout then
-            table.insert(parts, "Min " .. util.FormatMoney(s.minBuyout, true))
-        end
-        ui.sellRefs:SetText(table.concat(parts, "   "))
+    -- Context line: market / min / vendor from the DB.
+    local sg = A.sell.Suggest(it.itemId)
+    local parts = {}
+    if sg and sg.market then
+        table.insert(parts, "Market " .. util.FormatMoney(sg.market, true))
+    end
+    if sg and sg.minBuyout then
+        table.insert(parts, "Min " .. util.FormatMoney(sg.minBuyout, true))
+    end
+    if sg and sg.vendor then
+        table.insert(parts, "Vendor " .. util.FormatMoney(sg.vendor, true))
+    end
+    if table.getn(parts) > 0 then
+        ui.sellCtx:SetText(table.concat(parts, "   "))
     else
-        ui.sellRefs:SetText("No scan data \226\128\148 run a scan for pricing")
+        ui.sellCtx:SetText("No price data yet \226\128\148 scanning...")
+    end
+
+    local unitBuy = ReadMoneyBox(ui.sellBuyout)
+    local total = unitBuy and math.floor(unitBuy * it.count) or 0
+    if total > 0 then
+        ui.sellTotal:SetText("Total " .. util.FormatMoney(total, true))
+        ui.sellStackText:SetText("= " .. util.FormatMoney(total) .. " / stack")
+    else
+        ui.sellTotal:SetText("")
+        ui.sellStackText:SetText("")
+    end
+
+    -- Vendor comparison: above vendor = fine (green), below = warning (red).
+    local vc = A.sell.VendorCompare(it.itemId, unitBuy)
+    if vc then
+        local word = vc.above and "above vendor" or "BELOW vendor"
+        ui.sellVendor:SetText(string.format(
+            "%d%% of vendor \226\128\162 %s", vc.pct, word))
+        if vc.above then
+            ui.sellVendor:SetTextColor(0.35, 0.8, 0.35)
+        else
+            ui.sellVendor:SetTextColor(0.9, 0.4, 0.4)
+        end
+    else
+        ui.sellVendor:SetText("")
     end
 
     local dep, approx = A.sell.EstimateDeposit(ui.sellDuration)
@@ -736,42 +1041,35 @@ function ui.RefreshSell()
     if approx then depText = depText .. " (approx)" end
     ui.sellDeposit:SetText(depText)
 
-    local unitBuy = ReadMoneyBox(ui.sellBuyout)
-    local unitStart = ReadMoneyBox(ui.sellStart)
-    local haveBid = (unitBuy and unitBuy > 0) or (unitStart and unitStart > 0)
-    if atCap or not haveBid then
+    if atCap or not (unitBuy and unitBuy > 0) then
         ui.sellPostBtn:Disable()
     else
         ui.sellPostBtn:Enable()
     end
+
+    ui.MaybeScanSlotItem()
 end
 
 StaticPopupDialogs["AEGIS_EXCHANGE_POST"] = {
     text = "Post %s?\n%s",
     button1 = "Post",
     button2 = "Cancel",
-    OnAccept = function()
-        ui.DoPost()
-    end,
+    OnAccept = function() ui.DoPost() end,
     timeout = 0,
     whileDead = 1,
     hideOnEscape = 1,
 }
 
 function ui.ConfirmPost()
-    local it, unitBuy, unitStart = SellTotals()
+    local it = A.sell.GetItem()
     if not it then
         ChatMsg("Aegis: no item in the sell slot.")
         return
     end
+    local unitBuy = ReadMoneyBox(ui.sellBuyout)
     local buyTotal = math.floor((unitBuy or 0) * it.count)
-    local startTotal = math.floor((unitStart or unitBuy or 0) * it.count)
-    if startTotal < 1 then
-        ChatMsg("Aegis: enter a start bid or buyout of at least 1 copper.")
-        return
-    end
-    if buyTotal > 0 and startTotal > buyTotal then
-        ChatMsg("Aegis: start bid can't exceed the buyout.")
+    if buyTotal < 1 then
+        ChatMsg("Aegis: enter a buyout of at least 1 copper.")
         return
     end
     local dep, approx = A.sell.EstimateDeposit(ui.sellDuration)
@@ -783,19 +1081,11 @@ function ui.ConfirmPost()
         end
         di = di + 1
     end
-    local buyStr
-    if buyTotal > 0 then
-        buyStr = "buyout " .. util.FormatMoney(buyTotal)
-    else
-        buyStr = "no buyout"
-    end
     local detail = string.format(
-        "start %s \226\128\162 %s \226\128\162 %s \226\128\162 deposit ~%s%s",
-        util.FormatMoney(startTotal), buyStr, durLabel,
-        util.FormatMoney(dep), approx and " (approx)" or "")
-    ui.pendingPost = {
-        unitBuyout = unitBuy, unitStart = unitStart, minutes = ui.sellDuration,
-    }
+        "buyout %s \226\128\162 %s \226\128\162 deposit ~%s%s",
+        util.FormatMoney(buyTotal), durLabel, util.FormatMoney(dep),
+        approx and " (approx)" or "")
+    ui.pendingPost = { unitBuyout = unitBuy, minutes = ui.sellDuration }
     StaticPopup_Show("AEGIS_EXCHANGE_POST",
         it.name .. " (x" .. it.count .. ")", detail)
 end
@@ -804,13 +1094,15 @@ function ui.DoPost()
     local p = ui.pendingPost
     if not p then return end
     ui.pendingPost = nil
-    local ok, err = A.sell.Post(p.unitBuyout, p.unitStart, p.minutes)
+    local ok, err = A.sell.Post(p.unitBuyout, p.unitBuyout, p.minutes)
     if not ok then
         ChatMsg("Aegis: " .. (err or "could not post."))
     else
         ChatMsg("Aegis: auction posted.")
+        ui.lastScanItemId = nil   -- re-scan next time this item is slotted
     end
     ui.RefreshSell()
+    ui.RefreshBags()
 end
 
 -- ---------------------------------------------------------------------------
@@ -1152,6 +1444,7 @@ function ui.SelectSubTab(name)
         ui.HidePicker()
     end
     if name == "Sell" then
+        ui.RefreshBags()
         ui.RefreshSell()
     end
 end
@@ -1314,6 +1607,13 @@ A.RegisterEvent("NEW_AUCTION_UPDATE", function()
 end)
 A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
     ui.RefreshSell()
+end)
+-- Bags changed (looted, moved, sold): refresh the Sell tab's bag browser, but
+-- only while it's the visible tab so we don't rescan bags needlessly.
+A.RegisterEvent("BAG_UPDATE", function()
+    if ui.selectedSubTab == "Sell" then
+        ui.RefreshBags()
+    end
 end)
 
 -- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.
