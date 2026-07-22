@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: Aegis: Exchange
 ## Notes: Clean auction house helper for Turtle WoW
-## Version: 0.8.0
+## Version: 0.9.0
 ## SavedVariables: AegisExchangeDB
 ## SavedVariablesPerCharacter: AegisExchangeCharDB
 
@@ -10,5 +10,6 @@ core\util.lua
 core\db.lua
 core\scan.lua
 core\sell.lua
+core\buy.lua
 ui\frame.lua
 ui\tooltip.lua
