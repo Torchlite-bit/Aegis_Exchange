@@ -519,6 +519,26 @@ local function SetMoneyBox(e, copper)
     end
 end
 
+-- A small numeric entry box (stack size / number of stacks).
+local function MakeNumBox(parent, width, onChanged)
+    local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    e:SetWidth(width)
+    e:SetHeight(18)
+    e:SetAutoFocus(false)
+    e:SetNumeric(true)
+    e:SetJustifyH("CENTER")
+    e:SetScript("OnEnterPressed", function() e:ClearFocus() end)
+    e:SetScript("OnEscapePressed", function() e:ClearFocus() end)
+    e:SetScript("OnTextChanged", onChanged)
+    return e
+end
+
+local function NumVal(e, default)
+    local n = tonumber(e:GetText())
+    if not n or n < 1 then return default end
+    return math.floor(n)
+end
+
 function ui.BuildSellTab()
     local panel = ui.panels["Sell"]
     if not panel or ui.sellBuilt then return end
@@ -581,16 +601,19 @@ function ui.BuildSellTab()
     ui.sellCap:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -44)
     ui.sellCap:SetJustifyH("RIGHT")
 
-    -- ---- Price row ------------------------------------------------------
+    -- ---- Row 1: unit price + quick fills --------------------------------
     local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    buyLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -12)
-    buyLabel:SetWidth(88)
+    buyLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -8)
+    buyLabel:SetWidth(82)
     buyLabel:SetJustifyH("LEFT")
-    buyLabel:SetText("Buyout / unit:")
+    buyLabel:SetText("Unit price:")
     buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    ui.sellBuyout = MakeMoneyBox(panel, 100)
+    ui.sellBuyout = MakeMoneyBox(panel, 92)
     ui.sellBuyout:SetPoint("LEFT", buyLabel, "RIGHT", 6, 0)
+    ui.sellBuyout:SetScript("OnTextChanged", function()
+        ui.SyncSellPrices("unit")
+    end)
 
     local mkQuick = function(text, w, anchorTo, fn)
         local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -617,12 +640,37 @@ function ui.BuildSellTab()
         if sg and sg.vendor then SetMoneyBox(ui.sellBuyout, sg.vendor) end
     end)
 
-    ui.sellStackText = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ui.sellStackText:SetPoint("LEFT", ui.sellVendorBtn, "RIGHT", 8, 0)
+    -- ---- Row 2: stack price + "N stacks of S" ---------------------------
+    local stackLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    stackLabel:SetPoint("TOPLEFT", buyLabel, "BOTTOMLEFT", 0, -10)
+    stackLabel:SetWidth(82)
+    stackLabel:SetJustifyH("LEFT")
+    stackLabel:SetText("Stack price:")
+    stackLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    -- ---- Duration + Post row -------------------------------------------
+    ui.sellStackPrice = MakeMoneyBox(panel, 92)
+    ui.sellStackPrice:SetPoint("LEFT", stackLabel, "RIGHT", 6, 0)
+    ui.sellStackPrice:SetScript("OnTextChanged", function()
+        ui.SyncSellPrices("stack")
+    end)
+
+    ui.sellNumStacks = MakeNumBox(panel, 34, function() ui.RefreshSell() end)
+    ui.sellNumStacks:SetPoint("LEFT", ui.sellStackPrice, "RIGHT", 12, 0)
+    local ofLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ofLabel:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 4, 0)
+    ofLabel:SetText("stacks of")
+    ofLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.sellStackSize = MakeNumBox(panel, 34, function()
+        ui.SyncSellPrices("size")
+    end)
+    ui.sellStackSize:SetPoint("LEFT", ofLabel, "RIGHT", 4, 0)
+
+    ui.sellMaxInfo = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.sellMaxInfo:SetPoint("LEFT", ui.sellStackSize, "RIGHT", 8, 0)
+
+    -- ---- Row 3: duration + Post + Skip + status -------------------------
     local durLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    durLabel:SetPoint("TOPLEFT", buyLabel, "BOTTOMLEFT", 0, -12)
+    durLabel:SetPoint("TOPLEFT", stackLabel, "BOTTOMLEFT", 0, -12)
     durLabel:SetText("Duration:")
     durLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
@@ -632,7 +680,7 @@ function ui.BuildSellTab()
     while di <= table.getn(A.sell.DURATIONS) do
         local d = A.sell.DURATIONS[di]
         local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        b:SetWidth(46)
+        b:SetWidth(44)
         b:SetHeight(20)
         if prev then
             b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
@@ -652,31 +700,47 @@ function ui.BuildSellTab()
 
     local post = CreateFrame("Button", "AegisExchangeSellPostButton",
         panel, "UIPanelButtonTemplate")
-    post:SetWidth(120)
+    post:SetWidth(110)
     post:SetHeight(22)
-    post:SetPoint("LEFT", prev, "RIGHT", 16, 0)
-    post:SetText("Post Auction")
+    post:SetPoint("LEFT", prev, "RIGHT", 14, 0)
+    post:SetText("Post")
     post:SetScript("OnClick", function()
         ui.ConfirmPost()
     end)
     ui.sellPostBtn = post
 
+    local skip = CreateFrame("Button", "AegisExchangeSellSkipButton",
+        panel, "UIPanelButtonTemplate")
+    skip:SetWidth(60)
+    skip:SetHeight(22)
+    skip:SetPoint("LEFT", post, "RIGHT", 6, 0)
+    skip:SetText("Skip")
+    skip:SetScript("OnClick", function()
+        ui.SkipSell()
+    end)
+    ui.sellSkipBtn = skip
+
+    ui.sellStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellStatus:SetPoint("LEFT", skip, "RIGHT", 10, 0)
+    ui.sellStatus:SetJustifyH("LEFT")
+    ui.sellStatus:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
+
     -- ---- Divider --------------------------------------------------------
     local div = panel:CreateTexture(nil, "ARTWORK")
     div:SetTexture(C.border[1], C.border[2], C.border[3], 0.4)
     div:SetHeight(1)
-    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -128)
-    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -128)
+    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -134)
+    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -134)
 
     -- ---- Bottom-left: Your Bags ----------------------------------------
     local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -138)
+    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -142)
     bagHdr:SetText("Your Bags")
     bagHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
         panel, "FauxScrollFrameTemplate")
-    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -156)
+    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -160)
     -- Right edge pulled well in (168) so the FauxScrollFrame's scrollbar, which
     -- sits just OUTSIDE this edge, clears the listings column that starts at
     -- x=200 -- otherwise the bar overlaps the price info.
@@ -861,6 +925,7 @@ end
 
 -- When the slot item changes, scan the AH for that item's listings (once).
 function ui.MaybeScanSlotItem()
+    if A.sell.PostingActive() then return end   -- slot churns during a post
     local it = A.sell.GetItem()
     if not it or not it.itemId then
         ui.lastScanItemId = nil
@@ -977,24 +1042,39 @@ function ui.RefreshSell()
         ui.sellCap:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     end
 
-    if not it then
+    local posting = A.sell.PostingActive()
+
+    if not it and not posting then
         ui.sellSlot.icon:Hide()
         ui.sellName:SetText("Click a bag item, or drag one here")
         ui.sellCtx:SetText("")
         ui.sellVendor:SetText("")
         ui.sellDeposit:SetText("")
         ui.sellTotal:SetText("")
-        ui.sellStackText:SetText("")
+        ui.sellMaxInfo:SetText("")
         ui.sellPostBtn:Disable()
         ui.lastScanItemId = nil
+        ui.sellDefaultsFor = nil
         return
     end
+    if not it then return end   -- mid-post, slot momentarily empty
 
     if it.texture then
         ui.sellSlot.icon:SetTexture(it.texture)
         ui.sellSlot.icon:Show()
     end
-    ui.sellName:SetText(it.name .. "  (x" .. it.count .. ")")
+    -- On a new item, seed the stack-size / count defaults (one stack of the
+    -- whole placed amount, capped to the item's max stack).
+    local totalHave = A.sell.CountInBags(it.itemId)
+    if it.itemId ~= ui.sellDefaultsFor then
+        ui.sellDefaultsFor = it.itemId
+        local defSize = it.count
+        if it.maxStack and defSize > it.maxStack then defSize = it.maxStack end
+        if defSize < 1 then defSize = 1 end
+        ui.sellStackSize:SetText(tostring(defSize))
+        ui.sellNumStacks:SetText("1")
+    end
+    ui.sellName:SetText(it.name .. "  (" .. totalHave .. " total)")
 
     -- Context line: market / min / vendor from the DB.
     local sg = A.sell.Suggest(it.itemId)
@@ -1015,13 +1095,26 @@ function ui.RefreshSell()
     end
 
     local unitBuy = ReadMoneyBox(ui.sellBuyout)
-    local total = unitBuy and math.floor(unitBuy * it.count) or 0
-    if total > 0 then
-        ui.sellTotal:SetText("Total " .. util.FormatMoney(total, true))
-        ui.sellStackText:SetText("= " .. util.FormatMoney(total) .. " / stack")
+    local size    = ui.GetStackSize(it)
+    local nStacks = ui.GetNumStacks()
+    local maxStacks = A.sell.MaxStacks(it.itemId, size)
+
+    -- Clamp the requested stack count to what's assemblable, and show the max.
+    if nStacks > maxStacks and maxStacks >= 1 then
+        nStacks = maxStacks
+        ui.sellNumStacks:SetText(tostring(nStacks))
+    end
+    ui.sellMaxInfo:SetText(string.format("max %d stack(s) of %d",
+        maxStacks, size))
+
+    -- Totals across all stacks being posted.
+    local stackTotal = unitBuy and math.floor(unitBuy * size) or 0
+    local grandTotal = stackTotal * nStacks
+    if grandTotal > 0 then
+        ui.sellTotal:SetText(nStacks .. " x " .. util.FormatMoney(stackTotal)
+            .. " = " .. util.FormatMoney(grandTotal, true))
     else
         ui.sellTotal:SetText("")
-        ui.sellStackText:SetText("")
     end
 
     -- Vendor comparison: above vendor = fine (green), below = warning (red).
@@ -1039,18 +1132,89 @@ function ui.RefreshSell()
         ui.sellVendor:SetText("")
     end
 
-    local dep, approx = A.sell.EstimateDeposit(ui.sellDuration)
-    local depText = "Deposit ~" .. util.FormatMoney(dep, true)
-    if approx then depText = depText .. " (approx)" end
-    ui.sellDeposit:SetText(depText)
+    -- Deposit: per stack of `size`, times the number of stacks.
+    local perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
+        it.maxStack)
+    local approx = true
+    if not perStack then
+        perStack = A.sell.EstimateDeposit(ui.sellDuration)
+    end
+    local depTotal = (perStack or 0) * nStacks
+    ui.sellDeposit:SetText("Deposit ~" .. util.FormatMoney(depTotal, true)
+        .. (approx and " (approx)" or ""))
 
-    if atCap or not (unitBuy and unitBuy > 0) then
+    -- Posting state / button enable.
+    if posting then
         ui.sellPostBtn:Disable()
+        ui.sellSkipBtn:SetText("Cancel")
     else
-        ui.sellPostBtn:Enable()
+        ui.sellSkipBtn:SetText("Skip")
+        if atCap or maxStacks < 1 or not (unitBuy and unitBuy > 0) then
+            ui.sellPostBtn:Disable()
+        else
+            ui.sellPostBtn:Enable()
+        end
     end
 
     ui.MaybeScanSlotItem()
+end
+
+-- Current stack-size / stack-count entry values (with sensible fallbacks).
+function ui.GetStackSize(it)
+    it = it or A.sell.GetItem()
+    local def = 1
+    if it then
+        def = it.count
+        if it.maxStack and def > it.maxStack then def = it.maxStack end
+        if def < 1 then def = 1 end
+    end
+    local n = NumVal(ui.sellStackSize, def)
+    if it and it.maxStack and n > it.maxStack then n = it.maxStack end
+    if n < 1 then n = 1 end
+    return n
+end
+
+function ui.GetNumStacks()
+    return NumVal(ui.sellNumStacks, 1)
+end
+
+-- Keep unit price and stack price in step. `source` says which the user just
+-- edited: "unit"/"size" -> recompute stack price; "stack" -> recompute unit.
+function ui.SyncSellPrices(source)
+    if ui.sellSyncing then return end
+    ui.sellSyncing = true
+    local size = ui.GetStackSize()
+    if source == "stack" then
+        local sp = ReadMoneyBox(ui.sellStackPrice)
+        if sp and size > 0 then
+            SetMoneyBox(ui.sellBuyout, math.floor(sp / size))
+        end
+    else
+        local u = ReadMoneyBox(ui.sellBuyout)
+        if u then SetMoneyBox(ui.sellStackPrice, u * size) end
+    end
+    ui.sellSyncing = false
+    ui.RefreshSell()
+end
+
+-- Skip button: cancel an in-progress post, else clear the current selection.
+function ui.SkipSell()
+    if A.sell.PostingActive() then
+        A.sell.CancelPosting()
+        ui.sellStatus:SetText("Cancelled.")
+        ui.RefreshSell()
+        ui.RefreshBags()
+        return
+    end
+    A.sell.ClearSlot()
+    ui.lastScanItemId = nil
+    ui.sellDefaultsFor = nil
+    ui.sellListingGroups = nil
+    ui.sellScanState = nil
+    SetMoneyBox(ui.sellBuyout, nil)
+    SetMoneyBox(ui.sellStackPrice, nil)
+    ui.UpdateListingsList()
+    ui.RefreshSell()
 end
 
 StaticPopupDialogs["AEGIS_EXCHANGE_POST"] = {
@@ -1070,12 +1234,19 @@ function ui.ConfirmPost()
         return
     end
     local unitBuy = ReadMoneyBox(ui.sellBuyout)
-    local buyTotal = math.floor((unitBuy or 0) * it.count)
-    if buyTotal < 1 then
-        ChatMsg("Aegis: enter a buyout of at least 1 copper.")
+    local size    = ui.GetStackSize(it)
+    local nStacks = ui.GetNumStacks()
+    local maxStacks = A.sell.MaxStacks(it.itemId, size)
+    if nStacks > maxStacks then nStacks = maxStacks end
+    local stackBuyout = math.floor((unitBuy or 0) * size)
+    if stackBuyout < 1 then
+        ChatMsg("Aegis: enter a unit price of at least 1 copper.")
         return
     end
-    local dep, approx = A.sell.EstimateDeposit(ui.sellDuration)
+    if nStacks < 1 then
+        ChatMsg("Aegis: not enough of that item to make a stack.")
+        return
+    end
     local durLabel = "?"
     local di = 1
     while di <= table.getn(A.sell.DURATIONS) do
@@ -1084,28 +1255,54 @@ function ui.ConfirmPost()
         end
         di = di + 1
     end
+    local perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
+        it.maxStack) or A.sell.EstimateDeposit(ui.sellDuration) or 0
     local detail = string.format(
-        "buyout %s \226\128\162 %s \226\128\162 deposit ~%s%s",
-        util.FormatMoney(buyTotal), durLabel, util.FormatMoney(dep),
-        approx and " (approx)" or "")
-    ui.pendingPost = { unitBuyout = unitBuy, minutes = ui.sellDuration }
-    StaticPopup_Show("AEGIS_EXCHANGE_POST",
-        it.name .. " (x" .. it.count .. ")", detail)
+        "%d stack(s) of %d at %s each \226\128\162 %s \226\128\162 deposit ~%s (approx)",
+        nStacks, size, util.FormatMoney(stackBuyout), durLabel,
+        util.FormatMoney(perStack * nStacks))
+    ui.pendingPost = {
+        itemId = it.itemId, itemName = it.name, size = size,
+        nStacks = nStacks, unitBuyout = unitBuy, minutes = ui.sellDuration,
+    }
+    StaticPopup_Show("AEGIS_EXCHANGE_POST", it.name, detail)
 end
 
 function ui.DoPost()
     local p = ui.pendingPost
     if not p then return end
     ui.pendingPost = nil
-    local ok, err = A.sell.Post(p.unitBuyout, p.unitBuyout, p.minutes)
+    ui.sellStatus:SetText("Posting...")
+    local ok, err = A.sell.StartPosting(p.itemId, p.itemName, p.size,
+        p.nStacks, p.unitBuyout, p.unitBuyout, p.minutes, {
+            onProgress = function(done, total)
+                ui.sellStatus:SetText("Posting " .. done .. " / " .. total
+                    .. "...")
+            end,
+            onDone = function(done, total, reason)
+                local msg = "Posted " .. done .. " of " .. total .. "."
+                if reason == "out" then
+                    msg = msg .. " (ran out of items)"
+                elseif reason == "cap" then
+                    msg = msg .. " (hit the auction cap)"
+                elseif reason == "cancelled" then
+                    msg = "Posting cancelled after " .. done .. "."
+                elseif reason == "stuck" then
+                    msg = msg .. " (couldn't assemble a stack)"
+                end
+                ui.sellStatus:SetText(msg)
+                ChatMsg("Aegis: " .. msg)
+                ui.lastScanItemId = nil
+                ui.sellDefaultsFor = nil
+                ui.RefreshSell()
+                ui.RefreshBags()
+            end,
+        })
     if not ok then
+        ui.sellStatus:SetText("")
         ChatMsg("Aegis: " .. (err or "could not post."))
-    else
-        ChatMsg("Aegis: auction posted.")
-        ui.lastScanItemId = nil   -- re-scan next time this item is slotted
     end
     ui.RefreshSell()
-    ui.RefreshBags()
 end
 
 -- ---------------------------------------------------------------------------
