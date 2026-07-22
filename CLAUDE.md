@@ -112,6 +112,11 @@ or silent breakage on the 1.12 / Lua 5.0 client.
       `AuctionFrameTab1..3` inherit; verified in-game and against the Turtle
       1.12 UI source). There is **NO** template named `AuctionFrameTab` —
       using it throws `Couldn't find inherited node`.
+    - **`FauxScrollFrame_OnVerticalScroll(itemHeight, updateFn)` — 2 args on
+      1.12.** The frame and scroll offset are the implicit globals `this` /
+      `arg1`. The offset-first form belongs to later clients; using it here
+      passes a number as the update function and FrameXML crashes with
+      "attempt to call local 'updateFunction' (a number value)".
 
 ---
 

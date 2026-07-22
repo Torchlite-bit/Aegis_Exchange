@@ -40,7 +40,9 @@ local C = {
 -- Last scan older than this is "stale" and rendered amber.
 local STALE_SECONDS = 24 * 60 * 60
 
-local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting" }
+-- "Scan" hosts the scanner controls (Full Scan / Pause / Resume / Categories
+-- + status and progress); the others are placeholders for later stages.
+local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting", "Scan" }
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -139,9 +141,22 @@ function ui.BuildWindow()
     titleText:SetText("Aegis: Exchange")
     titleText:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
+    -- Swap to the stock Blizzard AH (its counterpart button swaps back —
+    -- see HookAuctionFrame). Raised above the title bar's drag region.
+    local blizBtn = CreateFrame("Button", "AegisExchangeBlizzardButton", f,
+        "UIPanelButtonTemplate")
+    blizBtn:SetWidth(92)
+    blizBtn:SetHeight(20)
+    blizBtn:SetPoint("RIGHT", titleBar, "RIGHT", -4, 0)
+    blizBtn:SetFrameLevel(f:GetFrameLevel() + 10)
+    blizBtn:SetText("Blizzard UI")
+    blizBtn:SetScript("OnClick", function()
+        ui.ShowBlizzardUI()
+    end)
+
     local subTitle = titleBar:CreateFontString(
         nil, "OVERLAY", "GameFontHighlightSmall")
-    subTitle:SetPoint("RIGHT", titleBar, "RIGHT", -8, 0)
+    subTitle:SetPoint("RIGHT", blizBtn, "LEFT", -10, 0)
     -- The version here is the quickest way to confirm which build is
     -- actually installed when triaging a bug report.
     subTitle:SetText("Turtle WoW 1.12 \226\128\162 v" .. (A.version or "?"))
@@ -158,20 +173,77 @@ function ui.BuildWindow()
         ui.CloseWindow()
     end)
 
-    -- Persistent scan strip: Full Scan / Pause / Resume + status text.
-    local fullScan = CreateFrame("Button", "AegisExchangeFullScanButton", f,
-        "UIPanelButtonTemplate")
+    -- Sub-tab row, directly under the title bar.
+    ui.subtabs = {}
+    local prev = nil
+    local nTabs = table.getn(SUBTABS)
+    local i = 1
+    while i <= nTabs do
+        local name = SUBTABS[i]
+        local tab = MakeSubTab(f, name)
+        if prev then
+            tab:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else
+            tab:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 0, -10)
+        end
+        ui.subtabs[name] = tab
+        prev = tab
+        i = i + 1
+    end
+
+    -- Content region (recessed well) below the sub-tabs.
+    -- 12 border + 26 title bar + 10 gap + 24 tabs + 8 gap = 80 from the top.
+    local content = CreateFrame("Frame", "AegisExchangeContent", f)
+    content:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -80)
+    content:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 16)
+    content:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    content:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    content:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    ui.content = content
+
+    -- One panel per sub-tab, filling the content region. All but Scan are
+    -- placeholders (centered label); Scan hosts the scanner controls below.
+    ui.panels = {}
+    i = 1
+    while i <= nTabs do
+        local name = SUBTABS[i]
+        local panel = CreateFrame("Frame", "AegisExchangePanel" .. name, content)
+        panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
+        panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
+        panel:Hide()
+        if name ~= "Scan" then
+            local label = panel:CreateFontString(
+                "AegisExchangePanelLabel" .. name, "OVERLAY",
+                "GameFontNormalLarge")
+            label:SetPoint("CENTER", panel, "CENTER", 0, 0)
+            label:SetText(name)
+            label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        end
+        ui.panels[name] = panel
+        i = i + 1
+    end
+
+    -- Scan tab: Full Scan / Pause / Resume / Categories + status + progress.
+    local scanPanel = ui.panels["Scan"]
+
+    local fullScan = CreateFrame("Button", "AegisExchangeFullScanButton",
+        scanPanel, "UIPanelButtonTemplate")
     fullScan:SetWidth(100)
     fullScan:SetHeight(22)
-    fullScan:SetPoint("TOPLEFT", titleBar, "BOTTOMLEFT", 0, -12)
+    fullScan:SetPoint("TOPLEFT", scanPanel, "TOPLEFT", 8, -10)
     fullScan:SetText("Full Scan")
     fullScan:SetScript("OnClick", function()
         ui.ConfirmFullScan()
     end)
     ui.fullScanBtn = fullScan
 
-    local pause = CreateFrame("Button", "AegisExchangePauseButton", f,
-        "UIPanelButtonTemplate")
+    local pause = CreateFrame("Button", "AegisExchangePauseButton",
+        scanPanel, "UIPanelButtonTemplate")
     pause:SetWidth(74)
     pause:SetHeight(22)
     pause:SetPoint("LEFT", fullScan, "RIGHT", 6, 0)
@@ -182,8 +254,8 @@ function ui.BuildWindow()
     end)
     ui.pauseBtn = pause
 
-    local resume = CreateFrame("Button", "AegisExchangeResumeButton", f,
-        "UIPanelButtonTemplate")
+    local resume = CreateFrame("Button", "AegisExchangeResumeButton",
+        scanPanel, "UIPanelButtonTemplate")
     resume:SetWidth(74)
     resume:SetHeight(22)
     resume:SetPoint("LEFT", pause, "RIGHT", 6, 0)
@@ -194,8 +266,8 @@ function ui.BuildWindow()
     end)
     ui.resumeBtn = resume
 
-    local cats = CreateFrame("Button", "AegisExchangeCategoriesButton", f,
-        "UIPanelButtonTemplate")
+    local cats = CreateFrame("Button", "AegisExchangeCategoriesButton",
+        scanPanel, "UIPanelButtonTemplate")
     cats:SetWidth(94)
     cats:SetHeight(22)
     cats:SetPoint("LEFT", resume, "RIGHT", 6, 0)
@@ -205,20 +277,20 @@ function ui.BuildWindow()
     end)
     ui.catsBtn = cats
 
-    local status = f:CreateFontString(
+    local status = scanPanel:CreateFontString(
         "AegisExchangeStatusText", "OVERLAY", "GameFontHighlightSmall")
-    status:SetPoint("RIGHT", f, "RIGHT", -16, 0)
+    status:SetPoint("RIGHT", scanPanel, "RIGHT", -10, 0)
     status:SetPoint("TOP", fullScan, "TOP", 0, -4)
     status:SetJustifyH("RIGHT")
     status:SetText("Last scan: never")
     status:SetTextColor(C.text[1], C.text[2], C.text[3])
     ui.statusText = status
 
-    -- Progress bar spanning the scan strip, under the buttons. Shown only
-    -- while a scan is running or paused (empty/hidden when idle).
-    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", f)
-    bar:SetPoint("TOPLEFT", fullScan, "BOTTOMLEFT", 0, -8)
-    bar:SetPoint("RIGHT", f, "RIGHT", -14, 0)
+    -- Progress bar under the buttons. Shown only while a scan is running or
+    -- paused (hidden when idle).
+    local bar = CreateFrame("StatusBar", "AegisExchangeScanBar", scanPanel)
+    bar:SetPoint("TOPLEFT", fullScan, "BOTTOMLEFT", 0, -10)
+    bar:SetPoint("RIGHT", scanPanel, "RIGHT", -10, 0)
     bar:SetHeight(14)
     bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
     bar:SetStatusBarColor(C.barFill[1], C.barFill[2], C.barFill[3])
@@ -235,55 +307,13 @@ function ui.BuildWindow()
     bar:Hide()
     ui.bar = bar
 
-    -- Sub-tab row.
-    ui.subtabs = {}
-    local prev = nil
-    local nTabs = table.getn(SUBTABS)
-    local i = 1
-    while i <= nTabs do
-        local name = SUBTABS[i]
-        local tab = MakeSubTab(f, name)
-        if prev then
-            tab:SetPoint("LEFT", prev, "RIGHT", 4, 0)
-        else
-            tab:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -10)
-        end
-        ui.subtabs[name] = tab
-        prev = tab
-        i = i + 1
-    end
-
-    -- Content region (recessed well) below the sub-tabs.
-    local content = CreateFrame("Frame", "AegisExchangeContent", f)
-    content:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -134)
-    content:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 16)
-    content:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    content:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
-    content:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
-    ui.content = content
-
-    -- One empty placeholder panel per sub-tab, filling the content region.
-    ui.panels = {}
-    i = 1
-    while i <= nTabs do
-        local name = SUBTABS[i]
-        local panel = CreateFrame("Frame", "AegisExchangePanel" .. name, content)
-        panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
-        panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
-        panel:Hide()
-        local label = panel:CreateFontString(
-            "AegisExchangePanelLabel" .. name, "OVERLAY", "GameFontNormalLarge")
-        label:SetPoint("CENTER", panel, "CENTER", 0, 0)
-        label:SetText(name)
-        label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        ui.panels[name] = panel
-        i = i + 1
-    end
+    local tip = scanPanel:CreateFontString(
+        nil, "OVERLAY", "GameFontHighlightSmall")
+    tip:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -10)
+    tip:SetJustifyH("LEFT")
+    tip:SetText("Tip: Categories \226\134\146 check classes \226\134\146"
+        .. " Scan Selected runs a fast targeted scan.")
+    tip:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -298,7 +328,8 @@ function ui.BuildWindow()
         end
     end)
 
-    ui.SelectSubTab("Buy")
+    -- Scan is the only functional tab so far; land there.
+    ui.SelectSubTab("Scan")
     ui.Refresh()
 end
 
@@ -446,13 +477,13 @@ end
 -- Category picker (class -> subclass checklist) for a targeted scan
 -- ---------------------------------------------------------------------------
 
--- Visible rows in the picker list. HARD BOTTOM: the picker is ~310px tall and
--- the list starts 34px down; the button row occupies the bottom ~34px. 11 rows
--- of 20px end at 254px — comfortably above the buttons. 13 rows reached 294px
--- and drew the last rows OVER "Scan Selected". Keep
+-- Visible rows in the picker list. HARD BOTTOM: the picker matches the
+-- content well (460 - 80 top - 16 bottom = 364px tall), the list starts 34px
+-- down, and the button row + divider occupy the bottom 44px. Keep
 --   34 + CAT_ROWS * CAT_ROW_H  <  picker height - 44
--- true whenever either constant changes.
-local CAT_ROWS  = 11    -- reusable visible rows
+-- true whenever any of these change, or the last rows draw OVER the
+-- "Scan Selected" button (the v0.4.0 overlap bug). 34 + 13*20 = 294 < 320.
+local CAT_ROWS  = 13    -- reusable visible rows
 local CAT_ROW_H = 20
 
 -- Flatten the class tree into the currently visible rows (a class row, then
@@ -622,11 +653,16 @@ function ui.BuildCategoryPicker()
     local scroll = CreateFrame("ScrollFrame", "AegisExchangePickerScroll",
         picker, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -34)
-    -- Bottom edge matches the last visible row (34 + 11*20 = 254 from the
-    -- top of a ~310px picker) so the scrollbar spans exactly the list area.
-    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -30, 56)
+    -- Bottom edge matches the last visible row (34 + 13*20 = 294 from the
+    -- top of a 364px picker) so the scrollbar spans exactly the list area.
+    scroll:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -30, 70)
+    -- 1.12 signature: FauxScrollFrame_OnVerticalScroll(itemHeight, updateFn) —
+    -- the frame and scroll offset are the implicit globals `this` / `arg1`.
+    -- The offset-first form belongs to LATER clients; passing it here makes
+    -- FrameXML receive a number as its update function and crash
+    -- ("attempt to call local 'updateFunction' (a number value)").
     scroll:SetScript("OnVerticalScroll", function()
-        FauxScrollFrame_OnVerticalScroll(arg1, CAT_ROW_H, ui.UpdateCatList)
+        FauxScrollFrame_OnVerticalScroll(CAT_ROW_H, ui.UpdateCatList)
     end)
     ui.catScroll = scroll
 
@@ -770,6 +806,11 @@ function ui.SelectSubTab(name)
     for k, panel in pairs(ui.panels) do
         if k == name then panel:Show() else panel:Hide() end
     end
+    -- The category picker belongs to the Scan tab; don't leave it floating
+    -- over another tab's panel.
+    if name ~= "Scan" then
+        ui.HidePicker()
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -841,6 +882,26 @@ function ui.HookAuctionFrame()
         end
     end)
 
+    -- "Aegis UI" button on the stock AH so the hand-off works both ways.
+    -- OpenWindow hides the Blizzard AH session-safely and shows ours.
+    if not ui.blizSwapBtn then
+        local b = CreateFrame("Button", "AegisExchangeSwapButton",
+            AuctionFrame, "UIPanelButtonTemplate")
+        b:SetWidth(70)
+        b:SetHeight(19)
+        local blizClose = getglobal("AuctionFrameCloseButton")
+        if blizClose then
+            b:SetPoint("RIGHT", blizClose, "LEFT", 4, 0)
+        else
+            b:SetPoint("TOPRIGHT", AuctionFrame, "TOPRIGHT", -60, -12)
+        end
+        b:SetText("Aegis UI")
+        b:SetScript("OnClick", function()
+            ui.OpenWindow()
+        end)
+        ui.blizSwapBtn = b
+    end
+
     ui.ahHooked = true
 end
 
@@ -862,8 +923,21 @@ function ui.OpenWindow()
     -- IsVisible guard, and the OnHide suppression keeps the session open.
     ui.HideBlizzardAH()
     ui.frame:Show()
-    ui.SelectSubTab(ui.selectedSubTab or "Buy")
+    ui.SelectSubTab(ui.selectedSubTab or "Scan")
     ui.Refresh()
+end
+
+-- Hand the session over to the stock Blizzard AH. Reached from the title-bar
+-- "Blizzard UI" button and /aex. showBlizzard makes our frame's OnHide skip
+-- CloseAuctionHouse, so the session survives the swap.
+function ui.ShowBlizzardUI()
+    ui.showBlizzard = true
+    if ui.frame then ui.frame:Hide() end
+    if AuctionFrame then
+        ShowUIPanel(AuctionFrame)
+    else
+        ChatMsg("Aegis: open the auction house first.")
+    end
 end
 
 -- Closing our window ends the session via the frame's OnHide (set in
@@ -909,11 +983,5 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         end
         return
     end
-    ui.showBlizzard = true
-    if ui.frame then ui.frame:Hide() end
-    if AuctionFrame then
-        ShowUIPanel(AuctionFrame)
-    else
-        ChatMsg("Aegis: open the auction house first.")
-    end
+    ui.ShowBlizzardUI()
 end
