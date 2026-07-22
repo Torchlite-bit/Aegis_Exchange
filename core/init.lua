@@ -22,7 +22,7 @@ A.name    = "Aegis_Exchange"   -- must match the folder / .toc / ADDON_LOADED
 -- Shown in the window title bar and printed at load. Bump on EVERY push the
 -- user will test — it is the only reliable way to know which build produced
 -- an in-game bug report.
-A.version = "0.7.0"
+A.version = "0.7.1"
 
 -- Detect Turtle WoW. Turtle exposes a global TURTLE_WOW_VERSION.
 A.isTurtle = (TURTLE_WOW_VERSION ~= nil)

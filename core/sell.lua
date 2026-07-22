@@ -238,10 +238,54 @@ end
 -- Bag enumeration (drives the Sell tab's "Your Bags" list)
 -- ---------------------------------------------------------------------------
 
--- Walk bags 0..4 and group every item by its category (GetItemInfo's itemType).
--- Returns an ordered list of { name = className, items = { entry, ... } } where
--- entry = { bag, slot, itemId, name, texture, count }. Order follows first
--- appearance so the grouping is stable between refreshes.
+-- Tooltip phrases that mark an item you cannot put on the auction house. 1.12
+-- exposes no soulbound flag, so we read the item's tooltip text (the same trick
+-- aux / Auctionator use). Globals fall back to English literals off Turtle.
+local BLOCK_PHRASES = {
+    ITEM_SOULBOUND  or "Soulbound",
+    ITEM_BIND_QUEST or "Quest Item",
+    ITEM_CONJURED   or "Conjured Item",
+}
+
+-- Hidden tooltip we own, created lazily, for reading bind status.
+local function ScanTip()
+    if not sell._scanTip then
+        sell._scanTip = CreateFrame("GameTooltip", "AegisExchangeScanTooltip",
+            nil, "GameTooltipTemplate")
+    end
+    return sell._scanTip
+end
+
+-- True unless the bag item is soulbound / quest / conjured (i.e. postable).
+function sell.IsAuctionable(bag, slot)
+    local tip = ScanTip()
+    tip:SetOwner(UIParent, "ANCHOR_NONE")
+    tip:ClearLines()
+    tip:SetBagItem(bag, slot)
+    local n = tip:NumLines() or 0
+    local i = 2   -- line 1 is the item name; bind text sits below it
+    while i <= n do
+        local fs = getglobal("AegisExchangeScanTooltipTextLeft" .. i)
+        local txt = fs and fs:GetText()
+        if txt then
+            local b = 1
+            while b <= table.getn(BLOCK_PHRASES) do
+                if string.find(txt, BLOCK_PHRASES[b], 1, true) then
+                    return false
+                end
+                b = b + 1
+            end
+        end
+        i = i + 1
+    end
+    return true
+end
+
+-- Walk bags 0..4 and group every POSTABLE item by its category (GetItemInfo's
+-- itemType). Soulbound / quest / conjured items are skipped. Returns an ordered
+-- list of { name = className, items = { entry, ... } } where entry =
+-- { bag, slot, itemId, name, texture, count }. Order follows first appearance
+-- so the grouping is stable between refreshes.
 function sell.ScanBags()
     local order = {}
     local byCat = {}
@@ -251,7 +295,7 @@ function sell.ScanBags()
         local slot = 1
         while slot <= slots do
             local link = GetContainerItemLink(bag, slot)
-            if link then
+            if link and sell.IsAuctionable(bag, slot) then
                 local texture, count = GetContainerItemInfo(bag, slot)
                 local iname, _, _, _, _, itype = GetItemInfo(link)
                 local cname = itype or "Other"

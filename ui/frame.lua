@@ -677,7 +677,10 @@ function ui.BuildSellTab()
     local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
         panel, "FauxScrollFrameTemplate")
     bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -156)
-    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 188, 10)
+    -- Right edge pulled well in (168) so the FauxScrollFrame's scrollbar, which
+    -- sits just OUTSIDE this edge, clears the listings column that starts at
+    -- x=200 -- otherwise the bar overlaps the price info.
+    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, 10)
     bagScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BAG_ROW_H, ui.UpdateBagList)
     end)
