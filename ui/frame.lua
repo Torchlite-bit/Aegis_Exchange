@@ -216,8 +216,8 @@ function ui.BuildWindow()
         panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
         panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
         panel:Hide()
-        -- Scan and Sell are real tabs (built below); the rest are placeholders.
-        if name ~= "Scan" and name ~= "Sell" then
+        -- Buy, Scan and Sell are real tabs (built below); rest are placeholders.
+        if name ~= "Scan" and name ~= "Sell" and name ~= "Buy" then
             local label = panel:CreateFontString(
                 "AegisExchangePanelLabel" .. name, "OVERLAY",
                 "GameFontNormalLarge")
@@ -317,6 +317,7 @@ function ui.BuildWindow()
     tip:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     ui.BuildSellTab()
+    ui.BuildBuyTab()
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -331,8 +332,8 @@ function ui.BuildWindow()
         end
     end)
 
-    -- Scan is the only functional tab so far; land there.
-    ui.SelectSubTab("Scan")
+    -- Land on Buy (the most-used tab); Buy / Sell / Scan are all functional.
+    ui.SelectSubTab("Buy")
     ui.Refresh()
 end
 
@@ -477,13 +478,11 @@ function ui.Refresh()
 end
 
 -- ---------------------------------------------------------------------------
--- Sell tab: bag browser + per-item listing scan + post
+-- Buy tab: search the AH, browse a page of listings, buy / bid
 -- ---------------------------------------------------------------------------
 
-local BAG_ROWS,  BAG_ROW_H  = 9, 19
-local LIST_ROWS, LIST_ROW_H = 9, 19
-
--- Colour for a "% of market" cell: cheap = green, near market = gold, dear = red.
+-- Colour for a "% of market" cell: cheap = green, near market = gold, dear =
+-- red. Shared by the Buy and Sell listing tables.
 local function PctColor(pct)
     if pct < 100 then
         return 0.35, 0.85, 0.35
@@ -492,6 +491,322 @@ local function PctColor(pct)
     end
     return 0.90, 0.38, 0.38
 end
+
+local BUY_ROWS, BUY_ROW_H = 11, 20
+
+function ui.BuildBuyTab()
+    local panel = ui.panels["Buy"]
+    if not panel or ui.buyBuilt then return end
+    ui.buyBuilt = true
+
+    -- Search row.
+    local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    lbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -14)
+    lbl:SetText("Search:")
+    lbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    local box = CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
+        "InputBoxTemplate")
+    box:SetWidth(220)
+    box:SetHeight(18)
+    box:SetPoint("LEFT", lbl, "RIGHT", 8, 0)
+    box:SetAutoFocus(false)
+    box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
+    box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
+    ui.buyBox = box
+
+    local searchBtn = CreateFrame("Button", "AegisExchangeBuySearchButton",
+        panel, "UIPanelButtonTemplate")
+    searchBtn:SetWidth(70)
+    searchBtn:SetHeight(20)
+    searchBtn:SetPoint("LEFT", box, "RIGHT", 8, 0)
+    searchBtn:SetText("Search")
+    searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
+    ui.buySearchBtn = searchBtn
+
+    -- Pager (right side).
+    local nextBtn = CreateFrame("Button", "AegisExchangeBuyNextButton",
+        panel, "UIPanelButtonTemplate")
+    nextBtn:SetWidth(24)
+    nextBtn:SetHeight(20)
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -13)
+    nextBtn:SetText(">")
+    nextBtn:SetScript("OnClick", function() A.buy.NextPage() end)
+    ui.buyNextBtn = nextBtn
+
+    ui.buyPageText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.buyPageText:SetPoint("RIGHT", nextBtn, "LEFT", -6, 0)
+    ui.buyPageText:SetJustifyH("RIGHT")
+    ui.buyPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    local prevBtn = CreateFrame("Button", "AegisExchangeBuyPrevButton",
+        panel, "UIPanelButtonTemplate")
+    prevBtn:SetWidth(24)
+    prevBtn:SetHeight(20)
+    prevBtn:SetPoint("RIGHT", ui.buyPageText, "LEFT", -6, 0)
+    prevBtn:SetText("<")
+    prevBtn:SetScript("OnClick", function() A.buy.PrevPage() end)
+    ui.buyPrevBtn = prevBtn
+
+    -- Status line.
+    ui.buyStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.buyStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
+    ui.buyStatus:SetJustifyH("LEFT")
+    ui.buyStatus:SetText("Type an item name and Search.")
+    ui.buyStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    -- Column headers.
+    local cols = { name = 12, ct = 214, unit = 250, stack = 350, pct = 470,
+                   act = 524 }
+    local mkCol = function(x, text)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -58)
+        fs:SetText(text)
+        return fs
+    end
+    mkCol(cols.name, "Item")
+    mkCol(cols.ct, "Ct")
+    mkCol(cols.unit, "Unit price")
+    mkCol(cols.stack, "Stack buyout")
+    mkCol(cols.pct, "% mkt")
+
+    -- Results list.
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
+        panel, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -74)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(BUY_ROW_H, ui.UpdateBuyList)
+    end)
+    ui.buyScroll = scroll
+
+    ui.buyRows = {}
+    local i = 1
+    while i <= BUY_ROWS do
+        local row = CreateFrame("Frame", nil, panel)
+        row:SetHeight(BUY_ROW_H)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.buyRows[i - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.buyRows[i - 1], "BOTTOMRIGHT", 0, 0)
+        end
+        local mkCell = function(x, w, just)
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", row, "LEFT", x, 0)
+            fs:SetWidth(w)
+            fs:SetJustifyH(just or "LEFT")
+            return fs
+        end
+        row.name  = mkCell(cols.name, 198)
+        row.ct    = mkCell(cols.ct, 30, "RIGHT")
+        row.unit  = mkCell(cols.unit, 94)
+        row.stack = mkCell(cols.stack, 112)
+        row.pct   = mkCell(cols.pct, 46)
+
+        local buyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        buyBtn:SetWidth(52)
+        buyBtn:SetHeight(17)
+        buyBtn:SetPoint("LEFT", row, "LEFT", cols.act, 0)
+        buyBtn:SetText("Buy")
+        buyBtn:SetScript("OnClick", function()
+            if row.entry then ui.ConfirmBuyout(row.entry) end
+        end)
+        row.buyBtn = buyBtn
+
+        local bidBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        bidBtn:SetWidth(46)
+        bidBtn:SetHeight(17)
+        bidBtn:SetPoint("LEFT", buyBtn, "RIGHT", 4, 0)
+        bidBtn:SetText("Bid")
+        bidBtn:SetScript("OnClick", function()
+            if row.entry then ui.ConfirmBid(row.entry) end
+        end)
+        row.bidBtn = bidBtn
+
+        row:Hide()
+        ui.buyRows[i] = row
+        i = i + 1
+    end
+end
+
+function ui.DoBuySearch()
+    if not ui.buyBox then return end
+    ui.buyBox:ClearFocus()
+    local name = util.Trim(ui.buyBox:GetText() or "")
+    ui.buyResults = nil
+    ui.UpdateBuyList()
+    local ok, err = A.buy.Search(name, {
+        onResults = function(rows)
+            ui.buyResults = rows
+            ui.UpdateBuyList()
+        end,
+        onState = function() ui.RefreshBuyStatus() end,
+    })
+    if not ok then
+        ui.buyStatus:SetText(err or "Could not search.")
+    else
+        ui.buyStatus:SetText("Searching...")
+    end
+end
+
+function ui.RefreshBuyStatus()
+    if not ui.buyStatus then return end
+    local phase = A.buy.state.phase
+    if phase == "wait_query" or phase == "wait_results" then
+        ui.buyStatus:SetText("Searching...")
+    end
+end
+
+function ui.RefreshBuy()
+    if not ui.buyBuilt then return end
+    ui.UpdateBuyList()
+end
+
+function ui.UpdateBuyList()
+    if not ui.buyScroll then return end
+    local rows = ui.buyResults or {}
+    local total = table.getn(rows)
+    FauxScrollFrame_Update(ui.buyScroll, total, BUY_ROWS, BUY_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.buyScroll)
+
+    -- Header / pager.
+    local _, page, totalPages, totalAuctions = A.buy.GetResults()
+    if ui.buyResults then
+        if total == 0 then
+            ui.buyStatus:SetText("No auctions found.")
+        else
+            ui.buyStatus:SetText(totalAuctions .. " auction(s) \226\128\162 "
+                .. "cheapest first")
+        end
+        ui.buyPageText:SetText("Page " .. (page + 1) .. " / " .. totalPages)
+    else
+        ui.buyPageText:SetText("")
+    end
+
+    local i = 1
+    while i <= BUY_ROWS do
+        local row = ui.buyRows[i]
+        local r = rows[i + offset]
+        if r then
+            row.entry = r
+            row.name:SetText(r.name)
+            if r.canUse == nil or r.canUse then
+                row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+            else
+                row.name:SetTextColor(0.9, 0.4, 0.4)   -- can't use (red)
+            end
+            row.ct:SetText("x" .. r.count)
+            row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
+            if r.buyout and r.buyout > 0 then
+                row.stack:SetText(util.FormatMoney(r.buyout, true))
+            else
+                row.stack:SetText("bid only")
+            end
+            -- % of market.
+            local market = r.itemId and A.db.MarketValue(r.itemId)
+            if market and market > 0 and r.unit then
+                local pct = math.floor(r.unit / market * 100)
+                row.pct:SetText(pct .. "%")
+                row.pct:SetTextColor(PctColor(pct))
+            else
+                row.pct:SetText("\226\128\148")
+                row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            end
+            -- Buttons: no buyout / own auction disables Buy.
+            if r.mine then
+                row.buyBtn:Disable()
+                row.bidBtn:Disable()
+            else
+                if r.buyout and r.buyout > 0 then
+                    row.buyBtn:Enable()
+                else
+                    row.buyBtn:Disable()
+                end
+                row.bidBtn:Enable()
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_BUYOUT"] = {
+    text = "Buy %s?\n%s",
+    button1 = "Buy",
+    button2 = "Cancel",
+    OnAccept = function() ui.DoBuyout() end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+}
+
+StaticPopupDialogs["AEGIS_EXCHANGE_BID"] = {
+    text = "Bid on %s?\n%s",
+    button1 = "Bid",
+    button2 = "Cancel",
+    OnAccept = function() ui.DoBid() end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+}
+
+function ui.ConfirmBuyout(row)
+    if row.mine then ChatMsg("Aegis: that's your own auction."); return end
+    if not (row.buyout and row.buyout > 0) then
+        ChatMsg("Aegis: that auction has no buyout.")
+        return
+    end
+    ui.pendingBuy = row
+    local detail = string.format("%d x %s \226\128\162 buyout %s",
+        row.count, row.name, util.FormatMoney(row.buyout))
+    StaticPopup_Show("AEGIS_EXCHANGE_BUYOUT",
+        row.name .. " (x" .. row.count .. ")", detail)
+end
+
+function ui.DoBuyout()
+    local row = ui.pendingBuy
+    ui.pendingBuy = nil
+    if not row then return end
+    local ok, err = A.buy.Buyout(row)
+    if not ok then
+        ChatMsg("Aegis: " .. (err or "buyout failed."))
+    else
+        ChatMsg("Aegis: bought " .. row.name .. " x" .. row.count .. ".")
+    end
+end
+
+function ui.ConfirmBid(row)
+    if row.mine then ChatMsg("Aegis: that's your own auction."); return end
+    ui.pendingBid = row
+    local detail = string.format("%d x %s \226\128\162 bid %s",
+        row.count, row.name, util.FormatMoney(row.nextBid))
+    StaticPopup_Show("AEGIS_EXCHANGE_BID",
+        row.name .. " (x" .. row.count .. ")", detail)
+end
+
+function ui.DoBid()
+    local row = ui.pendingBid
+    ui.pendingBid = nil
+    if not row then return end
+    local ok, err = A.buy.Bid(row, row.nextBid)
+    if not ok then
+        ChatMsg("Aegis: " .. (err or "bid failed."))
+    else
+        ChatMsg("Aegis: bid on " .. row.name .. ".")
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Sell tab: bag browser + per-item listing scan + post
+-- ---------------------------------------------------------------------------
+
+local BAG_ROWS,  BAG_ROW_H  = 9, 19
+local LIST_ROWS, LIST_ROW_H = 9, 19
 
 -- A money entry box. Accepts "1g 50s 20c" style text (util.ParseMoney).
 local function MakeMoneyBox(parent, width)
@@ -1646,6 +1961,8 @@ function ui.SelectSubTab(name)
     if name == "Sell" then
         ui.RefreshBags()
         ui.RefreshSell()
+    elseif name == "Buy" then
+        ui.RefreshBuy()
     end
 end
 
@@ -1759,7 +2076,7 @@ function ui.OpenWindow()
     -- IsVisible guard, and the OnHide suppression keeps the session open.
     ui.HideBlizzardAH()
     ui.frame:Show()
-    ui.SelectSubTab(ui.selectedSubTab or "Scan")
+    ui.SelectSubTab(ui.selectedSubTab or "Buy")
     ui.Refresh()
 end
 
