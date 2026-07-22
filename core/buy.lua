@@ -52,6 +52,97 @@ local function Notify()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- Shopping lists + recent searches (persisted in AegisExchangeDB.shopping)
+-- ---------------------------------------------------------------------------
+
+local RECENT_MAX = 12
+
+-- The persisted store, or nil before ADDON_LOADED. Callers guard on nil.
+local function Store()
+    return A.db and A.db.account and A.db.account.shopping
+end
+
+function buy.Lists()
+    local s = Store()
+    return s and s.lists or {}
+end
+
+function buy.Recent()
+    local s = Store()
+    return s and s.recent or {}
+end
+
+-- Push a search term to the front of the recent list (delete any duplicate).
+function buy.PushRecent(term)
+    local s = Store()
+    if not s or not term or term == "" then return end
+    local i = 1
+    while i <= table.getn(s.recent) do
+        if string.lower(s.recent[i]) == string.lower(term) then
+            table.remove(s.recent, i)
+        else
+            i = i + 1
+        end
+    end
+    table.insert(s.recent, 1, term)
+    while table.getn(s.recent) > RECENT_MAX do
+        table.remove(s.recent)
+    end
+end
+
+function buy.AddList(name)
+    local s = Store()
+    if not s or not name or name == "" then return nil end
+    local list = { name = name, items = {} }
+    table.insert(s.lists, list)
+    return list
+end
+
+function buy.RenameList(index, name)
+    local s = Store()
+    if not s or not name or name == "" then return end
+    local list = s.lists[index]
+    if list then list.name = name end
+end
+
+function buy.DeleteList(index)
+    local s = Store()
+    if s and s.lists[index] then table.remove(s.lists, index) end
+end
+
+-- Add an item name to a list (no duplicates). Returns true if newly added.
+function buy.AddItemToList(index, itemName)
+    local s = Store()
+    if not s or not itemName or itemName == "" then return false end
+    local list = s.lists[index]
+    if not list then return false end
+    local i = 1
+    while i <= table.getn(list.items) do
+        if string.lower(list.items[i]) == string.lower(itemName) then
+            return false
+        end
+        i = i + 1
+    end
+    table.insert(list.items, itemName)
+    return true
+end
+
+function buy.RemoveItemFromList(index, itemName)
+    local s = Store()
+    if not s then return end
+    local list = s.lists[index]
+    if not list then return end
+    local i = 1
+    while i <= table.getn(list.items) do
+        if list.items[i] == itemName then
+            table.remove(list.items, i)
+        else
+            i = i + 1
+        end
+    end
+end
+
 -- Kick off a fresh search for `name` at page 0.
 function buy.Search(name, callbacks)
     if buy.IsBusy() then
@@ -64,6 +155,7 @@ function buy.Search(name, callbacks)
     st.phase     = "wait_query"
     st.cooldown  = 0
     st.timeout   = 0
+    buy.PushRecent(util.Trim(st.name))
     buy.driver:Show()
     Notify()
     return true

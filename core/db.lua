@@ -49,6 +49,12 @@ local function DefaultAccountDB()
         version = DB_VERSION,
         items = {},   -- itemID -> { daily, seen, vendor }
         names = {},   -- itemName -> itemID
+        -- Shopping (Buy tab): saved lists + recent searches, account-wide so
+        -- every character shares them.
+        shopping = {
+            lists  = {},   -- array of { name = "...", items = { "Silk Cloth", ... } }
+            recent = {},   -- recent search terms, most-recent first (capped)
+        },
     }
 end
 
