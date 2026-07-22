@@ -60,7 +60,7 @@ scan.state = {
                            --   onComplete = fn(stats) }
 }
 
--- Chat trace of every scanner transition; toggled with "/aegis debug". This is
+-- Chat trace of every scanner transition; toggled with "/aex debug". This is
 -- how we tell WHICH leg a stall is on: query never sent (CanSendAuctionQuery
 -- stays false) vs. query sent but no AUCTION_ITEM_LIST_UPDATE ever arrives
 -- (dead AH session / server rejected the query).
