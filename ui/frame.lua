@@ -216,7 +216,8 @@ function ui.BuildWindow()
         panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
         panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
         panel:Hide()
-        if name ~= "Scan" then
+        -- Scan and Sell are real tabs (built below); the rest are placeholders.
+        if name ~= "Scan" and name ~= "Sell" then
             local label = panel:CreateFontString(
                 "AegisExchangePanelLabel" .. name, "OVERLAY",
                 "GameFontNormalLarge")
@@ -314,6 +315,8 @@ function ui.BuildWindow()
     tip:SetText("Tip: Categories \226\134\146 check classes \226\134\146"
         .. " Scan Selected runs a fast targeted scan.")
     tip:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.BuildSellTab()
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -471,6 +474,343 @@ function ui.Refresh()
             ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
         end
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- Sell tab: post the item in the sell slot, with Aegis price context
+-- ---------------------------------------------------------------------------
+
+-- A money entry box. Accepts "1g 50s 20c" style text (util.ParseMoney).
+local function MakeMoneyBox(parent, width)
+    local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    e:SetWidth(width)
+    e:SetHeight(18)
+    e:SetAutoFocus(false)   -- InputBoxTemplate already provides the font
+    e:SetScript("OnEnterPressed", function() e:ClearFocus() end)
+    e:SetScript("OnEscapePressed", function() e:ClearFocus() end)
+    e:SetScript("OnTextChanged", function() ui.RefreshSell() end)
+    return e
+end
+
+-- Read a money box as copper (per unit), or nil if empty/unparseable.
+local function ReadMoneyBox(e)
+    local txt = util.Trim(e:GetText() or "")
+    if txt == "" then return nil end
+    return util.ParseMoney(txt)
+end
+
+local function SetMoneyBox(e, copper)
+    if copper and copper > 0 then
+        e:SetText(util.FormatMoney(copper))
+    else
+        e:SetText("")
+    end
+end
+
+function ui.BuildSellTab()
+    local panel = ui.panels["Sell"]
+    if not panel or ui.sellBuilt then return end
+    ui.sellBuilt = true
+    ui.sellDuration = A.sell.DEFAULT_DURATION
+
+    -- Sell slot: drop or click an item in exactly like the stock AH sell slot.
+    local slot = CreateFrame("Button", "AegisExchangeSellSlot", panel)
+    slot:SetWidth(40)
+    slot:SetHeight(40)
+    slot:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -14)
+    slot:SetBackdrop({
+        bgFile = "Interface\\Buttons\\UI-EmptySlot",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    slot:SetBackdropColor(0, 0, 0, 0.6)
+    slot:RegisterForDrag("LeftButton")
+    local icon = slot:CreateTexture("AegisExchangeSellSlotIcon", "ARTWORK")
+    icon:SetPoint("TOPLEFT", slot, "TOPLEFT", 3, -3)
+    icon:SetPoint("BOTTOMRIGHT", slot, "BOTTOMRIGHT", -3, 3)
+    icon:Hide()
+    slot.icon = icon
+    local place = function()
+        -- Moves the cursor item into the sell slot (or picks the slotted item
+        -- back up). Works off the AH session, not the Blizzard sell frame.
+        ClickAuctionSellItemButton()
+        ui.RefreshSell()
+    end
+    slot:SetScript("OnClick", place)
+    slot:SetScript("OnReceiveDrag", place)
+    ui.sellSlot = slot
+
+    local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hint:SetPoint("LEFT", slot, "RIGHT", 10, 6)
+    hint:SetText("Drag an item here to sell")
+    hint:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.sellName = hint
+
+    local refs = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    refs:SetPoint("LEFT", slot, "RIGHT", 10, -10)
+    refs:SetJustifyH("LEFT")
+    refs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    ui.sellRefs = refs
+
+    -- Buyout row.
+    local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    buyLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -16)
+    buyLabel:SetWidth(96)
+    buyLabel:SetJustifyH("LEFT")
+    buyLabel:SetText("Buyout / unit:")
+    buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellBuyout = MakeMoneyBox(panel, 110)
+    ui.sellBuyout:SetPoint("LEFT", buyLabel, "RIGHT", 6, 0)
+
+    local mkQuick = function(text, w, anchorTo, fn)
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(w)
+        b:SetHeight(18)
+        b:SetPoint("LEFT", anchorTo, "RIGHT", 6, 0)
+        b:SetText(text)
+        b:SetScript("OnClick", fn)
+        return b
+    end
+    ui.sellMarketBtn = mkQuick("Market", 58, ui.sellBuyout, function()
+        local it = A.sell.GetItem()
+        local s = it and A.sell.Suggest(it.itemId)
+        if s and s.market then SetMoneyBox(ui.sellBuyout, s.market) end
+    end)
+    ui.sellUnderBtn = mkQuick("Undercut", 66, ui.sellMarketBtn, function()
+        local it = A.sell.GetItem()
+        local u = it and A.sell.UndercutUnit(it.itemId)
+        if u then SetMoneyBox(ui.sellBuyout, u) end
+    end)
+    ui.sellVendorBtn = mkQuick("Vendor", 56, ui.sellUnderBtn, function()
+        local it = A.sell.GetItem()
+        local s = it and A.sell.Suggest(it.itemId)
+        if s and s.vendor then SetMoneyBox(ui.sellBuyout, s.vendor) end
+    end)
+
+    -- Start-bid row.
+    local startLabel = panel:CreateFontString(
+        nil, "OVERLAY", "GameFontNormalSmall")
+    startLabel:SetPoint("TOPLEFT", buyLabel, "BOTTOMLEFT", 0, -12)
+    startLabel:SetWidth(96)
+    startLabel:SetJustifyH("LEFT")
+    startLabel:SetText("Start / unit:")
+    startLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellStart = MakeMoneyBox(panel, 110)
+    ui.sellStart:SetPoint("LEFT", startLabel, "RIGHT", 6, 0)
+
+    local startHint = panel:CreateFontString(
+        nil, "OVERLAY", "GameFontDisableSmall")
+    startHint:SetPoint("LEFT", ui.sellStart, "RIGHT", 8, 0)
+    startHint:SetText("blank = same as buyout")
+    ui.sellStartHint = startHint
+
+    -- Duration row.
+    local durLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    durLabel:SetPoint("TOPLEFT", startLabel, "BOTTOMLEFT", 0, -14)
+    durLabel:SetText("Duration:")
+    durLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellDurBtns = {}
+    local prev = nil
+    local di = 1
+    while di <= table.getn(A.sell.DURATIONS) do
+        local d = A.sell.DURATIONS[di]
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(50)
+        b:SetHeight(20)
+        if prev then
+            b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else
+            b:SetPoint("LEFT", durLabel, "RIGHT", 8, 0)
+        end
+        b:SetText(d.label)
+        b.minutes = d.minutes
+        b:SetScript("OnClick", function()
+            ui.sellDuration = b.minutes
+            ui.RefreshSell()
+        end)
+        ui.sellDurBtns[di] = b
+        prev = b
+        di = di + 1
+    end
+
+    -- Deposit + auction-count line.
+    ui.sellDeposit = panel:CreateFontString(
+        nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellDeposit:SetPoint("TOPLEFT", durLabel, "BOTTOMLEFT", 0, -14)
+    ui.sellDeposit:SetJustifyH("LEFT")
+    ui.sellDeposit:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellCount = panel:CreateFontString(
+        nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellCount:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -14)
+    ui.sellCount:SetJustifyH("RIGHT")
+
+    -- Post button + footnote.
+    local post = CreateFrame("Button", "AegisExchangeSellPostButton",
+        panel, "UIPanelButtonTemplate")
+    post:SetWidth(150)
+    post:SetHeight(24)
+    post:SetPoint("TOPLEFT", ui.sellDeposit, "BOTTOMLEFT", 0, -16)
+    post:SetText("Post Auction")
+    post:SetScript("OnClick", function()
+        ui.ConfirmPost()
+    end)
+    ui.sellPostBtn = post
+
+    local foot = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    foot:SetPoint("LEFT", post, "RIGHT", 10, 0)
+    foot:SetText("5% cut on sale \226\128\162 deposit is approximate")
+
+    ui.RefreshSell()
+end
+
+-- Compute the total buyout for the whole stack, for the confirm text/summary.
+local function SellTotals()
+    local it = A.sell.GetItem()
+    if not it then return nil end
+    local unitBuy = ReadMoneyBox(ui.sellBuyout)
+    local unitStart = ReadMoneyBox(ui.sellStart)
+    return it, unitBuy, unitStart
+end
+
+function ui.RefreshSell()
+    if not ui.sellBuilt then return end
+    local it = A.sell.GetItem()
+
+    -- Duration button highlight.
+    local di = 1
+    while di <= table.getn(ui.sellDurBtns) do
+        local b = ui.sellDurBtns[di]
+        if b.minutes == ui.sellDuration then
+            b:LockHighlight()
+        else
+            b:UnlockHighlight()
+        end
+        di = di + 1
+    end
+
+    local count = A.sell.OwnerCount()
+    local atCap = count >= A.sell.CAP
+    ui.sellCount:SetText("Your auctions: " .. count .. " / " .. A.sell.CAP)
+    if atCap then
+        ui.sellCount:SetTextColor(0.9, 0.3, 0.3)
+    else
+        ui.sellCount:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    if not it then
+        ui.sellSlot.icon:Hide()
+        ui.sellName:SetText("Drag an item here to sell")
+        ui.sellRefs:SetText("")
+        ui.sellDeposit:SetText("")
+        ui.sellPostBtn:Disable()
+        return
+    end
+
+    if it.texture then
+        ui.sellSlot.icon:SetTexture(it.texture)
+        ui.sellSlot.icon:Show()
+    end
+    ui.sellName:SetText(it.name .. "  (x" .. it.count .. ")")
+
+    local s = A.sell.Suggest(it.itemId)
+    if s and (s.market or s.minBuyout) then
+        local parts = {}
+        if s.market then
+            table.insert(parts, "Market " .. util.FormatMoney(s.market, true))
+        end
+        if s.minBuyout then
+            table.insert(parts, "Min " .. util.FormatMoney(s.minBuyout, true))
+        end
+        ui.sellRefs:SetText(table.concat(parts, "   "))
+    else
+        ui.sellRefs:SetText("No scan data \226\128\148 run a scan for pricing")
+    end
+
+    local dep, approx = A.sell.EstimateDeposit(ui.sellDuration)
+    local depText = "Deposit ~" .. util.FormatMoney(dep, true)
+    if approx then depText = depText .. " (approx)" end
+    ui.sellDeposit:SetText(depText)
+
+    local unitBuy = ReadMoneyBox(ui.sellBuyout)
+    local unitStart = ReadMoneyBox(ui.sellStart)
+    local haveBid = (unitBuy and unitBuy > 0) or (unitStart and unitStart > 0)
+    if atCap or not haveBid then
+        ui.sellPostBtn:Disable()
+    else
+        ui.sellPostBtn:Enable()
+    end
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_POST"] = {
+    text = "Post %s?\n%s",
+    button1 = "Post",
+    button2 = "Cancel",
+    OnAccept = function()
+        ui.DoPost()
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+}
+
+function ui.ConfirmPost()
+    local it, unitBuy, unitStart = SellTotals()
+    if not it then
+        ChatMsg("Aegis: no item in the sell slot.")
+        return
+    end
+    local buyTotal = math.floor((unitBuy or 0) * it.count)
+    local startTotal = math.floor((unitStart or unitBuy or 0) * it.count)
+    if startTotal < 1 then
+        ChatMsg("Aegis: enter a start bid or buyout of at least 1 copper.")
+        return
+    end
+    if buyTotal > 0 and startTotal > buyTotal then
+        ChatMsg("Aegis: start bid can't exceed the buyout.")
+        return
+    end
+    local dep, approx = A.sell.EstimateDeposit(ui.sellDuration)
+    local durLabel = "?"
+    local di = 1
+    while di <= table.getn(A.sell.DURATIONS) do
+        if A.sell.DURATIONS[di].minutes == ui.sellDuration then
+            durLabel = A.sell.DURATIONS[di].label
+        end
+        di = di + 1
+    end
+    local buyStr
+    if buyTotal > 0 then
+        buyStr = "buyout " .. util.FormatMoney(buyTotal)
+    else
+        buyStr = "no buyout"
+    end
+    local detail = string.format(
+        "start %s \226\128\162 %s \226\128\162 %s \226\128\162 deposit ~%s%s",
+        util.FormatMoney(startTotal), buyStr, durLabel,
+        util.FormatMoney(dep), approx and " (approx)" or "")
+    ui.pendingPost = {
+        unitBuyout = unitBuy, unitStart = unitStart, minutes = ui.sellDuration,
+    }
+    StaticPopup_Show("AEGIS_EXCHANGE_POST",
+        it.name .. " (x" .. it.count .. ")", detail)
+end
+
+function ui.DoPost()
+    local p = ui.pendingPost
+    if not p then return end
+    ui.pendingPost = nil
+    local ok, err = A.sell.Post(p.unitBuyout, p.unitStart, p.minutes)
+    if not ok then
+        ChatMsg("Aegis: " .. (err or "could not post."))
+    else
+        ChatMsg("Aegis: auction posted.")
+    end
+    ui.RefreshSell()
 end
 
 -- ---------------------------------------------------------------------------
@@ -811,6 +1151,9 @@ function ui.SelectSubTab(name)
     if name ~= "Scan" then
         ui.HidePicker()
     end
+    if name == "Sell" then
+        ui.RefreshSell()
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -962,6 +1305,15 @@ end)
 
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     if ui.frame then ui.frame:Hide() end
+end)
+
+-- The item in the sell slot changed (placed / removed) or our auctions
+-- updated (a post landed): keep the Sell tab current.
+A.RegisterEvent("NEW_AUCTION_UPDATE", function()
+    ui.RefreshSell()
+end)
+A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
+    ui.RefreshSell()
 end)
 
 -- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.

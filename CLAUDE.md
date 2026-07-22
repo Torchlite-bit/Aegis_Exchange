@@ -145,6 +145,7 @@ Aegis_Exchange/
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
   core/db.lua            -- SavedVariables price DB (daily-min + weighted-median market)
   core/scan.lua          -- page-by-page auction scanner state machine
+  core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut)
   ui/frame.lua           -- standalone Aegis window (replaces the AH) + sub-tabs
   ui/tooltip.lua         -- GameTooltip price lines (save/replace hooks)
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
@@ -152,8 +153,9 @@ Aegis_Exchange/
   CLAUDE.md              -- this file
 ```
 
-Load order is fixed by the `.toc`: `init` → `util` → `db` → `scan` → `frame` →
-`tooltip`. `init.lua` must load first (it creates the namespace and dispatcher).
+Load order is fixed by the `.toc`: `init` → `util` → `db` → `scan` → `sell` →
+`frame` → `tooltip`. `init.lua` must load first (it creates the namespace and
+dispatcher); `sell` before `frame` because the Sell tab drives `A.sell`.
 
 The repository root **is** the addon folder: clone/copy it into
 `Interface/AddOns/Aegis_Exchange` so the folder name matches the `.toc`.
