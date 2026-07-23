@@ -1384,10 +1384,12 @@ function ui.BuildCraftTab()
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
     ui.craftBox = box
 
+    -- Search button sits to the RIGHT of the box (not below it), so the yellow
+    -- label never lands on the "Item" column header underneath.
     local searchBtn = CreateFrame("Button", "AegisExchangeCraftSearchButton",
         panel, "UIPanelButtonTemplate")
     searchBtn:SetWidth(64); searchBtn:SetHeight(20)
-    searchBtn:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -6)
+    searchBtn:SetPoint("LEFT", box, "RIGHT", 10, 0)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoCraftSearch() end)
 
@@ -1412,7 +1414,7 @@ function ui.BuildCraftTab()
     prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
 
     ui.craftStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftStatus:SetPoint("TOPLEFT", searchBtn, "BOTTOMLEFT", 0, -8)
+    ui.craftStatus:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -8)
     ui.craftStatus:SetJustifyH("LEFT")
     ui.craftStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.craftStatus:SetText("Click a reagent on the left to shop for it.")
@@ -1822,12 +1824,17 @@ end
 function ui.AttachCraftButton(frame, name)
     if not frame or getglobal(name) then return end
     local b = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
-    b:SetWidth(96); b:SetHeight(20)
+    b:SetWidth(88); b:SetHeight(20)
     local close = getglobal(frame:GetName() .. "CloseButton")
-    if close then
-        b:SetPoint("RIGHT", close, "LEFT", -4, 0)
+    if pfUI and close then
+        -- pfUI packs its window header tight against a small corner X; drop our
+        -- button a row below the close button so it doesn't sit on the X or the
+        -- "Improves skill" checkbox.
+        b:SetPoint("TOPRIGHT", close, "BOTTOMRIGHT", 0, -2)
+    elseif close then
+        b:SetPoint("RIGHT", close, "LEFT", -8, 0)   -- a touch more gap from the X
     else
-        b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -40, -14)
+        b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -44, -14)
     end
     b:SetText("Add to Aegis")
     b:SetScript("OnClick", function() ui.CraftCapture() end)
@@ -1841,19 +1848,17 @@ function ui.AttachProfLine(frame, btnName, key)
     if not frame then return end
     ui.profLines = ui.profLines or {}
     if ui.profLines[key] then return end
-    local btn = getglobal(btnName)
+    -- Anchor to the frame's BOTTOM-RIGHT, in the empty area above the
+    -- Create/Exit buttons -- clear of the skill progress bar up top and of any
+    -- buttons. Sub line sits just below the net line.
     local net = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    if btn then
-        net:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -5)
-    else
-        net:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -40, -40)
-    end
+    net:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 92)
     net:SetJustifyH("RIGHT")
-    net:SetWidth(170)
+    net:SetWidth(210)
     local sub = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     sub:SetPoint("TOPRIGHT", net, "BOTTOMRIGHT", 0, -2)
     sub:SetJustifyH("RIGHT")
-    sub:SetWidth(170)
+    sub:SetWidth(210)
     ui.profLines[key] = { net = net, sub = sub }
 end
 
@@ -3153,7 +3158,9 @@ function ui.HookAuctionFrame()
         b:SetHeight(19)
         local blizClose = getglobal("AuctionFrameCloseButton")
         if blizClose then
-            b:SetPoint("RIGHT", blizClose, "LEFT", 4, 0)
+            -- Negative gap: sit clearly to the LEFT of the X (the old +4 tucked
+            -- our right edge under the close button, crammed in pfUI).
+            b:SetPoint("RIGHT", blizClose, "LEFT", -6, 0)
         else
             b:SetPoint("TOPRIGHT", AuctionFrame, "TOPRIGHT", -60, -12)
         end
