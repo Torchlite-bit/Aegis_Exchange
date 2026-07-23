@@ -108,22 +108,32 @@ function sell.Suggest(itemId)
     }
 end
 
--- Per-unit price to undercut the cheapest seen buyout by ~5% (falls back to
--- market value). Returns copper, or nil if we have no data for the item.
+-- Undercut a reference price by the user's configured percent (Aegis tab),
+-- always landing at least 1 copper below it. Defaults to 5%.
+local function ApplyUndercut(ref)
+    if not ref or ref <= 1 then return ref end
+    local pct = A.db and A.db.Setting and A.db.Setting("undercutPct") or 5
+    if not pct or pct < 0 then pct = 5 end
+    local under = math.floor(ref * (1 - pct / 100))
+    if under >= ref then under = ref - 1 end   -- guarantee a real undercut
+    if under < 1 then under = 1 end
+    return under
+end
+
+-- Per-unit price to undercut the cheapest seen buyout (falls back to market
+-- value). Returns copper, or nil if we have no data for the item.
 function sell.UndercutUnit(itemId)
     -- Prefer the freshest thing we have: the lowest OTHER seller from the last
-    -- item scan, undercut by 1 copper; else the DB's min buyout / market -5%.
+    -- item scan; else the DB's min buyout / market. Both get the same percent.
     local low = sell.LowestListingUnit(true)
     if low and low > 1 then
-        return low - 1
+        return ApplyUndercut(low)
     end
     local s = sell.Suggest(itemId)
     if not s then return nil end
     local base = s.minBuyout or s.market
     if not base then return nil end
-    local under = math.floor(base * 0.95)
-    if under < 1 then under = 1 end
-    return under
+    return ApplyUndercut(base)
 end
 
 -- ---------------------------------------------------------------------------

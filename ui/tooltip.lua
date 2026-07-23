@@ -38,6 +38,8 @@ tooltip.hooked = false
 -- Append the Aegis price lines for `itemId` to `gtt` and re-flow it.
 -- AddLine/AddDoubleLine do NOT re-layout on their own — Show() is mandatory.
 function tooltip.Extend(gtt, itemId, count)
+    -- Honour the Aegis-tab toggle for tooltip price lines.
+    if A.db.Setting and A.db.Setting("tooltip") == false then return end
     local market = A.db.MarketValue(itemId)
     local minBuy = A.db.MinBuyout(itemId)
     local vendor = A.db.GetVendor(itemId)

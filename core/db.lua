@@ -60,7 +60,35 @@ local function DefaultAccountDB()
         crafting = {
             projects = {},  -- { { name, itemId, reagents = { {name,count,itemId} } } }
         },
+        -- User settings (Aegis tab). Values are read through db.Setting, which
+        -- falls back to SETTING_DEFAULTS, so a save missing a key still works.
+        settings = {},
     }
+end
+
+-- Defaults for every user setting. db.Setting falls back to these, so adding a
+-- new setting here is enough -- no migration of old saves needed.
+local SETTING_DEFAULTS = {
+    duration    = 480,          -- default post duration, minutes (120/480/1440)
+    undercutPct = 5,            -- Undercut button: percent below the reference
+    sellDefault = "undercut",   -- slot prefill: "undercut"|"market"|"none"
+    tooltip     = true,         -- show Aegis price lines on item tooltips
+    profLine    = true,         -- show the profit line on profession windows
+}
+
+-- Read a user setting, falling back to its default when unset.
+function db.Setting(key)
+    local s = db.account and db.account.settings
+    local v = s and s[key]
+    if v == nil then return SETTING_DEFAULTS[key] end
+    return v
+end
+
+-- Write a user setting (account-wide).
+function db.SetSetting(key, value)
+    if not db.account then return end
+    if not db.account.settings then db.account.settings = {} end
+    db.account.settings[key] = value
 end
 
 -- Default shape of the per-character DB.
@@ -234,6 +262,13 @@ end
 function db.IdFromName(name)
     if not db.account or not name then return nil end
     return db.account.names[name]
+end
+
+-- Wipe all recorded price data (keeps the name->id map, which is harmless and
+-- useful for link-less tooltips). Driven by the Aegis tab's "Clear price data".
+function db.ClearItems()
+    if not db.account then return end
+    db.account.items = {}
 end
 
 -- Number of distinct items with any recorded price data.
