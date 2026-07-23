@@ -353,3 +353,96 @@ A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     buy.state.phase = "idle"
     buy.driver:Hide()
 end)
+
+-- ---------------------------------------------------------------------------
+-- Crafting: recipes captured from the profession window (kept here so no new
+-- file is added to the .toc -- a /reload is enough to pick this up)
+-- ---------------------------------------------------------------------------
+
+A.craft = {}
+local craft = A.craft
+
+local function CStore()
+    return A.db and A.db.account and A.db.account.crafting
+end
+
+function craft.Projects()
+    local s = CStore()
+    return s and s.projects or {}
+end
+
+-- Add (or replace, by name) a captured recipe. Returns the stored project.
+function craft.AddProject(project)
+    local s = CStore()
+    if not s or not project or not project.name then return nil end
+    local i = 1
+    while i <= table.getn(s.projects) do
+        if s.projects[i].name == project.name then
+            table.remove(s.projects, i)   -- refresh an existing entry
+        else
+            i = i + 1
+        end
+    end
+    table.insert(s.projects, 1, project)
+    return project
+end
+
+function craft.DeleteProject(index)
+    local s = CStore()
+    if s and s.projects[index] then table.remove(s.projects, index) end
+end
+
+-- Capture the recipe currently selected in the trade-skill window (most
+-- professions). Returns a project table or (nil, reason).
+function craft.CaptureTradeSkill()
+    if not GetTradeSkillSelectionIndex then return nil, "No profession open." end
+    local id = GetTradeSkillSelectionIndex()
+    if not id or id < 1 then return nil, "Select a recipe first." end
+    local name = GetTradeSkillInfo(id)
+    if not name then return nil, "Could not read the recipe." end
+    local itemId
+    if GetTradeSkillItemLink then
+        itemId = util.ItemIdFromLink(GetTradeSkillItemLink(id))
+    end
+    local reagents = {}
+    local n = GetTradeSkillNumReagents(id) or 0
+    local r = 1
+    while r <= n do
+        local rname, _, rcount = GetTradeSkillReagentInfo(id, r)
+        local rid
+        if GetTradeSkillReagentItemLink then
+            rid = util.ItemIdFromLink(GetTradeSkillReagentItemLink(id, r))
+        end
+        if rname then
+            table.insert(reagents,
+                { name = rname, count = rcount or 1, itemId = rid })
+        end
+        r = r + 1
+    end
+    return { name = name, itemId = itemId, reagents = reagents }
+end
+
+-- Capture the recipe selected in the craft window (Enchanting).
+function craft.CaptureCraft()
+    if not GetCraftSelectionIndex then return nil, "No profession open." end
+    local id = GetCraftSelectionIndex()
+    if not id or id < 1 then return nil, "Select a recipe first." end
+    local name = GetCraftInfo(id)
+    if not name then return nil, "Could not read the recipe." end
+    local reagents = {}
+    local n = GetCraftNumReagents(id) or 0
+    local r = 1
+    while r <= n do
+        local rname, _, rcount = GetCraftReagentInfo(id, r)
+        local rid
+        if GetCraftReagentItemLink then
+            rid = util.ItemIdFromLink(GetCraftReagentItemLink(id, r))
+        end
+        if rname then
+            table.insert(reagents,
+                { name = rname, count = rcount or 1, itemId = rid })
+        end
+        r = r + 1
+    end
+    return { name = name, reagents = reagents }
+end

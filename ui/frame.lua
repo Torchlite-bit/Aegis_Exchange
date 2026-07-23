@@ -216,8 +216,10 @@ function ui.BuildWindow()
         panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
         panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
         panel:Hide()
-        -- Buy, Scan and Sell are real tabs (built below); rest are placeholders.
-        if name ~= "Scan" and name ~= "Sell" and name ~= "Buy" then
+        -- Buy, Sell, Scan and Crafting are real tabs (built below); rest are
+        -- placeholders.
+        if name ~= "Scan" and name ~= "Sell" and name ~= "Buy"
+            and name ~= "Crafting" then
             local label = panel:CreateFontString(
                 "AegisExchangePanelLabel" .. name, "OVERLAY",
                 "GameFontNormalLarge")
@@ -318,6 +320,7 @@ function ui.BuildWindow()
 
     ui.BuildSellTab()
     ui.BuildBuyTab()
+    ui.BuildCraftTab()
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -556,6 +559,137 @@ end
 ui.PctColorBuy = PctColorBuy     -- exposed for tests
 ui.PctColorSell = PctColorSell
 
+-- Shared result-row column layout (Buy tab AND Crafting tab), row-relative.
+local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
+              buy = 436, bid = 490 }
+local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
+
+-- Build a listing result row (name/ct/unit/stack/pct + Buy/Bid) into `store`.
+-- Buttons act on row.entry, so the same rows serve Buy and Crafting.
+local function BuildResultRow(parent, scroll, store, i, rowH)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(rowH)
+    if i == 1 then
+        row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+    else
+        row:SetPoint("TOPLEFT", store[i - 1], "BOTTOMLEFT", 0, 0)
+        row:SetPoint("TOPRIGHT", store[i - 1], "BOTTOMRIGHT", 0, 0)
+    end
+    local mkCell = function(x, w, just)
+        local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", row, "LEFT", x, 0)
+        fs:SetWidth(w)
+        fs:SetJustifyH(just or "LEFT")
+        return fs
+    end
+    row.name  = mkCell(RCX.name, RCW.name)
+    row.ct    = mkCell(RCX.ct, RCW.ct, "RIGHT")
+    row.unit  = mkCell(RCX.unit, RCW.unit)
+    row.stack = mkCell(RCX.stack, RCW.stack)
+    row.pct   = mkCell(RCX.pct, RCW.pct)
+    local buyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    buyBtn:SetWidth(50); buyBtn:SetHeight(17)
+    buyBtn:SetPoint("LEFT", row, "LEFT", RCX.buy, 0)
+    buyBtn:SetText("Buy")
+    buyBtn:SetScript("OnClick", function()
+        if row.entry then ui.ConfirmBuyout(row.entry) end
+    end)
+    row.buyBtn = buyBtn
+    local bidBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+    bidBtn:SetWidth(44); bidBtn:SetHeight(17)
+    bidBtn:SetPoint("LEFT", row, "LEFT", RCX.bid, 0)
+    bidBtn:SetText("Bid")
+    bidBtn:SetScript("OnClick", function()
+        if row.entry then ui.ConfirmBid(row.entry) end
+    end)
+    row.bidBtn = bidBtn
+    row:Hide()
+    store[i] = row
+    return row
+end
+
+-- Fill a result row's content from a listing `r` (shared by Buy and Crafting).
+function ui.FillResultRow(row, r)
+    row.entry = r
+    row.name:SetText(r.name)
+    if r.canUse == nil or r.canUse then
+        row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        row.name:SetTextColor(0.9, 0.4, 0.4)
+    end
+    row.ct:SetText("x" .. r.count)
+    row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
+    if r.buyout and r.buyout > 0 then
+        row.stack:SetText(util.FormatMoney(r.buyout, true))
+    else
+        row.stack:SetText("bid only")
+    end
+    local market = r.itemId and A.db.MarketValue(r.itemId)
+    if market and market > 0 and r.unit then
+        local pct = math.floor(r.unit / market * 100)
+        row.pct:SetText(pct .. "%")
+        row.pct:SetTextColor(PctColorBuy(pct))
+    else
+        row.pct:SetText("\226\128\148")
+        row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    if r.mine then
+        row.buyBtn:Disable(); row.bidBtn:Disable()
+    else
+        if r.buyout and r.buyout > 0 then row.buyBtn:Enable()
+        else row.buyBtn:Disable() end
+        row.bidBtn:Enable()
+    end
+    row:Show()
+end
+
+-- Sort a working copy of `all` by column key/direction, applying an optional
+-- per-unit Max filter. Shared by the Buy and Crafting result panes so both
+-- handle bid-only rows (no buyout) and % market the same way.
+function ui.SortResults(all, sortKey, dir, maxUnit)
+    local rows = {}
+    local k = 1
+    while k <= table.getn(all) do
+        local r = all[k]
+        if not (maxUnit and maxUnit > 0) or (r.unit and r.unit <= maxUnit) then
+            table.insert(rows, r)
+        end
+        k = k + 1
+    end
+    local function keyOf(r)
+        if sortKey == "stack" then
+            return (r.buyout and r.buyout > 0) and r.buyout or nil
+        elseif sortKey == "pct" then
+            local m = r.itemId and A.db.MarketValue(r.itemId)
+            if m and m > 0 and r.unit then return r.unit / m end
+            return nil
+        end
+        return r.unit
+    end
+    table.sort(rows, function(a, b)
+        local av, bv = keyOf(a), keyOf(b)
+        if not av and not bv then return false end
+        if not av then return false end   -- no price -> always last
+        if not bv then return true end
+        if dir == "desc" then return av > bv end
+        return av < bv
+    end)
+    return rows
+end
+
+-- Put a ↑/↓ arrow on whichever sort header is active (shared Buy/Crafting).
+function ui.PaintSortHeaders(headers, sortKey, dir)
+    if not headers then return end
+    for hk, hb in pairs(headers) do
+        local t = hb.baseText
+        if hk == sortKey then
+            t = t .. (dir == "asc" and " \226\134\145" or " \226\134\147")
+        end
+        hb.label:SetText(t)
+    end
+end
+
 local BUY_ROWS,  BUY_ROW_H  = 11, 20
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
 local SIDE_W = 158    -- sidebar width
@@ -747,48 +881,7 @@ function ui.BuildBuyTab()
     ui.buyRows = {}
     i = 1
     while i <= BUY_ROWS do
-        local row = CreateFrame("Frame", nil, panel)
-        row:SetHeight(BUY_ROW_H)
-        if i == 1 then
-            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
-        else
-            row:SetPoint("TOPLEFT", ui.buyRows[i - 1], "BOTTOMLEFT", 0, 0)
-            row:SetPoint("TOPRIGHT", ui.buyRows[i - 1], "BOTTOMRIGHT", 0, 0)
-        end
-        local mkCell = function(x, w, just)
-            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            fs:SetPoint("LEFT", row, "LEFT", x, 0)
-            fs:SetWidth(w)
-            fs:SetJustifyH(just or "LEFT")
-            return fs
-        end
-        row.name  = mkCell(CX.name, CW.name)
-        row.ct    = mkCell(CX.ct, CW.ct, "RIGHT")
-        row.unit  = mkCell(CX.unit, CW.unit)
-        row.stack = mkCell(CX.stack, CW.stack)
-        row.pct   = mkCell(CX.pct, CW.pct)
-
-        local buyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        buyBtn:SetWidth(50); buyBtn:SetHeight(17)
-        buyBtn:SetPoint("LEFT", row, "LEFT", CX.buy, 0)
-        buyBtn:SetText("Buy")
-        buyBtn:SetScript("OnClick", function()
-            if row.entry then ui.ConfirmBuyout(row.entry) end
-        end)
-        row.buyBtn = buyBtn
-
-        local bidBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-        bidBtn:SetWidth(44); bidBtn:SetHeight(17)
-        bidBtn:SetPoint("LEFT", row, "LEFT", CX.bid, 0)
-        bidBtn:SetText("Bid")
-        bidBtn:SetScript("OnClick", function()
-            if row.entry then ui.ConfirmBid(row.entry) end
-        end)
-        row.bidBtn = bidBtn
-
-        row:Hide()
-        ui.buyRows[i] = row
+        BuildResultRow(panel, scroll, ui.buyRows, i, BUY_ROW_H)
         i = i + 1
     end
 
@@ -1054,50 +1147,12 @@ function ui.UpdateBuyList()
     local all = ui.buyResults or {}
 
     -- Working copy (so sorting doesn't disturb the engine's row order), with
-    -- the Max-price filter (per-unit) applied.
+    -- the Max-price filter (per-unit) applied and the chosen column sort.
     local maxUnit = ui.buyMax and util.ParseMoney(util.Trim(ui.buyMax:GetText() or ""))
-    local rows = {}
-    local k = 1
-    while k <= table.getn(all) do
-        local r = all[k]
-        if not (maxUnit and maxUnit > 0) or (r.unit and r.unit <= maxUnit) then
-            table.insert(rows, r)
-        end
-        k = k + 1
-    end
-
-    -- Sort by the chosen column / direction (headers are clickable).
     local sortKey = ui.buySortKey or "unit"
     local dir = ui.buySortDir or "asc"
-    local function keyOf(r)
-        if sortKey == "stack" then
-            return (r.buyout and r.buyout > 0) and r.buyout or nil
-        elseif sortKey == "pct" then
-            local m = r.itemId and A.db.MarketValue(r.itemId)
-            if m and m > 0 and r.unit then return r.unit / m end
-            return nil
-        end
-        return r.unit
-    end
-    table.sort(rows, function(a, b)
-        local av, bv = keyOf(a), keyOf(b)
-        if not av and not bv then return false end
-        if not av then return false end   -- no price -> always last
-        if not bv then return true end
-        if dir == "desc" then return av > bv end
-        return av < bv
-    end)
-
-    -- Header arrows on the active sort column.
-    if ui.buyHeaders then
-        for hk, hb in pairs(ui.buyHeaders) do
-            local t = hb.baseText
-            if hk == sortKey then
-                t = t .. (dir == "asc" and " \226\134\145" or " \226\134\147")
-            end
-            hb.label:SetText(t)
-        end
-    end
+    local rows = ui.SortResults(all, sortKey, dir, maxUnit)
+    ui.PaintSortHeaders(ui.buyHeaders, sortKey, dir)
 
     local total = table.getn(rows)
     FauxScrollFrame_Update(ui.buyScroll, total, BUY_ROWS, BUY_ROW_H)
@@ -1128,37 +1183,7 @@ function ui.UpdateBuyList()
         local row = ui.buyRows[i]
         local r = rows[i + offset]
         if r then
-            row.entry = r
-            row.name:SetText(r.name)
-            if r.canUse == nil or r.canUse then
-                row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
-            else
-                row.name:SetTextColor(0.9, 0.4, 0.4)
-            end
-            row.ct:SetText("x" .. r.count)
-            row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
-            if r.buyout and r.buyout > 0 then
-                row.stack:SetText(util.FormatMoney(r.buyout, true))
-            else
-                row.stack:SetText("bid only")
-            end
-            local market = r.itemId and A.db.MarketValue(r.itemId)
-            if market and market > 0 and r.unit then
-                local pct = math.floor(r.unit / market * 100)
-                row.pct:SetText(pct .. "%")
-                row.pct:SetTextColor(PctColorBuy(pct))
-            else
-                row.pct:SetText("\226\128\148")
-                row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-            end
-            if r.mine then
-                row.buyBtn:Disable(); row.bidBtn:Disable()
-            else
-                if r.buyout and r.buyout > 0 then row.buyBtn:Enable()
-                else row.buyBtn:Disable() end
-                row.bidBtn:Enable()
-            end
-            row:Show()
+            ui.FillResultRow(row, r)
         else
             row.entry = nil
             row:Hide()
@@ -1236,6 +1261,446 @@ function ui.DoBid()
         ChatMsg("Aegis: " .. (err or "bid failed."))
     else
         ChatMsg("Aegis: bid on " .. row.name .. ".")
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Crafting tab: recipes captured from a profession window, their reagents, and
+-- a Buy-style price/buy pane for whichever reagent you click.
+--
+-- Left  = recipe tree (project -> its reagents, expandable).
+-- Right = the same searchable result list as the Buy tab (shared row helpers),
+--         populated when you click a reagent.
+-- ---------------------------------------------------------------------------
+
+local CRAFT_ROWS,  CRAFT_ROW_H  = 11, 20
+local CSIDE_ROWS,  CSIDE_ROW_H  = 15, 18
+local CSIDE_W = 172   -- recipe-tree width (reagent lines carry a count)
+
+function ui.BuildCraftTab()
+    local panel = ui.panels["Crafting"]
+    if not panel or ui.craftBuilt then return end
+    ui.craftBuilt = true
+    ui.craftExpanded = {}
+
+    -- ===== Left: recipe tree ============================================
+    local sideHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -10)
+    sideHdr:SetText("Recipes")
+    sideHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftSideScroll",
+        panel, "FauxScrollFrameTemplate")
+    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
+    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 42)
+    sideScroll:SetWidth(CSIDE_W)
+    sideScroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(CSIDE_ROW_H, ui.UpdateCraftTree)
+    end)
+    ui.craftSideScroll = sideScroll
+
+    ui.craftSideRows = {}
+    local i = 1
+    while i <= CSIDE_ROWS do
+        local row = CreateFrame("Button", nil, panel)
+        row:SetHeight(CSIDE_ROW_H)
+        row:SetWidth(CSIDE_W)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1], "BOTTOMLEFT", 0, 0)
+        end
+        local ex = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        ex:SetPoint("LEFT", row, "LEFT", 2, 0)
+        ex:SetWidth(12)
+        ex:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        row.ex = ex
+        local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", row, "LEFT", 14, 0)
+        lbl:SetWidth(CSIDE_W - 40)
+        lbl:SetJustifyH("LEFT")
+        row.label = lbl
+        local ct = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        ct:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        ct:SetWidth(24)
+        ct:SetJustifyH("RIGHT")
+        row.ct = ct
+        row:SetScript("OnClick", function() ui.OnCraftTreeClick(row.entry) end)
+        row:Hide()
+        ui.craftSideRows[i] = row
+        i = i + 1
+    end
+
+    -- Delete the selected recipe.
+    local delBtn = CreateFrame("Button", "AegisExchangeCraftDelButton",
+        panel, "UIPanelButtonTemplate")
+    delBtn:SetWidth(CSIDE_W); delBtn:SetHeight(18)
+    delBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
+    delBtn:SetText("Remove recipe")
+    delBtn:SetScript("OnClick", function() ui.CraftDeleteProject() end)
+    ui.craftDelBtn = delBtn
+
+    -- ===== Right: reagent title + result list ============================
+    local RX = CSIDE_W + 24
+
+    ui.craftTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -10)
+    ui.craftTitle:SetText("Crafting")
+    ui.craftTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local box = CreateFrame("EditBox", "AegisExchangeCraftSearchBox", panel,
+        "InputBoxTemplate")
+    box:SetWidth(180); box:SetHeight(18)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -34)
+    box:SetAutoFocus(false)
+    box:SetScript("OnEnterPressed", function() ui.DoCraftSearch() end)
+    box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
+    ui.craftBox = box
+
+    local searchBtn = CreateFrame("Button", "AegisExchangeCraftSearchButton",
+        panel, "UIPanelButtonTemplate")
+    searchBtn:SetWidth(64); searchBtn:SetHeight(20)
+    searchBtn:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -6)
+    searchBtn:SetText("Search")
+    searchBtn:SetScript("OnClick", function() ui.DoCraftSearch() end)
+
+    -- Pager (mirrors the Buy tab).
+    local nextBtn = CreateFrame("Button", "AegisExchangeCraftNextButton",
+        panel, "UIPanelButtonTemplate")
+    nextBtn:SetWidth(24); nextBtn:SetHeight(20)
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -34)
+    nextBtn:SetText(">")
+    nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
+
+    ui.craftPageText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftPageText:SetPoint("RIGHT", nextBtn, "LEFT", -6, 0)
+    ui.craftPageText:SetJustifyH("RIGHT")
+    ui.craftPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    local prevBtn = CreateFrame("Button", "AegisExchangeCraftPrevButton",
+        panel, "UIPanelButtonTemplate")
+    prevBtn:SetWidth(24); prevBtn:SetHeight(20)
+    prevBtn:SetPoint("RIGHT", ui.craftPageText, "LEFT", -6, 0)
+    prevBtn:SetText("<")
+    prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
+
+    ui.craftStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftStatus:SetPoint("TOPLEFT", searchBtn, "BOTTOMLEFT", 0, -8)
+    ui.craftStatus:SetJustifyH("LEFT")
+    ui.craftStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.craftStatus:SetText("Click a reagent on the left to shop for it.")
+
+    -- Sortable column headers (same layout / behaviour as the Buy tab).
+    ui.craftSortKey = "unit"
+    ui.craftSortDir = "asc"
+    local rowLeft = RX + 4
+    local CX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
+                 buy = 436, bid = 490 }
+    local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
+
+    local mkText = function(cx, text)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -78)
+        fs:SetText(text)
+        return fs
+    end
+    mkText(CX.name, "Item")
+    mkText(CX.ct, "Ct")
+
+    ui.craftHeaders = {}
+    local mkSort = function(cx, w, text, key)
+        local b = CreateFrame("Button", nil, panel)
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -76)
+        b:SetWidth(w + 14); b:SetHeight(16)
+        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+        fs:SetText(text)
+        b.label = fs
+        b.baseText = text
+        b:SetScript("OnClick", function() ui.SetCraftSort(key) end)
+        ui.craftHeaders[key] = b
+        return b
+    end
+    mkSort(CX.unit, CW.unit, "Unit price", "unit")
+    mkSort(CX.stack, CW.stack, "Stack buyout", "stack")
+    mkSort(CX.pct, CW.pct, "% mkt", "pct")
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeCraftScroll",
+        panel, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(CRAFT_ROW_H, ui.UpdateCraftList)
+    end)
+    ui.craftScroll = scroll
+
+    ui.craftRows = {}
+    i = 1
+    while i <= CRAFT_ROWS do
+        BuildResultRow(panel, scroll, ui.craftRows, i, CRAFT_ROW_H)
+        i = i + 1
+    end
+
+    ui.RefreshCraftTree()
+end
+
+-- ---- recipe-tree model + paint -----------------------------------------
+
+function ui.FlattenCraft()
+    local flat = {}
+    local projects = A.craft and A.craft.Projects() or {}
+    local pi = 1
+    while pi <= table.getn(projects) do
+        local p = projects[pi]
+        table.insert(flat, { kind = "project", index = pi, name = p.name })
+        if ui.craftExpanded[pi] then
+            local reagents = p.reagents or {}
+            local ri = 1
+            while ri <= table.getn(reagents) do
+                local r = reagents[ri]
+                table.insert(flat, { kind = "reagent", projIndex = pi,
+                    name = r.name, count = r.count, itemId = r.itemId })
+                ri = ri + 1
+            end
+            if table.getn(reagents) == 0 then
+                table.insert(flat, { kind = "note", text = "(no reagents)" })
+            end
+        end
+        pi = pi + 1
+    end
+    if table.getn(projects) == 0 then
+        table.insert(flat, { kind = "note",
+            text = "Open a profession, select a recipe," })
+        table.insert(flat, { kind = "note",
+            text = "then click 'Add to Aegis'." })
+    end
+    ui.craftFlat = flat
+end
+
+function ui.RefreshCraftTree()
+    if not ui.craftSideScroll then return end
+    ui.FlattenCraft()
+    ui.UpdateCraftTree()
+end
+
+function ui.UpdateCraftTree()
+    if not ui.craftSideScroll then return end
+    local flat = ui.craftFlat or {}
+    FauxScrollFrame_Update(ui.craftSideScroll, table.getn(flat),
+        CSIDE_ROWS, CSIDE_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.craftSideScroll)
+    local i = 1
+    while i <= CSIDE_ROWS do
+        local row = ui.craftSideRows[i]
+        local e = flat[i + offset]
+        if e then
+            row.entry = e
+            row.ex:SetText("")
+            row.ct:SetText("")
+            if e.kind == "project" then
+                row.ex:SetText(ui.craftExpanded[e.index] and "-" or "+")
+                local mark = (ui.craftSel == e.index) and "> " or ""
+                row.label:SetText(mark .. e.name)
+                if ui.craftSel == e.index then
+                    row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+                else
+                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                end
+            elseif e.kind == "reagent" then
+                row.label:SetText("  " .. e.name)
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                if e.count and e.count > 1 then
+                    row.ct:SetText("x" .. e.count)
+                end
+            else
+                row.label:SetText("  " .. (e.text or ""))
+                row.label:SetTextColor(0.5, 0.5, 0.5)
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+function ui.OnCraftTreeClick(e)
+    if not e then return end
+    if e.kind == "project" then
+        ui.craftSel = e.index
+        ui.craftExpanded[e.index] = not ui.craftExpanded[e.index]
+        ui.RefreshCraftTree()
+    elseif e.kind == "reagent" then
+        ui.craftSel = e.projIndex
+        ui.craftBox:SetText(e.name)
+        ui.DoCraftSearch()
+        ui.RefreshCraftTree()
+    end
+end
+
+function ui.CraftDeleteProject()
+    if not A.craft or not ui.craftSel then
+        ChatMsg("Aegis: select a recipe first.")
+        return
+    end
+    A.craft.DeleteProject(ui.craftSel)
+    ui.craftSel = nil
+    ui.RefreshCraftTree()
+end
+
+-- ---- search + results (Buy-style, shared row helpers) ------------------
+
+function ui.DoCraftSearch()
+    if not ui.craftBox then return end
+    ui.craftBox:ClearFocus()
+    if not A.buy then
+        ui.craftStatus:SetText("Buy engine not loaded \226\128\148 fully restart WoW.")
+        return
+    end
+    local name = util.Trim(ui.craftBox:GetText() or "")
+    if name == "" then
+        ui.craftStatus:SetText("Type a reagent name and Search.")
+        return
+    end
+    ui.craftTitle:SetText(name)
+    ui.craftResults = nil
+    ui.UpdateCraftList()
+    local ok, err = A.buy.Search(name, {
+        onResults = function(rows) ui.craftResults = rows; ui.UpdateCraftList() end,
+        onState = function() ui.RefreshCraftStatus() end,
+    })
+    if not ok then
+        ui.craftStatus:SetText(err or "Could not search.")
+    else
+        ui.craftStatus:SetText("Searching...")
+    end
+end
+
+function ui.RefreshCraftStatus()
+    if not ui.craftStatus or not A.buy then return end
+    local phase = A.buy.state.phase
+    if phase == "wait_query" or phase == "wait_results" then
+        ui.craftStatus:SetText("Searching...")
+    end
+end
+
+function ui.SetCraftSort(key)
+    if ui.craftSortKey == key then
+        ui.craftSortDir = (ui.craftSortDir == "asc") and "desc" or "asc"
+    else
+        ui.craftSortKey = key
+        ui.craftSortDir = "asc"
+    end
+    ui.UpdateCraftList()
+end
+
+function ui.RefreshCraft()
+    if not ui.craftBuilt then return end
+    -- First open with nothing chosen: expand the most-recent recipe so its
+    -- reagents are visible right away (the recipe is inserted at index 1).
+    if not ui.craftSel and A.craft and table.getn(A.craft.Projects()) > 0 then
+        ui.craftSel = 1
+        ui.craftExpanded[1] = true
+    end
+    ui.RefreshCraftTree()
+    ui.UpdateCraftList()
+end
+
+function ui.UpdateCraftList()
+    if not ui.craftScroll then return end
+    local all = ui.craftResults or {}
+    local sortKey = ui.craftSortKey or "unit"
+    local dir = ui.craftSortDir or "asc"
+    local rows = ui.SortResults(all, sortKey, dir, nil)
+    ui.PaintSortHeaders(ui.craftHeaders, sortKey, dir)
+
+    local total = table.getn(rows)
+    FauxScrollFrame_Update(ui.craftScroll, total, CRAFT_ROWS, CRAFT_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.craftScroll)
+
+    if A.buy then
+        local _, page, totalPages, totalAuctions = A.buy.GetResults()
+        if ui.craftResults then
+            if table.getn(all) == 0 then
+                ui.craftStatus:SetText("No auctions found.")
+            else
+                local order = dir == "asc" and "low to high" or "high to low"
+                ui.craftStatus:SetText(totalAuctions .. " auction(s) \226\128\162 "
+                    .. sortKey .. " " .. order)
+            end
+            ui.craftPageText:SetText("Page " .. (page + 1) .. " / " .. totalPages)
+        else
+            ui.craftPageText:SetText("")
+        end
+    end
+
+    local i = 1
+    while i <= CRAFT_ROWS do
+        local row = ui.craftRows[i]
+        local r = rows[i + offset]
+        if r then
+            ui.FillResultRow(row, r)
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- ---- capture recipes from the profession windows -----------------------
+
+-- Read the currently-selected recipe from whichever profession window is open
+-- and store it as a Crafting project. TradeSkill covers most professions;
+-- Craft covers Enchanting (and Beast Training).
+function ui.CraftCapture()
+    if not A.craft then
+        ChatMsg("Aegis: crafting engine not loaded \226\128\148 fully restart WoW.")
+        return
+    end
+    local project, reason
+    if CraftFrame and CraftFrame:IsVisible() then
+        project, reason = A.craft.CaptureCraft()
+    else
+        project, reason = A.craft.CaptureTradeSkill()
+    end
+    if not project then
+        ChatMsg("Aegis: " .. (reason or "could not read that recipe."))
+        return
+    end
+    A.craft.AddProject(project)
+    ChatMsg("Aegis: added '" .. project.name .. "' to Crafting ("
+        .. table.getn(project.reagents) .. " reagent type(s)).")
+    if ui.craftBuilt then
+        ui.craftSel = 1               -- new project is inserted at the front
+        ui.craftExpanded[1] = true
+        ui.RefreshCraftTree()
+    end
+end
+
+-- Put an "Add to Aegis" button on a profession window, anchored to its close
+-- button. Save-original-and-replace only: no secure hooks on 1.12.
+function ui.AttachCraftButton(frame, name)
+    if not frame or getglobal(name) then return end
+    local b = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
+    b:SetWidth(96); b:SetHeight(20)
+    local close = getglobal(frame:GetName() .. "CloseButton")
+    if close then
+        b:SetPoint("RIGHT", close, "LEFT", -4, 0)
+    else
+        b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -40, -14)
+    end
+    b:SetText("Add to Aegis")
+    b:SetScript("OnClick", function() ui.CraftCapture() end)
+end
+
+function ui.HookProfessionFrames()
+    if TradeSkillFrame then
+        ui.AttachCraftButton(TradeSkillFrame, "AegisExchangeAddTradeSkillButton")
+    end
+    if CraftFrame then
+        ui.AttachCraftButton(CraftFrame, "AegisExchangeAddCraftButton")
     end
 end
 
@@ -2369,6 +2834,8 @@ function ui.SelectSubTab(name)
         ui.RefreshSell()
     elseif name == "Buy" then
         ui.RefreshBuy()
+    elseif name == "Crafting" then
+        ui.RefreshCraft()
     end
 end
 
@@ -2521,6 +2988,16 @@ end)
 
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     if ui.frame then ui.frame:Hide() end
+end)
+
+-- Profession windows are load-on-demand: by TRADE_SKILL_SHOW / CRAFT_SHOW the
+-- respective frame exists, so this is the moment to add our "Add to Aegis"
+-- button (AttachCraftButton no-ops if it is already there).
+A.RegisterEvent("TRADE_SKILL_SHOW", function()
+    ui.HookProfessionFrames()
+end)
+A.RegisterEvent("CRAFT_SHOW", function()
+    ui.HookProfessionFrames()
 end)
 
 -- The item in the sell slot changed (placed / removed) or our auctions

@@ -55,6 +55,11 @@ local function DefaultAccountDB()
             lists  = {},   -- array of { name = "...", items = { "Silk Cloth", ... } }
             recent = {},   -- recent search terms, most-recent first (capped)
         },
+        -- Crafting (Crafting tab): recipes captured from the profession window,
+        -- each with its reagents, so you can shop the mats at the AH.
+        crafting = {
+            projects = {},  -- { { name, itemId, reagents = { {name,count,itemId} } } }
+        },
     }
 end
 
