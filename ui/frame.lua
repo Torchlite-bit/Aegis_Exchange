@@ -44,6 +44,10 @@ local STALE_SECONDS = 24 * 60 * 60
 -- + status and progress); the others are placeholders for later stages.
 local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting", "Scan" }
 
+-- Display label per sub-tab (internal keys stay stable). The scan tab also
+-- hosts user settings, so it reads as "Aegis".
+local TAB_LABELS = { Scan = "Aegis" }
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -64,7 +68,7 @@ local function MakeSubTab(parent, name)
     })
     local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     fs:SetPoint("CENTER", b, "CENTER", 0, 0)
-    fs:SetText(name)
+    fs:SetText(TAB_LABELS[name] or name)
     b.label = fs
     b:SetWidth(fs:GetStringWidth() + 30)
     b:SetScript("OnClick", function()
@@ -318,6 +322,7 @@ function ui.BuildWindow()
         .. " Scan Selected runs a fast targeted scan.")
     tip:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
+    ui.BuildAegisSettings(scanPanel, tip)
     ui.BuildSellTab()
     ui.BuildBuyTab()
     ui.BuildCraftTab()
@@ -338,6 +343,197 @@ function ui.BuildWindow()
     -- Land on Buy (the most-used tab); Buy / Sell / Scan are all functional.
     ui.SelectSubTab("Buy")
     ui.Refresh()
+end
+
+-- ---------------------------------------------------------------------------
+-- Aegis tab: user settings (built onto the scan panel, below the scan strip)
+-- ---------------------------------------------------------------------------
+
+StaticPopupDialogs["AEGIS_EXCHANGE_CLEARDB"] = {
+    text = "Clear ALL recorded Aegis price data?\nThis cannot be undone.",
+    button1 = "Clear", button2 = "Cancel",
+    OnAccept = function()
+        A.db.ClearItems()
+        ui.RefreshSettings()
+        ChatMsg("Aegis: price data cleared.")
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.BuildAegisSettings(panel, anchorAbove)
+    -- Section header under the scan controls.
+    local hdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    hdr:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, -18)
+    hdr:SetText("Settings")
+    hdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local function label(text, anchor, dy)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        fs:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, dy)
+        fs:SetText(text)
+        fs:SetTextColor(C.text[1], C.text[2], C.text[3])
+        return fs
+    end
+
+    -- ---- Default post duration --------------------------------------------
+    local durLbl = label("Default post duration:", hdr, -16)
+    ui.setDurBtns = {}
+    local prev = nil
+    local di = 1
+    while di <= table.getn(A.sell.DURATIONS) do
+        local d = A.sell.DURATIONS[di]
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(44); b:SetHeight(20)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else b:SetPoint("LEFT", durLbl, "RIGHT", 10, 0) end
+        b:SetText(d.label)
+        b.minutes = d.minutes
+        b:SetScript("OnClick", function()
+            A.db.SetSetting("duration", b.minutes)
+            ui.ApplySettingsToSell()
+            ui.RefreshSettings()
+        end)
+        ui.setDurBtns[di] = b
+        prev = b
+        di = di + 1
+    end
+
+    -- ---- Default undercut % -----------------------------------------------
+    local ucLbl = label("Default undercut:", durLbl, -20)
+    local uc = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    uc:SetWidth(40); uc:SetHeight(18)
+    uc:SetAutoFocus(false); uc:SetNumeric(true); uc:SetJustifyH("CENTER")
+    uc:SetPoint("LEFT", ucLbl, "RIGHT", 10, 0)
+    uc:SetScript("OnEnterPressed", function()
+        ui.CommitUndercut(); uc:ClearFocus()
+    end)
+    uc:SetScript("OnEscapePressed", function() uc:ClearFocus() end)
+    uc:SetScript("OnEditFocusLost", function() ui.CommitUndercut() end)
+    ui.setUndercut = uc
+    local pctLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    pctLbl:SetPoint("LEFT", ui.setUndercut, "RIGHT", 4, 0)
+    pctLbl:SetText("% below the lowest competitor")
+    pctLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- ---- Default sell price -----------------------------------------------
+    local spLbl = label("Default sell price:", ucLbl, -20)
+    ui.setSellModeBtns = {}
+    local modes = { { "Undercut", "undercut" }, { "Market", "market" },
+                    { "None", "none" } }
+    prev = nil
+    local mi = 1
+    while mi <= table.getn(modes) do
+        local m = modes[mi]
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(72); b:SetHeight(20)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else b:SetPoint("LEFT", spLbl, "RIGHT", 10, 0) end
+        b:SetText(m[1])
+        b.mode = m[2]
+        b:SetScript("OnClick", function()
+            A.db.SetSetting("sellDefault", b.mode)
+            ui.RefreshSettings()
+        end)
+        ui.setSellModeBtns[mi] = b
+        prev = b
+        mi = mi + 1
+    end
+
+    -- ---- Toggles ----------------------------------------------------------
+    local tipChk = CreateFrame("CheckButton", "AegisExchangeSetTooltip", panel,
+        "UICheckButtonTemplate")
+    tipChk:SetWidth(24); tipChk:SetHeight(24)
+    tipChk:SetPoint("TOPLEFT", spLbl, "BOTTOMLEFT", -2, -16)
+    local tipTxt = getglobal(tipChk:GetName() .. "Text")
+    if tipTxt then
+        tipTxt:SetText("Show Aegis price lines on item tooltips")
+        tipTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
+    end
+    tipChk:SetScript("OnClick", function()
+        A.db.SetSetting("tooltip", tipChk:GetChecked() and true or false)
+    end)
+    ui.setTooltip = tipChk
+
+    local profChk = CreateFrame("CheckButton", "AegisExchangeSetProfLine", panel,
+        "UICheckButtonTemplate")
+    profChk:SetWidth(24); profChk:SetHeight(24)
+    profChk:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 0, -4)
+    local profTxt = getglobal(profChk:GetName() .. "Text")
+    if profTxt then
+        profTxt:SetText("Show profit line on profession windows")
+        profTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
+    end
+    profChk:SetScript("OnClick", function()
+        A.db.SetSetting("profLine", profChk:GetChecked() and true or false)
+        ui.UpdateProfLine()
+    end)
+    ui.setProfLine = profChk
+
+    -- ---- Price data -------------------------------------------------------
+    ui.setDataText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.setDataText:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 4, -14)
+    ui.setDataText:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    clearBtn:SetWidth(120); clearBtn:SetHeight(20)
+    clearBtn:SetPoint("LEFT", ui.setDataText, "RIGHT", 14, 0)
+    clearBtn:SetText("Clear price data")
+    clearBtn:SetScript("OnClick", function()
+        StaticPopup_Show("AEGIS_EXCHANGE_CLEARDB")
+    end)
+
+    ui.settingsBuilt = true
+    ui.RefreshSettings()
+end
+
+-- Clamp and store the undercut-percent box.
+function ui.CommitUndercut()
+    if not ui.setUndercut then return end
+    local n = tonumber(ui.setUndercut:GetText())
+    if not n then n = A.db.Setting("undercutPct") end
+    if n < 0 then n = 0 end
+    if n > 90 then n = 90 end
+    A.db.SetSetting("undercutPct", math.floor(n))
+    ui.RefreshSettings()
+end
+
+-- Push the saved default duration to the Sell tab immediately.
+function ui.ApplySettingsToSell()
+    local dur = A.db.Setting("duration")
+    if dur then ui.sellDuration = dur end
+    if ui.sellBuilt then ui.RefreshSell() end
+end
+
+-- Paint the settings widgets from the stored values.
+function ui.RefreshSettings()
+    if not ui.settingsBuilt then return end
+    local dur = A.db.Setting("duration")
+    local di = 1
+    while di <= table.getn(ui.setDurBtns) do
+        local b = ui.setDurBtns[di]
+        if b.minutes == dur then b:LockHighlight() else b:UnlockHighlight() end
+        di = di + 1
+    end
+    local mode = A.db.Setting("sellDefault")
+    local mi = 1
+    while mi <= table.getn(ui.setSellModeBtns) do
+        local b = ui.setSellModeBtns[mi]
+        if b.mode == mode then b:LockHighlight() else b:UnlockHighlight() end
+        mi = mi + 1
+    end
+    if ui.setUndercut then
+        ui.setUndercut:SetText(tostring(A.db.Setting("undercutPct")))
+    end
+    if ui.setTooltip then
+        ui.setTooltip:SetChecked(A.db.Setting("tooltip") ~= false and 1 or nil)
+    end
+    if ui.setProfLine then
+        ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
+    end
+    if ui.setDataText then
+        ui.setDataText:SetText("Price data: " .. A.db.ItemCount()
+            .. " item(s) recorded")
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1824,18 +2020,11 @@ end
 function ui.AttachCraftButton(frame, name)
     if not frame or getglobal(name) then return end
     local b = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
-    b:SetWidth(88); b:SetHeight(20)
-    local close = getglobal(frame:GetName() .. "CloseButton")
-    if pfUI and close then
-        -- pfUI packs its window header tight against a small corner X; drop our
-        -- button a row below the close button so it doesn't sit on the X or the
-        -- "Improves skill" checkbox.
-        b:SetPoint("TOPRIGHT", close, "BOTTOMRIGHT", 0, -2)
-    elseif close then
-        b:SetPoint("RIGHT", close, "LEFT", -8, 0)   -- a touch more gap from the X
-    else
-        b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -44, -14)
-    end
+    b:SetWidth(96); b:SetHeight(20)
+    -- Pin to the frame's BOTTOM-RIGHT, above the Create/Exit buttons. This spot
+    -- is clear in BOTH the stock UI and pfUI (no packed header / corner X to
+    -- fight), and the profit line stacks directly above it.
+    b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -16, 46)
     b:SetText("Add to Aegis")
     b:SetScript("OnClick", function() ui.CraftCapture() end)
 end
@@ -1848,17 +2037,22 @@ function ui.AttachProfLine(frame, btnName, key)
     if not frame then return end
     ui.profLines = ui.profLines or {}
     if ui.profLines[key] then return end
-    -- Anchor to the frame's BOTTOM-RIGHT, in the empty area above the
-    -- Create/Exit buttons -- clear of the skill progress bar up top and of any
-    -- buttons. Sub line sits just below the net line.
-    local net = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    net:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 92)
-    net:SetJustifyH("RIGHT")
-    net:SetWidth(210)
+    -- Stack the two lines directly ABOVE the "Add to Aegis" button (which is
+    -- pinned to the frame's bottom-right). Anchoring to the button keeps the
+    -- whole cluster together in the clear space above the Create/Exit buttons.
+    local btn = getglobal(btnName)
     local sub = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    sub:SetPoint("TOPRIGHT", net, "BOTTOMRIGHT", 0, -2)
+    if btn then
+        sub:SetPoint("BOTTOMRIGHT", btn, "TOPRIGHT", 0, 6)
+    else
+        sub:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -16, 74)
+    end
     sub:SetJustifyH("RIGHT")
     sub:SetWidth(210)
+    local net = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    net:SetPoint("BOTTOMRIGHT", sub, "TOPRIGHT", 0, 2)
+    net:SetJustifyH("RIGHT")
+    net:SetWidth(210)
     ui.profLines[key] = { net = net, sub = sub }
 end
 
@@ -1866,6 +2060,13 @@ end
 -- and blank the other. Cheap enough to run on a timer (a few DB lookups).
 function ui.UpdateProfLine()
     if not A.craft or not ui.profLines then return end
+    -- Aegis-tab toggle: when off, keep every line blank.
+    if A.db.Setting and A.db.Setting("profLine") == false then
+        for _, refs in pairs(ui.profLines) do
+            refs.net:SetText(""); refs.sub:SetText("")
+        end
+        return
+    end
     local key
     if CraftFrame and CraftFrame:IsVisible() and ui.profLines.craft then
         key = "craft"
@@ -1956,7 +2157,7 @@ function ui.BuildSellTab()
     local panel = ui.panels["Sell"]
     if not panel or ui.sellBuilt then return end
     ui.sellBuilt = true
-    ui.sellDuration = A.sell.DEFAULT_DURATION
+    ui.sellDuration = A.db.Setting("duration") or A.sell.DEFAULT_DURATION
 
     -- ---- Header: sell slot + item context -------------------------------
     local slot = CreateFrame("Button", "AegisExchangeSellSlot", panel)
@@ -2378,13 +2579,25 @@ function ui.OnItemListings(rows)
     ui.sellScanState = "done"
     local market = A.db.MarketValue(it.itemId)
     ui.sellListingGroups = A.sell.GroupListings(rows, market)
-    -- Pre-fill the buyout from the undercut rule when the user hasn't typed one.
+    -- Pre-fill the buyout from the default-price setting when the user hasn't
+    -- typed one.
     if util.Trim(ui.sellBuyout:GetText() or "") == "" then
-        local u = A.sell.UndercutUnit(it.itemId)
+        local u = ui.DefaultSellUnit(it.itemId)
         if u then SetMoneyBox(ui.sellBuyout, u) end
     end
     ui.UpdateListingsList()
     ui.RefreshSell()
+end
+
+-- The per-unit price to auto-fill for a freshly slotted item, per the Aegis-tab
+-- "Default sell price" setting. "none" leaves the box empty.
+function ui.DefaultSellUnit(itemId)
+    local mode = A.db.Setting("sellDefault") or "undercut"
+    if mode == "none" then return nil end
+    if mode == "market" then
+        return A.db.MarketValue(itemId) or A.sell.UndercutUnit(itemId)
+    end
+    return A.sell.UndercutUnit(itemId)   -- "undercut" (default)
 end
 
 function ui.UpdateListingsList()
@@ -3077,6 +3290,8 @@ function ui.SelectSubTab(name)
         ui.RefreshBuy()
     elseif name == "Crafting" then
         ui.RefreshCraft()
+    elseif name == "Scan" then
+        ui.RefreshSettings()   -- keep the price-data count current
     end
 end
 
