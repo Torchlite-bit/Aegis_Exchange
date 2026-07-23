@@ -534,17 +534,27 @@ end
 -- Buy tab: shopping-list sidebar + search + browse + buy / bid
 -- ---------------------------------------------------------------------------
 
--- Colour for a "% of market" cell (shared by the Buy and Sell tables):
--- below market = red, exactly at market = yellow, above market = green.
-local function PctColor(pct)
+-- "% of market" cell colours. The two tabs want OPPOSITE signals:
+--   Buy  -- cheap is good: under 100% = green, at 100% = yellow, over = red.
+--   Sell -- dear is good: under 100% = red,   at 100% = yellow, over = green.
+local function PctColorBuy(pct)
     if pct < 100 then
-        return 0.90, 0.38, 0.38   -- under 100%: red
+        return 0.35, 0.85, 0.35   -- under 100%: green (a deal)
     elseif pct == 100 then
         return 0.90, 0.82, 0.35   -- at 100%: yellow
     end
-    return 0.35, 0.85, 0.35       -- over 100%: green
+    return 0.90, 0.38, 0.38       -- over 100%: red (overpriced)
 end
-ui.PctColor = PctColor   -- exposed for tests
+local function PctColorSell(pct)
+    if pct < 100 then
+        return 0.90, 0.38, 0.38   -- under 100%: red (selling cheap)
+    elseif pct == 100 then
+        return 0.90, 0.82, 0.35   -- at 100%: yellow
+    end
+    return 0.35, 0.85, 0.35       -- over 100%: green (selling high)
+end
+ui.PctColorBuy = PctColorBuy     -- exposed for tests
+ui.PctColorSell = PctColorSell
 
 local BUY_ROWS,  BUY_ROW_H  = 11, 20
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
@@ -689,24 +699,45 @@ function ui.BuildBuyTab()
     ui.buyStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.buyStatus:SetText("Type an item name and Search.")
 
-    -- Column headers.
-    local cols = { name = RX + 4, ct = RX + 206, unit = RX + 242,
-                   stack = RX + 342, pct = RX + 462, act = RX + 516 }
-    local mkCol = function(x, text)
+    -- Column layout (row-relative x, width). Sized so Buy+Bid finish well
+    -- before the scrollbar. The unit / stack / % headers are clickable to sort.
+    ui.buySortKey = "unit"
+    ui.buySortDir = "asc"
+    local rowLeft = RX + 4
+    local CX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
+                 buy = 436, bid = 490 }
+    local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
+
+    local mkText = function(cx, text)
         local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -78)
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -78)
         fs:SetText(text)
         return fs
     end
-    mkCol(cols.name, "Item")
-    mkCol(cols.ct, "Ct")
-    mkCol(cols.unit, "Unit price")
-    mkCol(cols.stack, "Stack buyout")
-    mkCol(cols.pct, "% mkt")
+    mkText(CX.name, "Item")
+    mkText(CX.ct, "Ct")
+
+    ui.buyHeaders = {}
+    local mkSort = function(cx, w, text, key)
+        local b = CreateFrame("Button", nil, panel)
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -76)
+        b:SetWidth(w + 14); b:SetHeight(16)
+        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+        fs:SetText(text)
+        b.label = fs
+        b.baseText = text
+        b:SetScript("OnClick", function() ui.SetBuySort(key) end)
+        ui.buyHeaders[key] = b
+        return b
+    end
+    mkSort(CX.unit, CW.unit, "Unit price", "unit")
+    mkSort(CX.stack, CW.stack, "Stack buyout", "stack")
+    mkSort(CX.pct, CW.pct, "% mkt", "pct")
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 4, -94)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BUY_ROW_H, ui.UpdateBuyList)
@@ -732,15 +763,15 @@ function ui.BuildBuyTab()
             fs:SetJustifyH(just or "LEFT")
             return fs
         end
-        row.name  = mkCell(4, 198)
-        row.ct    = mkCell(206, 30, "RIGHT")
-        row.unit  = mkCell(242, 94)
-        row.stack = mkCell(342, 112)
-        row.pct   = mkCell(462, 46)
+        row.name  = mkCell(CX.name, CW.name)
+        row.ct    = mkCell(CX.ct, CW.ct, "RIGHT")
+        row.unit  = mkCell(CX.unit, CW.unit)
+        row.stack = mkCell(CX.stack, CW.stack)
+        row.pct   = mkCell(CX.pct, CW.pct)
 
         local buyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         buyBtn:SetWidth(50); buyBtn:SetHeight(17)
-        buyBtn:SetPoint("LEFT", row, "LEFT", 516, 0)
+        buyBtn:SetPoint("LEFT", row, "LEFT", CX.buy, 0)
         buyBtn:SetText("Buy")
         buyBtn:SetScript("OnClick", function()
             if row.entry then ui.ConfirmBuyout(row.entry) end
@@ -749,7 +780,7 @@ function ui.BuildBuyTab()
 
         local bidBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
         bidBtn:SetWidth(44); bidBtn:SetHeight(17)
-        bidBtn:SetPoint("LEFT", buyBtn, "RIGHT", 4, 0)
+        bidBtn:SetPoint("LEFT", row, "LEFT", CX.bid, 0)
         bidBtn:SetText("Bid")
         bidBtn:SetScript("OnClick", function()
             if row.entry then ui.ConfirmBid(row.entry) end
@@ -1022,16 +1053,49 @@ function ui.UpdateBuyList()
     if not ui.buyScroll then return end
     local all = ui.buyResults or {}
 
-    -- Apply the Max-price filter (per-unit) if set.
+    -- Working copy (so sorting doesn't disturb the engine's row order), with
+    -- the Max-price filter (per-unit) applied.
     local maxUnit = ui.buyMax and util.ParseMoney(util.Trim(ui.buyMax:GetText() or ""))
-    local rows = all
-    if maxUnit and maxUnit > 0 then
-        rows = {}
-        local k = 1
-        while k <= table.getn(all) do
-            local r = all[k]
-            if r.unit and r.unit <= maxUnit then table.insert(rows, r) end
-            k = k + 1
+    local rows = {}
+    local k = 1
+    while k <= table.getn(all) do
+        local r = all[k]
+        if not (maxUnit and maxUnit > 0) or (r.unit and r.unit <= maxUnit) then
+            table.insert(rows, r)
+        end
+        k = k + 1
+    end
+
+    -- Sort by the chosen column / direction (headers are clickable).
+    local sortKey = ui.buySortKey or "unit"
+    local dir = ui.buySortDir or "asc"
+    local function keyOf(r)
+        if sortKey == "stack" then
+            return (r.buyout and r.buyout > 0) and r.buyout or nil
+        elseif sortKey == "pct" then
+            local m = r.itemId and A.db.MarketValue(r.itemId)
+            if m and m > 0 and r.unit then return r.unit / m end
+            return nil
+        end
+        return r.unit
+    end
+    table.sort(rows, function(a, b)
+        local av, bv = keyOf(a), keyOf(b)
+        if not av and not bv then return false end
+        if not av then return false end   -- no price -> always last
+        if not bv then return true end
+        if dir == "desc" then return av > bv end
+        return av < bv
+    end)
+
+    -- Header arrows on the active sort column.
+    if ui.buyHeaders then
+        for hk, hb in pairs(ui.buyHeaders) do
+            local t = hb.baseText
+            if hk == sortKey then
+                t = t .. (dir == "asc" and " \226\134\145" or " \226\134\147")
+            end
+            hb.label:SetText(t)
         end
     end
 
@@ -1045,12 +1109,13 @@ function ui.UpdateBuyList()
             if table.getn(all) == 0 then
                 ui.buyStatus:SetText("No auctions found.")
             else
+                local order = dir == "asc" and "low to high" or "high to low"
                 local shown = ""
                 if maxUnit and maxUnit > 0 then
                     shown = " \226\128\162 " .. total .. " under max"
                 end
                 ui.buyStatus:SetText(totalAuctions .. " auction(s) \226\128\162 "
-                    .. "cheapest first" .. shown)
+                    .. sortKey .. " " .. order .. shown)
             end
             ui.buyPageText:SetText("Page " .. (page + 1) .. " / " .. totalPages)
         else
@@ -1081,7 +1146,7 @@ function ui.UpdateBuyList()
             if market and market > 0 and r.unit then
                 local pct = math.floor(r.unit / market * 100)
                 row.pct:SetText(pct .. "%")
-                row.pct:SetTextColor(PctColor(pct))
+                row.pct:SetTextColor(PctColorBuy(pct))
             else
                 row.pct:SetText("\226\128\148")
                 row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
@@ -1100,6 +1165,18 @@ function ui.UpdateBuyList()
         end
         i = i + 1
     end
+end
+
+-- Click a sortable header: same column toggles direction, a new column resets
+-- to ascending. Re-renders the current results.
+function ui.SetBuySort(key)
+    if ui.buySortKey == key then
+        ui.buySortDir = (ui.buySortDir == "asc") and "desc" or "asc"
+    else
+        ui.buySortKey = key
+        ui.buySortDir = "asc"
+    end
+    ui.UpdateBuyList()
 end
 
 StaticPopupDialogs["AEGIS_EXCHANGE_BUYOUT"] = {
@@ -1212,9 +1289,11 @@ function ui.BuildSellTab()
     ui.sellCtx:SetJustifyH("LEFT")
     ui.sellCtx:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
+    -- Vendor comparison lives in the RIGHT column (below the cap count) so it
+    -- can't collide with the unit-price row that sits just under the slot.
     ui.sellVendor = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellVendor:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -36)
-    ui.sellVendor:SetJustifyH("LEFT")
+    ui.sellVendor:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -60)
+    ui.sellVendor:SetJustifyH("RIGHT")
 
     -- Deposit / total / cap count, right-aligned.
     ui.sellDeposit = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1643,7 +1722,7 @@ function ui.UpdateListingsList()
             end
             if g.pct then
                 row.pct:SetText(g.pct .. "%")
-                row.pct:SetTextColor(PctColor(g.pct))
+                row.pct:SetTextColor(PctColorSell(g.pct))
             else
                 row.pct:SetText("\226\128\148")
                 row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
