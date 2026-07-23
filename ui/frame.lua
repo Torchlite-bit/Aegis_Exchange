@@ -124,17 +124,8 @@ function ui.BuildWindow()
     -- Title bar (also the drag handle). It stops well short of the top-right
     -- corner so its mouse-enabled drag region never overlaps the close button
     -- (otherwise the button is only clickable along its top edge).
-    -- Round Aegis crest in the top-left corner, like a default frame portrait.
-    -- The art is committed as Textures\Logo.tga (circular, transparent corners).
-    local portrait = f:CreateTexture("AegisExchangePortrait", "ARTWORK")
-    portrait:SetWidth(58)
-    portrait:SetHeight(58)
-    portrait:SetPoint("TOPLEFT", f, "TOPLEFT", 7, -7)
-    portrait:SetTexture("Interface\\AddOns\\Aegis_Exchange\\Textures\\Logo")
-    ui.portrait = portrait
-
     local titleBar = CreateFrame("Frame", "AegisExchangeTitleBar", f)
-    titleBar:SetPoint("TOPLEFT", f, "TOPLEFT", 70, -12)
+    titleBar:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -12)
     titleBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -40, -12)
     titleBar:SetHeight(26)
     titleBar:SetBackdrop({
@@ -229,10 +220,9 @@ function ui.BuildWindow()
         panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
         panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
         panel:Hide()
-        -- Buy, Sell, Scan and Crafting are real tabs (built below); rest are
-        -- placeholders.
+        -- Every tab is now a real tab (built below); no placeholders remain.
         if name ~= "Scan" and name ~= "Sell" and name ~= "Buy"
-            and name ~= "Crafting" then
+            and name ~= "Crafting" and name ~= "Auctions" then
             local label = panel:CreateFontString(
                 "AegisExchangePanelLabel" .. name, "OVERLAY",
                 "GameFontNormalLarge")
@@ -335,6 +325,7 @@ function ui.BuildWindow()
     ui.BuildSellTab()
     ui.BuildBuyTab()
     ui.BuildCraftTab()
+    ui.BuildAuctionsTab()
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -2156,6 +2147,199 @@ ui.profPoller:SetScript("OnUpdate", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Auctions tab: your active auctions -- time left, bid state, undercut flag,
+-- and a per-row Cancel.
+-- ---------------------------------------------------------------------------
+
+local AUC_ROWS, AUC_ROW_H = 12, 21
+-- Row-relative column x / width.
+local ACX = { name = 2, qty = 176, unit = 216, stack = 300, time = 392,
+              mkt = 452, cancel = 540 }
+local ACW = { name = 172, qty = 34, unit = 80, stack = 88, time = 56, mkt = 84 }
+
+function ui.BuildAuctionsTab()
+    local panel = ui.panels["Auctions"]
+    if not panel or ui.aucBuilt then return end
+    ui.aucBuilt = true
+
+    -- Summary + refresh.
+    ui.aucSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.aucSummary:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -12)
+    ui.aucSummary:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.aucSummary:SetText("Your auctions")
+
+    local refresh = CreateFrame("Button", "AegisExchangeAucRefreshButton",
+        panel, "UIPanelButtonTemplate")
+    refresh:SetWidth(72); refresh:SetHeight(20)
+    refresh:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
+    refresh:SetText("Refresh")
+    refresh:SetScript("OnClick", function() ui.RefreshAuctions(true) end)
+
+    ui.aucStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.aucStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -34)
+    ui.aucStatus:SetJustifyH("LEFT")
+    ui.aucStatus:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- Column headers.
+    local rowLeft = 6
+    local hdr = function(cx, text, just)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -54)
+        fs:SetText(text)
+        if just then fs:SetJustifyH(just) end
+        return fs
+    end
+    hdr(ACX.name, "Item")
+    hdr(ACX.qty, "Qty")
+    hdr(ACX.unit, "Unit")
+    hdr(ACX.stack, "Buyout")
+    hdr(ACX.time, "Time")
+    hdr(ACX.mkt, "vs market")
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeAucScroll",
+        panel, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(AUC_ROW_H, ui.UpdateAuctionsList)
+    end)
+    ui.aucScroll = scroll
+
+    ui.aucRows = {}
+    local i = 1
+    while i <= AUC_ROWS do
+        local row = CreateFrame("Frame", nil, panel)
+        row:SetHeight(AUC_ROW_H)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.aucRows[i - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.aucRows[i - 1], "BOTTOMRIGHT", 0, 0)
+        end
+        local mk = function(cx, w, just)
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+            fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+            return fs
+        end
+        row.name = mk(ACX.name, ACW.name)
+        row.qty  = mk(ACX.qty, ACW.qty)
+        row.unit = mk(ACX.unit, ACW.unit)
+        row.stack = mk(ACX.stack, ACW.stack)
+        row.time = mk(ACX.time, ACW.time)
+        row.mkt  = mk(ACX.mkt, ACW.mkt)
+        local cancel = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        cancel:SetWidth(64); cancel:SetHeight(18)
+        cancel:SetPoint("LEFT", row, "LEFT", ACX.cancel, 0)
+        cancel:SetText("Cancel")
+        cancel:SetScript("OnClick", function()
+            if row.entry then ui.ConfirmCancelAuction(row.entry) end
+        end)
+        row.cancelBtn = cancel
+        row:Hide()
+        ui.aucRows[i] = row
+        i = i + 1
+    end
+end
+
+-- Read the owner list into ui.aucAuctions; `request` also pings the server.
+function ui.RefreshAuctions(request)
+    if not ui.aucBuilt then return end
+    if request then A.sell.RequestOwnerAuctions() end
+    ui.aucAuctions = A.sell.OwnerAuctions()
+    ui.UpdateAuctionsList()
+end
+
+function ui.UpdateAuctionsList()
+    if not ui.aucScroll then return end
+    local rows = ui.aucAuctions or {}
+    local total = table.getn(rows)
+
+    local cap = A.sell.CAP or 120
+    ui.aucSummary:SetText("Your auctions: " .. total .. " / " .. cap)
+    if total == 0 then
+        ui.aucStatus:SetText("No active auctions. Post some on the Sell tab.")
+    else
+        ui.aucStatus:SetText("Cancel refunds the item (deposit is forfeit)."
+            .. "  Undercut = someone is cheaper than you.")
+    end
+
+    FauxScrollFrame_Update(ui.aucScroll, total, AUC_ROWS, AUC_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.aucScroll)
+    local i = 1
+    while i <= AUC_ROWS do
+        local row = ui.aucRows[i]
+        local r = rows[i + offset]
+        if r then
+            ui.FillAuctionRow(row, r)
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+function ui.FillAuctionRow(row, r)
+    row.entry = r
+    row.name:SetText(r.name)
+    local q = r.quality
+    if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
+        local c = ITEM_QUALITY_COLORS[q]
+        row.name:SetTextColor(c.r, c.g, c.b)
+    else
+        row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+    end
+    row.qty:SetText("x" .. r.count)
+    row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
+    if r.buyout and r.buyout > 0 then
+        row.stack:SetText(util.FormatMoney(r.buyout, true))
+    else
+        row.stack:SetText("bid only")
+    end
+    row.time:SetText(A.sell.TimeLeftText(r.timeLeft))
+
+    -- Undercut check vs the recorded market minimum. mkt below your unit means
+    -- a cheaper listing exists (you're undercut).
+    local mkt = r.itemId and A.db.MinBuyout(r.itemId)
+    if mkt and mkt > 0 and r.unit then
+        if r.unit <= mkt then
+            row.mkt:SetText("lowest")
+            row.mkt:SetTextColor(0.30, 0.85, 0.30)
+        else
+            row.mkt:SetText("under " .. util.FormatMoney(mkt, true))
+            row.mkt:SetTextColor(0.90, 0.30, 0.30)
+        end
+    else
+        row.mkt:SetText("\226\128\148")
+        row.mkt:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    row:Show()
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_CANCEL"] = {
+    text = "Cancel your auction of %s?\nThe item returns by mail; the deposit is lost.",
+    button1 = "Cancel auction", button2 = "Keep",
+    OnAccept = function() ui.DoCancelAuction() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmCancelAuction(r)
+    ui.pendingCancel = r
+    StaticPopup_Show("AEGIS_EXCHANGE_CANCEL", r.name .. " (x" .. r.count .. ")")
+end
+
+function ui.DoCancelAuction()
+    local r = ui.pendingCancel
+    ui.pendingCancel = nil
+    if not r then return end
+    if A.sell.CancelOwnerAuction(r.index) then
+        ChatMsg("Aegis: cancelled " .. r.name .. " x" .. r.count .. ".")
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- Sell tab: bag browser + per-item listing scan + post
 -- ---------------------------------------------------------------------------
 
@@ -3299,6 +3483,8 @@ function ui.SelectSubTab(name)
         ui.RefreshBuy()
     elseif name == "Crafting" then
         ui.RefreshCraft()
+    elseif name == "Auctions" then
+        ui.RefreshAuctions(true)
     elseif name == "Scan" then
         ui.RefreshSettings()   -- keep the price-data count current
     end
@@ -3481,6 +3667,7 @@ A.RegisterEvent("NEW_AUCTION_UPDATE", function()
 end)
 A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
     ui.RefreshSell()
+    if ui.aucBuilt then ui.RefreshAuctions(false) end
 end)
 -- Bags changed (looted, moved, sold): refresh the Sell tab's bag browser, but
 -- only while it's the visible tab so we don't rescan bags needlessly.

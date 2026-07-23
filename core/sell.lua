@@ -75,6 +75,72 @@ function sell.AtCap()
     return sell.OwnerCount() >= sell.CAP
 end
 
+-- ---------------------------------------------------------------------------
+-- Owned auctions (Auctions tab): read + cancel
+-- ---------------------------------------------------------------------------
+
+-- 1.12 time-left codes -> short labels. Turtle multiplies real durations x3, so
+-- these buckets are wider in wall-clock time, but the codes are unchanged.
+local TIME_LEFT = { "< 30m", "< 2h", "< 12h", "> 12h" }
+function sell.TimeLeftText(code)
+    return code and TIME_LEFT[code] or "\226\128\148"
+end
+
+-- Ask the server to (re)send your auction list. Fires AUCTION_OWNED_LIST_UPDATE
+-- when it lands. Optional on some clients, so it's guarded.
+function sell.RequestOwnerAuctions()
+    if GetOwnerAuctionItems then GetOwnerAuctionItems(0) end
+end
+
+-- Read your active auctions from the "owner" list into plain rows. Bid/buyout
+-- are per WHOLE stack (as the API reports); unit is derived for undercut checks.
+function sell.OwnerAuctions()
+    local rows = {}
+    local n = GetNumAuctionItems("owner")
+    local i = 1
+    while i <= (n or 0) do
+        local name, texture, count, quality, canUse, level, minBid, minInc,
+              buyout, bidAmount, highBidder = GetAuctionItemInfo("owner", i)
+        if name then
+            count = count or 1
+            local itemId
+            if GetAuctionItemLink then
+                itemId = util.ItemIdFromLink(GetAuctionItemLink("owner", i))
+            end
+            local timeLeft
+            if GetAuctionItemTimeLeft then
+                timeLeft = GetAuctionItemTimeLeft("owner", i)
+            end
+            table.insert(rows, {
+                index      = i,
+                name       = name,
+                texture    = texture,
+                count      = count,
+                quality    = quality,
+                buyout     = buyout or 0,
+                unit       = (buyout and buyout > 0)
+                             and math.floor(buyout / count) or nil,
+                bid        = bidAmount or 0,
+                minBid     = minBid or 0,
+                hasBid     = (bidAmount and bidAmount > 0) and true or false,
+                highBidder = highBidder,
+                timeLeft   = timeLeft,
+                itemId     = itemId,
+            })
+        end
+        i = i + 1
+    end
+    return rows
+end
+
+-- Cancel the auction at owner index `i`. The refreshed list arrives via
+-- AUCTION_OWNED_LIST_UPDATE.
+function sell.CancelOwnerAuction(i)
+    if not i or not CancelAuction then return false end
+    CancelAuction(i)
+    return true
+end
+
 -- Approximate deposit (copper) for the slotted item at `minutes`. Prefers the
 -- client's own CalculateAuctionDeposit (present once the AH UI has loaded),
 -- scaled by the Turtle factor. Returns (copper, isApprox); isApprox is true on
