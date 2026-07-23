@@ -1274,7 +1274,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local CRAFT_ROWS,  CRAFT_ROW_H  = 11, 20
-local CSIDE_ROWS,  CSIDE_ROW_H  = 15, 18
+local CSIDE_ROWS,  CSIDE_ROW_H  = 10, 18
 local CSIDE_W = 172   -- recipe-tree width (reagent lines carry a count)
 
 function ui.BuildCraftTab()
@@ -1292,7 +1292,7 @@ function ui.BuildCraftTab()
     local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftSideScroll",
         panel, "FauxScrollFrameTemplate")
     sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 42)
+    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 132)
     sideScroll:SetWidth(CSIDE_W)
     sideScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CSIDE_ROW_H, ui.UpdateCraftTree)
@@ -1330,6 +1330,33 @@ function ui.BuildCraftTab()
         ui.craftSideRows[i] = row
         i = i + 1
     end
+
+    -- Profit estimate for the selected recipe (buy mats -> craft -> resell).
+    local estHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    estHdr:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 116)
+    estHdr:SetText("Profit estimate")
+    estHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftCostFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 100)
+    ui.craftCostFS:SetWidth(CSIDE_W); ui.craftCostFS:SetJustifyH("LEFT")
+
+    ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftValueFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 84)
+    ui.craftValueFS:SetWidth(CSIDE_W); ui.craftValueFS:SetJustifyH("LEFT")
+
+    ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 64)
+    ui.craftNetFS:SetWidth(CSIDE_W); ui.craftNetFS:SetJustifyH("LEFT")
+
+    -- Fill the DB with a fresh price for the crafted item and every reagent.
+    local priceBtn = CreateFrame("Button", "AegisExchangeCraftPriceButton",
+        panel, "UIPanelButtonTemplate")
+    priceBtn:SetWidth(CSIDE_W); priceBtn:SetHeight(18)
+    priceBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 42)
+    priceBtn:SetText("Price recipe")
+    priceBtn:SetScript("OnClick", function() ui.CraftPriceRecipe() end)
+    ui.craftPriceBtn = priceBtn
 
     -- Delete the selected recipe.
     local delBtn = CreateFrame("Button", "AegisExchangeCraftDelButton",
@@ -1531,11 +1558,13 @@ function ui.OnCraftTreeClick(e)
         ui.craftSel = e.index
         ui.craftExpanded[e.index] = not ui.craftExpanded[e.index]
         ui.RefreshCraftTree()
+        ui.UpdateCraftSummary()
     elseif e.kind == "reagent" then
         ui.craftSel = e.projIndex
         ui.craftBox:SetText(e.name)
         ui.DoCraftSearch()
         ui.RefreshCraftTree()
+        ui.UpdateCraftSummary()
     end
 end
 
@@ -1547,6 +1576,7 @@ function ui.CraftDeleteProject()
     A.craft.DeleteProject(ui.craftSel)
     ui.craftSel = nil
     ui.RefreshCraftTree()
+    ui.UpdateCraftSummary()
 end
 
 -- ---- search + results (Buy-style, shared row helpers) ------------------
@@ -1567,13 +1597,75 @@ function ui.DoCraftSearch()
     ui.craftResults = nil
     ui.UpdateCraftList()
     local ok, err = A.buy.Search(name, {
-        onResults = function(rows) ui.craftResults = rows; ui.UpdateCraftList() end,
+        onResults = function(rows)
+            ui.craftResults = rows
+            ui.UpdateCraftList()
+            ui.UpdateCraftSummary()   -- the search fed the price DB
+        end,
         onState = function() ui.RefreshCraftStatus() end,
     })
     if not ok then
         ui.craftStatus:SetText(err or "Could not search.")
     else
         ui.craftStatus:SetText("Searching...")
+    end
+end
+
+-- Price every part of the selected recipe in one go: search the crafted item
+-- (when it's an auctionable item) and each reagent, one after another, so the
+-- price DB is filled and the profit estimate resolves. Only the last search's
+-- listings remain on the right; the rest just warm the DB.
+function ui.CraftPriceRecipe()
+    if not A.buy or not A.craft then return end
+    local p = ui.craftSel and A.craft.Projects()[ui.craftSel]
+    if not p then
+        ChatMsg("Aegis: select a recipe on the left first.")
+        return
+    end
+    local q = {}
+    if p.itemId then table.insert(q, p.name) end   -- crafted item, if it's an item
+    local i = 1
+    while i <= table.getn(p.reagents) do
+        table.insert(q, p.reagents[i].name)
+        i = i + 1
+    end
+    if table.getn(q) == 0 then
+        ChatMsg("Aegis: nothing to price for this recipe.")
+        return
+    end
+    ui.craftPriceQueue = q
+    ui.CraftRunPriceQueue()
+end
+
+function ui.CraftRunPriceQueue()
+    if not ui.craftPriceQueue or table.getn(ui.craftPriceQueue) == 0 then
+        ui.craftPriceQueue = nil
+        ui.UpdateCraftSummary()
+        if ui.craftStatus then
+            ui.craftStatus:SetText("Priced \226\128\148 net updated on the left.")
+        end
+        return
+    end
+    local term = table.remove(ui.craftPriceQueue, 1)
+    ui.craftBox:SetText(term)
+    ui.craftTitle:SetText(term)
+    local ok = A.buy.Search(term, {
+        onResults = function(rows)
+            ui.craftResults = rows
+            ui.UpdateCraftList()
+            ui.UpdateCraftSummary()
+            ui.CraftRunPriceQueue()   -- next part
+        end,
+        onState = function() ui.RefreshCraftStatus() end,
+    })
+    if not ok then
+        ui.craftPriceQueue = nil
+        if ui.craftStatus then ui.craftStatus:SetText("AH busy \226\128\148 try again.") end
+        return
+    end
+    if ui.craftStatus then
+        ui.craftStatus:SetText("Pricing... ("
+            .. table.getn(ui.craftPriceQueue) .. " left)")
     end
 end
 
@@ -1605,6 +1697,51 @@ function ui.RefreshCraft()
     end
     ui.RefreshCraftTree()
     ui.UpdateCraftList()
+    ui.UpdateCraftSummary()
+end
+
+-- Paint the Cost / Sells-for / Net lines for the selected recipe.
+function ui.UpdateCraftSummary()
+    if not ui.craftCostFS then return end
+    local p = ui.craftSel and A.craft and A.craft.Projects()[ui.craftSel]
+    if not p then
+        ui.craftCostFS:SetText("Reagents: \226\128\148")
+        ui.craftValueFS:SetText("Sells for: \226\128\148")
+        ui.craftNetFS:SetText("Net: \226\128\148")
+        ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        return
+    end
+    local cost, complete = A.craft.CostOf(p)
+    local value, known = A.craft.ValueOf(p)
+
+    if cost > 0 and not complete then
+        ui.craftCostFS:SetText("Reagents: " .. util.FormatMoney(cost, true)
+            .. " +?")
+    elseif complete then
+        ui.craftCostFS:SetText("Reagents: " .. util.FormatMoney(cost, true))
+    else
+        ui.craftCostFS:SetText("Reagents: |cff808080? \226\128\148 Price recipe|r")
+    end
+
+    if known then
+        ui.craftValueFS:SetText("Sells for: " .. util.FormatMoney(value, true))
+    else
+        ui.craftValueFS:SetText("Sells for: |cff808080?|r")
+    end
+
+    local net, netKnown = A.craft.NetOf(p)
+    if netKnown then
+        local word = net >= 0 and "Profit: " or "Loss: "
+        ui.craftNetFS:SetText(word .. util.FormatMoney(math.abs(net), true))
+        if net >= 0 then
+            ui.craftNetFS:SetTextColor(0.30, 0.85, 0.30)
+        else
+            ui.craftNetFS:SetTextColor(0.90, 0.30, 0.30)
+        end
+    else
+        ui.craftNetFS:SetText("Net: |cff808080need prices|r")
+        ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
 end
 
 function ui.UpdateCraftList()
@@ -1676,6 +1813,7 @@ function ui.CraftCapture()
         ui.craftSel = 1               -- new project is inserted at the front
         ui.craftExpanded[1] = true
         ui.RefreshCraftTree()
+        ui.UpdateCraftSummary()
     end
 end
 
