@@ -124,17 +124,8 @@ function ui.BuildWindow()
     -- Title bar (also the drag handle). It stops well short of the top-right
     -- corner so its mouse-enabled drag region never overlaps the close button
     -- (otherwise the button is only clickable along its top edge).
-    -- Round Aegis crest in the top-left corner, like a default frame portrait.
-    -- The art is committed as Textures\Logo.tga (circular, transparent corners).
-    local portrait = f:CreateTexture("AegisExchangePortrait", "ARTWORK")
-    portrait:SetWidth(58)
-    portrait:SetHeight(58)
-    portrait:SetPoint("TOPLEFT", f, "TOPLEFT", 7, -7)
-    portrait:SetTexture("Interface\\AddOns\\Aegis_Exchange\\Textures\\Logo")
-    ui.portrait = portrait
-
     local titleBar = CreateFrame("Frame", "AegisExchangeTitleBar", f)
-    titleBar:SetPoint("TOPLEFT", f, "TOPLEFT", 70, -12)
+    titleBar:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -12)
     titleBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -40, -12)
     titleBar:SetHeight(26)
     titleBar:SetBackdrop({
