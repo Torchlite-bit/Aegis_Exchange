@@ -168,6 +168,13 @@ function db.MinBuyout(itemId)
     return rec.daily[newest]
 end
 
+-- Best "buy it now" unit price for estimates: the most recent daily minimum
+-- buyout, falling back to the market median when today's data is thin. Used by
+-- the crafting profit estimate.
+function db.BestUnit(itemId)
+    return db.MinBuyout(itemId) or db.MarketValue(itemId)
+end
+
 -- Market value: time-weighted MEDIAN of up to the last KEEP_DAYS daily
 -- minima. Each value's weight decays by DECAY per day of age, so recent days
 -- dominate slightly but a run of old data still counts. Returns nil if the

@@ -264,6 +264,18 @@ function buy.ReadPage()
         i = i + 1
     end
 
+    -- Ordinary browsing feeds the price DB too (not just full scans): fold each
+    -- listing's unit buyout into today's daily minimum. This is what makes the
+    -- % market column and the crafting profit estimate work off searches alone.
+    local ri = 1
+    while ri <= table.getn(rows) do
+        local r = rows[ri]
+        if r.itemId and r.unit then
+            A.db.RecordAuction(r.itemId, r.unit, r.name)
+        end
+        ri = ri + 1
+    end
+
     -- Cheapest unit buyout first (bid-only auctions, unit = nil, sink to the
     -- bottom); the real `index` is preserved so buying still hits the right
     -- listing.
@@ -404,6 +416,13 @@ function craft.CaptureTradeSkill()
     if GetTradeSkillItemLink then
         itemId = util.ItemIdFromLink(GetTradeSkillItemLink(id))
     end
+    -- How many the recipe yields (for the profit estimate). Optional API on
+    -- 1.12 -- default 1 when unavailable.
+    local made = 1
+    if GetTradeSkillNumMade then
+        local minMade = GetTradeSkillNumMade(id)
+        if minMade and minMade > 0 then made = minMade end
+    end
     local reagents = {}
     local n = GetTradeSkillNumReagents(id) or 0
     local r = 1
@@ -419,7 +438,60 @@ function craft.CaptureTradeSkill()
         end
         r = r + 1
     end
-    return { name = name, itemId = itemId, reagents = reagents }
+    return { name = name, itemId = itemId, made = made, reagents = reagents }
+end
+
+-- Faction consignment cut applied to a sale on Turtle (see CLAUDE.md).
+craft.AH_CUT = 0.05
+
+-- Resolve a stored reagent/product to an itemId, using the captured link id
+-- first and the name->id map (filled by scans/searches) as a fallback.
+local function ResolveId(itemId, name)
+    if itemId then return itemId end
+    if name and A.db and A.db.IdFromName then return A.db.IdFromName(name) end
+    return nil
+end
+
+-- Total cost to buy this recipe's reagents at the best known unit price.
+-- Returns (copperTotal, complete, missingNames): complete is false (and the
+-- name is listed in missingNames) when a reagent has no recorded price yet.
+function craft.CostOf(project)
+    local total, complete, missing = 0, true, {}
+    if not project or not project.reagents then return 0, false, missing end
+    local i = 1
+    while i <= table.getn(project.reagents) do
+        local r = project.reagents[i]
+        local id = ResolveId(r.itemId, r.name)
+        local unit = id and A.db.BestUnit(id)
+        if unit then
+            total = total + unit * (r.count or 1)
+        else
+            complete = false
+            table.insert(missing, r.name)
+        end
+        i = i + 1
+    end
+    return total, complete, missing
+end
+
+-- Best known sale value of the crafted item (× quantity made). Returns
+-- (copper, known). Enchanting crafts have no item, so known is false.
+function craft.ValueOf(project)
+    if not project then return nil, false end
+    local id = ResolveId(project.itemId, project.name)
+    local unit = id and A.db.BestUnit(id)
+    if not unit then return nil, false end
+    return unit * (project.made or 1), true
+end
+
+-- Estimated net if you buy the mats, craft, and resell: sale value minus the
+-- AH cut, minus reagent cost. Returns (net, complete) where complete means
+-- both sides were fully priced.
+function craft.NetOf(project)
+    local cost, costComplete = craft.CostOf(project)
+    local value, valueKnown = craft.ValueOf(project)
+    if not (costComplete and valueKnown) then return nil, false end
+    return math.floor(value * (1 - craft.AH_CUT) - cost), true
 end
 
 -- Capture the recipe selected in the craft window (Enchanting).
