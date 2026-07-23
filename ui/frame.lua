@@ -1833,14 +1833,112 @@ function ui.AttachCraftButton(frame, name)
     b:SetScript("OnClick", function() ui.CraftCapture() end)
 end
 
+-- A live "Profit / Loss" readout under our button on a profession window. It
+-- works with the AH CLOSED -- it reads the price DB (filled by past scans and
+-- searches), not the live AH. Two font strings: a coloured net line and a dim
+-- mats/sells breakdown.
+function ui.AttachProfLine(frame, btnName, key)
+    if not frame then return end
+    ui.profLines = ui.profLines or {}
+    if ui.profLines[key] then return end
+    local btn = getglobal(btnName)
+    local net = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    if btn then
+        net:SetPoint("TOPRIGHT", btn, "BOTTOMRIGHT", 0, -5)
+    else
+        net:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -40, -40)
+    end
+    net:SetJustifyH("RIGHT")
+    net:SetWidth(170)
+    local sub = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    sub:SetPoint("TOPRIGHT", net, "BOTTOMRIGHT", 0, -2)
+    sub:SetJustifyH("RIGHT")
+    sub:SetWidth(170)
+    ui.profLines[key] = { net = net, sub = sub }
+end
+
+-- Paint the profit line for whichever profession window is currently visible,
+-- and blank the other. Cheap enough to run on a timer (a few DB lookups).
+function ui.UpdateProfLine()
+    if not A.craft or not ui.profLines then return end
+    local key
+    if CraftFrame and CraftFrame:IsVisible() and ui.profLines.craft then
+        key = "craft"
+    elseif TradeSkillFrame and TradeSkillFrame:IsVisible()
+        and ui.profLines.tradeskill then
+        key = "tradeskill"
+    end
+    -- Blank the line on any window that isn't the active one.
+    for k, refs in pairs(ui.profLines) do
+        if k ~= key then refs.net:SetText(""); refs.sub:SetText("") end
+    end
+    if not key then return end
+    local refs = ui.profLines[key]
+    local p = A.craft.Current()
+    if not p then refs.net:SetText(""); refs.sub:SetText(""); return end
+
+    local cost, complete = A.craft.CostOf(p)
+    local value, known = A.craft.ValueOf(p)
+    local net, netKnown = A.craft.NetOf(p)
+    if netKnown then
+        local word = net >= 0 and "Profit " or "Loss "
+        refs.net:SetText("Aegis: " .. word .. util.FormatMoney(math.abs(net), true))
+        if net >= 0 then
+            refs.net:SetTextColor(0.30, 0.85, 0.30)
+        else
+            refs.net:SetTextColor(0.90, 0.30, 0.30)
+        end
+        refs.sub:SetText("mats " .. util.FormatMoney(cost, true)
+            .. "  sells " .. util.FormatMoney(value, true))
+    else
+        -- Missing prices: show what we can and point at the AH.
+        refs.net:SetText("Aegis: price the mats in the AH")
+        refs.net:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        local matsTxt
+        if cost > 0 then
+            matsTxt = "mats " .. util.FormatMoney(cost, true)
+                .. (complete and "" or " +?")
+        else
+            matsTxt = "mats ?"
+        end
+        local sellTxt = known and ("sells " .. util.FormatMoney(value, true))
+            or "sells ?"
+        refs.sub:SetText(matsTxt .. "  " .. sellTxt)
+    end
+end
+
 function ui.HookProfessionFrames()
     if TradeSkillFrame then
         ui.AttachCraftButton(TradeSkillFrame, "AegisExchangeAddTradeSkillButton")
+        ui.AttachProfLine(TradeSkillFrame,
+            "AegisExchangeAddTradeSkillButton", "tradeskill")
     end
     if CraftFrame then
         ui.AttachCraftButton(CraftFrame, "AegisExchangeAddCraftButton")
+        ui.AttachProfLine(CraftFrame, "AegisExchangeAddCraftButton", "craft")
     end
+    if ui.profPoller then ui.profPoller:Show() end
+    ui.UpdateProfLine()
 end
+
+-- Poll the open profession window so the profit line tracks the selected
+-- recipe (there is no "selection changed" event on 1.12) and picks up new
+-- prices from a scan/search. Self-idles when no profession window is open.
+ui.profPoller = CreateFrame("Frame", "AegisExchangeProfPoller")
+ui.profPoller:Hide()
+ui.profPoller._accum = 0
+ui.profPoller:SetScript("OnUpdate", function()
+    ui.profPoller._accum = ui.profPoller._accum + arg1
+    if ui.profPoller._accum < 0.3 then return end
+    ui.profPoller._accum = 0
+    local tsVis = TradeSkillFrame and TradeSkillFrame:IsVisible()
+    local crVis = CraftFrame and CraftFrame:IsVisible()
+    if not tsVis and not crVis then
+        ui.profPoller:Hide()
+        return
+    end
+    ui.UpdateProfLine()
+end)
 
 -- ---------------------------------------------------------------------------
 -- Sell tab: bag browser + per-item listing scan + post
@@ -3136,6 +3234,13 @@ A.RegisterEvent("TRADE_SKILL_SHOW", function()
 end)
 A.RegisterEvent("CRAFT_SHOW", function()
     ui.HookProfessionFrames()
+end)
+-- Stop the profit-line poller when the profession window closes.
+A.RegisterEvent("TRADE_SKILL_CLOSE", function()
+    if ui.profPoller then ui.profPoller:Hide() end
+end)
+A.RegisterEvent("CRAFT_CLOSE", function()
+    if ui.profPoller then ui.profPoller:Hide() end
 end)
 
 -- The item in the sell slot changed (placed / removed) or our auctions

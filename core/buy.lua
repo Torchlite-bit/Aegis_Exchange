@@ -518,3 +518,18 @@ function craft.CaptureCraft()
     end
     return { name = name, reagents = reagents }
 end
+
+-- The recipe currently selected in whichever profession window is OPEN, as a
+-- transient project (NOT stored). Used by the live profit line on the
+-- profession window. Returns a project or (nil, reason). Craft (Enchanting)
+-- takes priority when its window is the visible one.
+function craft.Current()
+    if CraftFrame and CraftFrame.IsVisible and CraftFrame:IsVisible() then
+        return craft.CaptureCraft()
+    end
+    if TradeSkillFrame and TradeSkillFrame.IsVisible
+        and TradeSkillFrame:IsVisible() then
+        return craft.CaptureTradeSkill()
+    end
+    return nil, "No profession open."
+end
