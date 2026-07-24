@@ -218,7 +218,10 @@ end
 sell.listings   = nil   -- raw rows from the last item scan (sorted cheapest 1st)
 sell.scanItemId = nil   -- item those rows are for
 sell.scanName   = nil
-sell.scanWhen   = nil    -- epoch of the last completed item scan
+sell.scanWhen   = nil   -- epoch of the last completed item scan
+
+sell.cache      = {}    -- { [itemId] = { listings, when } }
+sell.CACHE_TTL  = 3600   -- seconds a cached result stays valid
 
 -- Lowest per-unit buyout among the last scan's listings. `excludeMine` skips
 -- your own auctions (so undercut targets other sellers). Returns nil if none.
@@ -242,6 +245,16 @@ end
 -- onDone(rows). onProgress(page, total) fires per page. Returns false if the
 -- scanner is busy with another scan.
 function sell.ScanItem(itemName, itemId, onProgress, onDone)
+    -- Cache hit: return stored results without a new scan.
+    local entry = sell.cache[itemId]
+    if entry and time() - entry.when < sell.CACHE_TTL then
+        sell.listings   = entry.listings
+        sell.scanItemId = itemId
+        sell.scanName   = itemName
+        sell.scanWhen   = entry.when
+        if onDone then onDone(sell.listings) end
+        return true
+    end
     if A.scan.IsRunning() or A.scan.IsPaused() then
         return false
     end
@@ -271,6 +284,23 @@ function sell.ScanItem(itemName, itemId, onProgress, onDone)
                 return au < bu
             end)
             sell.scanWhen = time()
+            -- Store a deep copy in the cache so later mutations to sell.listings
+            -- don't corrupt the cached data.
+            local copy = {}
+            local li = 1
+            while li <= table.getn(sell.listings) do
+                local r = sell.listings[li]
+                table.insert(copy, {
+                    count  = r.count,
+                    buyout = r.buyout,
+                    unit   = r.unit,
+                    minBid = r.minBid,
+                    owner  = r.owner,
+                    isMine = r.isMine,
+                })
+                li = li + 1
+            end
+            sell.cache[itemId] = { listings = copy, when = sell.scanWhen }
             if onDone then onDone(sell.listings) end
         end,
     })

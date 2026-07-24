@@ -2694,9 +2694,18 @@ function ui.BuildSellTab()
         ic:Hide()
         row.icon = ic
         local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("LEFT", row, "LEFT", 24, 0)
+        lbl:SetPoint("LEFT", row, "LEFT", 30, 0)
         lbl:SetJustifyH("LEFT")
         row.label = lbl
+        -- Cache indicator: small green asterisk left of the label, between the
+        -- icon and the item name so long names never overlap it.
+        local dot = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        dot:SetPoint("LEFT", row, "LEFT", 20, 0)
+        dot:SetJustifyH("LEFT")
+        dot:SetTextColor(0.30, 0.85, 0.30)
+        dot:SetText("*")
+        dot:Hide()
+        row.cacheDot = dot
         row:SetScript("OnClick", function()
             local e = row.entry
             if e and e.kind == "item" then ui.SelectBagEntry(e.item) end
@@ -2828,6 +2837,7 @@ function ui.UpdateBagList()
             row.entry = e
             if e.kind == "cat" then
                 row.icon:Hide()
+                row.cacheDot:Hide()
                 row.label:ClearAllPoints()
                 row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
                 row.label:SetText(e.name .. " (" .. e.num .. ")")
@@ -2840,8 +2850,15 @@ function ui.UpdateBagList()
                 else
                     row.icon:Hide()
                 end
+                -- Show the cache dot when this item has a fresh scan result cached.
+                local ce = A.sell.cache[it.itemId]
+                if ce and time() - ce.when < A.sell.CACHE_TTL then
+                    row.cacheDot:Show()
+                else
+                    row.cacheDot:Hide()
+                end
                 row.label:ClearAllPoints()
-                row.label:SetPoint("LEFT", row, "LEFT", 24, 0)
+                row.label:SetPoint("LEFT", row, "LEFT", 30, 0)
                 local txt = it.name
                 if it.count and it.count > 1 then txt = txt .. " x" .. it.count end
                 row.label:SetText(txt)
@@ -2881,7 +2898,11 @@ function ui.MaybeScanSlotItem()
     local started = A.sell.ScanItem(it.name, it.itemId, nil, function(rows)
         ui.OnItemListings(rows)
     end)
-    ui.sellScanState = started and "scanning" or "busy"
+    -- On a cache hit, onDone fires synchronously and sellListingGroups is
+    -- already populated. Only mark "scanning" when a real scan is in flight.
+    if not ui.sellListingGroups then
+        ui.sellScanState = started and "scanning" or "busy"
+    end
     if not started then ui.lastScanItemId = nil end
     ui.UpdateListingsList()
 end
@@ -2904,6 +2925,7 @@ function ui.OnItemListings(rows)
         if u then SetMoneyBox(ui.sellBuyout, u) end
     end
     ui.UpdateListingsList()
+    ui.UpdateBagList()     -- refresh cache dots on the bag rows
     ui.RefreshSell()
 end
 
@@ -3766,6 +3788,8 @@ end)
 
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     if ui.frame then ui.frame:Hide() end
+    -- Clear the Sell tab's per-item cache so next session gets fresh prices.
+    A.sell.cache = {}
 end)
 
 -- Profession windows are load-on-demand: by TRADE_SKILL_SHOW / CRAFT_SHOW the
