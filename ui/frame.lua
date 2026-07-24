@@ -2670,6 +2670,35 @@ function ui.BuildSellTab()
     -- sits just OUTSIDE this edge, clears the listings column that starts at
     -- x=200 -- otherwise the bar overlaps the price info.
     bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, 10)
+
+    local scanAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    scanAllBtn:SetWidth(48)
+    scanAllBtn:SetHeight(18)
+    scanAllBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 18)
+    scanAllBtn:SetText("Scan")
+    scanAllBtn:SetScript("OnClick", function()
+        if A.sell.batchActive then
+            A.sell.StopBatchScan()
+            ui.UpdateBagList()
+            scanAllBtn:SetText("Scan")
+        else
+            scanAllBtn:SetText("Stop")
+            A.sell.ScanAllBags(
+                function(itemId)
+                    -- Per-item: redraw dots (the just-scanned item turns green,
+                    -- the next one turns yellow).
+                    ui.UpdateBagList()
+                end,
+                function()
+                    -- All done or stopped.
+                    scanAllBtn:SetText("Scan")
+                    ui.UpdateBagList()
+                end
+            )
+            ui.UpdateBagList()   -- show the first yellow dot immediately
+        end
+    end)
+    ui.sellScanAllBtn = scanAllBtn
     bagScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BAG_ROW_H, ui.UpdateBagList)
     end)
@@ -2850,12 +2879,20 @@ function ui.UpdateBagList()
                 else
                     row.icon:Hide()
                 end
-                -- Show the cache dot when this item has a fresh scan result cached.
-                local ce = A.sell.cache[it.itemId]
-                if ce and time() - ce.when < A.sell.CACHE_TTL then
-                    row.cacheDot:Show()
+                -- Cache dot: yellow * while this item is being batch-scanned,
+                -- green * when a fresh result is cached, hidden otherwise.
+                local dot = row.cacheDot
+                if A.sell.batchActive and A.sell.batchCurrentItemId == it.itemId then
+                    dot:SetTextColor(1.0, 0.85, 0.10)   -- yellow
+                    dot:Show()
                 else
-                    row.cacheDot:Hide()
+                    local ce = A.sell.cache[it.itemId]
+                    if ce and time() - ce.when < A.sell.CACHE_TTL then
+                        dot:SetTextColor(0.30, 0.85, 0.30)   -- green
+                        dot:Show()
+                    else
+                        dot:Hide()
+                    end
                 end
                 row.label:ClearAllPoints()
                 row.label:SetPoint("LEFT", row, "LEFT", 30, 0)
@@ -2876,9 +2913,32 @@ end
 -- Place a bag item into the sell slot; the NEW_AUCTION_UPDATE that follows
 -- refreshes the header and kicks off the per-item listing scan.
 function ui.SelectBagEntry(item)
+    -- During a scan, only allow cached items (they load instantly).
     if A.scan.IsRunning() or A.scan.IsPaused() then
-        ChatMsg("Aegis: a scan is in progress \226\128\148 try again in a moment.")
-        return
+        local ce = A.sell.cache[item.itemId]
+        if ce and time() - ce.when < A.sell.CACHE_TTL then
+            -- Render directly from the cache without setting sell.listings.
+            -- Setting sell.listings = ce.listings creates a shared reference
+            -- that the batch scan's onListing callbacks could corrupt via
+            -- table.insert — the scan engine modifies sell.listings for the
+            -- item it is currently querying.
+            A.sell.PlaceFromBag(item.bag, item.slot)
+            A.sell.scanItemId = item.itemId
+            A.sell.scanName   = item.name
+            A.sell.scanWhen   = ce.when
+            ui.lastScanItemId = item.itemId
+            local it = A.sell.GetItem()
+            local market = it and it.itemId and A.db.MarketValue(it.itemId) or nil
+            ui.sellListingGroups = A.sell.GroupListings(ce.listings, market)
+            ui.sellScanState = "done"
+            ui.UpdateListingsList()
+            ui.UpdateBagList()
+            ui.RefreshSell()
+            return
+        else
+            ChatMsg("Aegis: scan in progress \226\128\148 cached items still available.")
+            return
+        end
     end
     A.sell.PlaceFromBag(item.bag, item.slot)
     ui.RefreshSell()
@@ -2895,6 +2955,26 @@ function ui.MaybeScanSlotItem()
     if it.itemId == ui.lastScanItemId then return end
     ui.lastScanItemId = it.itemId
     ui.sellListingGroups = nil
+    -- During a running scan we can't start a new ScanItem (it would either
+    -- return false or, worse, set sell.listings to a cached reference that
+    -- the scan engine's onListing callbacks would corrupt). Render from
+    -- cache directly instead.
+    if A.scan.IsRunning() or A.scan.IsPaused() then
+        local ce = A.sell.cache[it.itemId]
+        if ce and time() - ce.when < A.sell.CACHE_TTL then
+            A.sell.scanItemId = it.itemId
+            A.sell.scanName   = it.name
+            A.sell.scanWhen   = ce.when
+            local market = A.db.MarketValue(it.itemId)
+            ui.sellListingGroups = A.sell.GroupListings(ce.listings, market)
+            ui.sellScanState = "done"
+            ui.UpdateListingsList()
+        else
+            ui.sellScanState = "scanning"
+            ui.UpdateListingsList()
+        end
+        return
+    end
     local started = A.sell.ScanItem(it.name, it.itemId, nil, function(rows)
         ui.OnItemListings(rows)
     end)
@@ -3789,6 +3869,7 @@ end)
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     if ui.frame then ui.frame:Hide() end
     -- Clear the Sell tab's per-item cache so next session gets fresh prices.
+    A.sell.StopBatchScan()
     A.sell.cache = {}
 end)
 
