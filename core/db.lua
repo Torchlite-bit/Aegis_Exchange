@@ -69,11 +69,13 @@ end
 -- Defaults for every user setting. db.Setting falls back to these, so adding a
 -- new setting here is enough -- no migration of old saves needed.
 local SETTING_DEFAULTS = {
-    duration    = 480,          -- default post duration, minutes (120/480/1440)
-    undercutPct = 5,            -- Undercut button: percent below the reference
-    sellDefault = "undercut",   -- slot prefill: "undercut"|"market"|"none"
-    tooltip     = true,         -- show Aegis price lines on item tooltips
-    profLine    = true,         -- show the profit line on profession windows
+    duration       = 480,       -- default post duration, minutes (120/480/1440)
+    undercutMode   = "pct",     -- "pct" (percent) or "flat" (fixed copper)
+    undercutPct    = 5,         -- percent below the reference (pct mode)
+    undercutAmount = 100,       -- copper below the reference (flat mode; 1s)
+    sellDefault    = "undercut", -- slot prefill: "undercut"|"market"|"none"
+    tooltip        = true,      -- show Aegis price lines on item tooltips
+    profLine       = true,      -- show the profit line on profession windows
 }
 
 -- Read a user setting, falling back to its default when unset.
