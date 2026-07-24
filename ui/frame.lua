@@ -126,7 +126,9 @@ function ui.BuildWindow()
     -- (otherwise the button is only clickable along its top edge).
     local titleBar = CreateFrame("Frame", "AegisExchangeTitleBar", f)
     titleBar:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -12)
-    titleBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -40, -12)
+    -- Extend the dark bar to just left of the close button (the raised buttons
+    -- sit on top of it), so the header reads as one clean strip.
+    titleBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -12)
     titleBar:SetHeight(26)
     titleBar:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -145,13 +147,26 @@ function ui.BuildWindow()
     titleText:SetText("Aegis: Exchange")
     titleText:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
+    -- Close button (top-right) — closes the auction house. Its frame level is
+    -- raised above the title bar so the whole button is clickable, not just the
+    -- sliver above the drag region. Created first so the swap button can anchor
+    -- to its left.
+    local close = CreateFrame("Button", "AegisExchangeCloseButton", f,
+        "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -8)
+    close:SetFrameLevel(f:GetFrameLevel() + 10)
+    close:SetScript("OnClick", function()
+        ui.CloseWindow()
+    end)
+
     -- Swap to the stock Blizzard AH (its counterpart button swaps back —
-    -- see HookAuctionFrame). Raised above the title bar's drag region.
+    -- see HookAuctionFrame). Raised above the title bar's drag region and
+    -- anchored to the close button so it sits neatly on the extended bar.
     local blizBtn = CreateFrame("Button", "AegisExchangeBlizzardButton", f,
         "UIPanelButtonTemplate")
     blizBtn:SetWidth(92)
     blizBtn:SetHeight(20)
-    blizBtn:SetPoint("RIGHT", titleBar, "RIGHT", -4, 0)
+    blizBtn:SetPoint("RIGHT", close, "LEFT", -4, 0)
     blizBtn:SetFrameLevel(f:GetFrameLevel() + 10)
     blizBtn:SetText("Blizzard UI")
     blizBtn:SetScript("OnClick", function()
@@ -165,17 +180,6 @@ function ui.BuildWindow()
     -- actually installed when triaging a bug report.
     subTitle:SetText("Turtle WoW 1.12 \226\128\162 v" .. (A.version or "?"))
     subTitle:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-
-    -- Close button (top-right) — closes the auction house. Its frame level is
-    -- raised above the title bar so the whole button is clickable, not just the
-    -- sliver above the drag region.
-    local close = CreateFrame("Button", "AegisExchangeCloseButton", f,
-        "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -8)
-    close:SetFrameLevel(f:GetFrameLevel() + 10)
-    close:SetScript("OnClick", function()
-        ui.CloseWindow()
-    end)
 
     -- Sub-tab row, directly under the title bar.
     ui.subtabs = {}
@@ -272,11 +276,27 @@ function ui.BuildWindow()
     end)
     ui.resumeBtn = resume
 
+    -- Stop: abandon the scan entirely and free the AH for browsing/posting.
+    -- (Pause keeps progress for Resume, but the scanner is shared, so it still
+    -- holds the query channel -- Stop is the way to bail out completely.)
+    local stop = CreateFrame("Button", "AegisExchangeStopButton",
+        scanPanel, "UIPanelButtonTemplate")
+    stop:SetWidth(60)
+    stop:SetHeight(22)
+    stop:SetPoint("LEFT", resume, "RIGHT", 6, 0)
+    stop:SetText("Stop")
+    stop:SetScript("OnClick", function()
+        A.scan.Stop()
+        ui.Refresh()
+        ChatMsg("Aegis: scan stopped.")
+    end)
+    ui.stopBtn = stop
+
     local cats = CreateFrame("Button", "AegisExchangeCategoriesButton",
         scanPanel, "UIPanelButtonTemplate")
     cats:SetWidth(94)
     cats:SetHeight(22)
-    cats:SetPoint("LEFT", resume, "RIGHT", 6, 0)
+    cats:SetPoint("LEFT", stop, "RIGHT", 6, 0)
     cats:SetText("Categories")
     cats:SetScript("OnClick", function()
         ui.TogglePicker()
@@ -398,22 +418,56 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         di = di + 1
     end
 
-    -- ---- Default undercut % -----------------------------------------------
+    -- ---- Default undercut: percent OR a flat copper amount ----------------
     local ucLbl = label("Default undercut:", durLbl, -20)
-    local uc = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    uc:SetWidth(40); uc:SetHeight(18)
-    uc:SetAutoFocus(false); uc:SetNumeric(true); uc:SetJustifyH("CENTER")
-    uc:SetPoint("LEFT", ucLbl, "RIGHT", 10, 0)
-    uc:SetScript("OnEnterPressed", function()
-        ui.CommitUndercut(); uc:ClearFocus()
+
+    local pctMode = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    pctMode:SetWidth(34); pctMode:SetHeight(20)
+    pctMode:SetPoint("LEFT", ucLbl, "RIGHT", 10, 0)
+    pctMode:SetText("%")
+    pctMode.mode = "pct"
+    pctMode:SetScript("OnClick", function()
+        A.db.SetSetting("undercutMode", "pct"); ui.RefreshSettings()
     end)
+    local flatMode = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    flatMode:SetWidth(48); flatMode:SetHeight(20)
+    flatMode:SetPoint("LEFT", pctMode, "RIGHT", 3, 0)
+    flatMode:SetText("Flat")
+    flatMode.mode = "flat"
+    flatMode:SetScript("OnClick", function()
+        A.db.SetSetting("undercutMode", "flat"); ui.RefreshSettings()
+    end)
+    ui.setUcModeBtns = { pctMode, flatMode }
+
+    -- Percent entry.
+    local uc = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    uc:SetWidth(34); uc:SetHeight(18)
+    uc:SetAutoFocus(false); uc:SetNumeric(true); uc:SetJustifyH("CENTER")
+    uc:SetPoint("LEFT", flatMode, "RIGHT", 12, 0)
+    uc:SetScript("OnEnterPressed", function() ui.CommitUndercut(); uc:ClearFocus() end)
     uc:SetScript("OnEscapePressed", function() uc:ClearFocus() end)
     uc:SetScript("OnEditFocusLost", function() ui.CommitUndercut() end)
     ui.setUndercut = uc
     local pctLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    pctLbl:SetPoint("LEFT", ui.setUndercut, "RIGHT", 4, 0)
-    pctLbl:SetText("% below the lowest competitor")
+    pctLbl:SetPoint("LEFT", uc, "RIGHT", 3, 0)
+    pctLbl:SetText("%")
     pctLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- Flat-amount entry (money text like "1s" or "50c").
+    local flat = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    flat:SetWidth(64); flat:SetHeight(18)
+    flat:SetAutoFocus(false); flat:SetJustifyH("CENTER")
+    flat:SetPoint("LEFT", pctLbl, "RIGHT", 12, 0)
+    flat:SetScript("OnEnterPressed", function()
+        ui.CommitUndercutFlat(); flat:ClearFocus()
+    end)
+    flat:SetScript("OnEscapePressed", function() flat:ClearFocus() end)
+    flat:SetScript("OnEditFocusLost", function() ui.CommitUndercutFlat() end)
+    ui.setUndercutFlat = flat
+    local flatLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    flatLbl:SetPoint("LEFT", flat, "RIGHT", 4, 0)
+    flatLbl:SetText("below (e.g. 1s, 50c)")
+    flatLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     -- ---- Default sell price -----------------------------------------------
     local spLbl = label("Default sell price:", ucLbl, -20)
@@ -497,6 +551,15 @@ function ui.CommitUndercut()
     ui.RefreshSettings()
 end
 
+-- Parse and store the flat-amount undercut (money text -> copper).
+function ui.CommitUndercutFlat()
+    if not ui.setUndercutFlat then return end
+    local c = util.ParseMoney(util.Trim(ui.setUndercutFlat:GetText() or ""))
+    if not c or c < 1 then c = A.db.Setting("undercutAmount") end
+    A.db.SetSetting("undercutAmount", math.floor(c))
+    ui.RefreshSettings()
+end
+
 -- Push the saved default duration to the Sell tab immediately.
 function ui.ApplySettingsToSell()
     local dur = A.db.Setting("duration")
@@ -521,8 +584,20 @@ function ui.RefreshSettings()
         if b.mode == mode then b:LockHighlight() else b:UnlockHighlight() end
         mi = mi + 1
     end
+    local ucMode = A.db.Setting("undercutMode")
+    if ui.setUcModeBtns then
+        local ui2 = 1
+        while ui2 <= table.getn(ui.setUcModeBtns) do
+            local b = ui.setUcModeBtns[ui2]
+            if b.mode == ucMode then b:LockHighlight() else b:UnlockHighlight() end
+            ui2 = ui2 + 1
+        end
+    end
     if ui.setUndercut then
         ui.setUndercut:SetText(tostring(A.db.Setting("undercutPct")))
+    end
+    if ui.setUndercutFlat then
+        ui.setUndercutFlat:SetText(util.FormatMoney(A.db.Setting("undercutAmount"), false))
     end
     if ui.setTooltip then
         ui.setTooltip:SetChecked(A.db.Setting("tooltip") ~= false and 1 or nil)
@@ -779,7 +854,12 @@ local function BuildResultRow(parent, scroll, store, i, rowH)
         fs:SetJustifyH(just or "LEFT")
         return fs
     end
-    row.name  = mkCell(RCX.name, RCW.name)
+    -- Item icon, then the name shifted to its right.
+    local icon = row:CreateTexture(nil, "ARTWORK")
+    icon:SetWidth(16); icon:SetHeight(16)
+    icon:SetPoint("LEFT", row, "LEFT", RCX.name, 0)
+    row.icon = icon
+    row.name  = mkCell(RCX.name + 20, RCW.name - 20)
     row.ct    = mkCell(RCX.ct, RCW.ct, "RIGHT")
     row.unit  = mkCell(RCX.unit, RCW.unit)
     row.stack = mkCell(RCX.stack, RCW.stack)
@@ -808,6 +888,13 @@ end
 -- Fill a result row's content from a listing `r` (shared by Buy and Crafting).
 function ui.FillResultRow(row, r)
     row.entry = r
+    if row.icon then
+        if r.texture then
+            row.icon:SetTexture(r.texture); row.icon:Show()
+        else
+            row.icon:Hide()
+        end
+    end
     row.name:SetText(r.name)
     if r.canUse == nil or r.canUse then
         row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
@@ -819,7 +906,13 @@ function ui.FillResultRow(row, r)
     if r.buyout and r.buyout > 0 then
         row.stack:SetText(util.FormatMoney(r.buyout, true))
     else
-        row.stack:SetText("bid only")
+        -- Bid-only auction: show the current/next bid instead of just "bid only".
+        local nb = r.nextBid or r.minBid or 0
+        if nb > 0 then
+            row.stack:SetText("bid " .. util.FormatMoney(nb, true))
+        else
+            row.stack:SetText("bid only")
+        end
     end
     local market = r.itemId and A.db.MarketValue(r.itemId)
     if market and market > 0 and r.unit then
@@ -2223,7 +2316,11 @@ function ui.BuildAuctionsTab()
             fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
             return fs
         end
-        row.name = mk(ACX.name, ACW.name)
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", ACX.name, 0)
+        row.icon = icon
+        row.name = mk(ACX.name + 20, ACW.name - 20)
         row.qty  = mk(ACX.qty, ACW.qty)
         row.unit = mk(ACX.unit, ACW.unit)
         row.stack = mk(ACX.stack, ACW.stack)
@@ -2283,6 +2380,13 @@ end
 
 function ui.FillAuctionRow(row, r)
     row.entry = r
+    if row.icon then
+        if r.texture then
+            row.icon:SetTexture(r.texture); row.icon:Show()
+        else
+            row.icon:Hide()
+        end
+    end
     row.name:SetText(r.name)
     local q = r.quality
     if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
@@ -2376,6 +2480,15 @@ function ui.BuildSellTab()
     end
     slot:SetScript("OnClick", place)
     slot:SetScript("OnReceiveDrag", place)
+    slot:SetScript("OnEnter", function()
+        local it = A.sell.GetItem()
+        if it and it.link then
+            GameTooltip:SetOwner(slot, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(it.link)
+            GameTooltip:Show()
+        end
+    end)
+    slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     ui.sellSlot = slot
 
     ui.sellName = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2585,6 +2698,15 @@ function ui.BuildSellTab()
             local e = row.entry
             if e and e.kind == "item" then ui.SelectBagEntry(e.item) end
         end)
+        row:SetScript("OnEnter", function()
+            local e = row.entry
+            if e and e.kind == "item" and e.item then
+                GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                GameTooltip:SetBagItem(e.item.bag, e.item.slot)
+                GameTooltip:Show()
+            end
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row:Hide()
         ui.bagRows[bi] = row
         bi = bi + 1

@@ -40,9 +40,11 @@ buy.state = {
 buy.driver = CreateFrame("Frame", "AegisExchangeBuyDriver")
 buy.driver:Hide()
 
--- Another AH consumer (scan / posting) is using the query channel.
+-- Another AH consumer (an actively-querying scan, or posting) is using the
+-- query channel. A PAUSED scan is idle on the wire, so browsing is allowed --
+-- you can pause a scan, check a price here, then Resume (or Stop).
 function buy.IsBusy()
-    return A.scan.IsRunning() or A.scan.IsPaused() or A.sell.PostingActive()
+    return A.scan.IsRunning() or A.sell.PostingActive()
 end
 
 local function Notify()
@@ -233,7 +235,7 @@ function buy.ReadPage()
     local rows = {}
     local i = 1
     while i <= numOnPage do
-        local name, _, count, quality, canUse, level, minBid, minInc,
+        local name, texture, count, quality, canUse, level, minBid, minInc,
               buyout, bidAmount, highBidder, owner = GetAuctionItemInfo("list", i)
         if name then
             count = count or 1
@@ -246,6 +248,7 @@ function buy.ReadPage()
             table.insert(rows, {
                 index   = i,
                 name    = name,
+                texture = texture,
                 count   = count,
                 quality = quality,
                 canUse  = canUse,

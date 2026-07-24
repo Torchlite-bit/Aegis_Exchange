@@ -174,13 +174,22 @@ function sell.Suggest(itemId)
     }
 end
 
--- Undercut a reference price by the user's configured percent (Aegis tab),
--- always landing at least 1 copper below it. Defaults to 5%.
+-- Undercut a reference price by the user's configured rule (Aegis tab): either
+-- a percent below, or a fixed copper amount below. Always lands at least 1
+-- copper under. Defaults to 5%.
 local function ApplyUndercut(ref)
     if not ref or ref <= 1 then return ref end
-    local pct = A.db and A.db.Setting and A.db.Setting("undercutPct") or 5
-    if not pct or pct < 0 then pct = 5 end
-    local under = math.floor(ref * (1 - pct / 100))
+    local mode = A.db and A.db.Setting and A.db.Setting("undercutMode") or "pct"
+    local under
+    if mode == "flat" then
+        local amt = A.db.Setting("undercutAmount") or 100
+        if amt < 1 then amt = 1 end
+        under = ref - amt
+    else
+        local pct = A.db.Setting("undercutPct") or 5
+        if pct < 0 then pct = 5 end
+        under = math.floor(ref * (1 - pct / 100))
+    end
     if under >= ref then under = ref - 1 end   -- guarantee a real undercut
     if under < 1 then under = 1 end
     return under
