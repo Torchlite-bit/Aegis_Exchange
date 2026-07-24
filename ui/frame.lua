@@ -2482,11 +2482,14 @@ function ui.BuildSellTab()
     slot:SetScript("OnReceiveDrag", place)
     slot:SetScript("OnEnter", function()
         local it = A.sell.GetItem()
-        if it and it.link then
-            GameTooltip:SetOwner(slot, "ANCHOR_RIGHT")
+        if not it then return end
+        GameTooltip:SetOwner(slot, "ANCHOR_RIGHT")
+        if GameTooltip.SetAuctionSellItem then
+            GameTooltip:SetAuctionSellItem()          -- the slot item, safely
+        elseif it.link and GameTooltip.SetHyperlink then
             GameTooltip:SetHyperlink(it.link)
-            GameTooltip:Show()
         end
+        GameTooltip:Show()
     end)
     slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     ui.sellSlot = slot
@@ -2700,7 +2703,7 @@ function ui.BuildSellTab()
         end)
         row:SetScript("OnEnter", function()
             local e = row.entry
-            if e and e.kind == "item" and e.item then
+            if e and e.kind == "item" and e.item and GameTooltip.SetBagItem then
                 GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
                 GameTooltip:SetBagItem(e.item.bag, e.item.slot)
                 GameTooltip:Show()
