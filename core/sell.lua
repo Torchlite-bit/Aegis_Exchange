@@ -218,7 +218,84 @@ end
 sell.listings   = nil   -- raw rows from the last item scan (sorted cheapest 1st)
 sell.scanItemId = nil   -- item those rows are for
 sell.scanName   = nil
-sell.scanWhen   = nil    -- epoch of the last completed item scan
+sell.scanWhen   = nil   -- epoch of the last completed item scan
+
+sell.cache      = {}    -- { [itemId] = { listings, when } }
+sell.CACHE_TTL  = 3600   -- seconds a cached result stays valid
+
+-- Batch "Scan All" state: iterates every bag item, scanning uncached ones one
+-- at a time. The UI reads batchCurrentItemId to show a yellow * while the item
+-- is being fetched.
+sell.batchActive        = false
+sell.batchCurrentItemId = nil
+sell.batchQueue         = nil
+sell.batchIndex         = 1
+
+-- Walk every auctionable bag item and scan the AH for it, skipping items that
+-- already have a fresh cache entry. onItemDone(itemId) fires after EACH item
+-- is processed (cache hit or scan complete); onAllDone() fires when the queue
+-- is exhausted or the batch is stopped.
+function sell.ScanAllBags(onItemDone, onAllDone)
+    -- Build a flat queue from the bag categories.
+    local cats = sell.ScanBags()
+    local queue = {}
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local items = cats[ci].items
+        local ii = 1
+        while ii <= table.getn(items) do
+            table.insert(queue, items[ii])
+            ii = ii + 1
+        end
+        ci = ci + 1
+    end
+    sell.batchQueue  = queue
+    sell.batchIndex  = 1
+    sell.batchActive = true
+
+    local function processNext()
+        if not sell.batchActive then
+            sell.batchCurrentItemId = nil
+            if onAllDone then onAllDone() end
+            return
+        end
+        local idx = sell.batchIndex
+        if idx > table.getn(queue) then
+            sell.batchActive = false
+            sell.batchCurrentItemId = nil
+            if onAllDone then onAllDone() end
+            return
+        end
+        local item = queue[idx]
+        sell.batchIndex = idx + 1
+        sell.batchCurrentItemId = item.itemId
+
+        -- Already cached? Fire the per-item callback immediately (the UI just
+        -- needs to redraw the green dot) and move on.
+        local entry = sell.cache[item.itemId]
+        if entry and time() - entry.when < sell.CACHE_TTL then
+            if onItemDone then onItemDone(item.itemId) end
+            processNext()
+            return
+        end
+
+        -- Not cached: run a targeted AH scan for this item. Reuse sell.ScanItem
+        -- which handles the query, filtering, sorting, and deep-copy caching.
+        sell.ScanItem(item.name, item.itemId, nil, function()
+            if onItemDone then onItemDone(item.itemId) end
+            processNext()
+        end)
+    end
+
+    processNext()
+end
+
+-- Abort a running batch scan. The current item's scan will still finish (it is
+-- already in flight), but no further items will be queued.
+function sell.StopBatchScan()
+    sell.batchActive = false
+    sell.batchCurrentItemId = nil
+end
 
 -- Lowest per-unit buyout among the last scan's listings. `excludeMine` skips
 -- your own auctions (so undercut targets other sellers). Returns nil if none.
@@ -242,6 +319,16 @@ end
 -- onDone(rows). onProgress(page, total) fires per page. Returns false if the
 -- scanner is busy with another scan.
 function sell.ScanItem(itemName, itemId, onProgress, onDone)
+    -- Cache hit: return stored results without a new scan.
+    local entry = sell.cache[itemId]
+    if entry and time() - entry.when < sell.CACHE_TTL then
+        sell.listings   = entry.listings
+        sell.scanItemId = itemId
+        sell.scanName   = itemName
+        sell.scanWhen   = entry.when
+        if onDone then onDone(sell.listings) end
+        return true
+    end
     if A.scan.IsRunning() or A.scan.IsPaused() then
         return false
     end
@@ -271,6 +358,31 @@ function sell.ScanItem(itemName, itemId, onProgress, onDone)
                 return au < bu
             end)
             sell.scanWhen = time()
+            -- Store a deep copy in the cache so later mutations to sell.listings
+            -- don't corrupt the cached data.
+            local copy = {}
+            local li = 1
+            while li <= table.getn(sell.listings) do
+                local r = sell.listings[li]
+                table.insert(copy, {
+                    count  = r.count,
+                    buyout = r.buyout,
+                    unit   = r.unit,
+                    minBid = r.minBid,
+                    owner  = r.owner,
+                    isMine = r.isMine,
+                })
+                li = li + 1
+            end
+            sell.cache[itemId] = { listings = copy, when = sell.scanWhen }
+            -- Temporary debug: log what's being cached so we can trace
+            -- the root cause of cache entries with 0 rows.
+            if DEFAULT_CHAT_FRAME then
+                DEFAULT_CHAT_FRAME:AddMessage(
+                    "|cff5fc8f8Aegis cache store:|r "
+                    .. tostring(itemName) .. " (id:" .. tostring(itemId)
+                    .. ") rows=" .. tostring(table.getn(copy)))
+            end
             if onDone then onDone(sell.listings) end
         end,
     })
@@ -383,6 +495,15 @@ function sell.ScanBags()
             if link and sell.IsAuctionable(bag, slot) then
                 local texture, count = GetContainerItemInfo(bag, slot)
                 local iname, _, _, _, _, itype = GetItemInfo(link)
+                -- On 1.12 GetItemInfo may return nil until the client-side
+                -- item cache is warm. Fall back to the name between [...] in
+                -- the link so AH queries don't send a raw item-link string
+                -- (which the server won't understand and would return 0
+                -- results for, storing a bogus empty cache).
+                if not iname then
+                    local _, _, n = string.find(link, "%[([^%]]+)%]")
+                    iname = n
+                end
                 local cname = itype or "Other"
                 local cat = byCat[cname]
                 if not cat then
