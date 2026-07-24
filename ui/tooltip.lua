@@ -106,6 +106,14 @@ function resolvers.SetHyperlink(link)
     return id, 1
 end
 
+function resolvers.SetAuctionSellItem()
+    -- The item currently in the auction sell slot (8th return is the link).
+    local name, _, count, _, _, _, _, link = GetAuctionSellItemInfo()
+    local id = link and util.ItemIdFromLink(link)
+    if not id then return nil end
+    return id, count or 1
+end
+
 function resolvers.SetMerchantItem(index)
     local id = util.ItemIdFromLink(GetMerchantItemLink(index))
     if not id then return nil end
@@ -130,7 +138,12 @@ end
 -- client calls SetTooltipMoney), then calls the original, then appends our
 -- lines.
 local function HookMethod(name, source)
-    tooltip.orig[name] = GameTooltip[name]
+    -- Only hook a method that actually exists on this client; otherwise we'd
+    -- install a replacement whose "original" is nil and error the moment it is
+    -- called (e.g. GameTooltip:SetHyperlink on some 1.12 builds).
+    local orig = GameTooltip[name]
+    if type(orig) ~= "function" then return end
+    tooltip.orig[name] = orig
     GameTooltip[name] = function(self, a1, a2)
         local id, count = resolvers[name](a1, a2)
         if id then
@@ -156,12 +169,13 @@ function tooltip.Install()
     if tooltip.hooked then return end
     if not GameTooltip then return end
 
-    HookMethod("SetBagItem",       "bag")
-    HookMethod("SetInventoryItem", "inventory")
-    HookMethod("SetAuctionItem",   "auction")
-    HookMethod("SetHyperlink",     "link")
-    HookMethod("SetMerchantItem",  "merchant")
-    HookMethod("SetInboxItem",     "inbox")
+    HookMethod("SetBagItem",         "bag")
+    HookMethod("SetInventoryItem",   "inventory")
+    HookMethod("SetAuctionItem",     "auction")
+    HookMethod("SetAuctionSellItem", "sell")
+    HookMethod("SetHyperlink",       "link")
+    HookMethod("SetMerchantItem",    "merchant")
+    HookMethod("SetInboxItem",       "inbox")
 
     -- Vendor-price collection. 1.12's GetItemInfo has no sell price; the only
     -- source is the money line the client adds to bag-item tooltips while a
