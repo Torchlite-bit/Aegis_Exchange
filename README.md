@@ -1,6 +1,11 @@
 # Aegis: Exchange
 
-**A clean, "fast" auction house for Turtle WoW.**
+**A clean, fast auction house for Turtle WoW.**
+
+[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/3wTfRU8V9Z)
+[![Client](https://img.shields.io/badge/client-WoW%201.12%20(vanilla)-c79c6e?style=flat-square)](https://turtle-wow.org)
+[![pfUI](https://img.shields.io/badge/pfUI-skin%20included-33ffcc?style=flat-square)](#using-pfui)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
 with a window that actually knows what things are worth — what you should charge,
@@ -9,6 +14,21 @@ made this week.
 
 > Built for **Turtle WoW 1.18.1**, which runs the original **WoW 1.12 (vanilla)**
 > client on **Lua 5.0**. Not Classic. Not retail. Real vanilla.
+
+**[💬 Join the Discord](https://discord.gg/3wTfRU8V9Z)** for help, bug reports,
+and feature ideas.
+
+---
+
+## Contents
+
+- [What it does](#what-it-does) — the six tabs
+- [Using pfUI?](#using-pfui)
+- [Install](#install)
+- [Using it](#using-it)
+- [A few honest notes](#a-few-honest-notes)
+- [Under the hood](#under-the-hood)
+- [Contributing](#contributing)
 
 ---
 
@@ -183,11 +203,30 @@ and the reasons behind them, most of which were learned the hard way.
 
 ---
 
+## Something broken?
+
+1. Check the **version** in the window's title bar (`v0.20.2`) — quote it.
+2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
+3. Tell us on **[Discord](https://discord.gg/3wTfRU8V9Z)** or open an
+   [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
+   help enormously, especially for anything layout-related.
+
+Recent changes are in [CHANGELOG.md](CHANGELOG.md).
+
+---
+
 ## Contributing
 
-PRs welcome. Two requests: keep it inside the 1.12 rules in `CLAUDE.md`, and bump
-the version in both `core/init.lua` and the `.toc` so in-game bug reports say
-which build they came from.
+PRs welcome — come say hi on **[Discord](https://discord.gg/3wTfRU8V9Z)** first
+if you're planning something big.
+
+Three requests:
+
+1. Keep inside the 1.12 / Lua 5.0 rules in [`CLAUDE.md`](CLAUDE.md) — they're
+   there because breaking them fails at *runtime*, not at load.
+2. Bump the version in **both** `core/init.lua` and the `.toc`, so in-game bug
+   reports say which build they came from.
+3. Add a line to [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
@@ -195,4 +234,10 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
+<div align="center">
+
+**[💬 Discord](https://discord.gg/3wTfRU8V9Z)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
+
 *Aegis: Exchange is part of the Aegis addon series. Happy flipping.* ⚔️
+
+</div>
