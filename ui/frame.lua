@@ -3778,7 +3778,13 @@ function ui.AttachMerchantButton()
         local b = CreateFrame("Button", "AegisExchangeMerchantSellButton",
             MerchantFrame, "UIPanelButtonTemplate")
         b:SetWidth(150); b:SetHeight(22)
-        b:SetPoint("BOTTOMLEFT", MerchantFrame, "BOTTOMLEFT", 22, 52)
+        -- Anchor OUTSIDE the frame, just above its top-right corner. The
+        -- merchant window's INSIDE layout differs a lot between the stock UI
+        -- and pfUI (pfUI packs the Merchant/Buyback tabs and a money row along
+        -- the bottom, which the old bottom-left spot landed on), so sitting
+        -- outside is the one placement that is clear in both.
+        b:SetPoint("BOTTOMRIGHT", MerchantFrame, "TOPRIGHT", -4, 4)
+        b:SetFrameStrata("HIGH")
         b:SetScript("OnClick", function() ui.ConfirmSellMarked() end)
         ui.merchantBtn = b
     end
