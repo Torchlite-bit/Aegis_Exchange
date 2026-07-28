@@ -42,7 +42,7 @@ local STALE_SECONDS = 24 * 60 * 60
 
 -- "Scan" hosts the scanner controls (Full Scan / Pause / Resume / Categories
 -- + status and progress); the others are placeholders for later stages.
-local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting", "Scan" }
+local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting", "History", "Scan" }
 
 -- Display label per sub-tab (internal keys stay stable). The scan tab also
 -- hosts user settings, so it reads as "Aegis".
@@ -226,7 +226,8 @@ function ui.BuildWindow()
         panel:Hide()
         -- Every tab is now a real tab (built below); no placeholders remain.
         if name ~= "Scan" and name ~= "Sell" and name ~= "Buy"
-            and name ~= "Crafting" and name ~= "Auctions" then
+            and name ~= "Crafting" and name ~= "Auctions"
+            and name ~= "History" then
             local label = panel:CreateFontString(
                 "AegisExchangePanelLabel" .. name, "OVERLAY",
                 "GameFontNormalLarge")
@@ -346,6 +347,7 @@ function ui.BuildWindow()
     ui.BuildBuyTab()
     ui.BuildCraftTab()
     ui.BuildAuctionsTab()
+    ui.BuildHistoryTab()
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -1528,7 +1530,10 @@ function ui.DoBuyout()
     if not ok then
         ChatMsg("Aegis: " .. (err or "buyout failed."))
     else
+        -- Log the spend for the History tab.
+        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)
         ChatMsg("Aegis: bought " .. row.name .. " x" .. row.count .. ".")
+        if ui.selectedSubTab == "History" then ui.RefreshHistory() end
     end
 end
 
@@ -2442,6 +2447,239 @@ function ui.DoCancelAuction()
         ChatMsg("Aegis: cancelled " .. r.name .. " x" .. r.count .. ".")
     end
 end
+
+-- ---------------------------------------------------------------------------
+-- History tab: sales income (from the mailbox) + purchases (from the Buy tab),
+-- with totals over a selectable window.
+-- ---------------------------------------------------------------------------
+
+local HIST_ROWS, HIST_ROW_H = 12, 20
+-- Period options: label + window seconds (0 = all time).
+local HIST_PERIODS = {
+    { label = "24h", secs = 86400 },
+    { label = "7d",  secs = 7 * 86400 },
+    { label = "30d", secs = 30 * 86400 },
+    { label = "All", secs = 0 },
+}
+
+-- Pull the item name out of an AH "sold" mail subject. enUS: the subject is
+-- "Auction successful: <item>". Returns the item name, or nil for other mail.
+local function AuctionSoldItem(subject)
+    if not subject then return nil end
+    local s, e = string.find(subject, "Auction successful: ", 1, true)
+    if s == 1 then return string.sub(subject, e + 1) end
+    return nil
+end
+
+-- Scan the open mailbox for AH sale mails and log each one once (deduped by an
+-- approximate arrival time so the same mail isn't re-counted across sessions).
+function ui.ScanMailSales()
+    if not GetInboxNumItems then return end
+    local n = GetInboxNumItems() or 0
+    local i = 1
+    while i <= n do
+        local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
+        local item = AuctionSoldItem(subject)
+        if item and money and money > 0 then
+            -- Arrival epoch is stable as daysLeft falls and `now` rises; bucket
+            -- to the hour for a key that survives relogins.
+            local arrival = math.floor((time() - (daysLeft or 0) * 86400) / 3600)
+            local key = subject .. "|" .. money .. "|" .. arrival
+            if not A.db.WasSeen(key) then
+                A.db.MarkSeen(key)
+                A.db.RecordTxn("sale", item, money)
+            end
+        end
+        i = i + 1
+    end
+    if ui.selectedSubTab == "History" then ui.RefreshHistory() end
+end
+
+function ui.BuildHistoryTab()
+    local panel = ui.panels["History"]
+    if not panel or ui.histBuilt then return end
+    ui.histBuilt = true
+    ui.histPeriod = 2   -- default to 7d
+
+    -- Period buttons.
+    local perLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    perLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -14)
+    perLbl:SetText("Period:")
+    perLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.histPerBtns = {}
+    local prev = nil
+    local pi = 1
+    while pi <= table.getn(HIST_PERIODS) do
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(44); b:SetHeight(20)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else b:SetPoint("LEFT", perLbl, "RIGHT", 8, 0) end
+        b:SetText(HIST_PERIODS[pi].label)
+        b.idx = pi
+        b:SetScript("OnClick", function()
+            ui.histPeriod = b.idx
+            ui.RefreshHistory()
+        end)
+        ui.histPerBtns[pi] = b
+        prev = b
+        pi = pi + 1
+    end
+
+    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    clearBtn:SetWidth(100); clearBtn:SetHeight(20)
+    clearBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -12)
+    clearBtn:SetText("Clear history")
+    clearBtn:SetScript("OnClick", function()
+        StaticPopup_Show("AEGIS_EXCHANGE_CLEARLEDGER")
+    end)
+
+    -- Totals line.
+    ui.histTotals = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.histTotals:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -42)
+    ui.histTotals:SetJustifyH("LEFT")
+
+    ui.histNote = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histNote:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -62)
+    ui.histNote:SetJustifyH("LEFT")
+    ui.histNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
+
+    -- Column headers.
+    local rowLeft = 6
+    local HCX = { when = 2, kind = 92, item = 176, amount = 470 }
+    ui.histCols = HCX
+    local hdr = function(cx, text, just)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -84)
+        fs:SetText(text)
+        if just then fs:SetJustifyH(just) end
+        return fs
+    end
+    hdr(HCX.when, "When")
+    hdr(HCX.kind, "Type")
+    hdr(HCX.item, "Item")
+    hdr(HCX.amount, "Amount", "RIGHT")
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
+        panel, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -100)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
+    end)
+    ui.histScroll = scroll
+
+    ui.histRows = {}
+    local i = 1
+    while i <= HIST_ROWS do
+        local row = CreateFrame("Frame", nil, panel)
+        row:SetHeight(HIST_ROW_H)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.histRows[i - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.histRows[i - 1], "BOTTOMRIGHT", 0, 0)
+        end
+        local mk = function(cx, w, just)
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+            fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+            return fs
+        end
+        row.when   = mk(HCX.when, 86)
+        row.kind   = mk(HCX.kind, 80)
+        row.item   = mk(HCX.item, 290)
+        row.amount = mk(HCX.amount, 96, "RIGHT")
+        row:Hide()
+        ui.histRows[i] = row
+        i = i + 1
+    end
+end
+
+function ui.RefreshHistory()
+    if not ui.histBuilt then return end
+    -- Highlight the active period button.
+    local pi = 1
+    while pi <= table.getn(ui.histPerBtns) do
+        local b = ui.histPerBtns[pi]
+        if b.idx == ui.histPeriod then b:LockHighlight() else b:UnlockHighlight() end
+        pi = pi + 1
+    end
+
+    local secs = HIST_PERIODS[ui.histPeriod].secs
+    local since = (secs > 0) and (time() - secs) or nil
+    local income, spend = A.db.LedgerTotals(since)
+    local net = income - spend
+    local netColor
+    if net >= 0 then netColor = "|cff4cd94c" else netColor = "|cffe64c4c" end
+    ui.histTotals:SetText(
+        "Income " .. util.FormatMoney(income, true)
+        .. "   Spent " .. util.FormatMoney(spend, true)
+        .. "   Net " .. netColor .. util.FormatMoney(math.abs(net), true) .. "|r")
+
+    -- Build the display list (most recent first) within the window.
+    local led = A.db.Ledger()
+    ui.histView = {}
+    local i = table.getn(led)
+    while i >= 1 do
+        local e = led[i]
+        if not since or (e.t and e.t >= since) then
+            table.insert(ui.histView, e)
+        end
+        i = i - 1
+    end
+    ui.UpdateHistoryList()
+end
+
+function ui.UpdateHistoryList()
+    if not ui.histScroll then return end
+    local rows = ui.histView or {}
+    local total = table.getn(rows)
+    FauxScrollFrame_Update(ui.histScroll, total, HIST_ROWS, HIST_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.histScroll)
+    local i = 1
+    while i <= HIST_ROWS do
+        local row = ui.histRows[i]
+        local e = rows[i + offset]
+        if e then
+            row.when:SetText(e.t and util.FormatAgo(time() - e.t) or "\226\128\148")
+            row.when:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            if e.kind == "sale" then
+                row.kind:SetText("Sold")
+                row.kind:SetTextColor(0.30, 0.85, 0.30)
+                row.amount:SetText("+" .. util.FormatMoney(e.amount, true))
+            else
+                row.kind:SetText("Bought")
+                row.kind:SetTextColor(0.90, 0.55, 0.35)
+                row.amount:SetText("-" .. util.FormatMoney(e.amount, true))
+            end
+            row.item:SetText(e.item or "?")
+            row.item:SetTextColor(C.text[1], C.text[2], C.text[3])
+            row:Show()
+        else
+            row:Hide()
+        end
+        i = i + 1
+    end
+    if total == 0 then
+        ui.histNote:SetText("No transactions in this period yet.")
+    else
+        ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
+    end
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {
+    text = "Clear ALL Aegis sales/income history?\nThis cannot be undone.",
+    button1 = "Clear", button2 = "Cancel",
+    OnAccept = function()
+        A.db.ClearLedger()
+        ui.RefreshHistory()
+        ChatMsg("Aegis: history cleared.")
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
 
 -- ---------------------------------------------------------------------------
 -- Sell tab: bag browser + per-item listing scan + post
@@ -3712,6 +3950,8 @@ function ui.SelectSubTab(name)
         ui.RefreshCraft()
     elseif name == "Auctions" then
         ui.RefreshAuctions(true)
+    elseif name == "History" then
+        ui.RefreshHistory()
     elseif name == "Scan" then
         ui.RefreshSettings()   -- keep the price-data count current
     end
@@ -3898,6 +4138,12 @@ end)
 A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
     ui.RefreshSell()
     if ui.aucBuilt then ui.RefreshAuctions(false) end
+end)
+
+-- The mailbox updated (opened one, or took mail): log any AH sale mail so the
+-- History tab tracks income even when the AH window isn't open.
+A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+    ui.ScanMailSales()
 end)
 -- Bags changed (looted, moved, sold): refresh the Sell tab's bag browser, but
 -- only while it's the visible tab so we don't rescan bags needlessly.

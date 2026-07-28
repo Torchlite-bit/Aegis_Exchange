@@ -63,8 +63,15 @@ local function DefaultAccountDB()
         -- User settings (Aegis tab). Values are read through db.Setting, which
         -- falls back to SETTING_DEFAULTS, so a save missing a key still works.
         settings = {},
+        -- Sales & income history (History tab): a capped list of transactions,
+        -- plus dedup keys so a mailbox sale is only logged once.
+        ledger     = {},   -- array of { t, kind = "sale"|"buy", item, amount, id }
+        ledgerSeen = {},   -- dedup key -> true (AH sale mails)
     }
 end
+
+-- Cap on retained transactions so SavedVariables stays small.
+local LEDGER_MAX = 500
 
 -- Defaults for every user setting. db.Setting falls back to these, so adding a
 -- new setting here is enough -- no migration of old saves needed.
@@ -271,6 +278,63 @@ end
 function db.ClearItems()
     if not db.account then return end
     db.account.items = {}
+end
+
+-- ---------------------------------------------------------------------------
+-- Sales & income ledger (History tab)
+-- ---------------------------------------------------------------------------
+
+-- Append a transaction. kind is "sale" (money in) or "buy" (money out).
+function db.RecordTxn(kind, item, amount, itemId)
+    if not db.account then return end
+    if not amount or amount <= 0 then return end
+    local led = db.account.ledger
+    if not led then led = {}; db.account.ledger = led end
+    table.insert(led, { t = time(), kind = kind, item = item or "?",
+        amount = amount, id = itemId })
+    -- Prune oldest beyond the cap.
+    while table.getn(led) > LEDGER_MAX do
+        table.remove(led, 1)
+    end
+end
+
+function db.Ledger()
+    return (db.account and db.account.ledger) or {}
+end
+
+-- Has this mail-sale dedup key been logged already?
+function db.WasSeen(key)
+    return db.account and db.account.ledgerSeen and db.account.ledgerSeen[key]
+        and true or false
+end
+
+function db.MarkSeen(key)
+    if not db.account then return end
+    if not db.account.ledgerSeen then db.account.ledgerSeen = {} end
+    db.account.ledgerSeen[key] = true
+end
+
+-- Income / spend / count over transactions at or after `sinceEpoch` (nil = all).
+function db.LedgerTotals(sinceEpoch)
+    local income, spend, n = 0, 0, 0
+    local led = db.Ledger()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if not sinceEpoch or (e.t and e.t >= sinceEpoch) then
+            if e.kind == "sale" then income = income + (e.amount or 0)
+            elseif e.kind == "buy" then spend = spend + (e.amount or 0) end
+            n = n + 1
+        end
+        i = i + 1
+    end
+    return income, spend, n
+end
+
+function db.ClearLedger()
+    if not db.account then return end
+    db.account.ledger = {}
+    db.account.ledgerSeen = {}
 end
 
 -- Number of distinct items with any recorded price data.
