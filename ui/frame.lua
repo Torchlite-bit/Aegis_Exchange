@@ -3892,12 +3892,22 @@ function ui.AttachMerchantButton()
         local b = CreateFrame("Button", "AegisExchangeMerchantSellButton",
             MerchantFrame, "UIPanelButtonTemplate")
         b:SetWidth(150); b:SetHeight(22)
-        -- Anchor OUTSIDE the frame, centered just below its bottom edge. The
-        -- merchant window's INSIDE layout differs a lot between the stock UI
-        -- and pfUI (pfUI packs the Merchant/Buyback tabs and a money row along
-        -- the bottom), so sitting outside is the one placement clear in both --
-        -- and below the frame it still reads as belonging to that window.
-        b:SetPoint("TOP", MerchantFrame, "BOTTOM", 0, -6)
+        -- Sit in the tab row, to the right of Merchant / Buyback -- effectively
+        -- a third tab position.
+        --
+        -- Anchoring to the TABS (rather than the frame edge) is what makes this
+        -- line up in the stock UI and pfUI alike: pfUI restyles and repositions
+        -- the merchant window, but the tabs move with it, so we move too. Every
+        -- frame-relative offset we tried drifted between the two, because
+        -- pfUI's border is a hairline where vanilla's is thick and ornate.
+        local anchor = getglobal("MerchantFrameTab2")
+            or getglobal("MerchantFrameTab1")
+        if anchor then
+            b:SetPoint("LEFT", anchor, "RIGHT", 2, 0)
+        else
+            -- No tabs (shouldn't happen): fall back to under the frame.
+            b:SetPoint("TOP", MerchantFrame, "BOTTOM", 0, -6)
+        end
         b:SetFrameStrata("HIGH")
         b:SetScript("OnClick", function() ui.ConfirmSellMarked() end)
         ui.merchantBtn = b
