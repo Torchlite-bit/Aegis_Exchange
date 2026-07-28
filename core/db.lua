@@ -87,6 +87,12 @@ local SETTING_DEFAULTS = {
     tooltip        = true,      -- show Aegis price lines on item tooltips
     profLine       = true,      -- show the profit line on profession windows
     pfSkin         = true,      -- match pfUI's look when pfUI is installed
+    -- Query pacing between scan pages:
+    --   "auto" -- let the client's CanSendAuctionQuery() gate decide. Vanilla
+    --            keeps it shut ~5s; the AuctionQueryThrottle DLL clears it as
+    --            soon as the reply lands, so scans speed up automatically.
+    --   "safe" -- always keep the fixed 4s floor as well.
+    queryThrottle  = "auto",
 }
 
 -- Read a user setting, falling back to its default when unset.
