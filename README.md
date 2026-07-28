@@ -27,6 +27,29 @@ flat amount (yes, 1 copper works). Post **multiple stacks at once** — "3 stack
 of 20" — with an approximate deposit and your listing count against the 120-auction
 cap. Click any competitor's row to steal their price.
 
+A **History** panel shows what your scans say the item is worth (median, the
+range you've seen, how many days of data) next to what it has **actually sold
+for** from your mailbox. And after a **bag scan**, Aegis loads the first item
+into the sell slot and walks you down the list — **Post** or **Skip** moves to
+the next one, so you can clear a full bag without clicking back and forth.
+
+### 🏪 Vendor list — some things just aren't worth listing
+Not everything belongs on the auction house. Hit **Vendor** on the Sell tab and
+Aegis shows the bag items worth **more at a merchant** than on the AH — comparing
+the vendor price against the best AH price *after the 5% cut* — sorted by what
+you'd actually gain:
+
+| Item | Qty | Vendor (ea) | AH net (ea) | You gain |
+|---|---|---|---|---|
+| Tough Jerky | x5 | 25c | 9c | +80c |
+
+**Tick the ones you want gone** (or *Mark all*). Then at any merchant, an Aegis
+button appears on the vendor window — **"Aegis: sell 6 marked"** — which confirms
+what's about to go, sells the lot, and logs the gold to your History.
+
+> Vendor prices are learned by **hovering items at a merchant** (1.12's API
+> doesn't expose them otherwise), so this list fills in as you play.
+
 ### 📜 Auctions — mind the store
 Every auction you have out, with time left, current bid, and the thing you
 actually care about: **have I been undercut?** Green means you're still the
@@ -51,11 +74,38 @@ time.
 ### 🔍 Aegis tab — scanning + settings
 Run a full scan, a category-targeted scan, or scan everything in your bags to
 price it. Pause, resume, or **stop** whenever. Plus your defaults: post duration,
-undercut rule, auto-fill price, tooltip lines, and profit line — all in one place.
+undercut rule (% or flat), auto-fill price, tooltip lines, profit line, and the
+pfUI skin — all in one place.
 
 ### 💬 Tooltips everywhere
 Every item tooltip — bags, inventory, the AH, even the mailbox — gains market
 value, minimum buyout, and vendor price, with stack totals.
+
+---
+
+## Using pfUI?
+
+Aegis notices and **restyles itself to match** — pfUI's borders, buttons,
+checkboxes and scrollbars instead of vanilla tooltip frames. Nothing to install;
+it just happens. Turn it off any time with **"Match pfUI's look"** on the Aegis
+tab (takes a `/reload`).
+
+The skinning is purely cosmetic and fully guarded — if pfUI changes its API,
+the worst case is Aegis keeps its default look. It never affects behaviour.
+
+<details>
+<summary>Using <b>pfUI-addonskinner</b>?</summary>
+
+Aegis skins itself, so you don't need this. But if you prefer managing every
+skin through [pfUI-addonskinner](https://github.com/mrrosh/pfUI-addonskinner):
+
+1. Copy `pfui/Aegis_Exchange.lua` from this repo to
+   `Interface/AddOns/pfUI-addonskinner/skins/Aegis_Exchange.lua`
+2. Add `skins\Aegis_Exchange.lua` to `pfUI-addonskinner.toc` under `# skins`
+3. Restart the client
+
+That file just calls Aegis's own skinning routine, so both paths stay identical.
+</details>
 
 ---
 
@@ -117,7 +167,9 @@ Aegis_Exchange/
 │   └── buy.lua     search/buy engine + shopping lists + crafting
 ├── ui/
 │   ├── frame.lua   the window and every tab
+│   ├── skin.lua    optional pfUI restyling
 │   └── tooltip.lua price lines on item tooltips
+├── pfui/           drop-in skin for pfUI-addonskinner (not loaded by Aegis)
 └── design/         mockups (reference only — never loaded)
 ```
 

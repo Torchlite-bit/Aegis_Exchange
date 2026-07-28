@@ -367,6 +367,10 @@ function ui.BuildWindow()
         end
     end)
 
+    -- Match pfUI's look when pfUI is installed (purely cosmetic, and a no-op
+    -- otherwise). Runs last so every widget above already exists.
+    if A.skin then A.skin.Apply() end
+
     -- Land on Buy (the most-used tab); Buy / Sell / Scan are all functional.
     ui.SelectSubTab("Buy")
     ui.Refresh()
@@ -530,9 +534,25 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setProfLine = profChk
 
+    -- pfUI skin toggle. Only meaningful with pfUI installed, and changing it
+    -- takes effect on the next /reload (we can't un-skin frames in place).
+    local pfChk = CreateFrame("CheckButton", "AegisExchangeSetPfSkin", panel,
+        "UICheckButtonTemplate")
+    pfChk:SetWidth(24); pfChk:SetHeight(24)
+    pfChk:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 0, -4)
+    local pfTxt = getglobal(pfChk:GetName() .. "Text")
+    if pfTxt then
+        pfTxt:SetText("Match pfUI's look (needs /reload)")
+        pfTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
+    end
+    pfChk:SetScript("OnClick", function()
+        A.db.SetSetting("pfSkin", pfChk:GetChecked() and true or false)
+    end)
+    ui.setPfSkin = pfChk
+
     -- ---- Price data -------------------------------------------------------
     ui.setDataText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.setDataText:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 4, -14)
+    ui.setDataText:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 4, -14)
     ui.setDataText:SetTextColor(C.text[1], C.text[2], C.text[3])
 
     local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -611,6 +631,15 @@ function ui.RefreshSettings()
     end
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
+    end
+    if ui.setPfSkin then
+        ui.setPfSkin:SetChecked(A.db.Setting("pfSkin") ~= false and 1 or nil)
+        -- Without pfUI the toggle does nothing; grey it out rather than lie.
+        if A.skin and A.skin.Available() then
+            ui.setPfSkin:Enable()
+        else
+            ui.setPfSkin:Disable()
+        end
     end
     if ui.setDataText then
         ui.setDataText:SetText("Price data: " .. A.db.ItemCount()
@@ -2139,6 +2168,7 @@ function ui.AttachCraftButton(frame, name)
     b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -16, 46)
     b:SetText("Add to Aegis")
     b:SetScript("OnClick", function() ui.CraftCapture() end)
+    if A.skin then A.skin.ApplyExternal() end
 end
 
 -- A live "Profit / Loss" readout under our button on a profession window. It
@@ -3747,6 +3777,7 @@ end
 
 function ui.ShowVendorList()
     ui.BuildVendorList()
+    if A.skin then A.skin.ApplyOverlay(ui.vendList) end
     ui.RefreshVendorList()
     ui.vendList:Show()
 end
@@ -3787,6 +3818,7 @@ function ui.AttachMerchantButton()
         b:SetFrameStrata("HIGH")
         b:SetScript("OnClick", function() ui.ConfirmSellMarked() end)
         ui.merchantBtn = b
+        if A.skin then A.skin.ApplyExternal() end
     end
     ui.RefreshMerchantButton()
 end
@@ -4348,6 +4380,7 @@ end
 
 function ui.ShowPicker()
     ui.BuildCategoryPicker()
+    if A.skin then A.skin.ApplyOverlay(ui.picker) end
     if not ui.catTree then
         ui.catTree = A.scan.GetCategories()
         ui.catExpanded = {}
@@ -4375,17 +4408,29 @@ end
 -- Sub-tab switching
 -- ---------------------------------------------------------------------------
 
+-- Tint a sub-tab. Under the pfUI skin the visible backdrop is pfUI's own child
+-- frame (tab.backdrop), so colour that instead of the tab itself.
+local function TintTab(tab, bg, border)
+    local target = tab
+    if tab.backdrop and tab.backdrop.SetBackdropColor then
+        target = tab.backdrop
+    end
+    if not target.SetBackdropColor then return end
+    target:SetBackdropColor(bg[1], bg[2], bg[3], 1)
+    if target.SetBackdropBorderColor then
+        target:SetBackdropBorderColor(border[1], border[2], border[3])
+    end
+end
+
 function ui.SelectSubTab(name)
     if not ui.subtabs then return end
     ui.selectedSubTab = name
     for k, tab in pairs(ui.subtabs) do
         if k == name then
-            tab:SetBackdropColor(C.tabOn[1], C.tabOn[2], C.tabOn[3], 1)
-            tab:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+            TintTab(tab, C.tabOn, C.border)
             tab.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         else
-            tab:SetBackdropColor(C.tabOff[1], C.tabOff[2], C.tabOff[3], 1)
-            tab:SetBackdropBorderColor(0.30, 0.26, 0.16)
+            TintTab(tab, C.tabOff, { 0.30, 0.26, 0.16 })
             tab.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         end
     end
@@ -4506,6 +4551,7 @@ function ui.HookAuctionFrame()
             ui.OpenWindow()
         end)
         ui.blizSwapBtn = b
+        if A.skin then A.skin.ApplyExternal() end
     end
 
     ui.ahHooked = true

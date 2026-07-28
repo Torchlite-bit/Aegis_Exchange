@@ -86,6 +86,7 @@ local SETTING_DEFAULTS = {
     sellDefault    = "undercut", -- slot prefill: "undercut"|"market"|"none"
     tooltip        = true,      -- show Aegis price lines on item tooltips
     profLine       = true,      -- show the profit line on profession windows
+    pfSkin         = true,      -- match pfUI's look when pfUI is installed
 }
 
 -- Read a user setting, falling back to its default when unset.
