@@ -167,9 +167,15 @@ numbers, % colours, and profit estimates fill in as you go.
 - **Turtle specifics are baked in:** durations are ×3 (6h / 24h / 72h), there's a
   120-auction account cap, a 5% cut on sales, and the auction house is
   **cross-faction** — one shared economy, so prices aren't split by side.
-- **Scanning is deliberately polite.** ~4 seconds between pages, because the 1.12
-  server will happily ignore you if you hammer it. A full scan takes a while;
-  that's the protocol, not the addon.
+- **Scanning is paced by your client, not by us.** Aegis waits on the client's
+  own `CanSendAuctionQuery()` gate, which vanilla keeps shut ~5s after every
+  query. A full scan takes a while; that's the protocol, not the addon.
+  - Running the [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)
+    DLL? It clears that timer as soon as the server replies, so **Aegis speeds
+    up automatically** — nothing to configure. It's a DLL rather than an addon,
+    so there's nothing to detect: the gate *is* the signal. The Aegis tab shows
+    which you're getting (`fast — gate opened in 0.28s`), and **Safe 4s** pacing
+    is there if you ever want the old fixed floor back.
 - **Mail sale-tracking is enUS-only** right now (it matches "Auction successful:").
 
 ---
@@ -205,7 +211,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v0.20.2`) — quote it.
+1. Check the **version** in the window's title bar (`v0.21.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/Hr66t25vE7)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

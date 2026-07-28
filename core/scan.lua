@@ -24,7 +24,43 @@ local util = A.util
 scan.PAGE_SIZE = 50
 
 -- Seconds to wait between page queries (on top of CanSendAuctionQuery).
-scan.PAGE_DELAY = 4
+--
+-- The REAL throttle is the client's own CanSendAuctionQuery() gate: vanilla
+-- keeps it shut for ~5s after each query. This wall-clock delay is a floor we
+-- add on top of it.
+--
+-- AuctionQueryThrottle (https://github.com/brues-code/AuctionQueryThrottle) is
+-- a DLL -- not an addon, so there is nothing to IsAddOnLoaded() -- that clears
+-- that timer as soon as the server's reply lands. With it installed the gate
+-- opens almost immediately, so a 4s floor would throw the benefit away.
+--
+-- So in "auto" (the default) we drop the floor to FAST_DELAY and let the
+-- CLIENT'S GATE do the throttling. That is correct either way:
+--   * DLL present  -> gate opens at round-trip speed -> we scan fast.
+--   * DLL absent   -> gate stays shut ~5s -> we wait exactly as before.
+-- No detection needed; the gate IS the detector. "safe" restores the old
+-- fixed floor for anyone whose client reports the gate unreliably.
+scan.PAGE_DELAY = 4      -- "safe" floor
+scan.FAST_DELAY = 0.25   -- "auto" floor: just enough not to poll every frame
+
+-- Gate openings at or under this many seconds mean the throttle has been
+-- lifted (the DLL is doing its job). Purely informational -- it drives the
+-- readout, not the pacing.
+scan.FAST_GATE = 1.5
+
+-- The floor to use right now, per the Aegis-tab setting.
+function scan.PageDelay()
+    local mode = A.db and A.db.Setting and A.db.Setting("queryThrottle") or "auto"
+    if mode == "safe" then return scan.PAGE_DELAY end
+    return scan.FAST_DELAY
+end
+
+-- True once we've seen the client's gate open fast enough that the vanilla
+-- throttle is clearly not in play. Reported in the UI so it's obvious whether
+-- AuctionQueryThrottle is actually working.
+function scan.FastThrottleSeen()
+    return scan.state.fastGate and true or false
+end
 
 -- Seconds to wait for AUCTION_ITEM_LIST_UPDATE before re-sending the same
 -- page (lost replies happen on laggy servers).
@@ -56,6 +92,9 @@ scan.state = {
     sent          = 0,     -- queries actually handed to the client this run
     retries       = 0,     -- re-sends of the CURRENT page (reply never came)
     waitOk        = 0,     -- seconds spent blocked on CanSendAuctionQuery()
+    gateWait      = 0,     -- seconds the CURRENT gate wait has taken
+    lastGate      = nil,   -- how long the last gate took to open
+    fastGate      = false, -- gate has opened fast enough to mean "throttle lifted"
     callbacks     = nil,   -- { onPage = fn(page1, totalPages),
                            --   onComplete = fn(stats) }
 }
@@ -139,7 +178,22 @@ function scan.OnUpdate(dt)
     if st.phase == "wait_query" then
         st.cooldown = st.cooldown - dt
         if st.cooldown <= 0 then
+            -- Past our floor: the client's own gate now decides. This is the
+            -- part that adapts -- with AuctionQueryThrottle it opens at
+            -- round-trip speed, without it we sit here the vanilla ~5s.
+            st.gateWait = st.gateWait + dt
             if CanSendAuctionQuery() then
+                st.lastGate = st.gateWait
+                if st.gateWait <= scan.FAST_GATE then
+                    if not st.fastGate then
+                        scan.Debug(string.format(
+                            "query gate opened in %.2fs \226\128\148 throttle"
+                            .. " looks lifted (AuctionQueryThrottle?)",
+                            st.gateWait))
+                    end
+                    st.fastGate = true
+                end
+                st.gateWait = 0
                 st.waitOk = 0
                 SendQuery()
             else
@@ -219,7 +273,7 @@ local function StartCurrentQuery()
     if st.queryIndex == 1 then
         st.cooldown = 0
     else
-        st.cooldown = scan.PAGE_DELAY
+        st.cooldown = scan.PageDelay()
     end
     st.timeout = 0
 end
@@ -258,7 +312,7 @@ function scan.OnListUpdate()
     else
         st.page = st.page + 1
         st.phase = "wait_query"
-        st.cooldown = scan.PAGE_DELAY
+        st.cooldown = scan.PageDelay()
     end
 end
 
@@ -293,6 +347,9 @@ function scan.Start(queryOrList, callbacks)
     st.sent           = 0
     st.retries        = 0
     st.waitOk         = 0
+    st.gateWait       = 0
+    st.lastGate       = nil
+    st.fastGate       = false
     StartCurrentQuery()
     st.cooldown       = 0    -- first query goes as soon as the client allows
     scan.driver:Show()
@@ -317,7 +374,7 @@ function scan.Continue()
     local st = scan.state
     if st.phase ~= "paused" then return end
     st.page = st.lastCompleted + 1
-    st.cooldown = scan.PAGE_DELAY   -- be polite on re-entry
+    st.cooldown = scan.PageDelay()   -- be polite on re-entry
     st.timeout = 0
     st.phase = "wait_query"
     scan.driver:Show()
@@ -354,7 +411,7 @@ function scan.GetProgress()
     if st.elapsed > 0 then
         rate = st.scanned / st.elapsed
     end
-    local secPerPage = scan.PAGE_DELAY + 1
+    local secPerPage = scan.PageDelay() + 1
     if overallDone > 0 then
         secPerPage = st.elapsed / overallDone
     end
@@ -376,6 +433,8 @@ function scan.GetProgress()
         sent        = st.sent or 0,
         retries     = st.retries or 0,
         phase       = st.phase,
+        lastGate    = st.lastGate,
+        fastGate    = st.fastGate and true or false,
     }
 end
 

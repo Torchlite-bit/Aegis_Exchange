@@ -553,9 +553,41 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setPfSkin = pfChk
 
+    -- ---- Scan pacing -------------------------------------------------------
+    -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
+    -- running the AuctionQueryThrottle DLL scans as fast as the server answers
+    -- while a stock client still waits its ~5s. "Safe" keeps the fixed floor.
+    local thLbl = label("Scan pacing:", pfChk, -12)
+
+    ui.setThrottleBtns = {}
+    local modes = { { "Auto", "auto" }, { "Safe 4s", "safe" } }
+    local prevTh = nil
+    local ti = 1
+    while ti <= table.getn(modes) do
+        local m = modes[ti]
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(64); b:SetHeight(20)
+        if prevTh then b:SetPoint("LEFT", prevTh, "RIGHT", 4, 0)
+        else b:SetPoint("LEFT", thLbl, "RIGHT", 10, 0) end
+        b:SetText(m[1])
+        b.mode = m[2]
+        b:SetScript("OnClick", function()
+            A.db.SetSetting("queryThrottle", b.mode)
+            ui.RefreshSettings()
+        end)
+        ui.setThrottleBtns[ti] = b
+        prevTh = b
+        ti = ti + 1
+    end
+
+    ui.setThrottleInfo = panel:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlightSmall")
+    ui.setThrottleInfo:SetPoint("LEFT", prevTh, "RIGHT", 10, 0)
+    ui.setThrottleInfo:SetJustifyH("LEFT")
+
     -- ---- Price data -------------------------------------------------------
     ui.setDataText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.setDataText:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 4, -14)
+    ui.setDataText:SetPoint("TOPLEFT", thLbl, "BOTTOMLEFT", 0, -14)
     ui.setDataText:SetTextColor(C.text[1], C.text[2], C.text[3])
 
     local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -647,6 +679,37 @@ function ui.RefreshSettings()
     if ui.setDataText then
         ui.setDataText:SetText("Price data: " .. A.db.ItemCount()
             .. " item(s) recorded")
+    end
+
+    -- Scan pacing: highlight the active mode and report what the client's
+    -- query gate is actually doing, so it's obvious whether a throttle-removing
+    -- DLL (AuctionQueryThrottle) is having any effect.
+    local thMode = A.db.Setting("queryThrottle") or "auto"
+    if ui.setThrottleBtns then
+        local ti = 1
+        while ti <= table.getn(ui.setThrottleBtns) do
+            local b = ui.setThrottleBtns[ti]
+            if b.mode == thMode then b:LockHighlight() else b:UnlockHighlight() end
+            ti = ti + 1
+        end
+    end
+    if ui.setThrottleInfo then
+        local p = A.scan.GetProgress()
+        if thMode == "safe" then
+            ui.setThrottleInfo:SetText("fixed 4s between pages")
+            ui.setThrottleInfo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        elseif p.fastGate then
+            ui.setThrottleInfo:SetText(string.format(
+                "fast \226\128\148 gate opened in %.2fs", p.lastGate or 0))
+            ui.setThrottleInfo:SetTextColor(0.30, 0.85, 0.30)
+        elseif p.lastGate then
+            ui.setThrottleInfo:SetText(string.format(
+                "client throttled \226\128\148 gate took %.1fs", p.lastGate))
+            ui.setThrottleInfo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        else
+            ui.setThrottleInfo:SetText("follows the client's own query gate")
+            ui.setThrottleInfo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        end
     end
 end
 

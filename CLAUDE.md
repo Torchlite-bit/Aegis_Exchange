@@ -68,8 +68,19 @@ or silent breakage on the 1.12 / Lua 5.0 client.
      (`invType`, `class`, `subclass`, `isUsable`, `quality`) stay nil for
      "no filter".
 10. **Throttle every query.** Poll **`CanSendAuctionQuery()`** before **every**
-    query. Leave **~4 seconds between pages**. Wait for the
-    **`AUCTION_ITEM_LIST_UPDATE`** event before reading a page.
+    query — that gate is the authority, never a wall-clock timer alone. Wait
+    for the **`AUCTION_ITEM_LIST_UPDATE`** event before reading a page.
+    - The client keeps the gate shut ~5s after each query, which is where the
+      old "leave ~4 seconds between pages" rule of thumb came from. We now
+      apply only a small floor (`scan.FAST_DELAY`) and let the gate do the
+      throttling, because the **AuctionQueryThrottle** DLL
+      (<https://github.com/brues-code/AuctionQueryThrottle>) clears that timer
+      as soon as the reply lands. It is a DLL, **not an addon** — there is
+      nothing to `IsAddOnLoaded()`, so the gate itself is the detector: it
+      opens fast with the DLL and stays shut ~5s without it.
+    - `scan.PageDelay()` returns the floor for the current pacing setting;
+      "safe" restores the fixed 4s for clients that report the gate unreliably.
+      **Never** send a query without checking the gate, whatever the floor.
 11. **Page size is 50.**
 12. **Hiding `AuctionFrame` ENDS the AH session.** `AuctionFrame`'s XML
     `<OnHide>` runs **`CloseAuctionHouse()`**, so **any** `AuctionFrame:Hide()`

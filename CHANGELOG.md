@@ -12,6 +12,18 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [0.21.0]
+
+### Added
+- **Adaptive scan pacing.** Aegis now waits on the client's own
+  `CanSendAuctionQuery()` gate rather than a fixed wall-clock delay, so a client
+  running the [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)
+  DLL scans as fast as the server answers, while a stock client still waits its
+  ~5s. That DLL is not an addon, so there is nothing to detect — the gate *is*
+  the signal.
+- **Scan pacing** setting on the Aegis tab (**Auto** / **Safe 4s**) with a live
+  readout of what the gate is actually doing (`fast — gate opened in 0.28s`).
+
 ## [0.20.2]
 
 ### Fixed
@@ -205,4 +217,4 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-[0.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[0.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
