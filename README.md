@@ -2,7 +2,7 @@
 
 **A clean, fast auction house for Turtle WoW.**
 
-[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/3wTfRU8V9Z)
+[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/Hr66t25vE7)
 [![Client](https://img.shields.io/badge/client-WoW%201.12%20(vanilla)-c79c6e?style=flat-square)](https://turtle-wow.org)
 [![pfUI](https://img.shields.io/badge/pfUI-skin%20included-33ffcc?style=flat-square)](#using-pfui)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
@@ -15,7 +15,7 @@ made this week.
 > Built for **Turtle WoW 1.18.1**, which runs the original **WoW 1.12 (vanilla)**
 > client on **Lua 5.0**. Not Classic. Not retail. Real vanilla.
 
-**[💬 Join the Discord](https://discord.gg/3wTfRU8V9Z)** for help, bug reports,
+**[💬 Join the Discord](https://discord.gg/Hr66t25vE7)** for help, bug reports,
 and feature ideas.
 
 ---
@@ -207,7 +207,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 1. Check the **version** in the window's title bar (`v0.20.2`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
-3. Tell us on **[Discord](https://discord.gg/3wTfRU8V9Z)** or open an
+3. Tell us on **[Discord](https://discord.gg/Hr66t25vE7)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
    help enormously, especially for anything layout-related.
 
@@ -217,7 +217,7 @@ Recent changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-PRs welcome — come say hi on **[Discord](https://discord.gg/3wTfRU8V9Z)** first
+PRs welcome — come say hi on **[Discord](https://discord.gg/Hr66t25vE7)** first
 if you're planning something big.
 
 Three requests:
@@ -236,7 +236,7 @@ MIT — see [LICENSE](LICENSE).
 
 <div align="center">
 
-**[💬 Discord](https://discord.gg/3wTfRU8V9Z)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
+**[💬 Discord](https://discord.gg/Hr66t25vE7)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
 
 *Aegis: Exchange is part of the Aegis addon series. Happy flipping.* ⚔️
 
