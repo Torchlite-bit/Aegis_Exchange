@@ -189,6 +189,58 @@ function sell.VendorList()
     return rows
 end
 
+-- Bag stacks whose item is marked for vendoring. Rows are
+-- { bag, slot, itemId, name, count, vendorUnit, value } — `value` is the
+-- vendor payout for that whole stack, when we know the unit price.
+function sell.MarkedInBags()
+    local rows = {}
+    local cats = sell.ScanBags()
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local items = cats[ci].items
+        local ii = 1
+        while ii <= table.getn(items) do
+            local it = items[ii]
+            if it.itemId and A.db.IsVendorMarked(it.itemId) then
+                local unit = A.db.GetVendor(it.itemId)
+                table.insert(rows, {
+                    bag = it.bag, slot = it.slot, itemId = it.itemId,
+                    name = it.name, count = it.count or 1,
+                    vendorUnit = unit,
+                    value = unit and unit * (it.count or 1) or nil,
+                })
+            end
+            ii = ii + 1
+        end
+        ci = ci + 1
+    end
+    return rows
+end
+
+-- Sell every marked bag stack to the open merchant. On 1.12 that is
+-- UseContainerItem(bag, slot) while the merchant window is up. Returns
+-- (stacksSold, estimatedCopper). Caller must confirm first -- this spends
+-- items. Refuses unless a merchant window is actually open.
+function sell.SellMarkedToVendor()
+    if not (MerchantFrame and MerchantFrame:IsVisible()) then
+        return 0, 0
+    end
+    if not UseContainerItem then return 0, 0 end
+    local rows = sell.MarkedInBags()
+    -- Sell from the LAST slot backwards: selling shifts nothing on 1.12, but
+    -- reverse order keeps our captured bag/slot pairs valid if it ever does.
+    local sold, value = 0, 0
+    local i = table.getn(rows)
+    while i >= 1 do
+        local r = rows[i]
+        UseContainerItem(r.bag, r.slot)
+        sold = sold + 1
+        value = value + (r.value or 0)
+        i = i - 1
+    end
+    return sold, value
+end
+
 -- Approximate deposit (copper) for the slotted item at `minutes`. Prefers the
 -- client's own CalculateAuctionDeposit (present once the AH UI has loaded),
 -- scaled by the Turtle factor. Returns (copper, isApprox); isApprox is true on
