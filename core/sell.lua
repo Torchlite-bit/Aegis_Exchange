@@ -141,6 +141,54 @@ function sell.CancelOwnerAuction(i)
     return true
 end
 
+-- ---------------------------------------------------------------------------
+-- Vendor list: bag items worth MORE at a vendor than on the AH
+-- ---------------------------------------------------------------------------
+
+-- Compare each auctionable bag item's vendor price against what it would net
+-- on the AH (best known unit price minus the 5% consignment cut). Returns rows
+-- sorted by the biggest vendor advantage first:
+--   { name, itemId, texture, count, vendorUnit, ahUnit, netAh, diff, total }
+-- `diff` is per unit (vendor - net AH); `total` is diff x count. Items with no
+-- recorded vendor price are skipped -- vendor prices come from hovering an
+-- item at a merchant, so the list fills in as you play.
+function sell.VendorList()
+    local rows = {}
+    local cats = sell.ScanBags()
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local items = cats[ci].items
+        local ii = 1
+        while ii <= table.getn(items) do
+            local it = items[ii]
+            local vendor = it.itemId and A.db.GetVendor(it.itemId)
+            if vendor and vendor > 0 then
+                -- Best AH unit price we know, after the consignment cut.
+                local ah = A.db.MinBuyout(it.itemId) or A.db.MarketValue(it.itemId)
+                local netAh = ah and math.floor(ah * (1 - sell.CUT)) or 0
+                if vendor > netAh then
+                    local diff = vendor - netAh
+                    table.insert(rows, {
+                        name       = it.name,
+                        itemId     = it.itemId,
+                        texture    = it.texture,
+                        count      = it.count or 1,
+                        vendorUnit = vendor,
+                        ahUnit     = ah,
+                        netAh      = netAh,
+                        diff       = diff,
+                        total      = diff * (it.count or 1),
+                    })
+                end
+            end
+            ii = ii + 1
+        end
+        ci = ci + 1
+    end
+    table.sort(rows, function(a, b) return a.total > b.total end)
+    return rows
+end
+
 -- Approximate deposit (copper) for the slotted item at `minutes`. Prefers the
 -- client's own CalculateAuctionDeposit (present once the AH UI has loaded),
 -- scaled by the Turtle factor. Returns (copper, isApprox); isApprox is true on
