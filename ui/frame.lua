@@ -153,6 +153,9 @@ function ui.BuildWindow()
     -- to its left.
     local close = CreateFrame("Button", "AegisExchangeCloseButton", f,
         "UIPanelCloseButton")
+    -- Flagged so the pfUI skin uses its close-button helper rather than the
+    -- generic one (which would strip the X and leave an empty box).
+    close.aegisCloseButton = true
     close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -8, -8)
     close:SetFrameLevel(f:GetFrameLevel() + 10)
     close:SetScript("OnClick", function()
@@ -991,6 +994,17 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
         end
         k = k + 1
     end
+    -- Name sorts alphabetically; everything else numerically.
+    if sortKey == "name" then
+        table.sort(rows, function(a, b)
+            local an, bn = string.lower(a.name or ""), string.lower(b.name or "")
+            if an == bn then return false end
+            if dir == "desc" then return an > bn end
+            return an < bn
+        end)
+        return rows
+    end
+
     local function keyOf(r)
         if sortKey == "stack" then
             return (r.buyout and r.buyout > 0) and r.buyout or nil
@@ -998,6 +1012,8 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
             local m = r.itemId and A.db.MarketValue(r.itemId)
             if m and m > 0 and r.unit then return r.unit / m end
             return nil
+        elseif sortKey == "ct" then
+            return r.count
         end
         return r.unit
     end
@@ -1010,6 +1026,49 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
         return av < bv
     end)
     return rows
+end
+
+-- Build the clickable column headers for a results table. Every column sorts.
+-- The headers are bare text on an invisible button (aegisNoSkin) so the pfUI
+-- skin leaves them alone -- skinning them draws a backdrop per header and they
+-- overlap. Each button is sized to its own label so hit areas never collide.
+-- `cols` maps key -> x offset, `widths` key -> column width. Returns the
+-- key -> button table for ui.PaintSortHeaders.
+function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick)
+    local headers = {}
+    local defs = {
+        { key = "name",  text = "Item" },
+        { key = "ct",    text = "Ct" },
+        { key = "unit",  text = "Unit price" },
+        { key = "stack", text = "Stack buyout" },
+        { key = "pct",   text = "% mkt" },
+    }
+    local i = 1
+    while i <= table.getn(defs) do
+        local d = defs[i]
+        local cx = cols[d.key]
+        if cx then
+            local b = CreateFrame("Button", nil, panel)
+            b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
+            b:SetHeight(16)
+            b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
+            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+            fs:SetText(d.text)
+            -- Width: the label plus room for the sort arrow, but never wider
+            -- than the column, so adjacent headers can't overlap.
+            local w = fs:GetStringWidth() + 12
+            local maxw = (widths[d.key] or 40) + 12
+            if w > maxw then w = maxw end
+            b:SetWidth(w)
+            b.label = fs
+            b.baseText = d.text
+            b:SetScript("OnClick", function() onClick(d.key) end)
+            headers[d.key] = b
+        end
+        i = i + 1
+    end
+    return headers
 end
 
 -- Put a ↑/↓ arrow on whichever sort header is active (shared Buy/Crafting).
@@ -1176,32 +1235,12 @@ function ui.BuildBuyTab()
                  buy = 436, bid = 490 }
     local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 
-    local mkText = function(cx, text)
-        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -78)
-        fs:SetText(text)
-        return fs
-    end
-    mkText(CX.name, "Item")
-    mkText(CX.ct, "Ct")
-
+    -- EVERY column sorts, including Item and Ct. Headers are bare clickable
+    -- text (aegisNoSkin), never skinned into boxes -- pfUI's SkinButton would
+    -- give each one a backdrop and they'd visibly overlap.
     ui.buyHeaders = {}
-    local mkSort = function(cx, w, text, key)
-        local b = CreateFrame("Button", nil, panel)
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -76)
-        b:SetWidth(w + 14); b:SetHeight(16)
-        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
-        fs:SetText(text)
-        b.label = fs
-        b.baseText = text
-        b:SetScript("OnClick", function() ui.SetBuySort(key) end)
-        ui.buyHeaders[key] = b
-        return b
-    end
-    mkSort(CX.unit, CW.unit, "Unit price", "unit")
-    mkSort(CX.stack, CW.stack, "Stack buyout", "stack")
-    mkSort(CX.pct, CW.pct, "% mkt", "pct")
+    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, CX, CW,
+        function(key) ui.SetBuySort(key) end)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
@@ -1764,32 +1803,9 @@ function ui.BuildCraftTab()
                  buy = 436, bid = 490 }
     local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 
-    local mkText = function(cx, text)
-        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -78)
-        fs:SetText(text)
-        return fs
-    end
-    mkText(CX.name, "Item")
-    mkText(CX.ct, "Ct")
-
-    ui.craftHeaders = {}
-    local mkSort = function(cx, w, text, key)
-        local b = CreateFrame("Button", nil, panel)
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -76)
-        b:SetWidth(w + 14); b:SetHeight(16)
-        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
-        fs:SetText(text)
-        b.label = fs
-        b.baseText = text
-        b:SetScript("OnClick", function() ui.SetCraftSort(key) end)
-        ui.craftHeaders[key] = b
-        return b
-    end
-    mkSort(CX.unit, CW.unit, "Unit price", "unit")
-    mkSort(CX.stack, CW.stack, "Stack buyout", "stack")
-    mkSort(CX.pct, CW.pct, "% mkt", "pct")
+    -- Every column sorts (see ui.MakeSortHeaders); headers stay unskinned.
+    ui.craftHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, CX, CW,
+        function(key) ui.SetCraftSort(key) end)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeCraftScroll",
         panel, "FauxScrollFrameTemplate")
@@ -3075,19 +3091,35 @@ function ui.BuildSellTab()
     ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     -- Column header labels.
+    -- Every listing column sorts too. Bare clickable text (aegisNoSkin) so the
+    -- pfUI skin doesn't box each header and make them overlap.
+    ui.sellSortKey = "unit"
+    ui.sellSortDir = "asc"
     local colX = { unit = 200, avail = 292, stack = 452, pct = 592, you = 646 }
-    local mkCol = function(x, text)
-        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -155)
+    ui.sellHeaders = {}
+    local mkCol = function(x, text, key, width)
+        local b = CreateFrame("Button", nil, panel)
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -155)
+        b:SetHeight(16)
+        b.aegisNoSkin = true
+        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
         fs:SetJustifyH("LEFT")
         fs:SetText(text)
-        return fs
+        local w = fs:GetStringWidth() + 12
+        if w > width then w = width end
+        b:SetWidth(w)
+        b.label = fs
+        b.baseText = text
+        b:SetScript("OnClick", function() ui.SetSellSort(key) end)
+        ui.sellHeaders[key] = b
+        return b
     end
-    mkCol(colX.unit, "Unit price")
-    mkCol(colX.avail, "Available")
-    mkCol(colX.stack, "Stack price")
-    mkCol(colX.pct, "% mkt")
-    mkCol(colX.you, "You?")
+    mkCol(colX.unit,  "Unit price",  "unit",  88)
+    mkCol(colX.avail, "Available",   "avail", 156)
+    mkCol(colX.stack, "Stack price", "stack", 136)
+    mkCol(colX.pct,   "% mkt",       "pct",   50)
+    mkCol(colX.you,   "You?",        "you",   44)
 
     local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
         panel, "FauxScrollFrameTemplate")
@@ -3312,11 +3344,18 @@ function ui.OnItemListings(rows)
     ui.sellScanState = "done"
     local market = A.db.MarketValue(it.itemId)
     ui.sellListingGroups = A.sell.GroupListings(rows, market)
-    -- Pre-fill the buyout from the default-price setting when the user hasn't
-    -- typed one.
-    if util.Trim(ui.sellBuyout:GetText() or "") == "" then
+    -- Price it automatically: whenever a scan lands for a NEW item, fill the
+    -- buyout from the lowest competing listing with the configured undercut
+    -- applied (DefaultSellUnit -> UndercutUnit). Also fills an empty box, so
+    -- clearing the price and re-scanning re-prices it.
+    if ui.sellPrefilledFor ~= it.itemId
+        or util.Trim(ui.sellBuyout:GetText() or "") == "" then
         local u = ui.DefaultSellUnit(it.itemId)
-        if u then SetMoneyBox(ui.sellBuyout, u) end
+        if u then
+            SetMoneyBox(ui.sellBuyout, u)
+            ui.SyncSellPrices("unit")   -- keep the stack price in step
+        end
+        ui.sellPrefilledFor = it.itemId
     end
     ui.UpdateListingsList()
     ui.UpdateBagList()     -- refresh cache dots on the bag rows
@@ -3334,9 +3373,52 @@ function ui.DefaultSellUnit(itemId)
     return A.sell.UndercutUnit(itemId)   -- "undercut" (default)
 end
 
+-- Click a listings header: same column toggles direction, a new column starts
+-- ascending. Mirrors the Buy / Crafting behaviour.
+function ui.SetSellSort(key)
+    if ui.sellSortKey == key then
+        ui.sellSortDir = (ui.sellSortDir == "asc") and "desc" or "asc"
+    else
+        ui.sellSortKey = key
+        ui.sellSortDir = "asc"
+    end
+    ui.UpdateListingsList()
+end
+
+-- Sort a copy of the grouped listings by the chosen column.
+function ui.SortSellGroups(all, sortKey, dir)
+    local rows = {}
+    local i = 1
+    while i <= table.getn(all) do
+        table.insert(rows, all[i])
+        i = i + 1
+    end
+    local function keyOf(g)
+        if sortKey == "avail" then return g.num
+        elseif sortKey == "stack" then
+            return (g.buyout and g.buyout > 0) and g.buyout or nil
+        elseif sortKey == "pct" then return g.pct
+        elseif sortKey == "you" then return g.mine and 1 or 0 end
+        return g.unit
+    end
+    table.sort(rows, function(a, b)
+        local av, bv = keyOf(a), keyOf(b)
+        if not av and not bv then return false end
+        if not av then return false end   -- unpriced sinks
+        if not bv then return true end
+        if dir == "desc" then return av > bv end
+        return av < bv
+    end)
+    return rows
+end
+
 function ui.UpdateListingsList()
     if not ui.listScroll then return end
-    local groups = ui.sellListingGroups or {}
+    local all = ui.sellListingGroups or {}
+    local groups = ui.SortSellGroups(all,
+        ui.sellSortKey or "unit", ui.sellSortDir or "asc")
+    ui.PaintSortHeaders(ui.sellHeaders,
+        ui.sellSortKey or "unit", ui.sellSortDir or "asc")
     FauxScrollFrame_Update(ui.listScroll, table.getn(groups), LIST_ROWS, LIST_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.listScroll)
 
@@ -3438,6 +3520,7 @@ function ui.RefreshSell()
         ui.sellPostBtn:Disable()
         ui.lastScanItemId = nil
         ui.sellDefaultsFor = nil
+        ui.sellPrefilledFor = nil
         return
     end
     if not it then return end   -- mid-post, slot momentarily empty
@@ -3809,12 +3892,12 @@ function ui.AttachMerchantButton()
         local b = CreateFrame("Button", "AegisExchangeMerchantSellButton",
             MerchantFrame, "UIPanelButtonTemplate")
         b:SetWidth(150); b:SetHeight(22)
-        -- Anchor OUTSIDE the frame, just above its top-right corner. The
+        -- Anchor OUTSIDE the frame, centered just below its bottom edge. The
         -- merchant window's INSIDE layout differs a lot between the stock UI
         -- and pfUI (pfUI packs the Merchant/Buyback tabs and a money row along
-        -- the bottom, which the old bottom-left spot landed on), so sitting
-        -- outside is the one placement that is clear in both.
-        b:SetPoint("BOTTOMRIGHT", MerchantFrame, "TOPRIGHT", -4, 4)
+        -- the bottom), so sitting outside is the one placement clear in both --
+        -- and below the frame it still reads as belonging to that window.
+        b:SetPoint("TOP", MerchantFrame, "BOTTOM", 0, -6)
         b:SetFrameStrata("HIGH")
         b:SetScript("OnClick", function() ui.ConfirmSellMarked() end)
         ui.merchantBtn = b
@@ -3988,6 +4071,7 @@ function ui.SkipSell()
     A.sell.ClearSlot()
     ui.lastScanItemId = nil
     ui.sellDefaultsFor = nil
+    ui.sellPrefilledFor = nil
     ui.sellListingGroups = nil
     ui.sellScanState = nil
     SetMoneyBox(ui.sellBuyout, nil)
@@ -4075,6 +4159,7 @@ function ui.DoPost()
                 ChatMsg("Aegis: " .. msg)
                 ui.lastScanItemId = nil
                 ui.sellDefaultsFor = nil
+                ui.sellPrefilledFor = nil
                 ui.RefreshSell()
                 ui.RefreshBags()
                 -- Walking the post-scan bag list? Move to the next item
@@ -4508,6 +4593,16 @@ end
 function ui.HookAuctionFrame()
     if ui.ahHooked then return end
     if not AuctionFrame then return end
+
+    -- Blizzard's AuctionFrameAuctions_Update() does arithmetic on
+    -- AuctionFrameAuctions.page, which its own OnShow normally seeds. We
+    -- replace that window, so its Auctions tab may never be shown and the
+    -- field stays nil -- then ANY AUCTION_OWNED_LIST_UPDATE (posting,
+    -- cancelling, our owner-list request) reaches their handler and throws
+    -- "attempt to perform arithmetic on field 'page'". Seed it once here.
+    if AuctionFrameAuctions and AuctionFrameAuctions.page == nil then
+        AuctionFrameAuctions.page = 0
+    end
 
     ui.orig_AuctionFrame_OnShow = AuctionFrame:GetScript("OnShow")
     AuctionFrame:SetScript("OnShow", function()

@@ -43,11 +43,12 @@ local function Env()
     local ok, env = pcall(function() return pfUI:GetEnvironment() end)
     if not ok or not env then return nil end
     skin.env = {
-        CreateBackdrop = env.CreateBackdrop,
-        StripTextures  = env.StripTextures,
-        SkinButton     = env.SkinButton,
-        SkinCheckbox   = env.SkinCheckbox,
-        SkinScrollbar  = env.SkinScrollbar,
+        CreateBackdrop  = env.CreateBackdrop,
+        StripTextures   = env.StripTextures,
+        SkinButton      = env.SkinButton,
+        SkinCloseButton = env.SkinCloseButton,
+        SkinCheckbox    = env.SkinCheckbox,
+        SkinScrollbar   = env.SkinScrollbar,
     }
     return skin.env
 end
@@ -75,6 +76,18 @@ local function Button(b)
     local env = Env()
     if not b or not env or not env.SkinButton then return end
     pcall(function() env.SkinButton(b) end)
+end
+
+-- Close buttons need pfUI's dedicated helper: running the generic SkinButton
+-- over a UIPanelCloseButton strips its "X" texture and leaves an oversized
+-- empty box. If pfUI has no close-button skinner, leave the stock X alone --
+-- a vanilla X looks far better than a blank button.
+local function CloseButton(b)
+    local env = Env()
+    if not b or not env then return end
+    if env.SkinCloseButton then
+        pcall(function() env.SkinCloseButton(b) end)
+    end
 end
 
 local function Checkbox(c)
@@ -108,11 +121,21 @@ local function SkinWidget(f)
     local ok, otype = pcall(function() return f:GetObjectType() end)
     if not ok then return false end
 
+    -- Widgets that opt out: bare-text sort headers and our row buttons that
+    -- must keep their own look. Marked with aegisNoSkin at creation.
+    if f.aegisNoSkin then
+        f.aegisSkinned = true
+        return false
+    end
+
     if otype == "Button" or otype == "CheckButton" then
-        -- pfUI has a dedicated checkbox look; everything else is a button.
-        local isCheck = false
-        if otype == "CheckButton" then isCheck = true end
-        if isCheck then Checkbox(f) else Button(f) end
+        if otype == "CheckButton" then
+            Checkbox(f)
+        elseif f.aegisCloseButton then
+            CloseButton(f)
+        else
+            Button(f)
+        end
         f.aegisSkinned = true
         return true
     elseif otype == "EditBox" then
