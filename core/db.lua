@@ -337,6 +337,49 @@ function db.ClearLedger()
     db.account.ledgerSeen = {}
 end
 
+-- What this item has actually SOLD for (from the mailbox ledger, matched by
+-- name since AH sale mails carry no item link). Returns (median, count, last)
+-- of the whole-mail amounts, or nil when we've never sold it.
+function db.SaleHistory(itemName)
+    if not itemName then return nil, 0 end
+    local amounts, last = {}, nil
+    local led = db.Ledger()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if e.kind == "sale" and e.item == itemName and e.amount then
+            table.insert(amounts, e.amount)
+            last = e.amount           -- ledger is chronological; keep the newest
+        end
+        i = i + 1
+    end
+    local n = table.getn(amounts)
+    if n == 0 then return nil, 0 end
+    table.sort(amounts)
+    local median
+    if math.mod(n, 2) == 1 then
+        median = amounts[(n + 1) / 2]
+    else
+        median = math.floor((amounts[n / 2] + amounts[n / 2 + 1]) / 2)
+    end
+    return median, n, last
+end
+
+-- Spread of an item's recorded daily minimum buyouts: (days, low, high).
+-- Pairs with db.MarketValue (the time-weighted median) on the Sell tab.
+function db.PriceSpread(itemId)
+    if not db.account or not itemId then return 0 end
+    local rec = db.account.items[itemId]
+    if not rec then return 0 end
+    local days, low, high = 0, nil, nil
+    for _, v in pairs(rec.daily) do
+        days = days + 1
+        if not low or v < low then low = v end
+        if not high or v > high then high = v end
+    end
+    return days, low, high
+end
+
 -- Number of distinct items with any recorded price data.
 function db.ItemCount()
     if not db.account then return 0 end

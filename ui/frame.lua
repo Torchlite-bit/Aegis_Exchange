@@ -2749,6 +2749,25 @@ function ui.BuildSellTab()
     ui.sellVendor:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -60)
     ui.sellVendor:SetJustifyH("RIGHT")
 
+    -- History block: what our SCAN history says this item is worth (the
+    -- time-weighted median of daily minimums, plus the observed range) and what
+    -- it has actually SOLD for (from the mailbox ledger). Sits between the
+    -- deposit info and the listings table.
+    local histHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    histHdr:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -84)
+    histHdr:SetJustifyH("RIGHT")
+    histHdr:SetText("History")
+    histHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.sellHistHdr = histHdr
+
+    ui.sellHistScan = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellHistScan:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -100)
+    ui.sellHistScan:SetJustifyH("RIGHT")
+
+    ui.sellHistSold = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellHistSold:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -116)
+    ui.sellHistSold:SetJustifyH("RIGHT")
+
     -- Deposit / total / cap count, right-aligned.
     ui.sellDeposit = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.sellDeposit:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -12)
@@ -2909,6 +2928,16 @@ function ui.BuildSellTab()
     -- x=200 -- otherwise the bar overlaps the price info.
     bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, 10)
 
+    -- Vendor list: bag items worth more at a merchant than on the AH.
+    local vendListBtn = CreateFrame("Button", "AegisExchangeVendorListButton",
+        panel, "UIPanelButtonTemplate")
+    vendListBtn:SetWidth(56)
+    vendListBtn:SetHeight(18)
+    vendListBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -52, 18)
+    vendListBtn:SetText("Vendor")
+    vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
+    ui.sellVendorListBtn = vendListBtn
+
     local scanAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     scanAllBtn:SetWidth(48)
     scanAllBtn:SetHeight(18)
@@ -2931,6 +2960,9 @@ function ui.BuildSellTab()
                     -- All done or stopped.
                     scanAllBtn:SetText("Scan")
                     ui.UpdateBagList()
+                    -- Queue the scanned items for posting and slot the first
+                    -- one, so you can Post / Skip straight down the list.
+                    ui.StartSellQueue()
                 end
             )
             ui.UpdateBagList()   -- show the first yellow dot immediately
@@ -3350,6 +3382,8 @@ function ui.RefreshSell()
         ui.sellDeposit:SetText("")
         ui.sellTotal:SetText("")
         ui.sellMaxInfo:SetText("")
+        ui.sellHistScan:SetText("")
+        ui.sellHistSold:SetText("")
         ui.sellPostBtn:Disable()
         ui.lastScanItemId = nil
         ui.sellDefaultsFor = nil
@@ -3391,6 +3425,8 @@ function ui.RefreshSell()
     else
         ui.sellCtx:SetText("No price data yet \226\128\148 scanning...")
     end
+
+    ui.UpdateSellHistory(it)
 
     local unitBuy = ReadMoneyBox(ui.sellBuyout)
     local size    = ui.GetStackSize(it)
@@ -3495,7 +3531,270 @@ function ui.SyncSellPrices(source)
     ui.RefreshSell()
 end
 
--- Skip button: cancel an in-progress post, else clear the current selection.
+-- ---- vendor list overlay -----------------------------------------------
+-- Bag items that are worth MORE at a merchant than on the AH (after the 5%
+-- consignment cut). Built lazily over the content region, like the category
+-- picker.
+
+local VEND_ROWS, VEND_ROW_H = 12, 20
+
+function ui.BuildVendorList()
+    if ui.vendList then return end
+    local f = CreateFrame("Frame", "AegisExchangeVendorList", ui.frame)
+    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)
+    f:EnableMouse(true)
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    f:Hide()
+    ui.vendList = f
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    title:SetText("Better at a vendor than on the AH")
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    closeBtn:SetWidth(60); closeBtn:SetHeight(20)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -8)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.HideVendorList() end)
+
+    ui.vendNote = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.vendNote:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -30)
+    ui.vendNote:SetJustifyH("LEFT")
+    ui.vendNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- Columns.
+    local VX = { name = 8, qty = 210, vendor = 260, ah = 360, gain = 470 }
+    local hdr = function(cx, text, just)
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("TOPLEFT", f, "TOPLEFT", cx, -52)
+        fs:SetText(text)
+        if just then fs:SetJustifyH(just) end
+        return fs
+    end
+    hdr(VX.name, "Item")
+    hdr(VX.qty, "Qty")
+    hdr(VX.vendor, "Vendor (ea)")
+    hdr(VX.ah, "AH net (ea)")
+    hdr(VX.gain, "You gain")
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeVendScroll", f,
+        "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -68)
+    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, 10)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(VEND_ROW_H, ui.UpdateVendorList)
+    end)
+    ui.vendScroll = scroll
+
+    ui.vendRows = {}
+    local i = 1
+    while i <= VEND_ROWS do
+        local row = CreateFrame("Frame", nil, f)
+        row:SetHeight(VEND_ROW_H)
+        if i == 1 then
+            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        else
+            row:SetPoint("TOPLEFT", ui.vendRows[i - 1], "BOTTOMLEFT", 0, 0)
+            row:SetPoint("TOPRIGHT", ui.vendRows[i - 1], "BOTTOMRIGHT", 0, 0)
+        end
+        local mk = function(cx, w, just)
+            local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+            fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+            return fs
+        end
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", VX.name, 0)
+        row.icon = icon
+        row.name   = mk(VX.name + 20, 178)
+        row.qty    = mk(VX.qty, 44)
+        row.vendor = mk(VX.vendor, 94)
+        row.ah     = mk(VX.ah, 104)
+        row.gain   = mk(VX.gain, 96)
+        row:Hide()
+        ui.vendRows[i] = row
+        i = i + 1
+    end
+end
+
+function ui.RefreshVendorList()
+    if not ui.vendList then return end
+    ui.vendData = A.sell.VendorList()
+    ui.UpdateVendorList()
+end
+
+function ui.UpdateVendorList()
+    if not ui.vendScroll then return end
+    local rows = ui.vendData or {}
+    local total = table.getn(rows)
+
+    local sum = 0
+    local k = 1
+    while k <= total do sum = sum + (rows[k].total or 0); k = k + 1 end
+
+    if total == 0 then
+        ui.vendNote:SetText("Nothing in your bags is worth more at a vendor"
+            .. " \226\128\148 or those items have no vendor price recorded yet"
+            .. " (hover them at a merchant to learn it).")
+    else
+        ui.vendNote:SetText(total .. " item(s) \226\128\162 vendoring them all"
+            .. " nets about " .. util.FormatMoney(sum, true) .. " more than the AH.")
+    end
+
+    FauxScrollFrame_Update(ui.vendScroll, total, VEND_ROWS, VEND_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.vendScroll)
+    local i = 1
+    while i <= VEND_ROWS do
+        local row = ui.vendRows[i]
+        local r = rows[i + offset]
+        if r then
+            if r.texture then row.icon:SetTexture(r.texture); row.icon:Show()
+            else row.icon:Hide() end
+            row.name:SetText(r.name)
+            row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+            row.qty:SetText("x" .. r.count)
+            row.vendor:SetText(util.FormatMoney(r.vendorUnit, true))
+            if r.ahUnit then
+                row.ah:SetText(util.FormatMoney(r.netAh, true))
+            else
+                row.ah:SetText("no AH data")
+            end
+            row.gain:SetText("+" .. util.FormatMoney(r.total, true))
+            row.gain:SetTextColor(0.30, 0.85, 0.30)
+            row:Show()
+        else
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+function ui.ShowVendorList()
+    ui.BuildVendorList()
+    ui.RefreshVendorList()
+    ui.vendList:Show()
+end
+
+function ui.HideVendorList()
+    if ui.vendList then ui.vendList:Hide() end
+end
+
+function ui.ToggleVendorList()
+    ui.BuildVendorList()
+    if ui.vendList:IsVisible() then ui.HideVendorList()
+    else ui.ShowVendorList() end
+end
+
+-- Sell tab History block: the median the SCANS say (with the observed range and
+-- how many days back it goes), and what this item has actually SOLD for.
+function ui.UpdateSellHistory(it)
+    if not ui.sellHistScan then return end
+    if not it then
+        ui.sellHistScan:SetText("")
+        ui.sellHistSold:SetText("")
+        return
+    end
+
+    -- Scan side: time-weighted median of daily minimum buyouts, plus the range.
+    local median = A.db.MarketValue(it.itemId)
+    local days, low, high = A.db.PriceSpread(it.itemId)
+    if median and days > 0 then
+        local txt = "Scans: med " .. util.FormatMoney(median, true)
+            .. "  (" .. days .. "d"
+        if low and high and low ~= high then
+            txt = txt .. " " .. util.FormatMoney(low, true)
+                .. "\226\128\147" .. util.FormatMoney(high, true)
+        end
+        ui.sellHistScan:SetText(txt .. ")")
+        ui.sellHistScan:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        ui.sellHistScan:SetText("Scans: no data yet")
+        ui.sellHistScan:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    -- Sales side: what the mailbox ledger says this actually sold for.
+    local sMed, sCount, sLast = A.db.SaleHistory(it.name)
+    if sMed and sCount > 0 then
+        local txt = "Sold: " .. sCount .. "x  med "
+            .. util.FormatMoney(sMed, true)
+        if sLast and sLast ~= sMed then
+            txt = txt .. "  last " .. util.FormatMoney(sLast, true)
+        end
+        ui.sellHistSold:SetText(txt)
+        ui.sellHistSold:SetTextColor(0.30, 0.85, 0.30)
+    else
+        ui.sellHistSold:SetText("Sold: none yet")
+        ui.sellHistSold:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+end
+
+-- ---- post-scan sell queue ----------------------------------------------
+-- After a bag scan, walk the bag items one at a time: the first is placed in
+-- the sell slot automatically, and Post or Skip moves on to the next.
+
+-- Build the queue from the current bag contents and slot the first item.
+function ui.StartSellQueue()
+    local cats = A.sell.ScanBags()
+    local q = {}
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local items = cats[ci].items
+        local ii = 1
+        while ii <= table.getn(items) do
+            table.insert(q, items[ii])
+            ii = ii + 1
+        end
+        ci = ci + 1
+    end
+    ui.sellQueue = q
+    ui.sellQueueIndex = 0
+    if table.getn(q) == 0 then
+        ui.sellQueue = nil
+        return
+    end
+    ui.AdvanceSellQueue()
+end
+
+-- Place the next queued item into the sell slot. Ends quietly when exhausted.
+function ui.AdvanceSellQueue()
+    local q = ui.sellQueue
+    if not q then return false end
+    local i = (ui.sellQueueIndex or 0) + 1
+    -- Skip anything no longer in bags (already posted or moved).
+    while i <= table.getn(q) do
+        local item = q[i]
+        if item.itemId and A.sell.CountInBags(item.itemId) > 0 then
+            ui.sellQueueIndex = i
+            A.sell.PlaceFromBag(item.bag, item.slot)
+            ui.RefreshSell()
+            if ui.sellStatus then
+                ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
+                    .. " \226\128\148 Post or Skip.")
+            end
+            return true
+        end
+        i = i + 1
+    end
+    ui.sellQueue = nil
+    ui.sellQueueIndex = nil
+    if ui.sellStatus then ui.sellStatus:SetText("Bag list finished.") end
+    return false
+end
+
+-- Skip button: cancel an in-progress post, else move to the next queued item
+-- (or just clear the slot when we're not walking a queue).
 function ui.SkipSell()
     if A.sell.PostingActive() then
         A.sell.CancelPosting()
@@ -3512,6 +3811,8 @@ function ui.SkipSell()
     SetMoneyBox(ui.sellBuyout, nil)
     SetMoneyBox(ui.sellStackPrice, nil)
     ui.UpdateListingsList()
+    -- Walking the post-scan list? Move on to the next item.
+    if ui.sellQueue and ui.AdvanceSellQueue() then return end
     ui.RefreshSell()
 end
 
@@ -3594,6 +3895,11 @@ function ui.DoPost()
                 ui.sellDefaultsFor = nil
                 ui.RefreshSell()
                 ui.RefreshBags()
+                -- Walking the post-scan bag list? Move to the next item
+                -- (unless the user cancelled, which should stop the walk).
+                if ui.sellQueue and reason ~= "cancelled" then
+                    ui.AdvanceSellQueue()
+                end
             end,
         })
     if not ok then
@@ -3940,6 +4246,10 @@ function ui.SelectSubTab(name)
     -- over another tab's panel.
     if name ~= "Scan" then
         ui.HidePicker()
+    end
+    -- The vendor list belongs to the Sell tab; don't leave it over another.
+    if name ~= "Sell" then
+        ui.HideVendorList()
     end
     if name == "Sell" then
         ui.RefreshBags()
