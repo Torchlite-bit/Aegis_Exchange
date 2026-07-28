@@ -192,6 +192,7 @@ function skin.Apply()
     Backdrop(ui.frame, 1)
     Backdrop(ui.content, 1)
     if ui.titleBar then Backdrop(ui.titleBar, 1) end
+    skin.AdjustHeader()
 
     -- Sub-tab pills. These are custom-drawn Buttons whose colour we manage in
     -- SelectSubTab, so give them a pfUI backdrop and let our colouring ride on
@@ -213,6 +214,37 @@ function skin.Apply()
     skin.applied = true
     skin.ApplyExternal()
     return true
+end
+
+-- Re-anchor the header for the skin.
+--
+-- Our default offsets are tuned for the VANILLA frame border, which is thick
+-- and ornate (edgeSize 28 / 10px insets). pfUI's border is a hairline, so those
+-- same insets leave the title strip floating away from the edge and the close
+-- button sitting above it rather than on it.
+--
+-- Rather than guess pfUI's exact border width, tie the pieces to each other:
+-- the strip hugs the frame with a small inset, and the close button is
+-- vertically CENTERED on the strip. The "Blizzard UI" button and version text
+-- already chain off the close button, so the whole row follows automatically.
+function skin.AdjustHeader()
+    local ui = A.ui
+    if not ui or not ui.frame or not ui.titleBar then return end
+    local close = getglobal("AegisExchangeCloseButton")
+
+    pcall(function()
+        ui.titleBar:ClearAllPoints()
+        ui.titleBar:SetPoint("TOPLEFT", ui.frame, "TOPLEFT", 5, -5)
+        ui.titleBar:SetPoint("TOPRIGHT", ui.frame, "TOPRIGHT", -5, -5)
+    end)
+
+    if close then
+        pcall(function()
+            close:ClearAllPoints()
+            -- Centered on the strip, just inside its right edge.
+            close:SetPoint("RIGHT", ui.titleBar, "RIGHT", -3, 0)
+        end)
+    end
 end
 
 -- Our buttons that live on OTHER frames (profession windows, the merchant, the
