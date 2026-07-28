@@ -88,7 +88,17 @@ end
 
 -- Ask the server to (re)send your auction list. Fires AUCTION_OWNED_LIST_UPDATE
 -- when it lands. Optional on some clients, so it's guarded.
+--
+-- The resulting event ALSO reaches Blizzard's own auction UI, whose
+-- AuctionFrameAuctions_Update() does arithmetic on AuctionFrameAuctions.page.
+-- We replace the stock AH window, so its Auctions tab may never have been
+-- shown and that field can still be nil -- which threw
+--   Blizzard_AuctionUI.lua:836: attempt to perform arithmetic on field 'page'
+-- Seed it (harmless: 0 is exactly what their OnShow sets) before asking.
 function sell.RequestOwnerAuctions()
+    if AuctionFrameAuctions and AuctionFrameAuctions.page == nil then
+        AuctionFrameAuctions.page = 0
+    end
     if GetOwnerAuctionItems then GetOwnerAuctionItems(0) end
 end
 
