@@ -1,6 +1,6 @@
 # Aegis: Exchange
 
-**A clean, fast auction house for Turtle WoW.**
+**A clean, "fast" auction house for Turtle WoW.**
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
 with a window that actually knows what things are worth — what you should charge,
