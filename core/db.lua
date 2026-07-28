@@ -67,6 +67,9 @@ local function DefaultAccountDB()
         -- plus dedup keys so a mailbox sale is only logged once.
         ledger     = {},   -- array of { t, kind = "sale"|"buy", item, amount, id }
         ledgerSeen = {},   -- dedup key -> true (AH sale mails)
+        -- Items you've marked to sell at a vendor (Sell tab -> Vendor list).
+        -- The merchant window then offers to sell them all in one click.
+        vendorMarks = {},  -- itemId -> true
     }
 end
 
@@ -335,6 +338,29 @@ function db.ClearLedger()
     if not db.account then return end
     db.account.ledger = {}
     db.account.ledgerSeen = {}
+end
+
+-- ---- vendor marks (items flagged to sell at a merchant) -----------------
+
+function db.IsVendorMarked(itemId)
+    if not db.account or not itemId then return false end
+    local m = db.account.vendorMarks
+    return (m and m[itemId]) and true or false
+end
+
+function db.SetVendorMark(itemId, on)
+    if not db.account or not itemId then return end
+    if not db.account.vendorMarks then db.account.vendorMarks = {} end
+    if on then
+        db.account.vendorMarks[itemId] = true
+    else
+        db.account.vendorMarks[itemId] = nil
+    end
+end
+
+function db.ClearVendorMarks()
+    if not db.account then return end
+    db.account.vendorMarks = {}
 end
 
 -- What this item has actually SOLD for (from the mailbox ledger, matched by

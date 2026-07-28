@@ -358,6 +358,11 @@ function ui.BuildWindow()
             ui.refreshAccum = 0
             if A.scan.IsRunning() or A.scan.IsPaused() then
                 ui.Refresh()
+                -- Keep the Sell tab's per-item scan header ticking too, so it
+                -- shows the same live page / ETA / rate as the Aegis strip.
+                if ui.selectedSubTab == "Sell" and ui.sellScanState == "scanning" then
+                    ui.UpdateListingsList()
+                end
             end
         end
     end)
@@ -675,6 +680,26 @@ function ui.OnScanComplete(stats)
         stats.auctions, stats.pages, util.FormatDuration(stats.duration)))
 end
 
+-- Live scan progress as one line ("Page 3 / 6 - ~12s - 16.6/s"), or nil when
+-- the first page hasn't landed yet. Shared by the Aegis strip and the Sell
+-- tab's per-item scan header so both report the same thing.
+function ui.ScanProgressText()
+    local p = A.scan.GetProgress()
+    if p.totalPages <= 0 then return nil end
+    local text = string.format(
+        "Page %d / %d \226\128\162 ~%s \226\128\162 %s/s",
+        p.page, p.totalPages, util.FormatDuration(p.eta),
+        string.format("%.1f", p.rate))
+    if p.catCount > 1 then
+        text = string.format("Cat %d / %d \226\128\162 ", p.catIndex, p.catCount)
+            .. text
+    end
+    if p.retries > 0 then
+        text = text .. string.format(" (retry %d)", p.retries)
+    end
+    return text
+end
+
 -- State -> scan strip widgets.
 function ui.Refresh()
     if not ui.frame then return end
@@ -690,19 +715,8 @@ function ui.Refresh()
         ui.bar:SetMinMaxValues(0, totalPages)
         ui.bar:SetValue(p.pagesDone)
         ui.bar:Show()
-        if p.totalPages > 0 then
-            local pageText = string.format(
-                "Page %d / %d \226\128\162 ~%s \226\128\162 %s/s",
-                p.page, p.totalPages, util.FormatDuration(p.eta),
-                string.format("%.1f", p.rate))
-            if p.catCount > 1 then
-                pageText = string.format("Cat %d / %d \226\128\162 ",
-                    p.catIndex, p.catCount) .. pageText
-            end
-            if p.retries > 0 then
-                pageText = pageText
-                    .. string.format(" (retry %d)", p.retries)
-            end
+        local pageText = ui.ScanProgressText()
+        if pageText then
             ui.statusText:SetText(pageText)
         else
             -- Still before the first page. Say WHICH leg we're on so a stall
@@ -3297,7 +3311,14 @@ function ui.UpdateListingsList()
     local offset = FauxScrollFrame_GetOffset(ui.listScroll)
 
     if ui.sellScanState == "scanning" then
-        ui.listHeader:SetText("Scanning this item...")
+        -- Share the Aegis strip's live progress (page / ETA / rate) so this
+        -- scan is just as diagnosable from here.
+        local prog = ui.ScanProgressText()
+        if prog then
+            ui.listHeader:SetText("Scanning \226\128\162 " .. prog)
+        else
+            ui.listHeader:SetText("Scanning this item...")
+        end
     elseif ui.sellScanState == "busy" then
         ui.listHeader:SetText("Scanner busy \226\128\148 finish that scan first")
     elseif ui.sellListingGroups then
@@ -3572,8 +3593,32 @@ function ui.BuildVendorList()
     ui.vendNote:SetJustifyH("LEFT")
     ui.vendNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    -- Columns.
-    local VX = { name = 8, qty = 210, vendor = 260, ah = 360, gain = 470 }
+    -- Mark-all / clear, so you can flag the whole list for the merchant.
+    local markAll = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    markAll:SetWidth(74); markAll:SetHeight(20)
+    markAll:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    markAll:SetText("Mark all")
+    markAll:SetScript("OnClick", function()
+        local rows = ui.vendData or {}
+        local i = 1
+        while i <= table.getn(rows) do
+            A.db.SetVendorMark(rows[i].itemId, true)
+            i = i + 1
+        end
+        ui.UpdateVendorList()
+    end)
+
+    local clearMarks = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    clearMarks:SetWidth(74); clearMarks:SetHeight(20)
+    clearMarks:SetPoint("RIGHT", markAll, "LEFT", -4, 0)
+    clearMarks:SetText("Clear all")
+    clearMarks:SetScript("OnClick", function()
+        A.db.ClearVendorMarks()
+        ui.UpdateVendorList()
+    end)
+
+    -- Columns (name shifts right to make room for the mark checkbox).
+    local VX = { name = 30, qty = 226, vendor = 276, ah = 372, gain = 476 }
     local hdr = function(cx, text, just)
         local fs = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         fs:SetPoint("TOPLEFT", f, "TOPLEFT", cx, -52)
@@ -3614,15 +3659,28 @@ function ui.BuildVendorList()
             fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
             return fs
         end
+        -- Mark this item to sell at a merchant.
+        local chk = CreateFrame("CheckButton", "AegisExchangeVendCheck" .. i,
+            row, "UICheckButtonTemplate")
+        chk:SetWidth(20); chk:SetHeight(20)
+        chk:SetPoint("LEFT", row, "LEFT", 4, 0)
+        chk:SetScript("OnClick", function()
+            if row.entry then
+                A.db.SetVendorMark(row.entry.itemId,
+                    chk:GetChecked() and true or false)
+                ui.UpdateVendorList()
+            end
+        end)
+        row.check = chk
         local icon = row:CreateTexture(nil, "ARTWORK")
         icon:SetWidth(16); icon:SetHeight(16)
         icon:SetPoint("LEFT", row, "LEFT", VX.name, 0)
         row.icon = icon
-        row.name   = mk(VX.name + 20, 178)
+        row.name   = mk(VX.name + 20, 172)
         row.qty    = mk(VX.qty, 44)
-        row.vendor = mk(VX.vendor, 94)
-        row.ah     = mk(VX.ah, 104)
-        row.gain   = mk(VX.gain, 96)
+        row.vendor = mk(VX.vendor, 90)
+        row.ah     = mk(VX.ah, 98)
+        row.gain   = mk(VX.gain, 92)
         row:Hide()
         ui.vendRows[i] = row
         i = i + 1
@@ -3649,8 +3707,11 @@ function ui.UpdateVendorList()
             .. " \226\128\148 or those items have no vendor price recorded yet"
             .. " (hover them at a merchant to learn it).")
     else
+        local marked = table.getn(A.sell.MarkedInBags())
         ui.vendNote:SetText(total .. " item(s) \226\128\162 vendoring them all"
-            .. " nets about " .. util.FormatMoney(sum, true) .. " more than the AH.")
+            .. " nets about " .. util.FormatMoney(sum, true) .. " more than the AH."
+            .. "  Tick items, then use the Aegis button at any merchant ("
+            .. marked .. " marked).")
     end
 
     FauxScrollFrame_Update(ui.vendScroll, total, VEND_ROWS, VEND_ROW_H)
@@ -3660,6 +3721,8 @@ function ui.UpdateVendorList()
         local row = ui.vendRows[i]
         local r = rows[i + offset]
         if r then
+            row.entry = r
+            row.check:SetChecked(A.db.IsVendorMarked(r.itemId) and 1 or nil)
             if r.texture then row.icon:SetTexture(r.texture); row.icon:Show()
             else row.icon:Hide() end
             row.name:SetText(r.name)
@@ -3675,6 +3738,7 @@ function ui.UpdateVendorList()
             row.gain:SetTextColor(0.30, 0.85, 0.30)
             row:Show()
         else
+            row.entry = nil
             row:Hide()
         end
         i = i + 1
@@ -3695,6 +3759,86 @@ function ui.ToggleVendorList()
     ui.BuildVendorList()
     if ui.vendList:IsVisible() then ui.HideVendorList()
     else ui.ShowVendorList() end
+end
+
+-- ---- merchant window: sell everything you marked ------------------------
+
+StaticPopupDialogs["AEGIS_EXCHANGE_VENDORSELL"] = {
+    text = "Sell %s to this merchant?\n%s",
+    button1 = "Sell", button2 = "Cancel",
+    OnAccept = function() ui.DoSellMarked() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+-- Put an Aegis button on the merchant window showing how many marked stacks
+-- are in your bags. Save-and-anchor only, no secure hooks.
+function ui.AttachMerchantButton()
+    if not MerchantFrame then return end
+    if not ui.merchantBtn then
+        local b = CreateFrame("Button", "AegisExchangeMerchantSellButton",
+            MerchantFrame, "UIPanelButtonTemplate")
+        b:SetWidth(150); b:SetHeight(22)
+        b:SetPoint("BOTTOMLEFT", MerchantFrame, "BOTTOMLEFT", 22, 52)
+        b:SetScript("OnClick", function() ui.ConfirmSellMarked() end)
+        ui.merchantBtn = b
+    end
+    ui.RefreshMerchantButton()
+end
+
+function ui.RefreshMerchantButton()
+    if not ui.merchantBtn then return end
+    local rows = A.sell.MarkedInBags()
+    local n = table.getn(rows)
+    local value = 0
+    local i = 1
+    while i <= n do value = value + (rows[i].value or 0); i = i + 1 end
+    if n == 0 then
+        ui.merchantBtn:SetText("Aegis: nothing marked")
+        ui.merchantBtn:Disable()
+    else
+        ui.merchantBtn:SetText("Aegis: sell " .. n .. " marked")
+        ui.merchantBtn:Enable()
+    end
+    ui.merchantMarkedValue = value
+end
+
+function ui.ConfirmSellMarked()
+    local rows = A.sell.MarkedInBags()
+    local n = table.getn(rows)
+    if n == 0 then
+        ChatMsg("Aegis: nothing marked to sell.")
+        return
+    end
+    -- Name the first few so it's obvious what's about to go.
+    local names, i = {}, 1
+    while i <= n and i <= 4 do
+        table.insert(names, rows[i].name .. " x" .. rows[i].count)
+        i = i + 1
+    end
+    local detail = table.concat(names, ", ")
+    if n > 4 then detail = detail .. ", +" .. (n - 4) .. " more" end
+    if ui.merchantMarkedValue and ui.merchantMarkedValue > 0 then
+        detail = detail .. "\nabout "
+            .. util.FormatMoney(ui.merchantMarkedValue) .. " total"
+    end
+    StaticPopup_Show("AEGIS_EXCHANGE_VENDORSELL", n .. " marked stack(s)", detail)
+end
+
+function ui.DoSellMarked()
+    local sold, value = A.sell.SellMarkedToVendor()
+    if sold == 0 then
+        ChatMsg("Aegis: nothing was sold (is the merchant window open?).")
+        return
+    end
+    ChatMsg("Aegis: sold " .. sold .. " stack(s) for about "
+        .. util.FormatMoney(value) .. ".")
+    -- Vendor sales are income too.
+    if value > 0 then
+        A.db.RecordTxn("sale", "Vendor sale (" .. sold .. " stacks)", value)
+    end
+    ui.RefreshMerchantButton()
+    if ui.vendList and ui.vendList:IsVisible() then ui.RefreshVendorList() end
+    if ui.sellBuilt then ui.RefreshBags() end
 end
 
 -- Sell tab History block: the median the SCANS say (with the observed range and
@@ -4454,6 +4598,17 @@ end)
 -- History tab tracks income even when the AH window isn't open.
 A.RegisterEvent("MAIL_INBOX_UPDATE", function()
     ui.ScanMailSales()
+end)
+
+-- At a merchant: offer to sell everything marked on the Vendor list.
+A.RegisterEvent("MERCHANT_SHOW", function()
+    ui.AttachMerchantButton()
+end)
+-- Bags change as items are sold; keep the button's count honest.
+A.RegisterEvent("BAG_UPDATE", function()
+    if ui.merchantBtn and MerchantFrame and MerchantFrame:IsVisible() then
+        ui.RefreshMerchantButton()
+    end
 end)
 -- Bags changed (looted, moved, sold): refresh the Sell tab's bag browser, but
 -- only while it's the visible tab so we don't rescan bags needlessly.
