@@ -12,7 +12,10 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-## [0.22.0]
+## [1.1.0] — first public release
+
+> Aegis: Exchange is officially released. Everything below 1.1.0 was
+> pre-release development; the feature set it shipped with is the sum of it.
 
 ### Added
 - **Cancel all undercuts** on the Auctions tab — one button, labelled with the
@@ -261,4 +264,4 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-[0.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.1.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

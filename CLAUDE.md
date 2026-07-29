@@ -207,6 +207,16 @@ are done in practice — **imitate the approach, do not copy code blindly**:
   swap it for one pasted in chat without confirming it is current.
 - Every version bump gets a `CHANGELOG.md` entry. Mark a release **restart**
   when it adds a new `.lua` file to the `.toc`.
+- **A version bump touches FOUR places** — miss one and the in-game version
+  stops matching the release:
+  1. `core/init.lua` — `A.version`
+  2. `Aegis_Exchange.toc` — `## Version:`
+  3. `README.md` — the version badge **and** the "Check the version" line
+  4. `CHANGELOG.md` — a new entry plus the link ref at the bottom
+
+  The window title bar and the load message both read `A.version`, so they
+  follow automatically. Versions are `MAJOR.MINOR.PATCH`; 1.1.0 was the first
+  public release (everything below it was pre-release development).
 
 ---
 
