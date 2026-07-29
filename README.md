@@ -11,7 +11,6 @@
 [![Nampower](https://img.shields.io/badge/Nampower-Required-8A2BE2?style=flat-square&labelColor=555)](https://github.com/brues-code/nampower)
 [![UnitXP_SP3](https://img.shields.io/badge/UnitXP__SP3-Required-8A2BE2?style=flat-square&labelColor=555)](https://codeberg.org/konaka/UnitXP_SP3)
 [![ClassicAPI](https://img.shields.io/badge/ClassicAPI-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/ClassicAPI)
-[![SCRM](https://img.shields.io/badge/SCRM-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/SuperCleveRoidMacros)
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
