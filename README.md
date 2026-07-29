@@ -14,7 +14,6 @@
 [![SCRM](https://img.shields.io/badge/SCRM-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/SuperCleveRoidMacros)
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
-
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
 with a window that actually knows what things are worth — what you should charge,
 what you should pay, whether that recipe is worth crafting, and how much gold you
