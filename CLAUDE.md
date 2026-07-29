@@ -189,12 +189,20 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 ## README / CHANGELOG upkeep
 
 - **The badge block at the top of `README.md` is maintained by the project
-  owner.** It is two rows, deliberately:
+  owner.** It is grouped deliberately:
   1. Discord (`5865F2`), then the 1.18.1 servers — Octo WoW purple (`8A2BE2`),
      Capy WoW brown (`8B5A2B`).
-  2. The loaders — **Required** in red (`d62728`: SuperWoW, Nampower,
-     UnitXP_SP3) then **Recommended** in orange (`ff8c00`: ClassicAPI,
-     AuctionQueryThrottle). The colour carries the distinction, not the row.
+  2. **AuctionQueryThrottle** alone, green (`4c1`) and labelled "Recommended
+     for Aegis" — it is the ONLY external thing that changes Aegis's behaviour
+     (scan speed).
+  3. The rest of the realm setup in orange (`ff8c00`): SuperWoW, Nampower,
+     UnitXP_SP3, ClassicAPI — all **Recommended**, followed by a `<sub>` caption
+     saying Aegis needs none of them.
+
+  **Nothing is labelled "Required".** Aegis calls only vanilla 1.12 API; a
+  grep of `core/` and `ui/` finds no SuperWoW / Nampower / UnitXP_SP3 /
+  ClassicAPI calls. Do not reinstate a Required badge without a code change
+  that actually depends on one.
 
   There is deliberately **no pfUI badge** — pfUI is optional, and the "Using
   pfUI?" section says so instead. Do not re-add it.

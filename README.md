@@ -2,16 +2,21 @@
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-4c1?style=flat-square&labelColor=555)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.1-4c1?style=flat-square&labelColor=555)](CHANGELOG.md)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/Hr66t25vE7)
 [![Octo WoW](https://img.shields.io/badge/Octo%20WoW-1.18.1-8A2BE2?style=flat-square&labelColor=555)](https://octowow.st/)
 [![Capy WoW](https://img.shields.io/badge/Capy%20WoW-1.18.1-8B5A2B?style=flat-square&labelColor=555)](https://capycraft.io/)
 
-[![SuperWoW](https://img.shields.io/badge/SuperWoW-Required-d62728?style=flat-square&labelColor=555)](https://github.com/balakethelock/SuperWoW)
-[![Nampower](https://img.shields.io/badge/Nampower-Required-d62728?style=flat-square&labelColor=555)](https://github.com/brues-code/nampower)
-[![UnitXP_SP3](https://img.shields.io/badge/UnitXP__SP3-Required-d62728?style=flat-square&labelColor=555)](https://codeberg.org/konaka/UnitXP_SP3)
+[![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended%20for%20Aegis-4c1?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
+
+[![SuperWoW](https://img.shields.io/badge/SuperWoW-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/balakethelock/SuperWoW)
+[![Nampower](https://img.shields.io/badge/Nampower-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/nampower)
+[![UnitXP_SP3](https://img.shields.io/badge/UnitXP__SP3-Recommended-ff8c00?style=flat-square&labelColor=555)](https://codeberg.org/konaka/UnitXP_SP3)
 [![ClassicAPI](https://img.shields.io/badge/ClassicAPI-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/ClassicAPI)
-[![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
+
+<sub>**Aegis needs none of these** — it calls only vanilla 1.12 API.
+**AuctionQueryThrottle** is the one that changes anything here (scan speed);
+the rest are the recommended client setup for these realms.</sub>
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
 with a window that actually knows what things are worth — what you should charge,
@@ -201,11 +206,11 @@ numbers, % colours, and profit estimates fill in as you go.
     is there if you ever want the old fixed floor back.
 - **Mail sale-tracking is enUS-only** right now (it matches "Auction successful:").
 - **What Aegis itself needs: nothing but the client.** It calls only vanilla 1.12
-  API. The loader badges above describe the recommended setup for these realms
-  (and the wider Aegis addon series) — Aegis: Exchange does not call SuperWoW,
-  Nampower or UnitXP_SP3, and runs fine without them.
-  [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle) is
-  the one that changes anything here, and only how fast scans go.
+  API — no SuperWoW, Nampower, UnitXP_SP3 or ClassicAPI calls anywhere in the
+  source, and it runs fine without them. Those are the recommended setup for
+  these realms (and the wider Aegis addon series), not dependencies of this
+  addon. [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)
+  is the only one that changes anything here, and only how fast scans go.
 
 ---
 
@@ -240,7 +245,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.1.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.1.1`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/Hr66t25vE7)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
