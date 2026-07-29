@@ -80,9 +80,12 @@ local LEDGER_MAX = 500
 -- new setting here is enough -- no migration of old saves needed.
 local SETTING_DEFAULTS = {
     duration       = 480,       -- default post duration, minutes (120/480/1440)
-    undercutMode   = "pct",     -- "pct" (percent) or "flat" (fixed copper)
+    -- Default pricing: undercut the lowest competitor by a FLAT 1 copper. That
+    -- is the behaviour most sellers want out of the box -- just enough to be
+    -- cheapest without giving away margin.
+    undercutMode   = "flat",    -- "pct" (percent) or "flat" (fixed copper)
     undercutPct    = 5,         -- percent below the reference (pct mode)
-    undercutAmount = 100,       -- copper below the reference (flat mode; 1s)
+    undercutAmount = 1,         -- copper below the reference (flat mode)
     sellDefault    = "undercut", -- slot prefill: "undercut"|"market"|"none"
     tooltip        = true,      -- show Aegis price lines on item tooltips
     profLine       = true,      -- show the profit line on profession windows
@@ -93,6 +96,9 @@ local SETTING_DEFAULTS = {
     --            soon as the reply lands, so scans speed up automatically.
     --   "safe" -- always keep the fixed 4s floor as well.
     queryThrottle  = "auto",
+    -- Ask before cancelling an auction. Off = cancel on the first click, which
+    -- is what you want when clearing a lot of undercuts by hand.
+    confirmCancel  = true,
 }
 
 -- Read a user setting, falling back to its default when unset.

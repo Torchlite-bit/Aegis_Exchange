@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [0.22.0]
+
+### Added
+- **Cancel all undercuts** on the Auctions tab — one button, labelled with the
+  count, that cancels every auction someone is currently beating. It works from
+  the highest owner index down, because cancelling shifts the later indices.
+- **"Ask before cancelling an auction"** toggle on the Aegis tab. Turn it off and
+  Cancel (single or bulk) acts on the first click.
+- **Scan results report.** Finishing a scan now prints a breakdown: auctions
+  scanned, distinct items, a per-quality tally in item colours, items added vs.
+  updated in the price DB, items ignored, and pages/duration.
+
+### Changed
+- **Shipping defaults are now undercut / flat / 1 copper** — cheapest by the
+  smallest possible margin, rather than giving away 5%.
+- Badge colours: Octo WoW purple, Capy WoW brown, Required red, Recommended
+  orange. The pfUI badge is gone (it was never required) — the "Using pfUI?"
+  section says so instead.
+- README leads with an **AuctionQueryThrottle** notice, including that the gain
+  is realm-dependent (Octo WoW dramatically faster, Capy WoW roughly 2×), and a
+  note that Aegis itself calls **only** vanilla 1.12 API — the loader badges
+  describe the recommended realm setup, not Aegis's own dependencies.
+
+### Fixed
+- **"Posted 0 of 1 — couldn't assemble a stack."** `SplitContainerItem` only
+  splits *part* of a stack; asking it for the whole stack is a no-op on 1.12, so
+  the cursor stayed empty and the job died after retrying. Posting a single full
+  stack always hit this. The assembler now picks the whole stack up instead.
+  (The harness's sim happily split whole stacks, which is why this was never
+  caught — it now models the real no-op.)
+- **The post-scan queue sometimes slotted the wrong item, or nothing.** It used
+  the bag/slot captured when the queue was built, and posting shifts bags. It now
+  re-locates each item by itemId via the new `sell.FindItemSlot`.
+
 ## [0.21.1]
 
 ### Changed
@@ -227,4 +261,4 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-[0.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[0.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
