@@ -190,10 +190,14 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
 - **The badge block at the top of `README.md` is maintained by the project
   owner.** It is two rows, deliberately:
-  1. Discord, the 1.18.1 servers (Octo WoW / Capy WoW), pfUI.
-  2. The loaders — **Required** in purple (`8A2BE2`: SuperWoW, Nampower,
-     UnitXP_SP3) then **Recommended** in amber (`dfb317`: ClassicAPI, SCRM,
+  1. Discord (`5865F2`), then the 1.18.1 servers — Octo WoW purple (`8A2BE2`),
+     Capy WoW brown (`8B5A2B`).
+  2. The loaders — **Required** in red (`d62728`: SuperWoW, Nampower,
+     UnitXP_SP3) then **Recommended** in orange (`ff8c00`: ClassicAPI,
      AuctionQueryThrottle). The colour carries the distinction, not the row.
+
+  There is deliberately **no pfUI badge** — pfUI is optional, and the "Using
+  pfUI?" section says so instead. Do not re-add it.
 
   Keep the shields.io style (`flat-square`, `labelColor=555`) when adding to it,
   and do not reorder, re-row or restyle it unasked.

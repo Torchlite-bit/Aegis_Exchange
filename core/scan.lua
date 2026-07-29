@@ -100,9 +100,21 @@ scan.state = {
     sentAt        = nil,   -- st.elapsed when the current query went out
     lastReply     = nil,   -- how long the SERVER took to answer the last page
     fastGate      = false, -- gate has opened fast enough to mean "throttle lifted"
+    tally         = nil,   -- per-run stats for the completion report (see NewTally)
     callbacks     = nil,   -- { onPage = fn(page1, totalPages),
                            --   onComplete = fn(stats) }
 }
+
+-- 1.12 quality indices, for the scan report.
+scan.QUALITY_NAMES = { [0] = "Poor", [1] = "Common", [2] = "Uncommon",
+                       [3] = "Rare", [4] = "Epic", [5] = "Legendary",
+                       [6] = "Artifact" }
+
+-- Fresh per-run tally. `seen` maps itemId -> quality so each distinct item is
+-- counted once; added/updated split on whether the price DB already knew it.
+local function NewTally()
+    return { seen = {}, distinct = 0, added = 0, updated = 0, ignored = 0 }
+end
 
 -- Chat trace of every scanner transition; toggled with "/aex debug". This is
 -- how we tell WHICH leg a stall is on: query never sent (CanSendAuctionQuery
@@ -130,11 +142,31 @@ end
 local function RecordVisiblePage(numOnPage)
     local st = scan.state
     local onListing = st.callbacks and st.callbacks.onListing
+    local tally = st.tally
     for i = 1, numOnPage do
-        local name, _, count, _, _, _, minBid, _, buyoutPrice, _, _, owner =
+        local name, _, count, quality, _, _, minBid, _, buyoutPrice, _, _, owner =
             GetAuctionItemInfo("list", i)
         if name and count and count > 0 then
             local itemId = util.ItemIdFromLink(GetAuctionItemLink("list", i))
+            -- Tally BEFORE recording, so "added" means new to the price DB.
+            if tally then
+                if itemId then
+                    if not tally.seen[itemId] then
+                        local known = A.db.account
+                            and A.db.account.items[itemId] or nil
+                        tally.seen[itemId] = quality or 1
+                        tally.distinct = tally.distinct + 1
+                        if known then
+                            tally.updated = tally.updated + 1
+                        else
+                            tally.added = tally.added + 1
+                        end
+                    end
+                else
+                    -- No resolvable item link: nothing we can price.
+                    tally.ignored = tally.ignored + 1
+                end
+            end
             if buyoutPrice and buyoutPrice > 0 and itemId then
                 A.db.RecordAuction(
                     itemId, math.floor(buyoutPrice / count), name)
@@ -254,6 +286,20 @@ local function Finish()
         duration   = st.elapsed,
         categories = table.getn(st.queries),
     }
+    -- Roll the per-run tally into the report: distinct items, a per-quality
+    -- breakdown, and how many items were new to the price DB vs. refreshed.
+    local t = st.tally
+    if t then
+        local byQuality = {}
+        for _, q in pairs(t.seen) do
+            byQuality[q] = (byQuality[q] or 0) + 1
+        end
+        stats.items     = t.distinct
+        stats.byQuality = byQuality
+        stats.added     = t.added
+        stats.updated   = t.updated
+        stats.ignored   = t.ignored
+    end
     -- Item scans (Sell tab price lookups) pass stampLast=false so they feed
     -- the price DB WITHOUT resetting the Scan tab's "last full scan" marker.
     if not (st.callbacks and st.callbacks.stampLast == false) then
@@ -360,6 +406,7 @@ function scan.Start(queryOrList, callbacks)
     st.sent           = 0
     st.retries        = 0
     st.waitOk         = 0
+    st.tally          = NewTally()
     st.gateWait       = 0
     st.lastGate       = nil
     st.lastReply      = nil

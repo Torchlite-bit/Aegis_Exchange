@@ -645,6 +645,44 @@ function sell.PlaceFromBag(bag, slot)
     ClickAuctionSellItemButton()
 end
 
+-- Where does `itemId` live in the bags RIGHT NOW? Returns (bag, slot) for the
+-- largest auctionable stack, or nil.
+--
+-- Bag positions shift as you post, so any bag/slot captured earlier can be
+-- stale (that slot may now be empty or hold something else). Anything acting on
+-- a remembered item -- the post-scan sell queue especially -- must re-locate it
+-- through here rather than trusting the old coordinates.
+function sell.FindItemSlot(itemId)
+    if not itemId then return nil end
+    local bestBag, bestSlot, bestCount = nil, nil, 0
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                local _, count = GetContainerItemInfo(bag, slot)
+                if (count or 0) > bestCount then
+                    bestBag, bestSlot, bestCount = bag, slot, count or 0
+                end
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return bestBag, bestSlot
+end
+
+-- Place `itemId` into the sell slot, finding it fresh. Returns true if placed.
+function sell.PlaceItemById(itemId)
+    local bag, slot = sell.FindItemSlot(itemId)
+    if not bag then return false end
+    sell.PlaceFromBag(bag, slot)
+    return true
+end
+
 -- ---------------------------------------------------------------------------
 -- Posting
 -- ---------------------------------------------------------------------------
@@ -867,7 +905,19 @@ function sell.PostTick(dt)
             FinishJob("out")             -- can't build another stack
             return
         end
-        SplitContainerItem(bag, slot, job.stackSize)   -- stackSize onto cursor
+        -- CRITICAL: SplitContainerItem is for taking PART of a stack. Asking it
+        -- to split the WHOLE stack (count == what's in the slot) is a no-op on
+        -- 1.12, so the cursor stays empty, ClickAuctionSellItemButton does
+        -- nothing, verify never sees the item, and the job died with
+        -- "couldn't assemble a stack" -- which is exactly the
+        -- "Posted 0 of 1" failure, since a single full stack always hits this.
+        -- Pick the whole stack up instead when the counts match.
+        local _, slotCount = GetContainerItemInfo(bag, slot)
+        if (slotCount or 0) <= job.stackSize then
+            PickupContainerItem(bag, slot)             -- whole stack -> cursor
+        else
+            SplitContainerItem(bag, slot, job.stackSize)   -- part of it
+        end
         ClickAuctionSellItemButton()                   -- cursor -> sell slot
         job.phase = "verify"
         job.cool = ASSEMBLE_DELAY

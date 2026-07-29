@@ -553,11 +553,27 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setPfSkin = pfChk
 
+    -- Ask before cancelling an auction? Off makes the Auctions tab's Cancel
+    -- buttons act immediately.
+    local ccChk = CreateFrame("CheckButton", "AegisExchangeSetConfirmCancel",
+        panel, "UICheckButtonTemplate")
+    ccChk:SetWidth(24); ccChk:SetHeight(24)
+    ccChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -4)
+    local ccTxt = getglobal(ccChk:GetName() .. "Text")
+    if ccTxt then
+        ccTxt:SetText("Ask before cancelling an auction")
+        ccTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
+    end
+    ccChk:SetScript("OnClick", function()
+        A.db.SetSetting("confirmCancel", ccChk:GetChecked() and true or false)
+    end)
+    ui.setConfirmCancel = ccChk
+
     -- ---- Scan pacing -------------------------------------------------------
     -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
     -- running the AuctionQueryThrottle DLL scans as fast as the server answers
     -- while a stock client still waits its ~5s. "Safe" keeps the fixed floor.
-    local thLbl = label("Scan pacing:", pfChk, -12)
+    local thLbl = label("Scan pacing:", ccChk, -12)
 
     ui.setThrottleBtns = {}
     local modes = { { "Auto", "auto" }, { "Safe 4s", "safe" } }
@@ -667,6 +683,10 @@ function ui.RefreshSettings()
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
     end
+    if ui.setConfirmCancel then
+        ui.setConfirmCancel:SetChecked(
+            A.db.Setting("confirmCancel") ~= false and 1 or nil)
+    end
     if ui.setPfSkin then
         ui.setPfSkin:SetChecked(A.db.Setting("pfSkin") ~= false and 1 or nil)
         -- Without pfUI the toggle does nothing; grey it out rather than lie.
@@ -773,11 +793,49 @@ function ui.StartFullScan()
     ui.StartScan({})
 end
 
+-- Quality report order (best first) and their standard item colours.
+local SCAN_QUALITY_ORDER = { 6, 5, 4, 3, 2, 1, 0 }
+local SCAN_QUALITY_COLOR = {
+    [0] = "9d9d9d", [1] = "ffffff", [2] = "1eff00", [3] = "0070dd",
+    [4] = "a335ee", [5] = "ff8000", [6] = "e6cc80",
+}
+
+-- Full breakdown once a scan finishes: totals, a per-quality tally, and what
+-- it did to the price DB. Printed as separate lines so it reads like a report
+-- rather than one dense sentence.
 function ui.OnScanComplete(stats)
     ui.Refresh()
-    ChatMsg(string.format(
-        "Aegis: scan complete \226\128\148 %d auctions across %d pages in %s.",
-        stats.auctions, stats.pages, util.FormatDuration(stats.duration)))
+    local function line(text)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff5fc8f8Aegis:|r " .. text,
+            0.35, 0.78, 0.98)
+    end
+
+    local head = stats.auctions .. " auctions scanned"
+    if stats.items then head = head .. "  (" .. stats.items .. " items)" end
+    line(head)
+
+    -- Per quality, best first, each in its own item colour. Skip empties.
+    if stats.byQuality then
+        local qi = 1
+        while qi <= table.getn(SCAN_QUALITY_ORDER) do
+            local q = SCAN_QUALITY_ORDER[qi]
+            local n = stats.byQuality[q]
+            if n and n > 0 then
+                local name = A.scan.QUALITY_NAMES[q] or ("Quality " .. q)
+                line("  |cff" .. (SCAN_QUALITY_COLOR[q] or "ffffff")
+                    .. name .. " items:|r " .. n)
+            end
+            qi = qi + 1
+        end
+    end
+
+    if stats.added then
+        line("  Items added to database: " .. stats.added)
+        line("  Items updated in database: " .. (stats.updated or 0))
+        line("  Items ignored: " .. (stats.ignored or 0))
+    end
+    line("  Scanned " .. stats.pages .. " page(s) in "
+        .. util.FormatDuration(stats.duration))
 end
 
 -- Live scan progress as one line ("Page 3 / 6 - ~12s - 16.6/s"), or nil when
@@ -2401,6 +2459,15 @@ function ui.BuildAuctionsTab()
     refresh:SetText("Refresh")
     refresh:SetScript("OnClick", function() ui.RefreshAuctions(true) end)
 
+    -- Clear out everything you've been undercut on in one go.
+    local cancelAll = CreateFrame("Button", "AegisExchangeAucCancelAllButton",
+        panel, "UIPanelButtonTemplate")
+    cancelAll:SetWidth(132); cancelAll:SetHeight(20)
+    cancelAll:SetPoint("RIGHT", refresh, "LEFT", -6, 0)
+    cancelAll:SetText("Cancel all undercuts")
+    cancelAll:SetScript("OnClick", function() ui.ConfirmCancelAllUndercut() end)
+    ui.aucCancelAllBtn = cancelAll
+
     ui.aucStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.aucStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -34)
     ui.aucStatus:SetJustifyH("LEFT")
@@ -2488,6 +2555,19 @@ function ui.UpdateAuctionsList()
 
     local cap = A.sell.CAP or 120
     ui.aucSummary:SetText("Your auctions: " .. total .. " / " .. cap)
+
+    -- Label the bulk-cancel with how many are actually undercut, and disable it
+    -- when there's nothing to do.
+    if ui.aucCancelAllBtn then
+        local nUnder = table.getn(ui.UndercutAuctions())
+        if nUnder > 0 then
+            ui.aucCancelAllBtn:SetText("Cancel " .. nUnder .. " undercut")
+            ui.aucCancelAllBtn:Enable()
+        else
+            ui.aucCancelAllBtn:SetText("No undercuts")
+            ui.aucCancelAllBtn:Disable()
+        end
+    end
     if total == 0 then
         ui.aucStatus:SetText("No active auctions. Post some on the Sell tab.")
     else
@@ -2564,7 +2644,77 @@ StaticPopupDialogs["AEGIS_EXCHANGE_CANCEL"] = {
 
 function ui.ConfirmCancelAuction(r)
     ui.pendingCancel = r
+    -- The Aegis tab can turn the confirmation off, which is what you want when
+    -- clearing a pile of undercuts by hand.
+    if A.db.Setting("confirmCancel") == false then
+        ui.DoCancelAuction()
+        return
+    end
     StaticPopup_Show("AEGIS_EXCHANGE_CANCEL", r.name .. " (x" .. r.count .. ")")
+end
+
+-- ---- cancel every undercut auction --------------------------------------
+
+-- Auctions of ours that someone is currently beating on unit price.
+function ui.UndercutAuctions()
+    local out = {}
+    local rows = ui.aucAuctions or {}
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        local mkt = r.itemId and A.db.MinBuyout(r.itemId)
+        if mkt and mkt > 0 and r.unit and r.unit > mkt then
+            table.insert(out, r)
+        end
+        i = i + 1
+    end
+    return out
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_CANCELALL"] = {
+    text = "Cancel %s?\n%s\nThe items return by mail; deposits are lost.",
+    button1 = "Cancel them", button2 = "Keep",
+    OnAccept = function() ui.DoCancelAllUndercut() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmCancelAllUndercut()
+    local rows = ui.UndercutAuctions()
+    local n = table.getn(rows)
+    if n == 0 then
+        ChatMsg("Aegis: nothing of yours is undercut.")
+        return
+    end
+    if A.db.Setting("confirmCancel") == false then
+        ui.DoCancelAllUndercut()
+        return
+    end
+    local names, i = {}, 1
+    while i <= n and i <= 4 do
+        table.insert(names, rows[i].name .. " x" .. rows[i].count)
+        i = i + 1
+    end
+    local detail = table.concat(names, ", ")
+    if n > 4 then detail = detail .. ", +" .. (n - 4) .. " more" end
+    StaticPopup_Show("AEGIS_EXCHANGE_CANCELALL",
+        n .. " undercut auction(s)", detail)
+end
+
+-- Cancel them from the HIGHEST owner index down: cancelling shifts every later
+-- index down by one, so walking upward would skip auctions.
+function ui.DoCancelAllUndercut()
+    local rows = ui.UndercutAuctions()
+    local n = table.getn(rows)
+    if n == 0 then return end
+    table.sort(rows, function(a, b) return a.index > b.index end)
+    local done = 0
+    local i = 1
+    while i <= n do
+        if A.sell.CancelOwnerAuction(rows[i].index) then done = done + 1 end
+        i = i + 1
+    end
+    ChatMsg("Aegis: cancelled " .. done .. " undercut auction(s).")
+    ui.RefreshAuctions(true)
 end
 
 function ui.DoCancelAuction()
@@ -4118,9 +4268,11 @@ function ui.AdvanceSellQueue()
     -- Skip anything no longer in bags (already posted or moved).
     while i <= table.getn(q) do
         local item = q[i]
-        if item.itemId and A.sell.CountInBags(item.itemId) > 0 then
+        -- Re-locate by itemId: the bag/slot captured when the queue was built
+        -- goes stale as posting shifts bags around, which is why the walk
+        -- sometimes slotted the wrong item (or nothing) instead of the next one.
+        if item.itemId and A.sell.PlaceItemById(item.itemId) then
             ui.sellQueueIndex = i
-            A.sell.PlaceFromBag(item.bag, item.slot)
             ui.RefreshSell()
             if ui.sellStatus then
                 ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
