@@ -12,6 +12,16 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [0.21.1]
+
+### Changed
+- **Auto pacing is now genuinely minimal.** Our own floor between pages dropped
+  from 0.25s to 0.05s — at 0.25s a 60-page scan spent 15s waiting on *us*
+  rather than the server. The client's gate is still what actually throttles.
+- The scan readout now splits the per-page cost into **gate** vs **server**
+  (`fast — gate 0.02s, server 0.61s`), so a slow scan can be blamed correctly.
+  Realm-to-realm differences show up here as server time, not gate time.
+
 ## [0.21.0]
 
 ### Added
@@ -217,4 +227,4 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-[0.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[0.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

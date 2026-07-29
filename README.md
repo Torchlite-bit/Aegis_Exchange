@@ -1,21 +1,31 @@
 # Aegis: Exchange
 
-**A clean, fast auction house for Turtle WoW.**
+**A clean, fast auction house for vanilla WoW (1.12).**
 
-[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/Hr66t25vE7)
-[![Client](https://img.shields.io/badge/client-WoW%201.12%20(vanilla)-c79c6e?style=flat-square)](https://turtle-wow.org)
-[![pfUI](https://img.shields.io/badge/pfUI-skin%20included-33ffcc?style=flat-square)](#using-pfui)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/hsgPTNkSX)
+
+[![Octo WoW](https://img.shields.io/badge/Octo%20WoW-1.18.1-4c1?style=flat-square&labelColor=555)](https://octowow.st/)
+[![Capy WoW](https://img.shields.io/badge/Capy%20WoW-1.18.1-4c1?style=flat-square&labelColor=555)](https://capycraft.io/)
+
+[![SuperWoW](https://img.shields.io/badge/SuperWoW-Required-8A2BE2?style=flat-square&labelColor=555)](https://github.com/balakethelock/SuperWoW)
+[![Nampower](https://img.shields.io/badge/Nampower-Required-8A2BE2?style=flat-square&labelColor=555)](https://github.com/brues-code/nampower)
+[![UnitXP_SP3](https://img.shields.io/badge/UnitXP__SP3-Required-8A2BE2?style=flat-square&labelColor=555)](https://codeberg.org/konaka/UnitXP_SP3)
+
+[![ClassicAPI](https://img.shields.io/badge/ClassicAPI-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/ClassicAPI)
+[![SCRM](https://img.shields.io/badge/SCRM-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/SuperCleveRoidMacros)
+[![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended-dfb317?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
+[![pfUI](https://img.shields.io/badge/pfUI-skin%20included-33ffcc?style=flat-square&labelColor=555)](#using-pfui)
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
 with a window that actually knows what things are worth — what you should charge,
 what you should pay, whether that recipe is worth crafting, and how much gold you
 made this week.
 
-> Built for **Turtle WoW 1.18.1**, which runs the original **WoW 1.12 (vanilla)**
-> client on **Lua 5.0**. Not Classic. Not retail. Real vanilla.
+> Built for **1.18.1** servers (Octo WoW, Capy WoW, Turtle WoW), which run the
+> original **WoW 1.12 (vanilla)** client on **Lua 5.0**. Not Classic. Not retail.
+> Real vanilla.
 
-**[💬 Join the Discord](https://discord.gg/Hr66t25vE7)** for help, bug reports,
+**[💬 Join the Discord](https://discord.gg/hsgPTNkSX)** for help, bug reports,
 and feature ideas.
 
 ---
@@ -211,9 +221,9 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v0.21.0`) — quote it.
+1. Check the **version** in the window's title bar (`v0.21.1`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
-3. Tell us on **[Discord](https://discord.gg/Hr66t25vE7)** or open an
+3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
    help enormously, especially for anything layout-related.
 
@@ -223,7 +233,7 @@ Recent changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-PRs welcome — come say hi on **[Discord](https://discord.gg/Hr66t25vE7)** first
+PRs welcome — come say hi on **[Discord](https://discord.gg/hsgPTNkSX)** first
 if you're planning something big.
 
 Three requests:
@@ -242,7 +252,7 @@ MIT — see [LICENSE](LICENSE).
 
 <div align="center">
 
-**[💬 Discord](https://discord.gg/Hr66t25vE7)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
+**[💬 Discord](https://discord.gg/hsgPTNkSX)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
 
 *Aegis: Exchange is part of the Aegis addon series. Happy flipping.* ⚔️
 

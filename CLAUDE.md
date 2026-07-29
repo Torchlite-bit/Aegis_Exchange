@@ -184,6 +184,24 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
 ---
 
+---
+
+## README / CHANGELOG upkeep
+
+- **The badge block at the top of `README.md` is maintained by the project
+  owner.** It is grouped deliberately — Discord, then the 1.18.1 servers (Octo
+  WoW / Capy WoW), then **Required** loaders (SuperWoW, Nampower, UnitXP_SP3),
+  then **Recommended** (ClassicAPI, SCRM, AuctionQueryThrottle, pfUI). Keep that
+  grouping and the shields.io style (`flat-square`, `labelColor=555`) when
+  adding to it; do not reorder or restyle it unasked.
+- **One Discord invite, used everywhere.** It appears in the badge, the intro
+  line, "Something broken?", Contributing and the footer — change all of them
+  together or none.
+- Every version bump gets a `CHANGELOG.md` entry. Mark a release **restart**
+  when it adds a new `.lua` file to the `.toc`.
+
+---
+
 ## Quick self-check before committing Lua
 
 - [ ] No `string.match` / `string.gmatch` / `:match()` — used `string.find` /
