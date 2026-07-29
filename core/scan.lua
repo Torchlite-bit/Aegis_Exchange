@@ -41,7 +41,10 @@ scan.PAGE_SIZE = 50
 -- No detection needed; the gate IS the detector. "safe" restores the old
 -- fixed floor for anyone whose client reports the gate unreliably.
 scan.PAGE_DELAY = 4      -- "safe" floor
-scan.FAST_DELAY = 0.25   -- "auto" floor: just enough not to poll every frame
+-- "auto" floor. Deliberately tiny: the CLIENT'S GATE is the real throttle, so
+-- this only stops us re-testing it every single frame. It is per PAGE, so keep
+-- it small -- at 0.25s a 60-page scan spent 15s doing nothing but waiting on us.
+scan.FAST_DELAY = 0.05
 
 -- Gate openings at or under this many seconds mean the throttle has been
 -- lifted (the DLL is doing its job). Purely informational -- it drives the
@@ -94,6 +97,8 @@ scan.state = {
     waitOk        = 0,     -- seconds spent blocked on CanSendAuctionQuery()
     gateWait      = 0,     -- seconds the CURRENT gate wait has taken
     lastGate      = nil,   -- how long the last gate took to open
+    sentAt        = nil,   -- st.elapsed when the current query went out
+    lastReply     = nil,   -- how long the SERVER took to answer the last page
     fastGate      = false, -- gate has opened fast enough to mean "throttle lifted"
     callbacks     = nil,   -- { onPage = fn(page1, totalPages),
                            --   onComplete = fn(stats) }
@@ -159,6 +164,7 @@ local function SendQuery()
     st.sent = st.sent + 1
     st.phase = "wait_results"
     st.timeout = scan.REPLY_TIMEOUT
+    st.sentAt = st.elapsed   -- to measure the server's round trip
     scan.Debug(string.format(
         "query sent \226\128\148 cat %d, page %d (attempt %d)",
         st.queryIndex, st.page, st.retries + 1))
@@ -294,9 +300,16 @@ function scan.OnListUpdate()
     st.scanned = st.scanned + numOnPage
     st.lastCompleted = st.page
     st.retries = 0
+    -- How long the SERVER took to answer. Together with the gate wait this
+    -- accounts for the whole per-page cost, so a slow scan can be blamed
+    -- correctly: our floor, the client's throttle, or the server itself.
+    if st.sentAt then
+        st.lastReply = st.elapsed - st.sentAt
+        st.sentAt = nil
+    end
     scan.Debug(string.format(
-        "page %d / %d received \226\128\148 %d on page, %d total",
-        st.page + 1, st.totalPages, numOnPage, totalAuctions))
+        "page %d / %d received in %.2fs \226\128\148 %d on page, %d total",
+        st.page + 1, st.totalPages, st.lastReply or 0, numOnPage, totalAuctions))
     if st.callbacks and st.callbacks.onPage then
         st.callbacks.onPage(st.page + 1, st.totalPages)
     end
@@ -349,6 +362,8 @@ function scan.Start(queryOrList, callbacks)
     st.waitOk         = 0
     st.gateWait       = 0
     st.lastGate       = nil
+    st.lastReply      = nil
+    st.sentAt         = nil
     st.fastGate       = false
     StartCurrentQuery()
     st.cooldown       = 0    -- first query goes as soon as the client allows
@@ -434,6 +449,7 @@ function scan.GetProgress()
         retries     = st.retries or 0,
         phase       = st.phase,
         lastGate    = st.lastGate,
+        lastReply   = st.lastReply,
         fastGate    = st.fastGate and true or false,
     }
 end

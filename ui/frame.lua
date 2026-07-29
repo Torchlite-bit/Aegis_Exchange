@@ -699,12 +699,17 @@ function ui.RefreshSettings()
             ui.setThrottleInfo:SetText("fixed 4s between pages")
             ui.setThrottleInfo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         elseif p.fastGate then
+            -- Show BOTH halves of the per-page cost. If the gate is ~0 and the
+            -- reply is slow, the server is the limit, not us -- which is why
+            -- the same scan can differ between realms.
             ui.setThrottleInfo:SetText(string.format(
-                "fast \226\128\148 gate opened in %.2fs", p.lastGate or 0))
+                "fast \226\128\148 gate %.2fs, server %.2fs",
+                p.lastGate or 0, p.lastReply or 0))
             ui.setThrottleInfo:SetTextColor(0.30, 0.85, 0.30)
         elseif p.lastGate then
             ui.setThrottleInfo:SetText(string.format(
-                "client throttled \226\128\148 gate took %.1fs", p.lastGate))
+                "client throttled \226\128\148 gate %.1fs, server %.2fs",
+                p.lastGate, p.lastReply or 0))
             ui.setThrottleInfo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         else
             ui.setThrottleInfo:SetText("follows the client's own query gate")
