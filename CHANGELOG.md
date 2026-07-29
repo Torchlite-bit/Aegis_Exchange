@@ -12,6 +12,16 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.1]
+
+### Changed
+- **No badge claims to be "Required" any more.** Aegis calls only vanilla 1.12
+  API, so SuperWoW, Nampower, UnitXP_SP3 and ClassicAPI are now **Recommended**
+  (the recommended client setup for these realms) rather than requirements of
+  this addon. **AuctionQueryThrottle** is split out and marked *Recommended for
+  Aegis* — it is the only external thing that changes Aegis's behaviour, and only
+  scan speed. A caption under the badges says so plainly.
+
 ## [1.1.0] — first public release
 
 > Aegis: Exchange is officially released. Everything below 1.1.0 was
@@ -264,4 +274,4 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-[1.1.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.1.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
