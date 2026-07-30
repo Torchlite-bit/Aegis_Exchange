@@ -1,4 +1,4 @@
-# Aegis: Exchange
+# Aegis: Exchange (v1.1.1)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
