@@ -12,6 +12,15 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.3]
+
+### Fixed
+- **"Add to Aegis" no longer clips the profession window's right edge.** It was
+  anchored flush with the Exit button's right edge, but the button is wider
+  than Exit and its border art overhangs its logical bounds, so it overlapped
+  the frame in both the stock UI and pfUI. Now inset 10px; the profit lines
+  stack off the button, so they move with it.
+
 ## [1.1.2]
 
 ### Fixed
@@ -294,5 +303,6 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
