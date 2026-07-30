@@ -202,10 +202,9 @@ numbers, % colours, and profit estimates fill in as you go.
 - **Mail sale-tracking is enUS-only** right now (it matches "Auction successful:").
 - **What Aegis itself needs: nothing but the client.** It calls only vanilla 1.12
   API — no SuperWoW, Nampower, UnitXP_SP3 or ClassicAPI calls anywhere in the
-  source, and it runs fine without them. Those are the recommended setup for
-  these realms (and the wider Aegis addon series), not dependencies of this
-  addon. [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)
-  is the only one that changes anything here, and only how fast scans go.
+  source, so it runs fine without any of them.
+  [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle) is
+  the only external thing that changes anything here, and only how fast scans go.
 
 ---
 
