@@ -2455,7 +2455,12 @@ function ui.AttachCraftButton(frame, name, anchorNames)
         end
     end
     if anchor then
-        b:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", 0, 8)
+        -- Pulled 10px LEFT of the Exit button's right edge rather than flush
+        -- with it. "Add to Aegis" is wider than Exit, and its template's border
+        -- art overhangs its logical bounds, so a flush right edge clipped the
+        -- window frame in both UIs. The profit lines stack off this button, so
+        -- they inset with it.
+        b:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", -10, 8)
     else
         -- Unknown window layout: fall back well inside the frame rather than
         -- on top of its border.
