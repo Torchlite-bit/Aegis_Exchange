@@ -9,14 +9,9 @@
 
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Highly%20Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
-[![SuperWoW](https://img.shields.io/badge/SuperWoW-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/balakethelock/SuperWoW)
-[![Nampower](https://img.shields.io/badge/Nampower-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/nampower)
-[![UnitXP_SP3](https://img.shields.io/badge/UnitXP__SP3-Recommended-ff8c00?style=flat-square&labelColor=555)](https://codeberg.org/konaka/UnitXP_SP3)
-[![ClassicAPI](https://img.shields.io/badge/ClassicAPI-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/ClassicAPI)
-
-<sub>**Aegis needs none of these** — it calls only vanilla 1.12 API.
-**AuctionQueryThrottle** is the one that changes anything here (scan speed);
-the rest are the recommended client setup for these realms.</sub>
+<sub>**Aegis needs no mods or .dll** — it calls only vanilla 1.12 API.
+**AuctionQueryThrottle** is the however is the one that changes anything here (scan speed).
+</sub>
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
 with a window that actually knows what things are worth — what you should charge,
