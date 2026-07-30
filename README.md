@@ -10,7 +10,7 @@
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Highly%20Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
 <sub>**Aegis needs no mods or .dll** — it calls only vanilla 1.12 API.
-**AuctionQueryThrottle** is the however is the one that changes anything here (scan speed).
+**AuctionQueryThrottle** however is the one that changes anything here (scan speed).
 </sub>
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
