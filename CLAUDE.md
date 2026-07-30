@@ -192,17 +192,20 @@ are done in practice — **imitate the approach, do not copy code blindly**:
   owner.** It is grouped deliberately:
   1. Discord (`5865F2`), then the 1.18.1 servers — Octo WoW purple (`8A2BE2`),
      Capy WoW brown (`8B5A2B`).
-  2. **AuctionQueryThrottle** alone, green (`4c1`) and labelled "Recommended
-     for Aegis" — it is the ONLY external thing that changes Aegis's behaviour
-     (scan speed).
-  3. The rest of the realm setup in orange (`ff8c00`): SuperWoW, Nampower,
-     UnitXP_SP3, ClassicAPI — all **Recommended**, followed by a `<sub>` caption
-     saying Aegis needs none of them.
+     Also a **Client** badge (`c79c6e`, WoW 1.12 vanilla).
+  2. **AuctionQueryThrottle** alone, orange (`ff8c00`), labelled "Highly
+     Recommended" — it is the ONLY external thing that changes Aegis's behaviour
+     (scan speed) — followed by a `<sub>` caption saying Aegis needs no mods or
+     DLLs.
 
-  **Nothing is labelled "Required".** Aegis calls only vanilla 1.12 API; a
-  grep of `core/` and `ui/` finds no SuperWoW / Nampower / UnitXP_SP3 /
-  ClassicAPI calls. Do not reinstate a Required badge without a code change
-  that actually depends on one.
+  **Nothing is Required, and the loader badges were deliberately REMOVED.**
+  SuperWoW, Nampower, UnitXP_SP3 and ClassicAPI badges used to sit here; a grep
+  of `core/` and `ui/` finds no calls to any of them, so the owner removed them
+  rather than imply a relationship. Do not re-add them, and do not reinstate a
+  "Required" badge, without a code change that actually depends on one.
+
+  There is **no version badge** — the version lives in the `.toc` / `A.version`
+  and the in-game title bar.
 
   There is deliberately **no pfUI badge** — pfUI is optional, and the "Using
   pfUI?" section says so instead. Do not re-add it.
@@ -219,7 +222,8 @@ are done in practice — **imitate the approach, do not copy code blindly**:
   stops matching the release:
   1. `core/init.lua` — `A.version`
   2. `Aegis_Exchange.toc` — `## Version:`
-  3. `README.md` — the version badge **and** the "Check the version" line
+  3. `README.md` — the "Check the version" line in "Something broken?"
+     (there is no version badge; do not add one back)
   4. `CHANGELOG.md` — a new entry plus the link ref at the bottom
 
   The window title bar and the load message both read `A.version`, so they

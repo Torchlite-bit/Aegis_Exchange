@@ -15,12 +15,14 @@ printed in the window title bar — quote it in bug reports.
 ## [1.1.1]
 
 ### Changed
-- **No badge claims to be "Required" any more.** Aegis calls only vanilla 1.12
-  API, so SuperWoW, Nampower, UnitXP_SP3 and ClassicAPI are now **Recommended**
-  (the recommended client setup for these realms) rather than requirements of
-  this addon. **AuctionQueryThrottle** is split out and marked *Recommended for
-  Aegis* — it is the only external thing that changes Aegis's behaviour, and only
-  scan speed. A caption under the badges says so plainly.
+- **Nothing claims to be "Required" any more, and the loader badges are gone.**
+  Aegis calls only vanilla 1.12 API, so the SuperWoW / Nampower / UnitXP_SP3 /
+  ClassicAPI badges were removed rather than left implying a relationship with
+  this addon. **AuctionQueryThrottle** stands alone as *Highly Recommended* — the
+  only external thing that changes Aegis's behaviour, and only scan speed — with
+  a caption stating that Aegis needs no mods or DLLs.
+- Added a **Client** badge (WoW 1.12 vanilla); the version badge was dropped, so
+  the version now lives in the `.toc` and the in-game title bar.
 
 ## [1.1.0] — first public release
 
