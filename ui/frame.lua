@@ -1,7 +1,7 @@
 -- Aegis: Exchange
 -- ui/frame.lua
 --
--- STANDALONE custom auction window (Stage A: shell only).
+-- STANDALONE custom auction window.
 --
 -- Aegis is its OWN top-level frame parented to UIParent — it does NOT tab onto
 -- or parent to the Blizzard AuctionFrame. When the auction house opens we hide
@@ -11,11 +11,15 @@
 -- because no Blizzard AH frame is visible there are no default widgets, holes,
 -- sort headers, or backgrounds to conflict with.
 --
--- Stage A is skin + lifecycle + sub-tab switching only. Full Scan / Pause /
--- Resume are placeholders (chat messages); the sub-tab panels are empty labels.
--- Scanning, price DB, posting, search, etc. arrive in later stages, rendered
--- into these panels. (The scan/db/tooltip modules are unchanged and still
--- feed item tooltips.)
+-- Layout: BuildWindow() creates the frame, the sub-tab strip and one empty
+-- panel per sub-tab, then hands each panel to its own builder —
+-- BuildBuyTab / BuildSellTab / BuildAuctionsTab / BuildCraftTab /
+-- BuildHistoryTab, plus the scan controls and BuildAegisSettings for the
+-- "Aegis" tab. Every panel is a real tab; none are placeholders.
+--
+-- The one frame here that is NOT parented to our window is
+-- AegisExchangeSwapButton, the "Aegis UI" button we put ON the Blizzard AH so
+-- the hand-off works both ways. See HookAuctionFrame.
 
 local A = AegisExchange
 A.ui = A.ui or {}
@@ -40,8 +44,9 @@ local C = {
 -- Last scan older than this is "stale" and rendered amber.
 local STALE_SECONDS = 24 * 60 * 60
 
--- "Scan" hosts the scanner controls (Full Scan / Pause / Resume / Categories
--- + status and progress); the others are placeholders for later stages.
+-- Sub-tab order, left to right. "Scan" hosts the scanner controls (Full Scan /
+-- Pause / Resume / Stop / Categories + status and progress) and the settings
+-- block; it is displayed as "Aegis" via TAB_LABELS below.
 local SUBTABS = { "Buy", "Sell", "Auctions", "Crafting", "History", "Scan" }
 
 -- Display label per sub-tab (internal keys stay stable). The scan tab also
@@ -217,8 +222,8 @@ function ui.BuildWindow()
     content:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
     ui.content = content
 
-    -- One panel per sub-tab, filling the content region. All but Scan are
-    -- placeholders (centered label); Scan hosts the scanner controls below.
+    -- One panel per sub-tab, filling the content region. Each is populated by
+    -- its own Build*Tab function below.
     ui.panels = {}
     i = 1
     while i <= nTabs do
@@ -227,17 +232,6 @@ function ui.BuildWindow()
         panel:SetPoint("TOPLEFT", content, "TOPLEFT", 6, -6)
         panel:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -6, 6)
         panel:Hide()
-        -- Every tab is now a real tab (built below); no placeholders remain.
-        if name ~= "Scan" and name ~= "Sell" and name ~= "Buy"
-            and name ~= "Crafting" and name ~= "Auctions"
-            and name ~= "History" then
-            local label = panel:CreateFontString(
-                "AegisExchangePanelLabel" .. name, "OVERLAY",
-                "GameFontNormalLarge")
-            label:SetPoint("CENTER", panel, "CENTER", 0, 0)
-            label:SetText(name)
-            label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        end
         ui.panels[name] = panel
         i = i + 1
     end
@@ -5018,6 +5012,14 @@ function ui.HookAuctionFrame()
 
     -- "Aegis UI" button on the stock AH so the hand-off works both ways.
     -- OpenWindow hides the Blizzard AH session-safely and shows ours.
+    --
+    -- DELIBERATE EXCEPTION to "never parent anything to AuctionFrame": this is
+    -- the ONE frame we hang off the Blizzard window, and it has to be, because
+    -- it must appear on THEIR window while ours is hidden. Parenting it to
+    -- AuctionFrame is what makes it show and hide with the Blizzard AH for
+    -- free. Do not read this as leftover overlay code and remove it -- it is
+    -- the documented return path (README: "Aegis UI button (on the stock AH)").
+    -- Everything else Aegis draws lives under UIParent.
     if not ui.blizSwapBtn then
         local b = CreateFrame("Button", "AegisExchangeSwapButton",
             AuctionFrame, "UIPanelButtonTemplate")
