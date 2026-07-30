@@ -2,10 +2,10 @@
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
-[![Version](https://img.shields.io/badge/version-1.1.1-4c1?style=flat-square&labelColor=555)](CHANGELOG.md)
 [![Discord](https://img.shields.io/badge/Discord-join%20us-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/Hr66t25vE7)
 [![Octo WoW](https://img.shields.io/badge/Octo%20WoW-1.18.1-8A2BE2?style=flat-square&labelColor=555)](https://octowow.st/)
 [![Capy WoW](https://img.shields.io/badge/Capy%20WoW-1.18.1-8B5A2B?style=flat-square&labelColor=555)](https://capycraft.io/)
+[![Client](https://img.shields.io/badge/client-WoW%201.12%20(vanilla)-c79c6e?style=flat-square)](https://turtle-wow.org)
 
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended%20for%20Aegis-4c1?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
