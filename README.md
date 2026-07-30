@@ -7,7 +7,7 @@
 [![Capy WoW](https://img.shields.io/badge/Capy%20WoW-1.18.1-8B5A2B?style=flat-square&labelColor=555)](https://capycraft.io/)
 [![Client](https://img.shields.io/badge/client-WoW%201.12%20(vanilla)-c79c6e?style=flat-square)](https://turtle-wow.org)
 
-[![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Recommended%20for%20Aegis-4c1?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
+[![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Highly%20Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/nampower)
