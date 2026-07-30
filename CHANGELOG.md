@@ -12,27 +12,6 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-## [1.1.4]
-
-> Internal cleanup only — no user-visible change. Bumped so an in-game bug
-> report still names the build it came from.
-
-### Removed
-- Dead placeholder code in the sub-tab loop. It built a centered "coming soon"
-  label for any tab not in a hardcoded exclusion list — but that list had grown
-  to contain every entry in `SUBTABS`, so the branch had been unreachable since
-  the last placeholder tab was filled in 0.15.0.
-
-### Changed
-- `ui/frame.lua`'s header still described the file as "Stage A: shell only"
-  with "empty labels" for panels and scanning "in later stages". All six tabs
-  have been real since 0.15.0; the header now describes the actual layout.
-- `AegisExchangeSwapButton` — the "Aegis UI" button on the stock auction house
-  — is now commented as the deliberate, single exception to "nothing is
-  parented to AuctionFrame", so it doesn't read as leftover overlay code.
-- `CLAUDE.md`'s project layout was missing `core/buy.lua`, `ui/skin.lua` and
-  `pfui/`, and its load order omitted `buy` and `skin`.
-
 ## [1.1.3]
 
 ### Fixed
@@ -324,7 +303,6 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-[1.1.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
