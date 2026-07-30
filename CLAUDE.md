@@ -7,6 +7,12 @@ auction house helper for **Turtle WoW 1.18.1**, which runs the **ORIGINAL WoW
 > This is **NOT** WoW Classic and **NOT** retail. Do **not** use any API newer
 > than patch **1.12**. When in doubt, assume the API does not exist.
 
+**Planned work lives in [`ROADMAP.md`](ROADMAP.md)**, phased and dependency
+ordered, including the integration contract for the planned **Aegis: Courier**
+companion addon (separate repo). Check it before starting any large feature
+so the phase ordering and settled design decisions aren't re-litigated or
+built out of order.
+
 ---
 
 ## HARD RULES — never violate these
@@ -162,6 +168,8 @@ Aegis_Exchange/
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
                          -- never ported to Lua verbatim, NEVER in the .toc
   CLAUDE.md              -- this file
+  ROADMAP.md             -- phased, dependency-ordered plan; check before
+                         -- starting a large feature
 ```
 
 Load order is fixed by the `.toc`: `init` → `util` → `db` → `scan` → `sell` →
