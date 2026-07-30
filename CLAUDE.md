@@ -154,35 +154,19 @@ Aegis_Exchange/
   Aegis_Exchange.toc     -- Interface 11200; declares SavedVariables + load order
   core/init.lua          -- namespace (AegisExchange) + event dispatcher + OnLoad queue
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
-  core/db.lua            -- SavedVariables price DB (daily-min + weighted-median
-                         -- market), settings, ledger, vendor prices
+  core/db.lua            -- SavedVariables price DB (daily-min + weighted-median market)
   core/scan.lua          -- page-by-page auction scanner state machine
-  core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut),
-                         -- owned auctions, vendor list
-  core/buy.lua           -- search/buy engine + shopping lists; also defines the
-                         -- A.craft namespace (recipe capture + profit maths)
-  ui/frame.lua           -- standalone Aegis window (replaces the AH) + all six
-                         -- sub-tabs; ~5k lines, the bulk of the addon
-  ui/skin.lua            -- OPTIONAL pfUI restyling; every call pcall-guarded so
-                         -- a pfUI API change can only cost us the default look
+  core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut)
+  ui/frame.lua           -- standalone Aegis window (replaces the AH) + sub-tabs
   ui/tooltip.lua         -- GameTooltip price lines (save/replace hooks)
-  pfui/Aegis_Exchange.lua-- drop-in for pfUI-addonskinner users. NOT in the .toc
-                         -- and NOT loaded by us; it just calls A.skin.Apply()
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
                          -- never ported to Lua verbatim, NEVER in the .toc
   CLAUDE.md              -- this file
 ```
 
 Load order is fixed by the `.toc`: `init` → `util` → `db` → `scan` → `sell` →
-`buy` → `frame` → `skin` → `tooltip`. `init.lua` must load first (it creates
-the namespace and dispatcher); `util` second (every other module takes a
-file-scope `local util = A.util`); `sell` and `buy` before `frame` because the
-tabs drive `A.sell` / `A.buy` / `A.craft`. `skin` and `tooltip` are only
-reached at runtime, so their position is not load-critical.
-
-**Adding a `.lua` file means editing the `.toc` — and that needs a FULL client
-restart, not `/reload`.** 1.12 reads the file list at startup. Mark such a
-release **restart** in `CHANGELOG.md`.
+`frame` → `tooltip`. `init.lua` must load first (it creates the namespace and
+dispatcher); `sell` before `frame` because the Sell tab drives `A.sell`.
 
 The repository root **is** the addon folder: clone/copy it into
 `Interface/AddOns/Aegis_Exchange` so the folder name matches the `.toc`.
