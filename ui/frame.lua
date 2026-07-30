@@ -345,7 +345,73 @@ function ui.BuildWindow()
         .. " Scan Selected runs a fast targeted scan.")
     tip:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    ui.BuildAegisSettings(scanPanel, tip)
+    -- The settings block lives in a REAL ScrollFrame, not a FauxScrollFrame.
+    -- Every other tab virtualises fixed-height rows, which is what
+    -- FauxScrollFrame is for; settings are heterogeneous widgets that can't be
+    -- recycled into rows. A ScrollFrame is also the only 1.12 widget that
+    -- CLIPS its child -- this client has no SetClipsChildren -- so it's the
+    -- only way to keep overflow inside the window instead of spilling past the
+    -- bottom edge, which is what 1.1.1 did once the pacing and confirm-cancel
+    -- rows were added.
+    local SB_W = 16
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeAegisScroll",
+        scanPanel)
+    scroll:SetPoint("TOPLEFT", tip, "BOTTOMLEFT", 0, -8)
+    scroll:SetPoint("BOTTOMRIGHT", scanPanel, "BOTTOMRIGHT", -(SB_W + 10), 6)
+    ui.aegisScroll = scroll
+
+    local scrollChild = CreateFrame("Frame", "AegisExchangeAegisScrollChild",
+        scroll)
+    scrollChild:SetWidth(600)
+    scrollChild:SetHeight(300)
+    scroll:SetScrollChild(scrollChild)
+    ui.aegisScrollChild = scrollChild
+
+    -- Hand-built from a base Slider rather than inheriting a scroll template:
+    -- Slider is a primitive widget type that always exists, so there's no
+    -- "Couldn't find inherited node" risk from guessing a 1.12 template name
+    -- (the AuctionFrameTab lesson), and it matches the Aegis palette. Marked
+    -- aegisNoSkin because pfUI's SkinScrollbar reaches for the up/down buttons
+    -- a template would have supplied.
+    local sb = CreateFrame("Slider", "AegisExchangeAegisScrollBar", scanPanel)
+    sb.aegisNoSkin = true
+    sb:SetWidth(SB_W)
+    sb:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 8, 0)
+    sb:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 8, 0)
+    sb:SetOrientation("VERTICAL")
+    sb:SetMinMaxValues(0, 0)
+    sb:SetValue(0)
+    sb:SetValueStep(1)
+    sb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+        edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = { left = 3, right = 3, top = 6, bottom = 6 },
+    })
+    local thumb = sb:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture("Interface\\Buttons\\UI-SliderBar-Button-Vertical")
+    thumb:SetWidth(SB_W)
+    thumb:SetHeight(24)
+    sb:SetThumbTexture(thumb)
+    -- 1.12: the scripted widget is the global `this`, never a self argument.
+    sb:SetScript("OnValueChanged", function()
+        scroll:SetVerticalScroll(this:GetValue())
+    end)
+    sb:Hide()
+    ui.aegisScrollBar = sb
+
+    -- Wheel over the settings area scrolls it. arg1 is the wheel delta global
+    -- (+1 up / -1 down) on this client.
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function()
+        local _, maxV = sb:GetMinMaxValues()
+        local v = sb:GetValue() - (arg1 * 24)
+        if v < 0 then v = 0 end
+        if v > maxV then v = maxV end
+        sb:SetValue(v)
+    end)
+
+    ui.BuildAegisSettings(scrollChild, nil)
     ui.BuildSellTab()
     ui.BuildBuyTab()
     ui.BuildCraftTab()
@@ -394,10 +460,74 @@ StaticPopupDialogs["AEGIS_EXCHANGE_CLEARDB"] = {
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
 
+-- Distance from a frame's top edge to the lowest edge of anything inside it.
+-- Measured rather than hardcoded so that adding a setting later can't silently
+-- clip again. Returns nil until the frame has actually been laid out (GetTop
+-- is nil while hidden), so callers keep the last good value.
+local function ContentExtent(frame)
+    local top = frame:GetTop()
+    if not top then return nil end
+    local lowest = top
+    local function sweep(list)
+        local i = 1
+        local n = table.getn(list)
+        while i <= n do
+            local o = list[i]
+            if o and o.GetBottom then
+                local b = o:GetBottom()
+                if b and b < lowest then lowest = b end
+            end
+            i = i + 1
+        end
+    end
+    -- 1.12 returns these as multiple values; the table constructor captures
+    -- them without needing select(), which doesn't exist on Lua 5.0.
+    sweep({ frame:GetChildren() })
+    sweep({ frame:GetRegions() })
+    return top - lowest
+end
+
+-- Fit the Aegis tab's scroll child to its content and update the bar's range.
+-- Hides the bar entirely when everything already fits.
+function ui.UpdateAegisScroll()
+    local scroll = ui.aegisScroll
+    local child = ui.aegisScrollChild
+    local sb = ui.aegisScrollBar
+    if not scroll or not child or not sb then return end
+
+    local w = scroll:GetWidth()
+    if w and w > 0 then child:SetWidth(w) end
+
+    local measured = ContentExtent(child)
+    if measured then
+        ui.aegisContentH = measured + 10   -- breathing room under the last row
+    end
+    local contentH = ui.aegisContentH or 300
+    child:SetHeight(contentH)
+
+    local viewH = scroll:GetHeight() or 0
+    local maxScroll = contentH - viewH
+    if maxScroll < 1 then
+        sb:SetMinMaxValues(0, 0)
+        sb:SetValue(0)
+        sb:Hide()
+    else
+        sb:SetMinMaxValues(0, maxScroll)
+        if sb:GetValue() > maxScroll then sb:SetValue(maxScroll) end
+        sb:Show()
+    end
+end
+
+-- `anchorAbove` is optional: when the settings sit in the Aegis tab's scroll
+-- child they start at its top instead of hanging off the scan controls.
 function ui.BuildAegisSettings(panel, anchorAbove)
     -- Section header under the scan controls.
     local hdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hdr:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, -18)
+    if anchorAbove then
+        hdr:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, -18)
+    else
+        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
+    end
     hdr:SetText("Settings")
     hdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
@@ -736,6 +866,11 @@ function ui.RefreshSettings()
             ui.setThrottleInfo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         end
     end
+
+    -- Content can change height (the pacing readout wraps differently), so
+    -- re-measure whenever we repaint. SelectSubTab already routes the Scan tab
+    -- through here, which is the moment the panel becomes measurable.
+    ui.UpdateAegisScroll()
 end
 
 -- ---------------------------------------------------------------------------
@@ -2300,14 +2435,32 @@ end
 
 -- Put an "Add to Aegis" button on a profession window, anchored to its close
 -- button. Save-original-and-replace only: no secure hooks on 1.12.
-function ui.AttachCraftButton(frame, name)
+function ui.AttachCraftButton(frame, name, anchorNames)
     if not frame or getglobal(name) then return end
     local b = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
     b:SetWidth(96); b:SetHeight(20)
-    -- Pin to the frame's BOTTOM-RIGHT, above the Create/Exit buttons. This spot
-    -- is clear in BOTH the stock UI and pfUI (no packed header / corner X to
-    -- fight), and the profit line stacks directly above it.
-    b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -16, 46)
+    -- Anchor to the window's OWN Exit/Create button, not to the frame corner.
+    -- Same principle as the pfUI header fix: anchor to something that moves
+    -- with the skin. The stock profession window's BOTTOMRIGHT sits out under
+    -- its thick ornate border art, so -16,46 landed the button (and the profit
+    -- lines stacked above it) outside the panel; pfUI's border is a hairline,
+    -- which is why it only ever looked right when skinned. The Exit button is
+    -- inside the content area in both.
+    local anchor = nil
+    if anchorNames then
+        local i = 1
+        while i <= table.getn(anchorNames) and not anchor do
+            anchor = getglobal(anchorNames[i])
+            i = i + 1
+        end
+    end
+    if anchor then
+        b:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", 0, 8)
+    else
+        -- Unknown window layout: fall back well inside the frame rather than
+        -- on top of its border.
+        b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -40, 60)
+    end
     b:SetText("Add to Aegis")
     b:SetScript("OnClick", function() ui.CraftCapture() end)
     if A.skin then A.skin.ApplyExternal() end
@@ -2329,7 +2482,7 @@ function ui.AttachProfLine(frame, btnName, key)
     if btn then
         sub:SetPoint("BOTTOMRIGHT", btn, "TOPRIGHT", 0, 6)
     else
-        sub:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -16, 74)
+        sub:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -40, 88)
     end
     sub:SetJustifyH("RIGHT")
     sub:SetWidth(210)
@@ -2399,12 +2552,14 @@ end
 
 function ui.HookProfessionFrames()
     if TradeSkillFrame then
-        ui.AttachCraftButton(TradeSkillFrame, "AegisExchangeAddTradeSkillButton")
+        ui.AttachCraftButton(TradeSkillFrame, "AegisExchangeAddTradeSkillButton",
+            { "TradeSkillCancelButton", "TradeSkillCreateButton" })
         ui.AttachProfLine(TradeSkillFrame,
             "AegisExchangeAddTradeSkillButton", "tradeskill")
     end
     if CraftFrame then
-        ui.AttachCraftButton(CraftFrame, "AegisExchangeAddCraftButton")
+        ui.AttachCraftButton(CraftFrame, "AegisExchangeAddCraftButton",
+            { "CraftCancelButton", "CraftCreateButton" })
         ui.AttachProfLine(CraftFrame, "AegisExchangeAddCraftButton", "craft")
     end
     if ui.profPoller then ui.profPoller:Show() end

@@ -12,6 +12,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.2]
+
+### Fixed
+- **The Aegis tab's settings no longer run off the bottom of the window.**
+  Everything below the tip line now sits in a scrollable region with its own
+  bar (mouse wheel works too); the bar hides itself when it isn't needed. The
+  settings block had simply outgrown the panel — *Price data / Clear price
+  data* was clipped by the window edge with no way to reach it.
+- **"Add to Aegis" and the profit lines are aligned on the stock profession
+  window.** They were anchored to the frame's own bottom-right corner, which on
+  the unskinned window is out under its thick ornate border art — so the whole
+  cluster sat outside the panel. pfUI's border is a hairline, which is why this
+  only ever looked right when skinned. They now anchor to the window's own
+  Exit button, which is inside the content area in both UIs.
+
+### Changed
+- The Discord invite moved to `hsgPTNkSX` across all five places in the README.
+
 ## [1.1.1]
 
 ### Changed
@@ -276,4 +294,5 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

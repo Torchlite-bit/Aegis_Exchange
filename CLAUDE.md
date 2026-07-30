@@ -204,27 +204,33 @@ are done in practice — **imitate the approach, do not copy code blindly**:
   rather than imply a relationship. Do not re-add them, and do not reinstate a
   "Required" badge, without a code change that actually depends on one.
 
-  There is **no version badge** — the version lives in the `.toc` / `A.version`
-  and the in-game title bar.
+  There is **no version badge** — but the **H1 carries the version**
+  (`# Aegis: Exchange (v1.1.2)`), so it is a bump site. See the checklist below.
 
   There is deliberately **no pfUI badge** — pfUI is optional, and the "Using
   pfUI?" section says so instead. Do not re-add it.
 
   Keep the shields.io style (`flat-square`, `labelColor=555`) when adding to it,
   and do not reorder, re-row or restyle it unasked.
-- **One Discord invite, used everywhere: `https://discord.gg/Hr66t25vE7`.** It
+- **One Discord invite, used everywhere: `https://discord.gg/hsgPTNkSX`.** It
   appears in five places — the badge, the intro line, "Something broken?",
   Contributing and the footer. Change all five together or none, and never
   swap it for one pasted in chat without confirming it is current.
+  - This invite has now changed twice, and **both times only the badge got
+    updated**, leaving the other four pointing at a dead invite. When you see
+    the badge disagree with the body links, the badge is the new one — but
+    confirm before propagating, because "the badge is stale instead" is
+    equally possible and a wrong guess breaks every link in the file.
 - Every version bump gets a `CHANGELOG.md` entry. Mark a release **restart**
   when it adds a new `.lua` file to the `.toc`.
-- **A version bump touches FOUR places** — miss one and the in-game version
+- **A version bump touches FIVE places** — miss one and the in-game version
   stops matching the release:
   1. `core/init.lua` — `A.version`
   2. `Aegis_Exchange.toc` — `## Version:`
-  3. `README.md` — the "Check the version" line in "Something broken?"
-     (there is no version badge; do not add one back)
-  4. `CHANGELOG.md` — a new entry plus the link ref at the bottom
+  3. `README.md` — the **H1**: `# Aegis: Exchange (vX.Y.Z)`
+  4. `README.md` — the "Check the version" line in "Something broken?"
+     (there is still no version *badge*; do not add one back)
+  5. `CHANGELOG.md` — a new entry plus the link ref at the bottom
 
   The window title bar and the load message both read `A.version`, so they
   follow automatically. Versions are `MAJOR.MINOR.PATCH`; 1.1.0 was the first

@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.1.1)
+# Aegis: Exchange (v1.1.2)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -35,7 +35,7 @@ made this week.
 >
 > It's a DLL, not an addon, and it needs the VanillaFixes loader.
 
-**[💬 Join the Discord](https://discord.gg/Hr66t25vE7)** for help, bug reports,
+**[💬 Join the Discord](https://discord.gg/hsgPTNkSX)** for help, bug reports,
 and feature ideas.
 
 ---
@@ -239,9 +239,9 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.1.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.1.2`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
-3. Tell us on **[Discord](https://discord.gg/Hr66t25vE7)** or open an
+3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
    help enormously, especially for anything layout-related.
 
@@ -251,7 +251,7 @@ Recent changes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
-PRs welcome — come say hi on **[Discord](https://discord.gg/Hr66t25vE7)** first
+PRs welcome — come say hi on **[Discord](https://discord.gg/hsgPTNkSX)** first
 if you're planning something big.
 
 Three requests:
@@ -270,7 +270,7 @@ MIT — see [LICENSE](LICENSE).
 
 <div align="center">
 
-**[💬 Discord](https://discord.gg/Hr66t25vE7)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
+**[💬 Discord](https://discord.gg/hsgPTNkSX)** · **[📜 Changelog](CHANGELOG.md)** · **[🐛 Issues](https://github.com/Torchlite-bit/Aegis_Exchange/issues)**
 
 *Aegis: Exchange is part of the Aegis addon series. Happy flipping.* ⚔️
 
