@@ -238,6 +238,17 @@ Decided. Integrate default Blizzard-style category browsing directly into the se
 - Allows users to easily browse specific item slots or types visually without having to rely strictly on typing name search queries or remembering syntax.
  - Category filters feed cleanly into the underlying search engine alongside post-filter rules.
 
+### 3f — Session Purchase & Crafting Material Tracker
+
+**Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
+
+* **Session Purchase Counter:** A lightweight UI tracker anchored to the AH window logging items bought during the current shopping session (e.g., `Iron Ore: 10 purchased`).
+* **Aggregate Inventory Awareness:** Real-time calculation of total materials owned across character bags, bank, mailbox, and alt character databases.
+* **Goal Progress Ratio:** Displays contextual owned/purchased counts against target requirements (e.g., `Iron Ore — 25/40 available`).
+* **Instant Tally Updates:** Refreshes inventory totals and session counts immediately upon buyout/bid confirmation.
+
+
+
 ---
 
 ## Phase 3 — History & Price Intelligence polish
