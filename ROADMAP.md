@@ -65,6 +65,11 @@ weighting curve against the target behavior — recent days weighted more,
 decreasing effect past roughly a month — and close any gap between what's
 implemented and what's intended. This is mostly verification, not new code.
 
+### 0.4 Dynamic Window Scaling & Resizing
+Decided. Add a grab-and-drag scaling handle on the bottom-right corner of the main Aegis frame.
+- Allows users to freely adjust the frame size by dragging the corner.
+- Ensures inner UI panels, tables, and buttons dynamically rescale and re-anchor without breaking layout proportions or pixel density.
+
 ---
 
 ## Phase 1 — Aegis: Courier (separate repo, parallel track)
@@ -198,8 +203,11 @@ searches by name. Additionally supported in the same box:
 - The two filters explicitly requested: buyout-only (exclude bid-only
   auctions), and fully-stacked-only (stack size == max for that item).
 - Quick wins that only need the existing box, done here while it's already
-  being touched: tab-complete, and starting a search by dragging an
-  inventory item onto the box or right-clicking an item/item link.
+  being touched: 
+   - Right-click an item in your bags while on the Buy tab to instantly initiate a search for that item.
+   - Right-click an item in your bags while on the Sell tab to automatically place it directly into the sell slot for auction creation.
+   - Dragging an inventory item onto the search box or right-clicking an item link in chat.
+   - Tab-autocompletion in the search bar.
 
 ### 2b — Filter Builder tab
 Form-driven query construction mirroring aux's layout (Name / Level Range /
@@ -223,6 +231,12 @@ Everything from 2a's primitive set generalized under full `and`/`or`/`not`
 prefix-notation combination, plus stat-suffix matching (the
 `+3 stamina/+3 agility` wristband-suffix case) and any remaining aux
 primitives worth carrying over.
+
+### 3e — Blizzard-style Category Navigation Tree
+Decided. Integrate default Blizzard-style category browsing directly into the search interface
+- Displays a collapsible category tree on the left side of the search view (e.g., Weapons > Two-Handed Maces or Armor > Leather).
+- Allows users to easily browse specific item slots or types visually without having to rely strictly on typing name search queries or remembering syntax.
+ - Category filters feed cleanly into the underlying search engine alongside post-filter rules.
 
 ---
 
