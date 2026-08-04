@@ -152,8 +152,12 @@ local function RecordVisiblePage(numOnPage)
             if tally then
                 if itemId then
                     if not tally.seen[itemId] then
-                        local known = A.db.account
-                            and A.db.account.items[itemId] or nil
+                        -- Via db.Items(), not db.account.items: price data is
+                        -- keyed by realm, so "already known" must mean known
+                        -- HERE. Reaching past the accessor would count another
+                        -- realm's items as updates on this one.
+                        local items = A.db.Items and A.db.Items() or nil
+                        local known = items and items[itemId] or nil
                         tally.seen[itemId] = quality or 1
                         tally.distinct = tally.distinct + 1
                         if known then

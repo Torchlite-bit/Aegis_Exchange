@@ -12,13 +12,26 @@
 --   AegisExchangeCharDB  -- per-character. UI state, last scan info.
 --
 -- On-disk shape (kept compact — a 50+ page scan touches thousands of items):
---   AegisExchangeDB.items[itemID] = {
---       daily  = { [dayNumber] = minUnitBuyout },  -- pruned to KEEP_DAYS
---       seen   = count,                            -- auctions ever recorded
---       vendor = sellPrice,                        -- per unit, when known
+--   AegisExchangeDB.realms[realmName].items[itemID] = {
+--       daily = { [dayNumber] = minUnitBuyout },   -- pruned to KEEP_DAYS
+--       seen  = count,                             -- auctions ever recorded
 --   }
+--   AegisExchangeDB.vendors[itemID] = sellPrice    -- per unit, when known
 --   AegisExchangeDB.names[itemName] = itemID       -- for link-less tooltips
 --                                                  -- (mail inbox on 1.12)
+--
+-- WHY PRICES ARE KEYED BY REALM. `## SavedVariables` is account-wide across
+-- every realm, so before v3 a character on Octo WoW and one on Capy WoW folded
+-- their buyouts into the SAME daily minimum — two unrelated economies blended
+-- into one median. Turtle's AH being cross-faction (a CLAUDE.md hard rule)
+-- means there is no FACTION split to make, but there is very much a REALM one.
+-- So market data hangs off `realms[realmName]`, while everything that is a
+-- game constant rather than an economy fact stays account-wide and shared:
+--   * vendors -- an NPC's sell price is identical on every realm; siloing it
+--                per realm would make you re-learn it server by server.
+--   * names   -- itemName -> itemID is a property of the game, not the market.
+--   * shopping / crafting / settings / ledger / vendorMarks -- user data that
+--                should follow you everywhere.
 --
 -- IMPORTANT: both globals are nil until ADDON_LOADED fires for
 -- "Aegis_Exchange". db.Init is queued via A.OnLoad and runs exactly then.
@@ -28,7 +41,10 @@ A.db = {}
 local db = A.db
 
 -- Bump when the on-disk shape changes so we can migrate old data.
-local DB_VERSION = 2
+--   v2 -> v3: price data moved from a single account-wide `items` table to
+--             `realms[realmName].items`, and vendor prices moved out to their
+--             own account-wide `vendors` table. See MigrateToRealms.
+local DB_VERSION = 3
 
 -- Daily entries retained per item; also the window MarketValue medians over.
 local KEEP_DAYS = 11
@@ -47,8 +63,12 @@ end
 local function DefaultAccountDB()
     return {
         version = DB_VERSION,
-        items = {},   -- itemID -> { daily, seen, vendor }
-        names = {},   -- itemName -> itemID
+        -- Market data, per realm: realmName -> { items = { [id] = {daily,seen} } }.
+        -- Two realms are two economies; see the header note.
+        realms  = {},
+        -- Game constants, shared by every realm (see header note).
+        vendors = {},   -- itemID   -> vendor sell price, per unit
+        names   = {},   -- itemName -> itemID
         -- Shopping (Buy tab): saved lists + recent searches, account-wide so
         -- every character shares them.
         shopping = {
@@ -143,13 +163,79 @@ local function ApplyDefaults(target, defaults)
     end
 end
 
+-- Which realm's price bucket we're reading. Cached at Init: GetRealmName is
+-- stable for the session, and this is on the hot path of every scanned auction.
+function db.RealmKey()
+    local name = GetRealmName and GetRealmName() or nil
+    if not name or name == "" then return "?" end
+    return name
+end
+
+-- The current realm's item table, created on demand. Every price read/write
+-- goes through here rather than touching db.account directly, so the realm
+-- split lives in exactly one place.
+function db.Items()
+    if not db.account then return nil end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.items then bucket.items = {} end
+    return bucket.items
+end
+
+-- v2 -> v3. Old saves pooled EVERY realm's prices into one account-wide
+-- `items` table, with the vendor price stored inside each item record.
+--
+-- Vendor prices lift out cleanly -- they're a game constant, so they stay
+-- account-wide and nothing is lost. The daily buyouts are the awkward part:
+-- they carry no realm tag, so there is no way to know which realm each came
+-- from. We attribute the whole set to the realm you first log in on after
+-- upgrading. For the common single-realm user that preserves everything; for a
+-- multi-realm user one realm inherits some foreign dailies, and that
+-- self-corrects within KEEP_DAYS as fresh scans age the old values out. The
+-- alternative -- discarding price history on upgrade -- is worse for everyone.
+local function MigrateToRealms(acct, realmKey)
+    if type(acct.items) ~= "table" then return end
+    if not acct.realms then acct.realms = {} end
+    if not acct.vendors then acct.vendors = {} end
+    local bucket = acct.realms[realmKey]
+    if not bucket then bucket = {}; acct.realms[realmKey] = bucket end
+    if not bucket.items then bucket.items = {} end
+    for id, rec in pairs(acct.items) do
+        if type(rec) == "table" then
+            if rec.vendor and not acct.vendors[id] then
+                acct.vendors[id] = rec.vendor
+            end
+            if type(rec.daily) == "table" then
+                local existing = bucket.items[id]
+                if existing then
+                    -- Re-running the migration must not lose data: keep the
+                    -- lower buyout per day, the way RecordAuction would.
+                    for d, v in pairs(rec.daily) do
+                        local cur = existing.daily[d]
+                        if not cur or v < cur then existing.daily[d] = v end
+                    end
+                    existing.seen = (existing.seen or 0) + (rec.seen or 0)
+                else
+                    bucket.items[id] = { daily = rec.daily, seen = rec.seen or 0 }
+                end
+            end
+        end
+    end
+    acct.items = nil   -- drop the v2 table so it can't be read again
+end
+
 -- Runs after ADDON_LOADED (queued via A.OnLoad below). The SavedVariables
 -- globals exist by now: either a saved table, an empty table on first login,
 -- or nil which we replace with defaults.
 function db.Init()
+    db.realmKey = db.RealmKey()
+
     if AegisExchangeDB == nil then
         AegisExchangeDB = DefaultAccountDB()
-    elseif (AegisExchangeDB.version or 0) < DB_VERSION then
+    elseif (AegisExchangeDB.version or 0) < 2 then
         -- v1 scaffolding carried no real price data; keep its name map (was
         -- `nameToId`) and rebuild the rest.
         local old = AegisExchangeDB
@@ -157,6 +243,12 @@ function db.Init()
         if type(old.nameToId) == "table" then
             AegisExchangeDB.names = old.nameToId
         end
+    end
+    -- v2 saves carry real price history, so this migrates rather than rebuilds.
+    -- Keyed off the presence of `items` too, not just the version number, so a
+    -- save that was half-written by an older build still gets converted.
+    if (AegisExchangeDB.version or 0) < 3 or AegisExchangeDB.items then
+        MigrateToRealms(AegisExchangeDB, db.realmKey)
     end
     ApplyDefaults(AegisExchangeDB, DefaultAccountDB())
     AegisExchangeDB.version = DB_VERSION
@@ -191,10 +283,12 @@ end
 function db.RecordAuction(itemId, unitBuyout, itemName)
     if not db.account then return end   -- pre-ADDON_LOADED safety
     if not itemId or not unitBuyout or unitBuyout <= 0 then return end
-    local rec = db.account.items[itemId]
+    local items = db.Items()
+    if not items then return end
+    local rec = items[itemId]
     if not rec then
         rec = { daily = {}, seen = 0 }
-        db.account.items[itemId] = rec
+        items[itemId] = rec
     end
     local today = db.Day()
     local cur = rec.daily[today]
@@ -211,7 +305,8 @@ end
 -- Most recent daily minimum unit buyout, or nil if never seen.
 function db.MinBuyout(itemId)
     if not db.account then return nil end
-    local rec = db.account.items[itemId]
+    local items = db.Items()
+    local rec = items and items[itemId]
     if not rec then return nil end
     local newest = nil
     for d in pairs(rec.daily) do
@@ -234,7 +329,8 @@ end
 -- item has never been seen.
 function db.MarketValue(itemId)
     if not db.account then return nil end
-    local rec = db.account.items[itemId]
+    local items = db.Items()
+    local rec = items and items[itemId]
     if not rec then return nil end
 
     local today = db.Day()
@@ -265,21 +361,18 @@ end
 
 -- Vendor sell price (per unit), collected opportunistically from tooltip
 -- money while at a merchant (1.12's GetItemInfo has no sell price).
+-- Account-wide, NOT per realm: an NPC's sell price is the same on every server,
+-- so learning it once should cover all of them.
 function db.SetVendor(itemId, copper)
     if not db.account then return end
     if not itemId or not copper or copper <= 0 then return end
-    local rec = db.account.items[itemId]
-    if not rec then
-        rec = { daily = {}, seen = 0 }
-        db.account.items[itemId] = rec
-    end
-    rec.vendor = copper
+    if not db.account.vendors then db.account.vendors = {} end
+    db.account.vendors[itemId] = copper
 end
 
 function db.GetVendor(itemId)
-    if not db.account then return nil end
-    local rec = db.account.items[itemId]
-    return rec and rec.vendor
+    if not db.account or not db.account.vendors then return nil end
+    return db.account.vendors[itemId]
 end
 
 -- Resolve an item name to an itemID (for tooltips with no link, e.g. the
@@ -289,11 +382,18 @@ function db.IdFromName(name)
     return db.account.names[name]
 end
 
--- Wipe all recorded price data (keeps the name->id map, which is harmless and
--- useful for link-less tooltips). Driven by the Aegis tab's "Clear price data".
+-- Wipe recorded price data for THIS REALM (keeps the name->id map, which is
+-- harmless and useful for link-less tooltips, and keeps vendor prices, which
+-- are game constants). Driven by the Aegis tab's "Clear price data".
+--
+-- Deliberately realm-scoped: the Aegis tab shows this realm's item count, so
+-- Clear wipes exactly what it reports. Another realm's history isn't visible
+-- from here and shouldn't be destroyed from here either.
 function db.ClearItems()
     if not db.account then return end
-    db.account.items = {}
+    if not db.account.realms then return end
+    local key = db.realmKey or db.RealmKey()
+    db.account.realms[key] = nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -408,7 +508,8 @@ end
 -- Pairs with db.MarketValue (the time-weighted median) on the Sell tab.
 function db.PriceSpread(itemId)
     if not db.account or not itemId then return 0 end
-    local rec = db.account.items[itemId]
+    local items = db.Items()
+    local rec = items and items[itemId]
     if not rec then return 0 end
     local days, low, high = 0, nil, nil
     for _, v in pairs(rec.daily) do
@@ -419,11 +520,13 @@ function db.PriceSpread(itemId)
     return days, low, high
 end
 
--- Number of distinct items with any recorded price data.
+-- Number of distinct items with recorded price data ON THIS REALM.
 function db.ItemCount()
     if not db.account then return 0 end
+    local items = db.Items()
+    if not items then return 0 end
     local n = 0
-    for _ in pairs(db.account.items) do
+    for _ in pairs(items) do
         n = n + 1
     end
     return n

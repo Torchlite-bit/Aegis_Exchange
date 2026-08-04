@@ -25,15 +25,26 @@ means an original Aegis implementation of the *idea*, never ported code.
 Small, self-contained changes that later phases assume are already true.
 Doing these first avoids redoing work once Phase 2/3 build on top.
 
-### 0.1 Realm-keyed price data
-**Decided.** Price history currently lives under `AegisExchangeDB` — confirm
-the exact keying in `core/db.lua` and, if it's scoped narrower than the
-realm, widen it so every character on the same server pools into one price
-history. Turtle's cross-faction AH (already a CLAUDE.md hard rule) means
-there's no faction split to preserve — this is purely closing a
-character/account split that shouldn't exist. `AegisExchangeCharDB` stays
-per-character for things that should genuinely stay local (window position,
-UI state); only price/market data moves.
+### 0.1 Realm-keyed price data — ✅ **DONE** (v1.1.6)
+**The premise here was backwards, and the audit caught it.** This item assumed
+price data might be scoped *narrower* than the realm and need widening. It was
+scoped *wider*: `## SavedVariables` is account-wide across **every realm**, so
+Octo WoW and Capy WoW characters were folding buyouts into the same daily
+minimum — two unrelated economies blended into one median. The work was
+narrowing, not widening.
+
+Shipped shape: market data hangs off `realms[realmName].items`; things that are
+game constants rather than economy facts stay account-wide and shared — vendor
+prices (an NPC charges the same on every server, so siloing them per realm
+would force you to re-learn them), the name→ID map, shopping lists, crafting
+projects, settings and the ledger. All price access routes through
+`db.Items()`, so the split lives in one place.
+
+Migration v2→v3 preserves existing history by attributing it to the realm you
+first log in on after updating — the data carries no realm tag, so there's no
+better attribution available, and it self-corrects within `KEEP_DAYS` as fresh
+scans age the old dailies out. Discarding history on upgrade would have been
+worse for everyone.
 
 ### 0.2 Aegis: Courier integration surface
 **Decided** (contract; implementation is this phase's task). Expose the
