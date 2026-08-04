@@ -2986,6 +2986,11 @@ end
 -- Scan the open mailbox for AH sale mails and log each one once (deduped by an
 -- approximate arrival time so the same mail isn't re-counted across sessions).
 function ui.ScanMailSales()
+    -- Stand down when a companion addon (Aegis: Courier) owns the mailbox.
+    -- Two scanners on one inbox means two hooks racing and sales counted
+    -- twice; Courier reads mail far more thoroughly, so it wins. See the
+    -- integration block in core/db.lua.
+    if A.MailScanningExternal and A.MailScanningExternal() then return end
     if not GetInboxNumItems then return end
     local n = GetInboxNumItems() or 0
     local i = 1
@@ -2993,10 +2998,10 @@ function ui.ScanMailSales()
         local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
         local item = AuctionSoldItem(subject)
         if item and money and money > 0 then
-            -- Arrival epoch is stable as daysLeft falls and `now` rises; bucket
-            -- to the hour for a key that survives relogins.
-            local arrival = math.floor((time() - (daysLeft or 0) * 86400) / 3600)
-            local key = subject .. "|" .. money .. "|" .. arrival
+            -- Key built through the shared helper, which Courier also calls --
+            -- that is what stops a mail Aegis already logged from being
+            -- re-counted when Courier takes over.
+            local key = A.MailTxnKey(subject, money, daysLeft)
             if not A.db.WasSeen(key) then
                 A.db.MarkSeen(key)
                 A.db.RecordTxn("sale", item, money)

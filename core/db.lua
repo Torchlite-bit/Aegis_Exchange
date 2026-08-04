@@ -430,6 +430,113 @@ function db.MarkSeen(key)
     db.account.ledgerSeen[key] = true
 end
 
+-- ---------------------------------------------------------------------------
+-- Companion-addon integration surface (Aegis: Courier)
+-- ---------------------------------------------------------------------------
+--
+-- Everything a companion addon needs lives in this block. It is THE contract:
+-- Courier calls these and never touches AegisExchangeDB's internal shape, so
+-- our tables can keep changing as long as these signatures hold.
+--
+-- Data flows Courier -> Aegis, one direction only. We never read Courier's
+-- SavedVariables.
+
+-- Bump when a signature or payload field below changes meaning. Courier reads
+-- this and can refuse to integrate (rather than silently miscount) on a
+-- mismatch.
+--   1 -- RecordExternalTxn(txn), MailTxnKey(), ClaimMailScanning()
+A.INTEGRATION_VERSION = 1
+
+-- Dedup key for an auction-house mail, built the way Aegis's own mail scanner
+-- has always built it.
+--
+-- Exposed deliberately: a user who ran Aegis alone for a while already has
+-- those mails in the ledger under THESE keys. If Courier invented its own key
+-- scheme it would re-report mail Aegis had already logged and double-count it
+-- on the day Courier is installed. Generating the key through here makes the
+-- handover seamless.
+--
+-- `daysLeft` is the mail's remaining lifetime from GetInboxHeaderInfo. Arrival
+-- epoch is stable as daysLeft falls and `now` rises; bucketing to the hour
+-- gives a key that survives relogins.
+function A.MailTxnKey(subject, money, daysLeft)
+    local arrival = math.floor((time() - (daysLeft or 0) * 86400) / 3600)
+    return tostring(subject) .. "|" .. tostring(money) .. "|" .. arrival
+end
+
+-- Record a transaction observed by a companion addon.
+--
+-- txn = {
+--   kind   = "sale" | "buy",   -- required; money in / money out
+--   item   = "Silk Cloth",     -- required; display name
+--   amount = 12345,            -- required; copper, > 0. For a sale this should
+--                              -- be NET proceeds (after the 5% cut), because
+--                              -- that is what actually arrived in the mail.
+--   itemId = 4306,             -- optional
+--   key    = "...",            -- optional dedup key; use A.MailTxnKey for AH
+--                              -- mail. Repeats with the same key are ignored,
+--                              -- so re-scanning a mailbox is safe.
+-- }
+--
+-- Returns true on success, or false plus a short reason. Courier can surface
+-- the reason rather than failing silently.
+function A.RecordExternalTxn(txn)
+    if type(txn) ~= "table" then return false, "payload must be a table" end
+    if txn.kind ~= "sale" and txn.kind ~= "buy" then
+        return false, "kind must be 'sale' or 'buy'"
+    end
+    if type(txn.amount) ~= "number" or txn.amount <= 0 then
+        return false, "amount must be a positive number of copper"
+    end
+    if not db.account then return false, "Aegis DB not loaded yet" end
+    if txn.key then
+        if db.WasSeen(txn.key) then return false, "duplicate" end
+        db.MarkSeen(txn.key)
+    end
+    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId)
+    return true
+end
+
+-- Mail-scanning ownership.
+--
+-- Aegis has scanned the mailbox for "Auction successful" mail since 0.17.0. If
+-- Courier is installed it owns that job -- it reads mail far more thoroughly --
+-- and Aegis must stand down, or a user running both gets two hooks racing over
+-- the same inbox and sales counted twice.
+--
+-- Preferred handshake: Courier calls A.ClaimMailScanning("Aegis: Courier") from
+-- its own ADDON_LOADED. Explicit beats sniffing, and it works whatever the
+-- addon ends up being called.
+function A.ClaimMailScanning(who)
+    A.mailScanOwner = who or "external"
+    return true
+end
+
+function A.ReleaseMailScanning()
+    A.mailScanOwner = nil
+    return true
+end
+
+-- Globals we also accept as proof a Courier is present, for the case where it
+-- loads without calling ClaimMailScanning.
+--
+-- PLACEHOLDER: Aegis: Courier has not named its addon global yet. Confirm the
+-- real name once that repo settles it and trim this list -- the explicit claim
+-- above is the contract, this is only a safety net.
+local COURIER_GLOBALS = { "AegisCourier", "Aegis_Courier" }
+
+-- Is something else responsible for reading the mailbox?
+function A.MailScanningExternal()
+    if A.mailScanOwner then return true end
+    local i = 1
+    while i <= table.getn(COURIER_GLOBALS) do
+        local g = getglobal(COURIER_GLOBALS[i])
+        if type(g) == "table" then return true end
+        i = i + 1
+    end
+    return false
+end
+
 -- Income / spend / count over transactions at or after `sinceEpoch` (nil = all).
 function db.LedgerTotals(sinceEpoch)
     local income, spend, n = 0, 0, 0

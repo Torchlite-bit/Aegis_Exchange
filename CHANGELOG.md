@@ -12,6 +12,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.7]
+
+### Added
+- **Integration surface for the companion addon, [Aegis: Courier](https://github.com/Torchlite-bit).**
+  Courier owns the mailbox; this is the seam it pushes through, so it never
+  touches Aegis's saved tables directly and our internals stay free to change:
+  - `AegisExchange.RecordExternalTxn(txn)` — log a sale/purchase Courier
+    matched. Validates the payload and refuses bad ones with a reason rather
+    than corrupting the ledger.
+  - `AegisExchange.MailTxnKey(subject, money, daysLeft)` — the dedup key Aegis
+    has always used for auction mail. Shared deliberately: if you ran Aegis
+    alone for a while, those mails are already in your ledger under these keys,
+    so Courier generating keys through it means installing Courier **doesn't
+    re-count everything you'd already banked**.
+  - `AegisExchange.ClaimMailScanning(name)` / `ReleaseMailScanning()` —
+    Aegis's own mail scanner stands down while Courier owns the inbox. Two
+    scanners on one mailbox means every sale counted twice.
+  - `AegisExchange.INTEGRATION_VERSION` — so a future signature change is a
+    detectable mismatch instead of a silent miscount.
+
+  No effect at all unless a companion addon is installed.
+
 ## [1.1.6]
 
 ### Changed
@@ -373,6 +395,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
