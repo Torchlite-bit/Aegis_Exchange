@@ -724,6 +724,11 @@ end
 local ASSEMBLE_DELAY = 0.25
 local POST_DELAY     = 0.45
 local MAX_RETRIES    = 4
+-- How long to wait for a split/pickup to actually reach the cursor before
+-- treating the attempt as lost. SplitContainerItem needs a server round-trip on
+-- 1.12, so this has to tolerate realm latency; the poll exits the instant the
+-- cursor fills, so a fast realm never pays the full budget.
+local CURSOR_TIMEOUT = 2.0
 
 -- Total count of an item across all POSTABLE bag slots.
 function sell.CountInBags(itemId)
@@ -896,7 +901,11 @@ function sell.PostTick(dt)
     if job.phase == "assemble" then
         local it = sell.GetItem()
         if it and it.itemId == job.itemId and it.count == job.stackSize then
-            job.phase = "post"           -- already assembled
+            -- Already assembled (e.g. the user had it slotted). Go straight to
+            -- the phase that fires the auction. This used to say "post", which
+            -- no branch below handles -- the job would sit in a dead state
+            -- forever instead of posting.
+            job.phase = "verify"
             return
         end
         if CursorHasItem() then ClearCursor() end
@@ -918,9 +927,37 @@ function sell.PostTick(dt)
         else
             SplitContainerItem(bag, slot, job.stackSize)   -- part of it
         end
-        ClickAuctionSellItemButton()                   -- cursor -> sell slot
-        job.phase = "verify"
-        job.cool = ASSEMBLE_DELAY
+        -- Do NOT click the sell button in this same tick. PickupContainerItem
+        -- puts the stack on the cursor immediately (client-side), but
+        -- SplitContainerItem needs a SERVER ROUND-TRIP on 1.12 -- so clicking
+        -- now fires against an empty cursor, the sell slot stays empty, verify
+        -- fails, and the retry loop burns MAX_RETRIES and reports "couldn't
+        -- assemble a stack". That is precisely why posting worked when the bag
+        -- already held correctly-sized stacks (the instant Pickup path) and
+        -- failed whenever an actual split was required.
+        job.phase = "cursor"
+        job.wait  = CURSOR_TIMEOUT
+        job.cool  = 0
+    elseif job.phase == "cursor" then
+        -- Wait for the split/pickup to land on the cursor, then hand it to the
+        -- sell slot. Polled per frame, so an instant pickup costs a single tick
+        -- and a slow split costs only as long as it genuinely needs.
+        if CursorHasItem() then
+            ClickAuctionSellItemButton()               -- cursor -> sell slot
+            job.phase = "verify"
+            job.cool  = ASSEMBLE_DELAY
+            return
+        end
+        job.wait = job.wait - (dt or 0)
+        if job.wait <= 0 then
+            job.retries = job.retries + 1
+            if job.retries > MAX_RETRIES then
+                FinishJob("stuck")
+                return
+            end
+            job.phase = "assemble"
+            job.cool  = ASSEMBLE_DELAY
+        end
     elseif job.phase == "verify" then
         local it = sell.GetItem()
         if it and it.itemId == job.itemId and it.count == job.stackSize then
