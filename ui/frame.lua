@@ -844,8 +844,14 @@ function ui.RefreshSettings()
         end
     end
     if ui.setDataText then
-        ui.setDataText:SetText("Price data: " .. A.db.ItemCount()
-            .. " item(s) recorded")
+        -- Name the realm: prices are per-realm from v1.1.6 on, and the count
+        -- (and the Clear button beside it) covers THIS realm only. Saying so
+        -- beats leaving people to wonder why the number changed after a
+        -- server switch.
+        local realm = A.db.RealmKey and A.db.RealmKey() or nil
+        local txt = "Price data: " .. A.db.ItemCount() .. " item(s) recorded"
+        if realm and realm ~= "?" then txt = txt .. " on " .. realm end
+        ui.setDataText:SetText(txt)
     end
 
     -- Scan pacing: highlight the active mode and report what the client's

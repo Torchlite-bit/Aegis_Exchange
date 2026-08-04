@@ -12,6 +12,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.6]
+
+### Changed
+- **Price data is now kept per realm.** `## SavedVariables` is account-wide
+  across *every* server, so a character on Octo WoW and one on Capy WoW were
+  folding their buyouts into the same daily minimum — two unrelated economies
+  blended into one median. Market data now hangs off the realm you're on.
+  Everything that's a game constant rather than an economy fact stays shared:
+  **vendor prices** (an NPC charges the same everywhere — no re-learning them
+  server by server), the item name→ID map, and your shopping lists, crafting
+  projects, settings and history.
+  - Scans are still pooled across **all your characters on that realm**, which
+    was always the intent.
+  - The Aegis tab now names the realm next to the item count, and **Clear price
+    data** wipes that realm only — never one you can't see from there.
+  - **Your existing prices are kept, not wiped.** They carry no realm tag, so
+    they're attributed to whichever realm you first log in on after updating.
+    Single-realm players lose nothing. If you play several, one realm inherits
+    some foreign dailies and that ages itself out within ~11 days as fresh
+    scans replace them.
+
 ## [1.1.5]
 
 ### Fixed
@@ -352,6 +373,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
