@@ -12,6 +12,37 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.5]
+
+### Fixed
+- **"Posted 0 of N. (couldn't assemble a stack)" whenever a stack had to be
+  split.** `SplitContainerItem` is a *server round-trip* on 1.12, but the
+  assembler called `ClickAuctionSellItemButton` in the same frame — firing
+  against a still-empty cursor, so the sell slot never filled, verify failed,
+  and the job burned its retries. This is why posting worked if you manually
+  split the stacks yourself first (that path uses the instant
+  `PickupContainerItem`) and failed every time Aegis had to do the splitting.
+  The assembler now waits for the item to actually reach the cursor before
+  handing it to the sell slot, exiting the moment it lands.
+- **Right-click a bag item to load it into the Sell tab.** It played the default
+  click sound and did nothing. Both right-click paths are now hooked — the stock
+  bag buttons *and* `UseContainerItem`, which is where replacement bag addons
+  (pfUI and friends) land — so the item goes into the sell slot with pricing
+  filled in. Only active while the Aegis window is open on the Sell tab, and
+  only for postable items, so right-click keeps its normal meaning everywhere
+  else.
+- **Hover tooltips on search results.** The Buy, Crafting, Auctions and Sell
+  listing rows had no tooltip. They do now; the browse rows re-verify the
+  auction index first, so a row can never describe someone else's listing after
+  the page shifts.
+- **Long item names no longer overflow the "Your Bags" list.** Names like
+  *Formula: Enchant Shield - Lesser Protection* ran straight out of the list and
+  into the listings table. They're now clipped with an ellipsis. (1.12 has no
+  truncation mode for text — giving a FontString a width makes it *wrap* — so
+  the name is measured and cut instead.)
+- A job whose item was already sitting in the sell slot moved to a phase name
+  nothing handled, and would have hung there instead of posting.
+
 ## [1.1.4]
 
 ### Fixed
@@ -321,6 +352,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

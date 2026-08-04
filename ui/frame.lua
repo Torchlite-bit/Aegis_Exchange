@@ -61,6 +61,29 @@ local function ChatMsg(text)
     DEFAULT_CHAT_FRAME:AddMessage(text, 0.35, 0.78, 0.98)
 end
 
+-- Set `text` on a FontString, shortened with an ellipsis if it would run wider
+-- than `maxWidth` pixels.
+--
+-- 1.12 has no ellipsis/truncation mode for FontStrings: calling SetWidth() makes
+-- long text WRAP onto a second line rather than clip, which inside a fixed-height
+-- row looks worse than the overflow it was meant to fix. So we deliberately do
+-- NOT constrain the FontString and instead measure with GetStringWidth() and cut
+-- the string ourselves. Binary search keeps it to ~6 SetText calls rather than
+-- one per character.
+function ui.SetTextClipped(fs, text, maxWidth)
+    text = text or ""
+    fs:SetText(text)
+    if not maxWidth or maxWidth <= 0 then return end
+    if fs:GetStringWidth() <= maxWidth then return end
+    local lo, hi = 0, string.len(text)
+    while lo < hi do
+        local mid = math.floor((lo + hi + 1) / 2)
+        fs:SetText(string.sub(text, 1, mid) .. "...")
+        if fs:GetStringWidth() <= maxWidth then lo = mid else hi = mid - 1 end
+    end
+    fs:SetText(string.sub(text, 1, lo) .. "...")
+end
+
 -- A sub-tab button: a dark pill with a centered label, recoloured on select.
 local function MakeSubTab(parent, name)
     local b = CreateFrame("Button", "AegisExchangeSubTab" .. name, parent)
@@ -1183,9 +1206,44 @@ local function BuildResultRow(parent, scroll, store, i, rowH)
         if row.entry then ui.ConfirmBid(row.entry) end
     end)
     row.bidBtn = bidBtn
+    -- Hover tooltip. A Frame gets no OnEnter until its mouse is enabled; the
+    -- Buy/Bid buttons are children so they still take their own clicks.
+    row:EnableMouse(true)
+    row:SetScript("OnEnter", function()
+        ui.ShowListingTooltip(row, row.entry)
+    end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
     row:Hide()
     store[i] = row
     return row
+end
+
+-- Tooltip for a browse ("list") listing row.
+--
+-- SetAuctionItem indexes into the CURRENTLY loaded page, and our rows are sorted
+-- for display while the page can also be re-queried under us -- so verify the
+-- index still holds the auction we drew before trusting it, exactly as the
+-- Buy/Bid paths do. Falling back to the item link keeps the tooltip useful (item
+-- stats, just not the auction's bid state) when the page has moved on.
+function ui.ShowListingTooltip(owner, r)
+    if not r then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    local shown = false
+    if r.index and GameTooltip.SetAuctionItem and A.buy.Verify(r) then
+        shown = pcall(function() GameTooltip:SetAuctionItem("list", r.index) end)
+    end
+    if not shown then
+        local link = r.index and GetAuctionItemLink
+            and GetAuctionItemLink("list", r.index) or nil
+        if link and GameTooltip.SetHyperlink then
+            shown = pcall(function() GameTooltip:SetHyperlink(link) end)
+        end
+    end
+    if not shown then
+        -- Nothing authoritative left to read; at least name the item.
+        GameTooltip:SetText(r.name or "")
+    end
+    GameTooltip:Show()
 end
 
 -- Fill a result row's content from a listing `r` (shared by Buy and Crafting).
@@ -2688,6 +2746,22 @@ function ui.BuildAuctionsTab()
             if row.entry then ui.ConfirmCancelAuction(row.entry) end
         end)
         row.cancelBtn = cancel
+        -- Hover tooltip, read from the "owner" list rather than "list".
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function()
+            local r = row.entry
+            if not r then return end
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            local shown = false
+            if r.index and GameTooltip.SetAuctionItem then
+                shown = pcall(function()
+                    GameTooltip:SetAuctionItem("owner", r.index)
+                end)
+            end
+            if not shown then GameTooltip:SetText(r.name or "") end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row:Hide()
         ui.aucRows[i] = row
         i = i + 1
@@ -3120,6 +3194,15 @@ StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {
 local BAG_ROWS,  BAG_ROW_H  = 9, 19
 local LIST_ROWS, LIST_ROW_H = 9, 19
 
+-- Text budget for the "Your Bags" rows. The bag scroll's right edge sits at
+-- panel LEFT + 168 and it starts at LEFT + 12, so a row is ~156 wide; item
+-- labels begin 30px in (past the icon and cache dot) and category headers 4px
+-- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
+-- straight past the list into the listings table -- these are what they get
+-- clipped to. See ui.SetTextClipped.
+local BAG_ITEM_TEXT_W = 120
+local BAG_CAT_TEXT_W  = 146
+
 function ui.BuildSellTab()
     local panel = ui.panels["Sell"]
     if not panel or ui.sellBuilt then return end
@@ -3536,6 +3619,26 @@ function ui.BuildSellTab()
                 ui.SyncSellPrices("unit")   -- price the whole stack from it
             end
         end)
+        -- Every row here is a price bucket for the SAME item -- the one in the
+        -- sell slot -- because GroupListings aggregates a single-item scan and
+        -- keeps no per-auction index. So the tooltip comes from the slot rather
+        -- than from an auction index we don't have.
+        row:SetScript("OnEnter", function()
+            if not row.group then return end
+            local it = A.sell.GetItem()
+            if not it then return end
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            local shown = false
+            if GameTooltip.SetAuctionSellItem then
+                shown = pcall(function() GameTooltip:SetAuctionSellItem() end)
+            end
+            if not shown and it.link and GameTooltip.SetHyperlink then
+                shown = pcall(function() GameTooltip:SetHyperlink(it.link) end)
+            end
+            if not shown then GameTooltip:SetText(it.name or "") end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         row:Hide()
         ui.listRows[li] = row
         li = li + 1
@@ -3587,7 +3690,8 @@ function ui.UpdateBagList()
                 row.cacheDot:Hide()
                 row.label:ClearAllPoints()
                 row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
-                row.label:SetText(e.name .. " (" .. e.num .. ")")
+                ui.SetTextClipped(row.label, e.name .. " (" .. e.num .. ")",
+                    BAG_CAT_TEXT_W)
                 row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
             else
                 local it = e.item
@@ -3616,7 +3720,7 @@ function ui.UpdateBagList()
                 row.label:SetPoint("LEFT", row, "LEFT", 30, 0)
                 local txt = it.name
                 if it.count and it.count > 1 then txt = txt .. " x" .. it.count end
-                row.label:SetText(txt)
+                ui.SetTextClipped(row.label, txt, BAG_ITEM_TEXT_W)
                 row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
             end
             row:Show()
@@ -5053,9 +5157,91 @@ function ui.HideBlizzardAH()
     ui.keepSessionOpen = false
 end
 
+-- ---------------------------------------------------------------------------
+-- Right-click a bag item to load it into the Sell tab
+-- ---------------------------------------------------------------------------
+
+-- Only hijack right-click while the Aegis window is up AND Sell is the visible
+-- tab. Everywhere else -- bags open in the world, our other tabs, the stock AH
+-- -- right-click keeps its normal meaning, so eating food or opening a container
+-- still works exactly as it always did.
+function ui.SellRightClickActive()
+    return (ui.frame and ui.frame:IsVisible() and true or false)
+        and ui.selectedSubTab == "Sell"
+        and not A.sell.PostingActive()
+end
+
+-- Load (bag, slot) into the sell slot exactly as clicking its "Your Bags" row
+-- does, so the undercut prefill and the per-item listing scan both fire the same
+-- way. Returns true when we handled the click (caller must then NOT run the
+-- default behaviour).
+function ui.TrySellFromBag(bag, slot)
+    if not bag or not slot then return false end
+    if CursorHasItem and CursorHasItem() then return false end
+    local link = GetContainerItemLink(bag, slot)
+    if not link then return false end
+    -- Soulbound / conjured / otherwise unpostable: fall through to the default
+    -- action rather than silently swallowing the click.
+    if not A.sell.IsAuctionable(bag, slot) then return false end
+    local itemId = util.ItemIdFromLink(link)
+    if not itemId then return false end
+    local texture, count = GetContainerItemInfo(bag, slot)
+    local iname = GetItemInfo(link)
+    if not iname then
+        -- Same cold-item-cache fallback sell.ScanBags uses.
+        local _, _, n = string.find(link, "%[([^%]]+)%]")
+        iname = n
+    end
+    ui.SelectBagEntry({
+        bag = bag, slot = slot, itemId = itemId,
+        name = iname or link, texture = texture, count = count or 1,
+    })
+    return true
+end
+
+-- Save-and-replace (no secure hooks on 1.12) on BOTH right-click paths:
+--
+--   ContainerFrameItemButton_OnClick -- the stock bag buttons.
+--   UseContainerItem                 -- where every bag addon's right-click
+--                                       ultimately lands, so replacement bag
+--                                       UIs (pfUI, Stonkz's Bags, ...) work too.
+--
+-- The first hook returns without chaining when it handles the click, so the
+-- second never double-fires for the stock bags.
+function ui.HookBagRightClick()
+    if ui.bagClickHooked then return end
+    ui.bagClickHooked = true
+
+    if ContainerFrameItemButton_OnClick then
+        ui.orig_ContainerFrameItemButton_OnClick = ContainerFrameItemButton_OnClick
+        ContainerFrameItemButton_OnClick = function(button, ignoreModifiers)
+            if button == "RightButton" and ui.SellRightClickActive() then
+                -- `this` is the clicked item button; its parent carries the bag id.
+                local btn = this
+                local parent = btn and btn.GetParent and btn:GetParent() or nil
+                local bag = parent and parent.GetID and parent:GetID() or nil
+                local slot = btn and btn.GetID and btn:GetID() or nil
+                if ui.TrySellFromBag(bag, slot) then return end
+            end
+            return ui.orig_ContainerFrameItemButton_OnClick(button, ignoreModifiers)
+        end
+    end
+
+    if UseContainerItem then
+        ui.orig_UseContainerItem = UseContainerItem
+        UseContainerItem = function(bag, slot, onSelf)
+            if ui.SellRightClickActive() and ui.TrySellFromBag(bag, slot) then
+                return
+            end
+            return ui.orig_UseContainerItem(bag, slot, onSelf)
+        end
+    end
+end
+
 function ui.OpenWindow()
     ui.BuildWindow()
     ui.HookAuctionFrame()
+    ui.HookBagRightClick()
     ui.showBlizzard = false
     -- Synchronous hide is safe HERE: our AUCTION_HOUSE_SHOW handler runs
     -- after the client's AuctionFrame_Show() has already passed its
