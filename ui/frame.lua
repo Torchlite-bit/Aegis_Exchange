@@ -44,11 +44,21 @@ local C = {
 -- Last scan older than this is "stale" and rendered amber.
 local STALE_SECONDS = 24 * 60 * 60
 
+-- Forward declarations: these are defined further down with the other
+-- widget helpers, but ui.BuildAegisSettings is written above that point
+-- and a local is only in scope after its declaration.
+local MakeMoneyGSC, MakeHSlider, SetSliderRange
+
 -- Window size bounds. The minimum is the old fixed size -- below it the Sell
 -- tab's header rows start colliding -- and the maximum is generous enough for
 -- a big monitor without letting the window escape a small one.
-local MIN_W, MIN_H = 832, 460
+local MIN_W, MIN_H = 832, 472
 local MAX_W, MAX_H = 1400, 900
+
+-- Height of the Sell tab's control block -- everything above the divider. The
+-- bag list and the listings table both hang off it, so the whole tab shifts
+-- together when the controls change.
+local SELL_TOP_H = 146
 
 -- Sub-tab order, left to right. "Scan" hosts the scanner controls (Full Scan /
 -- Pause / Resume / Stop / Categories + status and progress) and the settings
@@ -106,6 +116,10 @@ end
 
 function ui.RestoreWindowSize()
     if not ui.frame or not A.db or not A.db.char then return end
+    -- Scale first, and unconditionally: it is stored independently of the size,
+    -- so someone who scaled the window but never dragged it bigger has no saved
+    -- width to restore -- and would otherwise lose their scale every login.
+    ui.ApplyWindowScale()
     local s = A.db.char.ui
     if not s or not s.width or not s.height then return end
     local w, h = s.width, s.height
@@ -115,6 +129,57 @@ function ui.RestoreWindowSize()
     if h > MAX_H then h = MAX_H end
     ui.frame:SetWidth(w)
     ui.frame:SetHeight(h)
+end
+
+-- ---------------------------------------------------------------------------
+-- Window scale
+--
+-- Resizing and scaling answer different questions. A taller window shows MORE
+-- rows (vanilla frames never reflow, so that is all it can do); scale makes
+-- the same window physically bigger or smaller. On a 4K screen you want both:
+-- more rows AND text you can read.
+--
+-- Stored per character alongside the size, and clamped -- below ~0.6 the
+-- fonts stop being legible and above ~1.5 the window no longer fits a 1024-
+-- tall screen at MAX_H.
+-- ---------------------------------------------------------------------------
+
+local SCALE_MIN, SCALE_MAX, SCALE_STEP = 0.70, 1.50, 0.05
+
+function ui.WindowScale()
+    if not A.db or not A.db.char then return 1 end
+    local s = A.db.char.ui
+    local v = s and s.scale
+    if not v or v < SCALE_MIN then return 1 end
+    if v > SCALE_MAX then return SCALE_MAX end
+    return v
+end
+
+-- Push the stored scale onto the window. Safe to call before the DB exists.
+function ui.ApplyWindowScale()
+    if not ui.frame or not ui.frame.SetScale then return end
+    ui.frame:SetScale(ui.WindowScale())
+end
+
+-- Nudge the scale by `delta` (pass nil to reset to 1.0).
+function ui.StepWindowScale(delta)
+    if not A.db or not A.db.char then return end
+    local v = 1
+    if delta then
+        v = ui.WindowScale() + delta
+        -- Round to the step so repeated nudges can't drift off it.
+        v = math.floor(v * 100 + 0.5) / 100
+        if v < SCALE_MIN then v = SCALE_MIN end
+        if v > SCALE_MAX then v = SCALE_MAX end
+    end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    s.scale = v
+    ui.ApplyWindowScale()
+    -- No list repaint needed: scale leaves every measurement in frame units
+    -- exactly where it was, so the row fit and the text truncation are both
+    -- unchanged. Only the readout has to catch up.
+    ui.RefreshSettings()
 end
 
 -- Skin any rows in `pool` that were grown after the skin's one-shot pass.
@@ -326,7 +391,8 @@ function ui.BuildWindow()
         f.aegisSizing = false
         f:StopMovingOrSizing()
         ui.SaveWindowSize()
-        ui.Refresh()          -- re-fit every list to the new height
+        ui.Refresh()
+        ui.RefreshCurrentTab()   -- re-fit the visible list to the new height
     end)
     -- Deliberately NO per-frame refresh while dragging. Repainting mid-drag
     -- means calling FauxScrollFrame_Update with a row count that is changing
@@ -726,20 +792,26 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     pctLbl:SetText("%")
     pctLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    -- Flat-amount entry (money text like "1s" or "50c").
-    local flat = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    flat:SetWidth(64); flat:SetHeight(18)
-    flat:SetAutoFocus(false); flat:SetJustifyH("CENTER")
-    flat:SetPoint("LEFT", pctLbl, "RIGHT", 12, 0)
-    flat:SetScript("OnEnterPressed", function()
-        ui.CommitUndercutFlat(); flat:ClearFocus()
-    end)
-    flat:SetScript("OnEscapePressed", function() flat:ClearFocus() end)
-    flat:SetScript("OnEditFocusLost", function() ui.CommitUndercutFlat() end)
+    -- Flat-amount entry. A gold/silver/copper triplet, the same widget the Sell
+    -- tab uses for bid and buyout -- one way to type a price everywhere.
+    --
+    -- Committing on every keystroke would repaint the boxes from the stored
+    -- value while the user is still typing, so the live edits commit QUIETLY
+    -- and only losing focus (or pressing Enter) triggers the full repaint.
+    local flat = MakeMoneyGSC(panel, function() ui.CommitUndercutFlat(true) end)
+    flat:Attach(pctLbl, 12, 0)
+    local fbox = { flat.g, flat.s, flat.c }
+    local fi = 1
+    while fi <= 3 do
+        fbox[fi]:SetScript("OnEditFocusLost", function()
+            ui.CommitUndercutFlat()
+        end)
+        fi = fi + 1
+    end
     ui.setUndercutFlat = flat
     local flatLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    flatLbl:SetPoint("LEFT", flat, "RIGHT", 4, 0)
-    flatLbl:SetText("below (e.g. 1s, 50c)")
+    flatLbl:SetPoint("LEFT", flat.c.tag, "RIGHT", 8, 0)
+    flatLbl:SetText("below")
     flatLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     -- ---- Default sell price -----------------------------------------------
@@ -766,11 +838,42 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         mi = mi + 1
     end
 
+    -- ---- Window scale ------------------------------------------------------
+    -- Deliberately buttons rather than a slider. A slider that rescales the
+    -- window it lives on moves itself out from under the cursor mid-drag, and
+    -- the thumb then tracks to a different value -- a feedback loop. Discrete
+    -- steps have no such problem and are easier to land on a round number.
+    local scLbl = label("Window scale:", spLbl, -20)
+
+    local scDown = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    scDown:SetWidth(24); scDown:SetHeight(20)
+    scDown:SetPoint("LEFT", scLbl, "RIGHT", 10, 0)
+    scDown:SetText("-")
+    scDown:SetScript("OnClick", function() ui.StepWindowScale(-SCALE_STEP) end)
+
+    ui.setScaleText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.setScaleText:SetPoint("LEFT", scDown, "RIGHT", 8, 0)
+    ui.setScaleText:SetWidth(40)
+    ui.setScaleText:SetJustifyH("CENTER")
+    ui.setScaleText:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    local scUp = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    scUp:SetWidth(24); scUp:SetHeight(20)
+    scUp:SetPoint("LEFT", ui.setScaleText, "RIGHT", 8, 0)
+    scUp:SetText("+")
+    scUp:SetScript("OnClick", function() ui.StepWindowScale(SCALE_STEP) end)
+
+    local scReset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    scReset:SetWidth(56); scReset:SetHeight(20)
+    scReset:SetPoint("LEFT", scUp, "RIGHT", 10, 0)
+    scReset:SetText("Reset")
+    scReset:SetScript("OnClick", function() ui.StepWindowScale(nil) end)
+
     -- ---- Toggles ----------------------------------------------------------
     local tipChk = CreateFrame("CheckButton", "AegisExchangeSetTooltip", panel,
         "UICheckButtonTemplate")
     tipChk:SetWidth(24); tipChk:SetHeight(24)
-    tipChk:SetPoint("TOPLEFT", spLbl, "BOTTOMLEFT", -2, -16)
+    tipChk:SetPoint("TOPLEFT", scLbl, "BOTTOMLEFT", -2, -16)
     local tipTxt = getglobal(tipChk:GetName() .. "Text")
     if tipTxt then
         tipTxt:SetText("Show Aegis price lines on item tooltips")
@@ -940,12 +1043,16 @@ function ui.CommitUndercut()
 end
 
 -- Parse and store the flat-amount undercut (money text -> copper).
-function ui.CommitUndercutFlat()
+--
+-- `quiet` skips the repaint. The g/s/c boxes commit on every keystroke, and
+-- repainting them from the stored value mid-word would fight the typist; the
+-- full refresh happens when the field is left instead.
+function ui.CommitUndercutFlat(quiet)
     if not ui.setUndercutFlat then return end
     local c = util.ParseMoney(util.Trim(ui.setUndercutFlat:GetText() or ""))
     if not c or c < 1 then c = A.db.Setting("undercutAmount") end
     A.db.SetSetting("undercutAmount", math.floor(c))
-    ui.RefreshSettings()
+    if not quiet then ui.RefreshSettings() end
 end
 
 -- Push the saved default duration to the Sell tab immediately.
@@ -986,6 +1093,9 @@ function ui.RefreshSettings()
     end
     if ui.setUndercutFlat then
         ui.setUndercutFlat:SetText(util.FormatMoney(A.db.Setting("undercutAmount"), false))
+    end
+    if ui.setScaleText then
+        ui.setScaleText:SetText(math.floor(ui.WindowScale() * 100 + 0.5) .. "%")
     end
     local tipOn = A.db.Setting("tooltip") ~= false
     if ui.setTooltip then
@@ -1293,7 +1403,7 @@ end
 -- / ClearFocus) so ReadMoneyBox, SetMoneyBox and every existing caller keep
 -- working untouched -- the Sell tab still thinks in plain copper everywhere,
 -- only the presentation changed.
-local function MakeMoneyGSC(parent, onChange)
+MakeMoneyGSC = function(parent, onChange)
     local grp = {}
     -- Blizzard's own coin art, the same the stock money frame uses -- so a
     -- price here reads exactly like a price anywhere else in the game.
@@ -1370,7 +1480,7 @@ end
 -- Horizontal slider, hand-built from the base Slider widget for the same reason
 -- as the Aegis tab's scroll bar: Slider is a primitive that always exists, so
 -- there's no "Couldn't find inherited node" risk from guessing a 1.12 template.
-local function MakeHSlider(parent, width, onChange)
+MakeHSlider = function(parent, width, onChange)
     local sb = CreateFrame("Slider", nil, parent)
     sb.aegisNoSkin = true
     sb:SetWidth(width)
@@ -1399,7 +1509,7 @@ end
 
 -- Point a slider at a range and value without its OnValueChanged firing back
 -- into the code that is currently painting the UI.
-local function SetSliderRange(sb, minV, maxV, value)
+SetSliderRange = function(sb, minV, maxV, value)
     if not sb then return end
     if maxV < minV then maxV = minV end
     ui.sellSliderSync = true
@@ -3646,25 +3756,6 @@ function ui.BuildSellTab()
     ui.sellVendor:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -60)
     ui.sellVendor:SetJustifyH("RIGHT")
 
-    -- History block: what our SCAN history says this item is worth (the
-    -- time-weighted median of daily minimums, plus the observed range) and what
-    -- it has actually SOLD for (from the mailbox ledger). Sits between the
-    -- deposit info and the listings table.
-    local histHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    histHdr:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -84)
-    histHdr:SetJustifyH("RIGHT")
-    histHdr:SetText("History")
-    histHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-    ui.sellHistHdr = histHdr
-
-    ui.sellHistScan = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellHistScan:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -100)
-    ui.sellHistScan:SetJustifyH("RIGHT")
-
-    ui.sellHistSold = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellHistSold:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -116)
-    ui.sellHistSold:SetJustifyH("RIGHT")
-
     -- Deposit / total / cap count, right-aligned.
     ui.sellDeposit = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.sellDeposit:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -12)
@@ -3680,12 +3771,18 @@ function ui.BuildSellTab()
     ui.sellCap:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -44)
     ui.sellCap:SetJustifyH("RIGHT")
 
-    -- ---- Row 1: stack size + stack count, each on a slider --------------
-    -- Sliders because picking a stack size is a "how do I want to split this"
-    -- decision, not a number you know up front -- dragging shows the trade-off
-    -- immediately, and the two are linked: a bigger stack means fewer of them.
+    -- ---- LEFT column: what to post --------------------------------------
+    -- Two stacked sliders and the duration under them. Sliders because picking
+    -- a stack size is a "how do I want to split this" decision, not a number
+    -- you know up front -- dragging shows the trade-off immediately, and the
+    -- two are linked: a bigger stack means fewer of them.
+    --
+    -- The split into columns is deliberate: the left half answers "what am I
+    -- putting up", the right half "for how much". They used to interleave on
+    -- shared rows, which meant reading a price and reading a stack size were
+    -- the same eye movement.
     local sizeLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sizeLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -8)
+    sizeLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -6)
     sizeLabel:SetWidth(66)
     sizeLabel:SetJustifyH("LEFT")
     sizeLabel:SetText("Stack size:")
@@ -3703,7 +3800,9 @@ function ui.BuildSellTab()
     ui.sellStackSize:SetPoint("LEFT", ui.sellSizeSlider, "RIGHT", 8, 0)
 
     local cntLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cntLabel:SetPoint("LEFT", ui.sellStackSize, "RIGHT", 16, 0)
+    cntLabel:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -8)
+    cntLabel:SetWidth(66)
+    cntLabel:SetJustifyH("LEFT")
     cntLabel:SetText("Stacks:")
     cntLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
@@ -3719,65 +3818,9 @@ function ui.BuildSellTab()
     ui.sellMaxInfo = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ui.sellMaxInfo:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 10, 0)
 
-    -- ---- Row 2: bid / buyout per item, in gold-silver-copper -------------
-    local bidLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bidLabel:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -12)
-    bidLabel:SetWidth(76)
-    bidLabel:SetJustifyH("LEFT")
-    bidLabel:SetText("Bid / item:")
-    bidLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
-    -- Optional: left blank the start bid follows the buyout, which is what the
-    -- Sell tab has always done.
-    ui.sellBid = MakeMoneyGSC(panel, function() ui.RefreshSell() end)
-    ui.sellBid:Attach(bidLabel, 6, 0)
-
-    local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    buyLabel:SetPoint("LEFT", ui.sellBid.c.tag, "RIGHT", 18, 0)
-    buyLabel:SetText("Buy / item:")
-    buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
-    ui.sellBuyout = MakeMoneyGSC(panel, function() ui.SyncSellPrices("unit") end)
-    ui.sellBuyout:Attach(buyLabel, 6, 0)
-
-    local mkQuick = function(text, w, anchorTo, fn)
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        b:SetWidth(w)
-        b:SetHeight(18)
-        b:SetPoint("LEFT", anchorTo, "RIGHT", 5, 0)
-        b:SetText(text)
-        b:SetScript("OnClick", fn)
-        return b
-    end
-    -- These write through SetText, which stays quiet so the boxes don't fire
-    -- while we're filling them -- so each one re-syncs explicitly afterwards.
-    ui.sellMarketBtn = mkQuick("Market", 54, ui.sellBuyout.c.tag, function()
-        local it = A.sell.GetItem()
-        local sg = it and A.sell.Suggest(it.itemId)
-        if sg and sg.market then
-            SetMoneyBox(ui.sellBuyout, sg.market)
-            ui.SyncSellPrices("unit")
-        end
-    end)
-    ui.sellUnderBtn = mkQuick("Undercut", 62, ui.sellMarketBtn, function()
-        local it = A.sell.GetItem()
-        local u = it and A.sell.UndercutUnit(it.itemId)
-        if u then
-            SetMoneyBox(ui.sellBuyout, u)
-            ui.SyncSellPrices("unit")
-        end
-    end)
-    ui.sellVendorBtn = mkQuick("Vendor", 52, ui.sellUnderBtn, function()
-        local it = A.sell.GetItem()
-        local sg = it and A.sell.Suggest(it.itemId)
-        if sg and sg.vendor then
-            SetMoneyBox(ui.sellBuyout, sg.vendor)
-            ui.SyncSellPrices("unit")
-        end
-    end)
-    -- ---- Row 3: duration + Post + Skip + status -------------------------
+    -- Duration, directly under the sliders.
     local durLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    durLabel:SetPoint("TOPLEFT", bidLabel, "BOTTOMLEFT", 0, -12)
+    durLabel:SetPoint("TOPLEFT", cntLabel, "BOTTOMLEFT", 0, -10)
     durLabel:SetText("Duration:")
     durLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
@@ -3827,27 +3870,100 @@ function ui.BuildSellTab()
     end)
     ui.sellSkipBtn = skip
 
+    -- Status gets its own line under the buttons. Squeezed onto the duration
+    -- row it had ~160px before it ran into the price column, which is not
+    -- enough for "Item 7 of 23 -- Elemental Earth".
     ui.sellStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellStatus:SetPoint("LEFT", skip, "RIGHT", 10, 0)
+    ui.sellStatus:SetPoint("TOPLEFT", durLabel, "BOTTOMLEFT", 0, -8)
     ui.sellStatus:SetJustifyH("LEFT")
     ui.sellStatus:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
+
+    -- ---- RIGHT column: for how much -------------------------------------
+    -- Pricing shortcuts sit ABOVE the two money rows they write into, so the
+    -- reading order is "pick a strategy, see what it produced".
+    --
+    -- Two buttons, not three. Undercut and price-match are the only choices
+    -- that are actually about the market; "Market" was the same reference
+    -- price with no undercut applied (i.e. price-match with worse data) and
+    -- "Vendor" was a floor, not a strategy -- the vendor figure is still shown
+    -- in this column and the Vendor list still calls out items worth more to a
+    -- merchant than to the AH.
+    local mkQuick = function(text, w, fn)
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(w)
+        b:SetHeight(20)
+        b:SetText(text)
+        b:SetScript("OnClick", fn)
+        return b
+    end
+    -- These write through SetText, which stays quiet so the boxes don't fire
+    -- while we're filling them -- so each one re-syncs explicitly afterwards.
+    ui.sellMatchBtn = mkQuick("Price match", 84, function()
+        local it = A.sell.GetItem()
+        local m = it and A.sell.MatchUnit(it.itemId)
+        if m then
+            SetMoneyBox(ui.sellBuyout, m)
+            ui.SyncSellPrices("unit")
+        end
+    end)
+    ui.sellMatchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -78)
+
+    ui.sellUnderBtn = mkQuick("Undercut", 70, function()
+        local it = A.sell.GetItem()
+        local u = it and A.sell.UndercutUnit(it.itemId)
+        if u then
+            SetMoneyBox(ui.sellBuyout, u)
+            ui.SyncSellPrices("unit")
+        end
+    end)
+    ui.sellUnderBtn:SetPoint("RIGHT", ui.sellMatchBtn, "LEFT", -5, 0)
+
+    -- Bid / buyout per item, in gold-silver-copper. Right-aligned as a block:
+    -- the copper box is the rightmost thing on each row, so the two rows line
+    -- up denominator for denominator.
+    --
+    -- Anchored from the RIGHT edge rather than off the buttons above: the
+    -- triplet plus its coin icons is 139px wide from the label, so hanging it
+    -- off the (narrower) button row would push the copper box off the panel.
+    local PRICE_GSC_W = 139
+    local bidLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    bidLabel:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -(PRICE_GSC_W + 12), -104)
+    bidLabel:SetWidth(66)
+    bidLabel:SetJustifyH("LEFT")
+    bidLabel:SetText("Bid / item:")
+    bidLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    -- Left blank, the start bid follows the buyout -- which is what the Sell
+    -- tab has always done.
+    ui.sellBid = MakeMoneyGSC(panel, function() ui.RefreshSell() end)
+    ui.sellBid:Attach(bidLabel, 6, 0)
+
+    local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    buyLabel:SetPoint("TOPLEFT", bidLabel, "BOTTOMLEFT", 0, -8)
+    buyLabel:SetWidth(66)
+    buyLabel:SetJustifyH("LEFT")
+    buyLabel:SetText("Buy / item:")
+    buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellBuyout = MakeMoneyGSC(panel, function() ui.SyncSellPrices("unit") end)
+    ui.sellBuyout:Attach(buyLabel, 6, 0)
 
     -- ---- Divider --------------------------------------------------------
     local div = panel:CreateTexture(nil, "ARTWORK")
     div:SetTexture(C.border[1], C.border[2], C.border[3], 0.4)
     div:SetHeight(1)
-    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -134)
-    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -134)
+    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -SELL_TOP_H)
+    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -SELL_TOP_H)
 
     -- ---- Bottom-left: Your Bags ----------------------------------------
     local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -142)
+    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -(SELL_TOP_H + 8))
     bagHdr:SetText("Your Bags")
     bagHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
         panel, "FauxScrollFrameTemplate")
-    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -160)
+    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -(SELL_TOP_H + 26))
     -- Right edge pulled well in (168) so the FauxScrollFrame's scrollbar, which
     -- sits just OUTSIDE this edge, clears the listings column that starts at
     -- x=200 -- otherwise the bar overlaps the price info.
@@ -3956,7 +4072,7 @@ ui.GrowBagRows = function(n)
 
     -- ---- Bottom-right: listings table ----------------------------------
     ui.listHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.listHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -138)
+    ui.listHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -(SELL_TOP_H + 4))
     ui.listHeader:SetJustifyH("LEFT")
     ui.listHeader:SetText("Select an item to see its listings")
     ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -3970,7 +4086,7 @@ ui.GrowBagRows = function(n)
     ui.sellHeaders = {}
     local mkCol = function(x, text, key, width)
         local b = CreateFrame("Button", nil, panel)
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -155)
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -(SELL_TOP_H + 21))
         b:SetHeight(16)
         b.aegisNoSkin = true
         local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -3994,7 +4110,7 @@ ui.GrowBagRows = function(n)
 
     local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
         panel, "FauxScrollFrameTemplate")
-    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -170)
+    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -(SELL_TOP_H + 36))
     listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 10)
     listScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(LIST_ROW_H, ui.UpdateListingsList)
@@ -4408,8 +4524,6 @@ function ui.RefreshSell()
         ui.sellDeposit:SetText("")
         ui.sellTotal:SetText("")
         ui.sellMaxInfo:SetText("")
-        ui.sellHistScan:SetText("")
-        ui.sellHistSold:SetText("")
         ui.sellPostBtn:Disable()
         ui.lastScanItemId = nil
         ui.sellDefaultsFor = nil
@@ -4452,8 +4566,6 @@ function ui.RefreshSell()
     else
         ui.sellCtx:SetText("No price data yet \226\128\148 scanning...")
     end
-
-    ui.UpdateSellHistory(it)
 
     local unitBuy = ReadMoneyBox(ui.sellBuyout)
     local size    = ui.GetStackSize(it)
@@ -4867,49 +4979,6 @@ function ui.DoSellMarked()
     ui.RefreshMerchantButton()
     if ui.vendList and ui.vendList:IsVisible() then ui.RefreshVendorList() end
     if ui.sellBuilt then ui.RefreshBags() end
-end
-
--- Sell tab History block: the median the SCANS say (with the observed range and
--- how many days back it goes), and what this item has actually SOLD for.
-function ui.UpdateSellHistory(it)
-    if not ui.sellHistScan then return end
-    if not it then
-        ui.sellHistScan:SetText("")
-        ui.sellHistSold:SetText("")
-        return
-    end
-
-    -- Scan side: time-weighted median of daily minimum buyouts, plus the range.
-    local median = A.db.MarketValue(it.itemId)
-    local days, low, high = A.db.PriceSpread(it.itemId)
-    if median and days > 0 then
-        local txt = "Scans: med " .. util.FormatMoney(median, true)
-            .. "  (" .. days .. "d"
-        if low and high and low ~= high then
-            txt = txt .. " " .. util.FormatMoney(low, true)
-                .. "\226\128\147" .. util.FormatMoney(high, true)
-        end
-        ui.sellHistScan:SetText(txt .. ")")
-        ui.sellHistScan:SetTextColor(C.text[1], C.text[2], C.text[3])
-    else
-        ui.sellHistScan:SetText("Scans: no data yet")
-        ui.sellHistScan:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    end
-
-    -- Sales side: what the mailbox ledger says this actually sold for.
-    local sMed, sCount, sLast = A.db.SaleHistory(it.name)
-    if sMed and sCount > 0 then
-        local txt = "Sold: " .. sCount .. "x  med "
-            .. util.FormatMoney(sMed, true)
-        if sLast and sLast ~= sMed then
-            txt = txt .. "  last " .. util.FormatMoney(sLast, true)
-        end
-        ui.sellHistSold:SetText(txt)
-        ui.sellHistSold:SetTextColor(0.30, 0.85, 0.30)
-    else
-        ui.sellHistSold:SetText("Sold: none yet")
-        ui.sellHistSold:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    end
 end
 
 -- ---- post-scan sell queue ----------------------------------------------
@@ -5451,6 +5520,17 @@ function ui.SelectSubTab(name)
     if name ~= "Sell" then
         ui.HideVendorList()
     end
+    ui.RefreshCurrentTab(true)
+end
+
+-- Repaint whichever tab is showing.
+--
+-- ui.Refresh() only ever touched the scan strip, so resizing the window
+-- recomputed nothing: the lists kept the row count they were last painted with
+-- and the extra height just went blank. Anything that changes how much room the
+-- lists have has to come through here.
+function ui.RefreshCurrentTab(requestAuctions)
+    local name = ui.selectedSubTab
     if name == "Sell" then
         ui.RefreshBags()
         ui.RefreshSell()
@@ -5459,7 +5539,9 @@ function ui.SelectSubTab(name)
     elseif name == "Crafting" then
         ui.RefreshCraft()
     elseif name == "Auctions" then
-        ui.RefreshAuctions(true)
+        -- Only ping the server when actually switching to the tab; a resize
+        -- must not fire an owner-list query.
+        ui.RefreshAuctions(requestAuctions and true or false)
     elseif name == "History" then
         ui.RefreshHistory()
     elseif name == "Scan" then
