@@ -32,14 +32,8 @@ printed in the window title bar — quote it in bug reports.
   actually carrying, whichever is smaller), so you can't ask for a stack the
   game won't allow. The line beside them reads `= 27 of 28`, so you can see
   what you're about to list against what you hold.
-- **Prices are entered in gold / silver / copper**, one box each with the
-  game's own coin icons, like the stock auction house — instead of typing
-  `1g 88s`.
-- **The window resizes.** Grab the grip in the bottom-right corner and drag.
-  Every list re-fits itself to the new height as you go, so a taller window
-  shows **more rows**, not more empty space — up to ~3x the listings on the
-  Sell and Buy tabs. Bounded to sensible limits (the old fixed size is the
-  minimum), and the size is remembered per character.
+- **Prices are entered in gold / silver / copper**, one box each, like the
+  stock auction house — instead of typing `1g 88s`.
 - **Bid per item** is now its own field, separate from **Buy per item**. Leave
   it blank and the start bid follows the buyout, exactly as before.
 

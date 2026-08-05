@@ -111,11 +111,6 @@ records every "Auction successful" for you. Purchases get logged when you buy.
 Then it tells you **Income · Spent · Net** over the last 24h, 7d, 30d, or all
 time.
 
-### 🪟 Resize it
-Drag the grip in the bottom-right corner. The lists re-fit as you drag, so a
-taller window shows **more rows** rather than more blank space. Your size is
-remembered per character.
-
 ### 🔍 Aegis tab — scanning + settings
 Run a full scan, a category-targeted scan, or scan everything in your bags to
 price it. Pause, resume, or **stop** whenever. Plus your defaults: post duration,
