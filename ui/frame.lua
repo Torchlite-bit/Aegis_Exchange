@@ -44,6 +44,12 @@ local C = {
 -- Last scan older than this is "stale" and rendered amber.
 local STALE_SECONDS = 24 * 60 * 60
 
+-- Window size bounds. The minimum is the old fixed size -- below it the Sell
+-- tab's header rows start colliding -- and the maximum is generous enough for
+-- a big monitor without letting the window escape a small one.
+local MIN_W, MIN_H = 832, 460
+local MAX_W, MAX_H = 1400, 900
+
 -- Sub-tab order, left to right. "Scan" hosts the scanner controls (Full Scan /
 -- Pause / Resume / Stop / Categories + status and progress) and the settings
 -- block; it is displayed as "Aegis" via TAB_LABELS below.
@@ -82,6 +88,46 @@ function ui.SetTextClipped(fs, text, maxWidth)
         if fs:GetStringWidth() <= maxWidth then lo = mid else hi = mid - 1 end
     end
     fs:SetText(string.sub(text, 1, lo) .. "...")
+end
+
+-- ---------------------------------------------------------------------------
+-- Window sizing
+-- ---------------------------------------------------------------------------
+
+-- Remember the size per character (AegisExchangeCharDB.ui is exactly the
+-- "window position, open tab, column widths" bucket db.lua describes).
+function ui.SaveWindowSize()
+    if not ui.frame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    s.width  = math.floor(ui.frame:GetWidth() or MIN_W)
+    s.height = math.floor(ui.frame:GetHeight() or MIN_H)
+end
+
+function ui.RestoreWindowSize()
+    if not ui.frame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s or not s.width or not s.height then return end
+    local w, h = s.width, s.height
+    if w < MIN_W then w = MIN_W end
+    if h < MIN_H then h = MIN_H end
+    if w > MAX_W then w = MAX_W end
+    if h > MAX_H then h = MAX_H end
+    ui.frame:SetWidth(w)
+    ui.frame:SetHeight(h)
+end
+
+-- How many rows of `rowH` actually fit in `scroll` at its current height,
+-- clamped to [minRows, maxRows]. This is what makes a taller window show more
+-- listings instead of more blank space: every list asks at paint time rather
+-- than trusting the count it was built with.
+function ui.RowsFor(scroll, rowH, minRows, maxRows)
+    if not scroll then return minRows end
+    local h = scroll:GetHeight() or 0
+    local n = math.floor(h / rowH)
+    if n < minRows then n = minRows end
+    if n > maxRows then n = maxRows end
+    return n
 end
 
 -- A sub-tab button: a dark pill with a centered label, recoloured on select.
@@ -229,6 +275,47 @@ function ui.BuildWindow()
         prev = tab
         i = i + 1
     end
+
+    -- ---- Resize grip ----------------------------------------------------
+    -- Everything inside the window already anchors to its panel's edges, so
+    -- widening or heightening the frame carries the panels and their scroll
+    -- frames with it for free. The only thing that doesn't follow on its own
+    -- is how many ROWS each list draws -- see ui.RowsFor, which recomputes
+    -- that from the live height, so dragging taller genuinely shows more
+    -- listings rather than leaving a blank gap.
+    f:SetResizable(true)
+    if f.SetMinResize then f:SetMinResize(MIN_W, MIN_H) end
+    if f.SetMaxResize then f:SetMaxResize(MAX_W, MAX_H) end
+
+    local grip = CreateFrame("Button", "AegisExchangeResizeGrip", f)
+    grip:SetWidth(16)
+    grip:SetHeight(16)
+    grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -6, 6)
+    grip:SetFrameLevel(f:GetFrameLevel() + 12)
+    grip.aegisNoSkin = true
+    local gripTex = grip:CreateTexture(nil, "OVERLAY")
+    gripTex:SetAllPoints(grip)
+    gripTex:SetTexture("Interface\\AddOns\\Aegis_Exchange\\media\\ResizeGrip")
+    grip.tex = gripTex
+    grip:SetScript("OnMouseDown", function()
+        f.aegisSizing = true
+        f:StartSizing("BOTTOMRIGHT")
+    end)
+    grip:SetScript("OnMouseUp", function()
+        f.aegisSizing = false
+        f:StopMovingOrSizing()
+        ui.SaveWindowSize()
+        ui.Refresh()          -- re-fit every list to the new height
+    end)
+    -- While dragging, keep the lists in step so the resize is visibly live
+    -- rather than snapping into place when the mouse comes up.
+    grip:SetScript("OnUpdate", function()
+        if not f.aegisSizing then return end
+        ui.Refresh()
+    end)
+    grip:SetScript("OnEnter", function() gripTex:SetVertexColor(1, 0.9, 0.4) end)
+    grip:SetScript("OnLeave", function() gripTex:SetVertexColor(1, 1, 1) end)
+    ui.resizeGrip = grip
 
     -- Content region (recessed well) below the sub-tabs.
     -- 12 border + 26 title bar + 10 gap + 24 tabs + 8 gap = 80 from the top.
@@ -434,6 +521,10 @@ function ui.BuildWindow()
     ui.BuildCraftTab()
     ui.BuildAuctionsTab()
     ui.BuildHistoryTab()
+
+    -- Apply the remembered size once every tab exists, so the first paint
+    -- already fits the restored height rather than snapping a frame later.
+    ui.RestoreWindowSize()
 
     -- Live refresh while a scan runs (elapsed is the GLOBAL arg1). Only ticks
     -- while the window is shown, i.e. while the AH is open.
@@ -1183,7 +1274,9 @@ end
 -- only the presentation changed.
 local function MakeMoneyGSC(parent, onChange)
     local grp = {}
-    local function mk(w, suffix, r, g, b)
+    -- Blizzard's own coin art, the same textures the stock money frame uses --
+    -- so a price here reads exactly like a price anywhere else in the game.
+    local function mk(w, coin)
         local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
         e:SetWidth(w)
         e:SetHeight(18)
@@ -1196,16 +1289,18 @@ local function MakeMoneyGSC(parent, onChange)
             if grp.quiet then return end     -- our own SetText, not the user
             if onChange then onChange() end
         end)
-        local tag = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        -- `tag` stays the name the layout anchors off, texture or not.
+        local tag = parent:CreateTexture(nil, "OVERLAY")
+        tag:SetTexture("Interface\\MoneyFrame\\UI-" .. coin .. "Icon")
+        tag:SetWidth(13)
+        tag:SetHeight(13)
         tag:SetPoint("LEFT", e, "RIGHT", 2, 0)
-        tag:SetText(suffix)
-        tag:SetTextColor(r, g, b)
         e.tag = tag
         return e
     end
-    grp.g = mk(34, "g", 1.00, 0.82, 0.00)
-    grp.s = mk(22, "s", 0.78, 0.78, 0.78)
-    grp.c = mk(22, "c", 0.80, 0.55, 0.35)
+    grp.g = mk(34, "Gold")
+    grp.s = mk(22, "Silver")
+    grp.c = mk(22, "Copper")
 
     grp.GetText = function(self)
         local gg = tonumber(self.g:GetText()) or 0
@@ -1585,7 +1680,9 @@ function ui.PaintSortHeaders(headers, sortKey, dir)
 end
 
 local BUY_ROWS,  BUY_ROW_H  = 11, 20
+local BUY_ROWS_MAX  = 34
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
+local SIDE_ROWS_MAX = 38
 local SIDE_W = 158    -- sidebar width
 
 function ui.BuildBuyTab()
@@ -1612,7 +1709,7 @@ function ui.BuildBuyTab()
 
     ui.buySideRows = {}
     local i = 1
-    while i <= SIDE_ROWS do
+    while i <= SIDE_ROWS_MAX do
         local row = CreateFrame("Button", nil, panel)
         row:SetHeight(SIDE_ROW_H)
         row:SetWidth(SIDE_W)
@@ -1754,7 +1851,7 @@ function ui.BuildBuyTab()
 
     ui.buyRows = {}
     i = 1
-    while i <= BUY_ROWS do
+    while i <= BUY_ROWS_MAX do
         BuildResultRow(panel, scroll, ui.buyRows, i, BUY_ROW_H)
         i = i + 1
     end
@@ -1804,12 +1901,13 @@ end
 function ui.UpdateBuySidebar()
     if not ui.buySideScroll then return end
     local flat = ui.buyFlat or {}
-    FauxScrollFrame_Update(ui.buySideScroll, table.getn(flat), SIDE_ROWS, SIDE_ROW_H)
+    local vis = ui.RowsFor(ui.buySideScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
+    FauxScrollFrame_Update(ui.buySideScroll, table.getn(flat), vis, SIDE_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.buySideScroll)
     local i = 1
-    while i <= SIDE_ROWS do
+    while i <= SIDE_ROWS_MAX do
         local row = ui.buySideRows[i]
-        local e = flat[i + offset]
+        local e = (i <= vis) and flat[i + offset] or nil
         if e then
             row.entry = e
             row.ex:SetText("")
@@ -2029,7 +2127,8 @@ function ui.UpdateBuyList()
     ui.PaintSortHeaders(ui.buyHeaders, sortKey, dir)
 
     local total = table.getn(rows)
-    FauxScrollFrame_Update(ui.buyScroll, total, BUY_ROWS, BUY_ROW_H)
+    local vis = ui.RowsFor(ui.buyScroll, BUY_ROW_H, BUY_ROWS, BUY_ROWS_MAX)
+    FauxScrollFrame_Update(ui.buyScroll, total, vis, BUY_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.buyScroll)
 
     if A.buy then
@@ -2053,9 +2152,9 @@ function ui.UpdateBuyList()
     end
 
     local i = 1
-    while i <= BUY_ROWS do
+    while i <= BUY_ROWS_MAX do
         local row = ui.buyRows[i]
-        local r = rows[i + offset]
+        local r = (i <= vis) and rows[i + offset] or nil
         if r then
             ui.FillResultRow(row, r)
         else
@@ -2151,7 +2250,9 @@ end
 -- ---------------------------------------------------------------------------
 
 local CRAFT_ROWS,  CRAFT_ROW_H  = 11, 20
+local CRAFT_ROWS_MAX  = 34
 local CSIDE_ROWS,  CSIDE_ROW_H  = 10, 18
+local CSIDE_ROWS_MAX  = 38
 local CSIDE_W = 172   -- recipe-tree width (reagent lines carry a count)
 
 function ui.BuildCraftTab()
@@ -2178,7 +2279,7 @@ function ui.BuildCraftTab()
 
     ui.craftSideRows = {}
     local i = 1
-    while i <= CSIDE_ROWS do
+    while i <= CSIDE_ROWS_MAX do
         local row = CreateFrame("Button", nil, panel)
         row:SetHeight(CSIDE_ROW_H)
         row:SetWidth(CSIDE_W)
@@ -2319,7 +2420,7 @@ function ui.BuildCraftTab()
 
     ui.craftRows = {}
     i = 1
-    while i <= CRAFT_ROWS do
+    while i <= CRAFT_ROWS_MAX do
         BuildResultRow(panel, scroll, ui.craftRows, i, CRAFT_ROW_H)
         i = i + 1
     end
@@ -2369,13 +2470,15 @@ end
 function ui.UpdateCraftTree()
     if not ui.craftSideScroll then return end
     local flat = ui.craftFlat or {}
+    local vis = ui.RowsFor(ui.craftSideScroll, CSIDE_ROW_H, CSIDE_ROWS,
+        CSIDE_ROWS_MAX)
     FauxScrollFrame_Update(ui.craftSideScroll, table.getn(flat),
-        CSIDE_ROWS, CSIDE_ROW_H)
+        vis, CSIDE_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.craftSideScroll)
     local i = 1
-    while i <= CSIDE_ROWS do
+    while i <= CSIDE_ROWS_MAX do
         local row = ui.craftSideRows[i]
-        local e = flat[i + offset]
+        local e = (i <= vis) and flat[i + offset] or nil
         if e then
             row.entry = e
             row.ex:SetText("")
@@ -2609,7 +2712,8 @@ function ui.UpdateCraftList()
     ui.PaintSortHeaders(ui.craftHeaders, sortKey, dir)
 
     local total = table.getn(rows)
-    FauxScrollFrame_Update(ui.craftScroll, total, CRAFT_ROWS, CRAFT_ROW_H)
+    local vis = ui.RowsFor(ui.craftScroll, CRAFT_ROW_H, CRAFT_ROWS, CRAFT_ROWS_MAX)
+    FauxScrollFrame_Update(ui.craftScroll, total, vis, CRAFT_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.craftScroll)
 
     if A.buy then
@@ -2629,9 +2733,9 @@ function ui.UpdateCraftList()
     end
 
     local i = 1
-    while i <= CRAFT_ROWS do
+    while i <= CRAFT_ROWS_MAX do
         local row = ui.craftRows[i]
-        local r = rows[i + offset]
+        local r = (i <= vis) and rows[i + offset] or nil
         if r then
             ui.FillResultRow(row, r)
         else
@@ -2836,6 +2940,7 @@ end)
 -- ---------------------------------------------------------------------------
 
 local AUC_ROWS, AUC_ROW_H = 12, 21
+local AUC_ROWS_MAX = 32
 -- Row-relative column x / width.
 local ACX = { name = 2, qty = 176, unit = 216, stack = 300, time = 392,
               mkt = 452, cancel = 540 }
@@ -2900,7 +3005,7 @@ function ui.BuildAuctionsTab()
 
     ui.aucRows = {}
     local i = 1
-    while i <= AUC_ROWS do
+    while i <= AUC_ROWS_MAX do
         local row = CreateFrame("Frame", nil, panel)
         row:SetHeight(AUC_ROW_H)
         if i == 1 then
@@ -2991,12 +3096,13 @@ function ui.UpdateAuctionsList()
             .. "  Undercut = someone is cheaper than you.")
     end
 
-    FauxScrollFrame_Update(ui.aucScroll, total, AUC_ROWS, AUC_ROW_H)
+    local vis = ui.RowsFor(ui.aucScroll, AUC_ROW_H, AUC_ROWS, AUC_ROWS_MAX)
+    FauxScrollFrame_Update(ui.aucScroll, total, vis, AUC_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.aucScroll)
     local i = 1
-    while i <= AUC_ROWS do
+    while i <= AUC_ROWS_MAX do
         local row = ui.aucRows[i]
-        local r = rows[i + offset]
+        local r = (i <= vis) and rows[i + offset] or nil
         if r then
             ui.FillAuctionRow(row, r)
         else
@@ -3148,6 +3254,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local HIST_ROWS, HIST_ROW_H = 12, 20
+local HIST_ROWS_MAX = 34
 -- Period options: label + window seconds (0 = all time).
 local HIST_PERIODS = {
     { label = "24h", secs = 86400 },
@@ -3271,7 +3378,7 @@ function ui.BuildHistoryTab()
 
     ui.histRows = {}
     local i = 1
-    while i <= HIST_ROWS do
+    while i <= HIST_ROWS_MAX do
         local row = CreateFrame("Frame", nil, panel)
         row:SetHeight(HIST_ROW_H)
         if i == 1 then
@@ -3336,12 +3443,13 @@ function ui.UpdateHistoryList()
     if not ui.histScroll then return end
     local rows = ui.histView or {}
     local total = table.getn(rows)
-    FauxScrollFrame_Update(ui.histScroll, total, HIST_ROWS, HIST_ROW_H)
+    local vis = ui.RowsFor(ui.histScroll, HIST_ROW_H, HIST_ROWS, HIST_ROWS_MAX)
+    FauxScrollFrame_Update(ui.histScroll, total, vis, HIST_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.histScroll)
     local i = 1
-    while i <= HIST_ROWS do
+    while i <= HIST_ROWS_MAX do
         local row = ui.histRows[i]
-        local e = rows[i + offset]
+        local e = (i <= vis) and rows[i + offset] or nil
         if e then
             row.when:SetText(e.t and util.FormatAgo(time() - e.t) or "\226\128\148")
             row.when:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
@@ -3385,7 +3493,9 @@ StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {
 -- ---------------------------------------------------------------------------
 
 local BAG_ROWS,  BAG_ROW_H  = 9, 19
+local BAG_ROWS_MAX  = 36
 local LIST_ROWS, LIST_ROW_H = 9, 19
+local LIST_ROWS_MAX = 36
 
 -- Text budget for the "Your Bags" rows. The bag scroll's right edge sits at
 -- panel LEFT + 168 and it starts at LEFT + 12, so a row is ~156 wide; item
@@ -3712,7 +3822,7 @@ function ui.BuildSellTab()
 
     ui.bagRows = {}
     local bi = 1
-    while bi <= BAG_ROWS do
+    while bi <= BAG_ROWS_MAX do
         local row = CreateFrame("Button", nil, panel)
         row:SetHeight(BAG_ROW_H)
         if bi == 1 then
@@ -3808,7 +3918,7 @@ function ui.BuildSellTab()
 
     ui.listRows = {}
     local li = 1
-    while li <= LIST_ROWS do
+    while li <= LIST_ROWS_MAX do
         -- Buttons (not plain frames) so a click can copy that listing's unit
         -- price into the buyout box -- one-click "match this seller".
         local row = CreateFrame("Button", nil, panel)
@@ -3887,12 +3997,13 @@ end
 function ui.UpdateBagList()
     if not ui.bagScroll then return end
     local flat = ui.bagFlat or {}
-    FauxScrollFrame_Update(ui.bagScroll, table.getn(flat), BAG_ROWS, BAG_ROW_H)
+    local vis = ui.RowsFor(ui.bagScroll, BAG_ROW_H, BAG_ROWS, BAG_ROWS_MAX)
+    FauxScrollFrame_Update(ui.bagScroll, table.getn(flat), vis, BAG_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.bagScroll)
     local i = 1
-    while i <= BAG_ROWS do
+    while i <= BAG_ROWS_MAX do
         local row = ui.bagRows[i]
-        local e = flat[i + offset]
+        local e = (i <= vis) and flat[i + offset] or nil
         if e then
             row.entry = e
             if e.kind == "cat" then
@@ -4105,7 +4216,8 @@ function ui.UpdateListingsList()
         ui.sellSortKey or "unit", ui.sellSortDir or "asc")
     ui.PaintSortHeaders(ui.sellHeaders,
         ui.sellSortKey or "unit", ui.sellSortDir or "asc")
-    FauxScrollFrame_Update(ui.listScroll, table.getn(groups), LIST_ROWS, LIST_ROW_H)
+    local vis = ui.RowsFor(ui.listScroll, LIST_ROW_H, LIST_ROWS, LIST_ROWS_MAX)
+    FauxScrollFrame_Update(ui.listScroll, table.getn(groups), vis, LIST_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.listScroll)
 
     if ui.sellScanState == "scanning" then
@@ -4130,9 +4242,9 @@ function ui.UpdateListingsList()
     end
 
     local i = 1
-    while i <= LIST_ROWS do
+    while i <= LIST_ROWS_MAX do
         local row = ui.listRows[i]
-        local g = groups[i + offset]
+        local g = (i <= vis) and groups[i + offset] or nil
         if g then
             row.group = g   -- click copies g.unit into the buyout box
             row.unit:SetText(g.unit and util.FormatMoney(g.unit, true) or "\226\128\148")
