@@ -107,7 +107,17 @@ local SETTING_DEFAULTS = {
     undercutPct    = 5,         -- percent below the reference (pct mode)
     undercutAmount = 1,         -- copper below the reference (flat mode)
     sellDefault    = "undercut", -- slot prefill: "undercut"|"market"|"none"
-    tooltip        = true,      -- show Aegis price lines on item tooltips
+    tooltip        = true,      -- master switch for Aegis price lines
+    -- Which lines the tooltip shows, all on by default so the behaviour is
+    -- unchanged for anyone who never opens these. Only consulted when the
+    -- master `tooltip` switch is on.
+    tipMarket      = true,      -- "Aegis Market" (time-weighted median)
+    tipMinBuyout   = true,      -- "Aegis Min Buyout" (most recent daily low)
+    tipVendor      = true,      -- "Aegis Vendor Price"
+    -- Stack totals -- "(x20 = 24g)" after a unit price. false = always show,
+    -- true = only while Shift is held, which is how aux does it and keeps the
+    -- tooltip short on a bank full of stacks.
+    tipStackShift  = false,
     profLine       = true,      -- show the profit line on profession windows
     pfSkin         = true,      -- match pfUI's look when pfUI is installed
     -- Query pacing between scan pages:

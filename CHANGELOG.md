@@ -15,6 +15,17 @@ printed in the window title bar — quote it in bug reports.
 ## [1.1.9]
 
 ### Added
+- **Tooltips now price more surfaces** — loot windows, quest rewards, the quest
+  log, and profession reagents, on top of bags, inventory, the AH, merchants and
+  the mailbox. Hover a reagent in a profession window and see what it's worth
+  without leaving it.
+- **Aegis tab controls which lines appear**: Market value, Minimum buyout and
+  Vendor price each toggle independently under the master tooltip switch, which
+  greys them when it's off.
+- **"Stack totals only while Shift is held"** — off by default, so nothing
+  changes unless you want it. On, a tooltip shows the unit price and only adds
+  `(x20 = 24g)` while Shift is down, which keeps things short in a bank full of
+  stacks.
 - **Stack size and stack count are sliders now**, and they interlock — drag the
   size and the count's ceiling follows, because bigger stacks means fewer of
   them. The size slider stops at the item's own max stack (or what you're

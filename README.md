@@ -118,8 +118,10 @@ undercut rule (% or flat), auto-fill price, tooltip lines, profit line, and the
 pfUI skin — all in one place.
 
 ### 💬 Tooltips everywhere
-Every item tooltip — bags, inventory, the AH, even the mailbox — gains market
-value, minimum buyout, and vendor price, with stack totals.
+Bags, inventory, the auction house, merchants, the mailbox, **loot windows,
+quest rewards and profession reagents** — all gain market value, minimum buyout
+and vendor price, with stack totals. Pick which of those three lines you want on
+the Aegis tab, and optionally show stack totals only while **Shift** is held.
 
 ---
 

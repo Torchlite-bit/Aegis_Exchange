@@ -666,13 +666,64 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end
     tipChk:SetScript("OnClick", function()
         A.db.SetSetting("tooltip", tipChk:GetChecked() and true or false)
+        ui.RefreshSettings()   -- grey the per-line options with the master
     end)
     ui.setTooltip = tipChk
+
+    -- Per-line tooltip options, indented under the master toggle because they
+    -- only mean anything while it's on. Tooltips now reach loot, quest rewards
+    -- and profession reagents as well as bags and the AH, so being able to trim
+    -- the lines back matters more than it did.
+    local tipSubs = {
+        { key = "tipMarket",     text = "Market value" },
+        { key = "tipMinBuyout",  text = "Minimum buyout" },
+        { key = "tipVendor",     text = "Vendor price" },
+    }
+    ui.setTipSubs = {}
+    local prevSub = nil
+    local si = 1
+    while si <= table.getn(tipSubs) do
+        local spec = tipSubs[si]
+        local c = CreateFrame("CheckButton", "AegisExchangeSet" .. spec.key,
+            panel, "UICheckButtonTemplate")
+        c:SetWidth(20); c:SetHeight(20)
+        if prevSub then
+            c:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
+        else
+            c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -2)
+        end
+        local t = getglobal(c:GetName() .. "Text")
+        if t then
+            t:SetText(spec.text)
+            t:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        end
+        c.settingKey = spec.key
+        c:SetScript("OnClick", function()
+            A.db.SetSetting(c.settingKey, c:GetChecked() and true or false)
+        end)
+        ui.setTipSubs[si] = c
+        prevSub = c
+        si = si + 1
+    end
+
+    local stackChk = CreateFrame("CheckButton", "AegisExchangeSetTipStackShift",
+        panel, "UICheckButtonTemplate")
+    stackChk:SetWidth(20); stackChk:SetHeight(20)
+    stackChk:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
+    local stackTxt = getglobal(stackChk:GetName() .. "Text")
+    if stackTxt then
+        stackTxt:SetText("Stack totals only while Shift is held")
+        stackTxt:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    stackChk:SetScript("OnClick", function()
+        A.db.SetSetting("tipStackShift", stackChk:GetChecked() and true or false)
+    end)
+    ui.setTipStackShift = stackChk
 
     local profChk = CreateFrame("CheckButton", "AegisExchangeSetProfLine", panel,
         "UICheckButtonTemplate")
     profChk:SetWidth(24); profChk:SetHeight(24)
-    profChk:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 0, -4)
+    profChk:SetPoint("TOPLEFT", stackChk, "BOTTOMLEFT", -18, -4)
     local profTxt = getglobal(profChk:GetName() .. "Text")
     if profTxt then
         profTxt:SetText("Show profit line on profession windows")
@@ -824,8 +875,29 @@ function ui.RefreshSettings()
     if ui.setUndercutFlat then
         ui.setUndercutFlat:SetText(util.FormatMoney(A.db.Setting("undercutAmount"), false))
     end
+    local tipOn = A.db.Setting("tooltip") ~= false
     if ui.setTooltip then
-        ui.setTooltip:SetChecked(A.db.Setting("tooltip") ~= false and 1 or nil)
+        ui.setTooltip:SetChecked(tipOn and 1 or nil)
+    end
+    -- The per-line options are meaningless with the master switch off, so grey
+    -- them out rather than leaving them looking live.
+    if ui.setTipSubs then
+        local si = 1
+        while si <= table.getn(ui.setTipSubs) do
+            local c = ui.setTipSubs[si]
+            c:SetChecked(A.db.Setting(c.settingKey) ~= false and 1 or nil)
+            if tipOn then c:Enable() else c:Disable() end
+            si = si + 1
+        end
+    end
+    if ui.setTipStackShift then
+        ui.setTipStackShift:SetChecked(
+            A.db.Setting("tipStackShift") == true and 1 or nil)
+        if tipOn then
+            ui.setTipStackShift:Enable()
+        else
+            ui.setTipStackShift:Disable()
+        end
     end
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
