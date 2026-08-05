@@ -666,13 +666,64 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end
     tipChk:SetScript("OnClick", function()
         A.db.SetSetting("tooltip", tipChk:GetChecked() and true or false)
+        ui.RefreshSettings()   -- grey the per-line options with the master
     end)
     ui.setTooltip = tipChk
+
+    -- Per-line tooltip options, indented under the master toggle because they
+    -- only mean anything while it's on. Tooltips now reach loot, quest rewards
+    -- and profession reagents as well as bags and the AH, so being able to trim
+    -- the lines back matters more than it did.
+    local tipSubs = {
+        { key = "tipMarket",     text = "Market value" },
+        { key = "tipMinBuyout",  text = "Minimum buyout" },
+        { key = "tipVendor",     text = "Vendor price" },
+    }
+    ui.setTipSubs = {}
+    local prevSub = nil
+    local si = 1
+    while si <= table.getn(tipSubs) do
+        local spec = tipSubs[si]
+        local c = CreateFrame("CheckButton", "AegisExchangeSet" .. spec.key,
+            panel, "UICheckButtonTemplate")
+        c:SetWidth(20); c:SetHeight(20)
+        if prevSub then
+            c:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
+        else
+            c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -2)
+        end
+        local t = getglobal(c:GetName() .. "Text")
+        if t then
+            t:SetText(spec.text)
+            t:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        end
+        c.settingKey = spec.key
+        c:SetScript("OnClick", function()
+            A.db.SetSetting(c.settingKey, c:GetChecked() and true or false)
+        end)
+        ui.setTipSubs[si] = c
+        prevSub = c
+        si = si + 1
+    end
+
+    local stackChk = CreateFrame("CheckButton", "AegisExchangeSetTipStackShift",
+        panel, "UICheckButtonTemplate")
+    stackChk:SetWidth(20); stackChk:SetHeight(20)
+    stackChk:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
+    local stackTxt = getglobal(stackChk:GetName() .. "Text")
+    if stackTxt then
+        stackTxt:SetText("Stack totals only while Shift is held")
+        stackTxt:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    stackChk:SetScript("OnClick", function()
+        A.db.SetSetting("tipStackShift", stackChk:GetChecked() and true or false)
+    end)
+    ui.setTipStackShift = stackChk
 
     local profChk = CreateFrame("CheckButton", "AegisExchangeSetProfLine", panel,
         "UICheckButtonTemplate")
     profChk:SetWidth(24); profChk:SetHeight(24)
-    profChk:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 0, -4)
+    profChk:SetPoint("TOPLEFT", stackChk, "BOTTOMLEFT", -18, -4)
     local profTxt = getglobal(profChk:GetName() .. "Text")
     if profTxt then
         profTxt:SetText("Show profit line on profession windows")
@@ -824,8 +875,29 @@ function ui.RefreshSettings()
     if ui.setUndercutFlat then
         ui.setUndercutFlat:SetText(util.FormatMoney(A.db.Setting("undercutAmount"), false))
     end
+    local tipOn = A.db.Setting("tooltip") ~= false
     if ui.setTooltip then
-        ui.setTooltip:SetChecked(A.db.Setting("tooltip") ~= false and 1 or nil)
+        ui.setTooltip:SetChecked(tipOn and 1 or nil)
+    end
+    -- The per-line options are meaningless with the master switch off, so grey
+    -- them out rather than leaving them looking live.
+    if ui.setTipSubs then
+        local si = 1
+        while si <= table.getn(ui.setTipSubs) do
+            local c = ui.setTipSubs[si]
+            c:SetChecked(A.db.Setting(c.settingKey) ~= false and 1 or nil)
+            if tipOn then c:Enable() else c:Disable() end
+            si = si + 1
+        end
+    end
+    if ui.setTipStackShift then
+        ui.setTipStackShift:SetChecked(
+            A.db.Setting("tipStackShift") == true and 1 or nil)
+        if tipOn then
+            ui.setTipStackShift:Enable()
+        else
+            ui.setTipStackShift:Disable()
+        end
     end
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
@@ -1100,6 +1172,116 @@ local function MakeMoneyBox(parent, width)
         if ui.RefreshSell then ui.RefreshSell() end
     end)
     return e
+end
+
+-- A gold / silver / copper triplet, the way the stock AH and aux present a
+-- price. Three small numeric boxes with coloured suffixes.
+--
+-- It deliberately EMULATES the single money box's interface (GetText / SetText
+-- / ClearFocus) so ReadMoneyBox, SetMoneyBox and every existing caller keep
+-- working untouched -- the Sell tab still thinks in plain copper everywhere,
+-- only the presentation changed.
+local function MakeMoneyGSC(parent, onChange)
+    local grp = {}
+    local function mk(w, suffix, r, g, b)
+        local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        e:SetWidth(w)
+        e:SetHeight(18)
+        e:SetAutoFocus(false)
+        e:SetNumeric(true)
+        e:SetJustifyH("RIGHT")
+        e:SetScript("OnEnterPressed", function() e:ClearFocus() end)
+        e:SetScript("OnEscapePressed", function() e:ClearFocus() end)
+        e:SetScript("OnTextChanged", function()
+            if grp.quiet then return end     -- our own SetText, not the user
+            if onChange then onChange() end
+        end)
+        local tag = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        tag:SetPoint("LEFT", e, "RIGHT", 2, 0)
+        tag:SetText(suffix)
+        tag:SetTextColor(r, g, b)
+        e.tag = tag
+        return e
+    end
+    grp.g = mk(34, "g", 1.00, 0.82, 0.00)
+    grp.s = mk(22, "s", 0.78, 0.78, 0.78)
+    grp.c = mk(22, "c", 0.80, 0.55, 0.35)
+
+    grp.GetText = function(self)
+        local gg = tonumber(self.g:GetText()) or 0
+        local ss = tonumber(self.s:GetText()) or 0
+        local cc = tonumber(self.c:GetText()) or 0
+        local total = gg * 10000 + ss * 100 + cc
+        if total <= 0 then return "" end
+        return util.FormatMoney(total, false)
+    end
+    grp.SetText = function(self, txt)
+        local copper = nil
+        if txt and txt ~= "" then copper = util.ParseMoney(txt) end
+        self.quiet = true
+        if not copper or copper <= 0 then
+            self.g:SetText(""); self.s:SetText(""); self.c:SetText("")
+        else
+            local gg, ss, cc = util.MoneyParts(copper)
+            self.g:SetText(gg > 0 and tostring(gg) or "")
+            self.s:SetText(tostring(ss))
+            self.c:SetText(tostring(cc))
+        end
+        self.quiet = false
+    end
+    grp.ClearFocus = function(self)
+        self.g:ClearFocus(); self.s:ClearFocus(); self.c:ClearFocus()
+    end
+    -- Anchor the whole triplet off one widget.
+    grp.Attach = function(self, anchor, dx, dy)
+        self.g:SetPoint("LEFT", anchor, "RIGHT", dx or 6, dy or 0)
+        self.s:SetPoint("LEFT", self.g.tag, "RIGHT", 5, 0)
+        self.c:SetPoint("LEFT", self.s.tag, "RIGHT", 5, 0)
+    end
+    return grp
+end
+
+-- Horizontal slider, hand-built from the base Slider widget for the same reason
+-- as the Aegis tab's scroll bar: Slider is a primitive that always exists, so
+-- there's no "Couldn't find inherited node" risk from guessing a 1.12 template.
+local function MakeHSlider(parent, width, onChange)
+    local sb = CreateFrame("Slider", nil, parent)
+    sb.aegisNoSkin = true
+    sb:SetWidth(width)
+    sb:SetHeight(15)
+    sb:SetOrientation("HORIZONTAL")
+    sb:SetMinMaxValues(1, 1)
+    sb:SetValue(1)
+    sb:SetValueStep(1)
+    sb:SetBackdrop({
+        bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+        edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+        tile = true, tileSize = 8, edgeSize = 8,
+        insets = { left = 3, right = 3, top = 6, bottom = 6 },
+    })
+    local thumb = sb:CreateTexture(nil, "OVERLAY")
+    thumb:SetTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    thumb:SetWidth(20)
+    thumb:SetHeight(20)
+    sb:SetThumbTexture(thumb)
+    sb:SetScript("OnValueChanged", function()
+        if ui.sellSliderSync then return end   -- we moved it, not the user
+        if onChange then onChange(this:GetValue()) end
+    end)
+    return sb
+end
+
+-- Point a slider at a range and value without its OnValueChanged firing back
+-- into the code that is currently painting the UI.
+local function SetSliderRange(sb, minV, maxV, value)
+    if not sb then return end
+    if maxV < minV then maxV = minV end
+    ui.sellSliderSync = true
+    sb:SetMinMaxValues(minV, maxV)
+    if value < minV then value = minV end
+    if value > maxV then value = maxV end
+    sb:SetValue(value)
+    ui.sellSliderSync = false
 end
 
 local function ReadMoneyBox(e)
@@ -3309,19 +3491,65 @@ function ui.BuildSellTab()
     ui.sellCap:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -44)
     ui.sellCap:SetJustifyH("RIGHT")
 
-    -- ---- Row 1: unit price + quick fills --------------------------------
+    -- ---- Row 1: stack size + stack count, each on a slider --------------
+    -- Sliders because picking a stack size is a "how do I want to split this"
+    -- decision, not a number you know up front -- dragging shows the trade-off
+    -- immediately, and the two are linked: a bigger stack means fewer of them.
+    local sizeLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    sizeLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -8)
+    sizeLabel:SetWidth(66)
+    sizeLabel:SetJustifyH("LEFT")
+    sizeLabel:SetText("Stack size:")
+    sizeLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellStackSize = MakeNumBox(panel, 34, function()
+        ui.SyncSellPrices("size")
+    end)
+
+    ui.sellSizeSlider = MakeHSlider(panel, 104, function(v)
+        ui.sellStackSize:SetText(tostring(math.floor(v)))
+        ui.SyncSellPrices("size")
+    end)
+    ui.sellSizeSlider:SetPoint("LEFT", sizeLabel, "RIGHT", 6, 0)
+    ui.sellStackSize:SetPoint("LEFT", ui.sellSizeSlider, "RIGHT", 8, 0)
+
+    local cntLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cntLabel:SetPoint("LEFT", ui.sellStackSize, "RIGHT", 16, 0)
+    cntLabel:SetText("Stacks:")
+    cntLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    ui.sellNumStacks = MakeNumBox(panel, 34, function() ui.RefreshSell() end)
+
+    ui.sellCountSlider = MakeHSlider(panel, 104, function(v)
+        ui.sellNumStacks:SetText(tostring(math.floor(v)))
+        ui.RefreshSell()
+    end)
+    ui.sellCountSlider:SetPoint("LEFT", cntLabel, "RIGHT", 6, 0)
+    ui.sellNumStacks:SetPoint("LEFT", ui.sellCountSlider, "RIGHT", 8, 0)
+
+    ui.sellMaxInfo = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.sellMaxInfo:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 10, 0)
+
+    -- ---- Row 2: bid / buyout per item, in gold-silver-copper -------------
+    local bidLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    bidLabel:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -12)
+    bidLabel:SetWidth(76)
+    bidLabel:SetJustifyH("LEFT")
+    bidLabel:SetText("Bid / item:")
+    bidLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    -- Optional: left blank the start bid follows the buyout, which is what the
+    -- Sell tab has always done.
+    ui.sellBid = MakeMoneyGSC(panel, function() ui.RefreshSell() end)
+    ui.sellBid:Attach(bidLabel, 6, 0)
+
     local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    buyLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -8)
-    buyLabel:SetWidth(82)
-    buyLabel:SetJustifyH("LEFT")
-    buyLabel:SetText("Unit price:")
+    buyLabel:SetPoint("LEFT", ui.sellBid.c.tag, "RIGHT", 18, 0)
+    buyLabel:SetText("Buy / item:")
     buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    ui.sellBuyout = MakeMoneyBox(panel, 92)
-    ui.sellBuyout:SetPoint("LEFT", buyLabel, "RIGHT", 6, 0)
-    ui.sellBuyout:SetScript("OnTextChanged", function()
-        ui.SyncSellPrices("unit")
-    end)
+    ui.sellBuyout = MakeMoneyGSC(panel, function() ui.SyncSellPrices("unit") end)
+    ui.sellBuyout:Attach(buyLabel, 6, 0)
 
     local mkQuick = function(text, w, anchorTo, fn)
         local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -3332,53 +3560,35 @@ function ui.BuildSellTab()
         b:SetScript("OnClick", fn)
         return b
     end
-    ui.sellMarketBtn = mkQuick("Market", 54, ui.sellBuyout, function()
+    -- These write through SetText, which stays quiet so the boxes don't fire
+    -- while we're filling them -- so each one re-syncs explicitly afterwards.
+    ui.sellMarketBtn = mkQuick("Market", 54, ui.sellBuyout.c.tag, function()
         local it = A.sell.GetItem()
         local sg = it and A.sell.Suggest(it.itemId)
-        if sg and sg.market then SetMoneyBox(ui.sellBuyout, sg.market) end
+        if sg and sg.market then
+            SetMoneyBox(ui.sellBuyout, sg.market)
+            ui.SyncSellPrices("unit")
+        end
     end)
     ui.sellUnderBtn = mkQuick("Undercut", 62, ui.sellMarketBtn, function()
         local it = A.sell.GetItem()
         local u = it and A.sell.UndercutUnit(it.itemId)
-        if u then SetMoneyBox(ui.sellBuyout, u) end
+        if u then
+            SetMoneyBox(ui.sellBuyout, u)
+            ui.SyncSellPrices("unit")
+        end
     end)
     ui.sellVendorBtn = mkQuick("Vendor", 52, ui.sellUnderBtn, function()
         local it = A.sell.GetItem()
         local sg = it and A.sell.Suggest(it.itemId)
-        if sg and sg.vendor then SetMoneyBox(ui.sellBuyout, sg.vendor) end
+        if sg and sg.vendor then
+            SetMoneyBox(ui.sellBuyout, sg.vendor)
+            ui.SyncSellPrices("unit")
+        end
     end)
-
-    -- ---- Row 2: stack price + "N stacks of S" ---------------------------
-    local stackLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    stackLabel:SetPoint("TOPLEFT", buyLabel, "BOTTOMLEFT", 0, -10)
-    stackLabel:SetWidth(82)
-    stackLabel:SetJustifyH("LEFT")
-    stackLabel:SetText("Stack price:")
-    stackLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
-    ui.sellStackPrice = MakeMoneyBox(panel, 92)
-    ui.sellStackPrice:SetPoint("LEFT", stackLabel, "RIGHT", 6, 0)
-    ui.sellStackPrice:SetScript("OnTextChanged", function()
-        ui.SyncSellPrices("stack")
-    end)
-
-    ui.sellNumStacks = MakeNumBox(panel, 34, function() ui.RefreshSell() end)
-    ui.sellNumStacks:SetPoint("LEFT", ui.sellStackPrice, "RIGHT", 12, 0)
-    local ofLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ofLabel:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 4, 0)
-    ofLabel:SetText("stacks of")
-    ofLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-    ui.sellStackSize = MakeNumBox(panel, 34, function()
-        ui.SyncSellPrices("size")
-    end)
-    ui.sellStackSize:SetPoint("LEFT", ofLabel, "RIGHT", 4, 0)
-
-    ui.sellMaxInfo = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ui.sellMaxInfo:SetPoint("LEFT", ui.sellStackSize, "RIGHT", 8, 0)
-
     -- ---- Row 3: duration + Post + Skip + status -------------------------
     local durLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    durLabel:SetPoint("TOPLEFT", stackLabel, "BOTTOMLEFT", 0, -12)
+    durLabel:SetPoint("TOPLEFT", bidLabel, "BOTTOMLEFT", 0, -12)
     durLabel:SetText("Duration:")
     durLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
 
@@ -4048,8 +4258,17 @@ function ui.RefreshSell()
         nStacks = maxStacks
         ui.sellNumStacks:SetText(tostring(nStacks))
     end
-    ui.sellMaxInfo:SetText(string.format("max %d stack(s) of %d",
-        maxStacks, size))
+    ui.sellMaxInfo:SetText(string.format("= %d of %d", size * nStacks, totalHave))
+
+    -- Re-range both sliders. Stack size can't exceed the item's own max stack
+    -- or what you actually hold; the count follows from whatever size is
+    -- chosen, which is what makes dragging one move the other's ceiling.
+    local sizeMax = totalHave
+    if it.maxStack and sizeMax > it.maxStack then sizeMax = it.maxStack end
+    if sizeMax < 1 then sizeMax = 1 end
+    SetSliderRange(ui.sellSizeSlider, 1, sizeMax, size)
+    SetSliderRange(ui.sellCountSlider, 1, (maxStacks >= 1) and maxStacks or 1,
+        nStacks)
 
     -- Totals across all stacks being posted.
     local stackTotal = unitBuy and math.floor(unitBuy * size) or 0
@@ -4122,21 +4341,16 @@ function ui.GetNumStacks()
     return NumVal(ui.sellNumStacks, 1)
 end
 
--- Keep unit price and stack price in step. `source` says which the user just
--- edited: "unit"/"size" -> recompute stack price; "stack" -> recompute unit.
+-- Repaint after a price or stack-size change.
+--
+-- Prices are now entered PER ITEM only. The editable stack-price box is gone --
+-- with a stack-size slider it was a second way to say the same thing, and the
+-- two boxes rounding into each other made a price drift as you dragged. The
+-- stack total is shown instead, on the right, by RefreshSell. `source` is kept
+-- so callers read the same as before.
 function ui.SyncSellPrices(source)
     if ui.sellSyncing then return end
     ui.sellSyncing = true
-    local size = ui.GetStackSize()
-    if source == "stack" then
-        local sp = ReadMoneyBox(ui.sellStackPrice)
-        if sp and size > 0 then
-            SetMoneyBox(ui.sellBuyout, math.floor(sp / size))
-        end
-    else
-        local u = ReadMoneyBox(ui.sellBuyout)
-        if u then SetMoneyBox(ui.sellStackPrice, u * size) end
-    end
     ui.sellSyncing = false
     ui.RefreshSell()
 end
@@ -4563,7 +4777,7 @@ function ui.SkipSell()
     ui.sellListingGroups = nil
     ui.sellScanState = nil
     SetMoneyBox(ui.sellBuyout, nil)
-    SetMoneyBox(ui.sellStackPrice, nil)
+    SetMoneyBox(ui.sellBid, nil)
     ui.UpdateListingsList()
     -- Walking the post-scan list? Move on to the next item.
     if ui.sellQueue and ui.AdvanceSellQueue() then return end
@@ -4587,13 +4801,20 @@ function ui.ConfirmPost()
         return
     end
     local unitBuy = ReadMoneyBox(ui.sellBuyout)
+    -- Bid is optional: blank means "same as the buyout", which is what the Sell
+    -- tab has always done. A bid above the buyout is a typo, not an intent.
+    local unitBid = ReadMoneyBox(ui.sellBid)
+    if unitBid and unitBuy and unitBid > unitBuy then
+        ChatMsg("Aegis: the bid per item can't be above the buyout.")
+        return
+    end
     local size    = ui.GetStackSize(it)
     local nStacks = ui.GetNumStacks()
     local maxStacks = A.sell.MaxStacks(it.itemId, size)
     if nStacks > maxStacks then nStacks = maxStacks end
     local stackBuyout = math.floor((unitBuy or 0) * size)
     if stackBuyout < 1 then
-        ChatMsg("Aegis: enter a unit price of at least 1 copper.")
+        ChatMsg("Aegis: enter a buyout per item of at least 1 copper.")
         return
     end
     if nStacks < 1 then
@@ -4616,7 +4837,8 @@ function ui.ConfirmPost()
         util.FormatMoney(perStack * nStacks))
     ui.pendingPost = {
         itemId = it.itemId, itemName = it.name, size = size,
-        nStacks = nStacks, unitBuyout = unitBuy, minutes = ui.sellDuration,
+        nStacks = nStacks, unitBuyout = unitBuy, unitBid = unitBid,
+        minutes = ui.sellDuration,
     }
     StaticPopup_Show("AEGIS_EXCHANGE_POST", it.name, detail)
 end
@@ -4627,7 +4849,7 @@ function ui.DoPost()
     ui.pendingPost = nil
     ui.sellStatus:SetText("Posting...")
     local ok, err = A.sell.StartPosting(p.itemId, p.itemName, p.size,
-        p.nStacks, p.unitBuyout, p.unitBuyout, p.minutes, {
+        p.nStacks, p.unitBuyout, p.unitBid or p.unitBuyout, p.minutes, {
             onProgress = function(done, total)
                 ui.sellStatus:SetText("Posting " .. done .. " / " .. total
                     .. "...")

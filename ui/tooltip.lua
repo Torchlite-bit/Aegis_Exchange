@@ -37,36 +37,48 @@ tooltip.hooked = false
 
 -- Append the Aegis price lines for `itemId` to `gtt` and re-flow it.
 -- AddLine/AddDoubleLine do NOT re-layout on their own — Show() is mandatory.
+-- A per-line toggle from the Aegis tab. Unset counts as ON, so a save written
+-- before these existed keeps showing everything.
+local function Want(key)
+    if not A.db.Setting then return true end
+    return A.db.Setting(key) ~= false
+end
+
 function tooltip.Extend(gtt, itemId, count)
     -- Honour the Aegis-tab toggle for tooltip price lines.
     if A.db.Setting and A.db.Setting("tooltip") == false then return end
-    local market = A.db.MarketValue(itemId)
-    local minBuy = A.db.MinBuyout(itemId)
-    local vendor = A.db.GetVendor(itemId)
+    local market = Want("tipMarket")    and A.db.MarketValue(itemId) or nil
+    local minBuy = Want("tipMinBuyout") and A.db.MinBuyout(itemId)   or nil
+    local vendor = Want("tipVendor")    and A.db.GetVendor(itemId)   or nil
     if not market and not minBuy and not vendor then return end
 
+    -- Stack totals: always, or only while Shift is held. Holding Shift is the
+    -- familiar gesture for "show me the whole stack" and keeps the tooltip
+    -- short when every bag slot is a stack of 20.
+    local withStack = count and count > 1
+    if withStack and A.db.Setting
+        and A.db.Setting("tipStackShift") == true then
+        withStack = IsShiftKeyDown and IsShiftKeyDown() and true or false
+    end
+    local function money(unit)
+        local right = util.FormatMoney(unit, true)
+        if withStack then
+            right = right .. " (x" .. count .. " = "
+                .. util.FormatMoney(unit * count, true) .. ")"
+        end
+        return right
+    end
+
     if market then
-        gtt:AddDoubleLine("Aegis Market",
-            util.FormatMoney(market, true),
+        gtt:AddDoubleLine("Aegis Market", money(market),
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
     end
     if minBuy then
-        local right = util.FormatMoney(minBuy, true)
-        if count and count > 1 then
-            -- Per-unit price, then the whole-stack total, per the mockup.
-            right = right .. " (x" .. count .. " = "
-                .. util.FormatMoney(minBuy * count, true) .. ")"
-        end
-        gtt:AddDoubleLine("Aegis Min Buyout", right,
+        gtt:AddDoubleLine("Aegis Min Buyout", money(minBuy),
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
     end
     if vendor then
-        local right = util.FormatMoney(vendor, true)
-        if count and count > 1 then
-            right = right .. " (x" .. count .. " = "
-                .. util.FormatMoney(vendor * count, true) .. ")"
-        end
-        gtt:AddDoubleLine("Aegis Vendor Price", right,
+        gtt:AddDoubleLine("Aegis Vendor Price", money(vendor),
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
     end
     gtt:Show()
@@ -129,6 +141,88 @@ function resolvers.SetInboxItem(index)
     return id, count or 1
 end
 
+-- The surfaces below are the "is this worth picking up / is this worth making"
+-- ones. Every getter is probed before use: HookMethod already skips a tooltip
+-- method the client doesn't have, but a method can exist while its link getter
+-- doesn't, so each resolver guards its own.
+
+function resolvers.SetLootItem(slot)
+    if not GetLootSlotLink then return nil end
+    local id = util.ItemIdFromLink(GetLootSlotLink(slot))
+    if not id then return nil end
+    local count = 1
+    if GetLootSlotInfo then
+        local _, _, quantity = GetLootSlotInfo(slot)
+        count = quantity or 1
+    end
+    return id, count
+end
+
+function resolvers.SetQuestItem(qtype, slot)
+    if not GetQuestItemLink then return nil end
+    local id = util.ItemIdFromLink(GetQuestItemLink(qtype, slot))
+    if not id then return nil end
+    local count = 1
+    if GetQuestItemInfo then
+        local _, _, numItems = GetQuestItemInfo(qtype, slot)
+        count = numItems or 1
+    end
+    return id, count
+end
+
+function resolvers.SetQuestLogItem(qtype, slot)
+    if not GetQuestLogItemLink then return nil end
+    local id = util.ItemIdFromLink(GetQuestLogItemLink(qtype, slot))
+    if not id then return nil end
+    return id, 1
+end
+
+-- Tradeskill and Craft share a shape: with a slot it's a reagent, without one
+-- it's the thing being made. Pairs with the Crafting tab's profit line -- hover
+-- a reagent and see what it's worth without leaving the profession window.
+function resolvers.SetTradeSkillItem(skill, slot)
+    local link, count = nil, 1
+    if slot then
+        if not GetTradeSkillReagentItemLink then return nil end
+        link = GetTradeSkillReagentItemLink(skill, slot)
+        if GetTradeSkillReagentInfo then
+            local _, _, n = GetTradeSkillReagentInfo(skill, slot)
+            count = n or 1
+        end
+    else
+        if not GetTradeSkillItemLink then return nil end
+        link = GetTradeSkillItemLink(skill)
+    end
+    local id = util.ItemIdFromLink(link)
+    if not id then return nil end
+    return id, count
+end
+
+function resolvers.SetCraftItem(skill, slot)
+    local link, count = nil, 1
+    if slot then
+        if not GetCraftReagentItemLink then return nil end
+        link = GetCraftReagentItemLink(skill, slot)
+        if GetCraftReagentInfo then
+            local _, _, n = GetCraftReagentInfo(skill, slot)
+            count = n or 1
+        end
+    else
+        if not GetCraftItemLink then return nil end
+        link = GetCraftItemLink(skill)
+    end
+    local id = util.ItemIdFromLink(link)
+    if not id then return nil end
+    return id, count
+end
+
+function resolvers.SetCraftSpell(slot)
+    if not GetCraftItemLink then return nil end
+    local id = util.ItemIdFromLink(GetCraftItemLink(slot))
+    if not id then return nil end
+    return id, 1
+end
+
 -- ---------------------------------------------------------------------------
 -- Hook installation
 -- ---------------------------------------------------------------------------
@@ -176,6 +270,12 @@ function tooltip.Install()
     HookMethod("SetHyperlink",       "link")
     HookMethod("SetMerchantItem",    "merchant")
     HookMethod("SetInboxItem",       "inbox")
+    HookMethod("SetLootItem",        "loot")
+    HookMethod("SetQuestItem",       "quest")
+    HookMethod("SetQuestLogItem",    "questlog")
+    HookMethod("SetTradeSkillItem",  "tradeskill")
+    HookMethod("SetCraftItem",       "craft")
+    HookMethod("SetCraftSpell",      "craft")
 
     -- Vendor-price collection. 1.12's GetItemInfo has no sell price; the only
     -- source is the money line the client adds to bag-item tooltips while a
