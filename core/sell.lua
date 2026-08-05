@@ -844,6 +844,15 @@ local function FindExactStack(itemId, count)
     return nil
 end
 
+-- Is this bag slot mid-move? GetContainerItemInfo's 3rd return is `locked`,
+-- which the client sets while the server is still processing a move. Acting on
+-- a locked slot is how a split silently does nothing -- so we wait instead of
+-- burning a retry. (Technique noted from how aux paces its stack moves.)
+local function SlotLocked(bag, slot)
+    local _, _, locked = GetContainerItemInfo(bag, slot)
+    return locked and true or false
+end
+
 -- First empty bag slot, for carving a split stack into. Backpack (0) last so we
 -- prefer real bags and leave the backpack free for loot.
 local function FindEmptySlot()
@@ -1007,6 +1016,13 @@ function sell.PostTick(dt)
         if not eb then
             sell.Debug("no free bag slot to carve into")
             FinishJob("nospace")
+            return
+        end
+        -- Never split out of a slot the server is still moving: the call is
+        -- silently dropped and we'd waste a retry waiting for a cursor that
+        -- was never going to fill.
+        if SlotLocked(src, srcSlot) or SlotLocked(eb, es) then
+            job.cool = ASSEMBLE_DELAY
             return
         end
         sell.Debug("carving " .. job.stackSize .. " off bag " .. src

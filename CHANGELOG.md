@@ -12,6 +12,31 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.9]
+
+### Added
+- **Stack size and stack count are sliders now**, and they interlock — drag the
+  size and the count's ceiling follows, because bigger stacks means fewer of
+  them. The size slider stops at the item's own max stack (or what you're
+  actually carrying, whichever is smaller), so you can't ask for a stack the
+  game won't allow. The line beside them reads `= 27 of 28`, so you can see
+  what you're about to list against what you hold.
+- **Prices are entered in gold / silver / copper**, one box each, like the
+  stock auction house — instead of typing `1g 88s`.
+- **Bid per item** is now its own field, separate from **Buy per item**. Leave
+  it blank and the start bid follows the buyout, exactly as before.
+
+### Changed
+- The editable **stack price** box is gone. With a stack-size slider it was a
+  second way to say the same thing, and the two boxes rounding into each other
+  made your price drift as you dragged. The stack total is shown on the right
+  instead (`3 x 16s 92c = 50s 76c`).
+
+### Fixed
+- The stack assembler now waits when a bag slot is **locked** (mid-move on the
+  server) instead of splitting into it and burning a retry on a cursor that was
+  never going to fill.
+
 ## [1.1.8]
 
 ### Fixed
@@ -423,6 +448,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
