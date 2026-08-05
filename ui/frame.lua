@@ -2986,6 +2986,11 @@ end
 -- Scan the open mailbox for AH sale mails and log each one once (deduped by an
 -- approximate arrival time so the same mail isn't re-counted across sessions).
 function ui.ScanMailSales()
+    -- Stand down when a companion addon (Aegis: Courier) owns the mailbox.
+    -- Two scanners on one inbox means two hooks racing and sales counted
+    -- twice; Courier reads mail far more thoroughly, so it wins. See the
+    -- integration block in core/db.lua.
+    if A.MailScanningExternal and A.MailScanningExternal() then return end
     if not GetInboxNumItems then return end
     local n = GetInboxNumItems() or 0
     local i = 1
@@ -2993,10 +2998,10 @@ function ui.ScanMailSales()
         local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
         local item = AuctionSoldItem(subject)
         if item and money and money > 0 then
-            -- Arrival epoch is stable as daysLeft falls and `now` rises; bucket
-            -- to the hour for a key that survives relogins.
-            local arrival = math.floor((time() - (daysLeft or 0) * 86400) / 3600)
-            local key = subject .. "|" .. money .. "|" .. arrival
+            -- Key built through the shared helper, which Courier also calls --
+            -- that is what stops a mail Aegis already logged from being
+            -- re-counted when Courier takes over.
+            local key = A.MailTxnKey(subject, money, daysLeft)
             if not A.db.WasSeen(key) then
                 A.db.MarkSeen(key)
                 A.db.RecordTxn("sale", item, money)
@@ -3576,7 +3581,7 @@ function ui.BuildSellTab()
         ui.sellHeaders[key] = b
         return b
     end
-    mkCol(colX.unit,  "Unit price",  "unit",  88)
+    mkCol(colX.unit + 4, "Unit price", "unit", 84)   -- +4: matches the row inset
     mkCol(colX.avail, "Available",   "avail", 156)
     mkCol(colX.stack, "Stack price", "stack", 136)
     mkCol(colX.pct,   "% mkt",       "pct",   50)
@@ -3613,7 +3618,10 @@ function ui.BuildSellTab()
             fs:SetJustifyH(just or "LEFT")
             return fs
         end
-        row.unit  = mkCell(0, 86)
+        -- 4px in, not flush with the row's left edge: at 0 the price sat
+        -- against the row border (and against the highlight box under the pfUI
+        -- skin), which read as clipped. The header below is inset to match.
+        row.unit  = mkCell(4, 84)
         row.avail = mkCell(92, 158)
         row.stack = mkCell(252, 130)
         row.pct   = mkCell(392, 48)
@@ -3625,26 +3633,12 @@ function ui.BuildSellTab()
                 ui.SyncSellPrices("unit")   -- price the whole stack from it
             end
         end)
-        -- Every row here is a price bucket for the SAME item -- the one in the
-        -- sell slot -- because GroupListings aggregates a single-item scan and
-        -- keeps no per-auction index. So the tooltip comes from the slot rather
-        -- than from an auction index we don't have.
-        row:SetScript("OnEnter", function()
-            if not row.group then return end
-            local it = A.sell.GetItem()
-            if not it then return end
-            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-            local shown = false
-            if GameTooltip.SetAuctionSellItem then
-                shown = pcall(function() GameTooltip:SetAuctionSellItem() end)
-            end
-            if not shown and it.link and GameTooltip.SetHyperlink then
-                shown = pcall(function() GameTooltip:SetHyperlink(it.link) end)
-            end
-            if not shown then GameTooltip:SetText(it.name or "") end
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- DELIBERATELY NO TOOLTIP on these rows. Every row here is a price
+        -- bucket for the SAME item -- the one already in the sell slot -- so a
+        -- tooltip repeats what the header shows, and anchored off a row this
+        -- far right it hangs outside the window. The Sell tab shows item
+        -- tooltips only where they tell you something you can't already see:
+        -- the "Your Bags" list and the sell slot itself.
         row:Hide()
         ui.listRows[li] = row
         li = li + 1
@@ -4646,8 +4640,11 @@ function ui.DoPost()
                     msg = msg .. " (hit the auction cap)"
                 elseif reason == "cancelled" then
                     msg = "Posting cancelled after " .. done .. "."
+                elseif reason == "nospace" then
+                    msg = msg .. " (no free bag slot to split into)"
                 elseif reason == "stuck" then
-                    msg = msg .. " (couldn't assemble a stack)"
+                    msg = msg .. " (couldn't assemble a stack \226\128\148"
+                        .. " /aex debug shows why)"
                 end
                 ui.sellStatus:SetText(msg)
                 ChatMsg("Aegis: " .. msg)

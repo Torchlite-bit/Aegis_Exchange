@@ -792,6 +792,16 @@ function sell.DepositFor(itemId, stackSize, minutes, maxStack)
     return base
 end
 
+-- Trace the posting state machine. Shares the /aex debug flag with the scanner,
+-- because "it says couldn't assemble a stack" is impossible to diagnose from
+-- the outside -- this prints which phase gave up and what the slot actually
+-- held.
+function sell.Debug(msg)
+    if A.debugScan and DEFAULT_CHAT_FRAME then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff5fc8f8Aegis post:|r " .. msg)
+    end
+end
+
 -- First postable bag slot holding at least `minCount` of the item, or nil.
 local function FindStack(itemId, minCount)
     local bag = 0
@@ -808,6 +818,46 @@ local function FindStack(itemId, minCount)
             slot = slot + 1
         end
         bag = bag + 1
+    end
+    return nil
+end
+
+-- A bag slot holding EXACTLY `count` of the item. This is the stack the
+-- assembler actually wants: the auction slot takes a whole bag stack reliably,
+-- which is why posting always worked when the bag already held the right sizes.
+local function FindExactStack(itemId, count)
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                local _, c = GetContainerItemInfo(bag, slot)
+                if (c or 0) == count then return bag, slot end
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return nil
+end
+
+-- First empty bag slot, for carving a split stack into. Backpack (0) last so we
+-- prefer real bags and leave the backpack free for loot.
+local function FindEmptySlot()
+    local order = { 1, 2, 3, 4, 0 }
+    local i = 1
+    while i <= table.getn(order) do
+        local bag = order[i]
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            if not GetContainerItemLink(bag, slot) then return bag, slot end
+            slot = slot + 1
+        end
+        i = i + 1
     end
     return nil
 end
@@ -898,6 +948,19 @@ function sell.PostTick(dt)
         return
     end
 
+    -- ASSEMBLY STRATEGY. The auction slot reliably accepts a WHOLE bag stack --
+    -- that is why posting always worked when the bags already held the right
+    -- sizes, and why every attempt that needed a genuine split failed, both
+    -- before 1.1.5 and after it. Waiting for the split to reach the cursor
+    -- (1.1.5) was necessary but not sufficient.
+    --
+    -- So we never hand the auction slot a floating split. When the bag has more
+    -- than we want, we CARVE: split the exact amount off, drop it into an empty
+    -- bag slot, wait for the bags to settle, and then post that new stack down
+    -- the same whole-stack path that has always worked. Phases:
+    --
+    --   assemble -> (exact stack exists?) -> place -> verify -> post
+    --            -> (need to carve)       -> carve -> settle -> assemble
     if job.phase == "assemble" then
         local it = sell.GetItem()
         if it and it.itemId == job.itemId and it.count == job.stackSize then
@@ -909,39 +972,90 @@ function sell.PostTick(dt)
             return
         end
         if CursorHasItem() then ClearCursor() end
-        local bag, slot = FindStack(job.itemId, job.stackSize)
-        if not bag then
-            FinishJob("out")             -- can't build another stack
+        -- An occupied slot makes ClickAuctionSellItemButton SWAP rather than
+        -- place, so empty it before we put anything in.
+        if it then sell.ClearSlot() end
+
+        -- Preferred: a bag stack that is already exactly the size we want.
+        local bag, slot = FindExactStack(job.itemId, job.stackSize)
+        if bag then
+            sell.Debug("placing exact stack from bag " .. bag .. " slot " .. slot)
+            PickupContainerItem(bag, slot)
+            job.phase = "place"
+            job.wait  = CURSOR_TIMEOUT
+            job.cool  = 0
             return
         end
-        -- CRITICAL: SplitContainerItem is for taking PART of a stack. Asking it
-        -- to split the WHOLE stack (count == what's in the slot) is a no-op on
-        -- 1.12, so the cursor stays empty, ClickAuctionSellItemButton does
-        -- nothing, verify never sees the item, and the job died with
-        -- "couldn't assemble a stack" -- which is exactly the
-        -- "Posted 0 of 1" failure, since a single full stack always hits this.
-        -- Pick the whole stack up instead when the counts match.
-        local _, slotCount = GetContainerItemInfo(bag, slot)
-        if (slotCount or 0) <= job.stackSize then
-            PickupContainerItem(bag, slot)             -- whole stack -> cursor
-        else
-            SplitContainerItem(bag, slot, job.stackSize)   -- part of it
+
+        -- Otherwise carve one off a larger stack.
+        local src, srcSlot = FindStack(job.itemId, job.stackSize + 1)
+        if not src then
+            -- Nothing big enough either. Items can be briefly absent -- a stack
+            -- we just posted leaves the bags via the server -- so retry a few
+            -- times before declaring we've run out.
+            job.finds = (job.finds or 0) + 1
+            if job.finds > MAX_RETRIES then
+                sell.Debug("no stack of " .. job.stackSize .. " left; finishing")
+                FinishJob("out")
+                return
+            end
+            job.cool = ASSEMBLE_DELAY
+            return
         end
-        -- Do NOT click the sell button in this same tick. PickupContainerItem
-        -- puts the stack on the cursor immediately (client-side), but
-        -- SplitContainerItem needs a SERVER ROUND-TRIP on 1.12 -- so clicking
-        -- now fires against an empty cursor, the sell slot stays empty, verify
-        -- fails, and the retry loop burns MAX_RETRIES and reports "couldn't
-        -- assemble a stack". That is precisely why posting worked when the bag
-        -- already held correctly-sized stacks (the instant Pickup path) and
-        -- failed whenever an actual split was required.
-        job.phase = "cursor"
+        job.finds = 0
+        local eb, es = FindEmptySlot()
+        if not eb then
+            sell.Debug("no free bag slot to carve into")
+            FinishJob("nospace")
+            return
+        end
+        sell.Debug("carving " .. job.stackSize .. " off bag " .. src
+            .. " slot " .. srcSlot .. " into bag " .. eb .. " slot " .. es)
+        job.carveBag, job.carveSlot = eb, es
+        SplitContainerItem(src, srcSlot, job.stackSize)
+        job.phase = "carve"
         job.wait  = CURSOR_TIMEOUT
         job.cool  = 0
-    elseif job.phase == "cursor" then
-        -- Wait for the split/pickup to land on the cursor, then hand it to the
-        -- sell slot. Polled per frame, so an instant pickup costs a single tick
-        -- and a slow split costs only as long as it genuinely needs.
+
+    elseif job.phase == "carve" then
+        -- SplitContainerItem is a server round-trip; wait for the cursor, then
+        -- drop the carved stack into the empty slot we reserved.
+        if CursorHasItem() then
+            PickupContainerItem(job.carveBag, job.carveSlot)
+            job.phase = "settle"
+            job.wait  = CURSOR_TIMEOUT
+            job.cool  = 0
+            return
+        end
+        job.wait = job.wait - (dt or 0)
+        if job.wait <= 0 then
+            sell.Debug("split never reached the cursor")
+            job.retries = job.retries + 1
+            if job.retries > MAX_RETRIES then FinishJob("stuck"); return end
+            job.phase = "assemble"
+            job.cool  = ASSEMBLE_DELAY
+        end
+
+    elseif job.phase == "settle" then
+        -- Wait for the bags to actually show the new stack, then let assemble
+        -- pick it up down the proven whole-stack path.
+        if FindExactStack(job.itemId, job.stackSize) then
+            if CursorHasItem() then ClearCursor() end
+            job.phase = "assemble"
+            job.cool  = 0
+            return
+        end
+        job.wait = job.wait - (dt or 0)
+        if job.wait <= 0 then
+            sell.Debug("carved stack never appeared in the bags")
+            job.retries = job.retries + 1
+            if job.retries > MAX_RETRIES then FinishJob("stuck"); return end
+            job.phase = "assemble"
+            job.cool  = ASSEMBLE_DELAY
+        end
+
+    elseif job.phase == "place" then
+        -- Wait for the pickup to land on the cursor, then hand it to the slot.
         if CursorHasItem() then
             ClickAuctionSellItemButton()               -- cursor -> sell slot
             job.phase = "verify"
@@ -950,14 +1064,13 @@ function sell.PostTick(dt)
         end
         job.wait = job.wait - (dt or 0)
         if job.wait <= 0 then
+            sell.Debug("pickup never reached the cursor")
             job.retries = job.retries + 1
-            if job.retries > MAX_RETRIES then
-                FinishJob("stuck")
-                return
-            end
+            if job.retries > MAX_RETRIES then FinishJob("stuck"); return end
             job.phase = "assemble"
             job.cool  = ASSEMBLE_DELAY
         end
+
     elseif job.phase == "verify" then
         local it = sell.GetItem()
         if it and it.itemId == job.itemId and it.count == job.stackSize then
@@ -974,7 +1087,15 @@ function sell.PostTick(dt)
                 job.callbacks.onProgress(job.posted, job.requested)
             end
         else
-            -- Assembly didn't land yet; retry a few times, then give up.
+            -- Assembly didn't land yet; retry a few times, then give up. The
+            -- trace names what the slot actually held, which is the one thing
+            -- "couldn't assemble a stack" never told anybody.
+            local got = "empty"
+            if it then
+                got = tostring(it.itemId) .. " x" .. tostring(it.count)
+            end
+            sell.Debug("verify: slot has " .. got .. ", wanted "
+                .. tostring(job.itemId) .. " x" .. tostring(job.stackSize))
             job.retries = job.retries + 1
             if job.retries > MAX_RETRIES then
                 FinishJob("stuck")

@@ -12,6 +12,56 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.1.8]
+
+### Fixed
+- **"couldn't assemble a stack" — actually fixed this time.** Posting anything
+  that needed a genuine split still failed after 1.1.5. The auction slot
+  reliably takes a *whole bag stack*, which is exactly why posting always
+  worked when your bags already held the right sizes and never worked when
+  Aegis had to do the splitting. Waiting for the split to reach the cursor
+  (1.1.5) was necessary but not enough.
+  Aegis now **carves**: it splits the amount off into a spare bag slot, waits
+  for the bags to settle, then posts that new stack down the whole-stack path
+  that always worked. Posting 19 as 2×9, or 9+19 as 3×9, both work now.
+- With **no free bag slot** there's nowhere to carve into, so it says
+  *"no free bag slot to split into"* instead of grinding through retries and
+  blaming the stack assembler.
+- `/aex debug` now traces the posting state machine — which phase gave up, and
+  what the sell slot actually held when it did. "Couldn't assemble a stack"
+  never told anyone anything; if it happens again, that trace will.
+
+### Changed
+- **No more tooltips on the Sell tab's listings rows.** Every row there is the
+  same item that's already in the sell slot, so the tooltip just repeated the
+  header — and anchored that far right it hung off the side of the window.
+  Tooltips stay where they tell you something you can't already see: the
+  **Your Bags** list and the sell slot itself.
+- The listings table's **Unit price** column is inset 4px instead of sitting
+  flush against the row border, where it read as clipped.
+
+## [1.1.7]
+
+### Added
+- **Integration surface for the companion addon, [Aegis: Courier](https://github.com/Torchlite-bit).**
+  Courier owns the mailbox; this is the seam it pushes through, so it never
+  touches Aegis's saved tables directly and our internals stay free to change:
+  - `AegisExchange.RecordExternalTxn(txn)` — log a sale/purchase Courier
+    matched. Validates the payload and refuses bad ones with a reason rather
+    than corrupting the ledger.
+  - `AegisExchange.MailTxnKey(subject, money, daysLeft)` — the dedup key Aegis
+    has always used for auction mail. Shared deliberately: if you ran Aegis
+    alone for a while, those mails are already in your ledger under these keys,
+    so Courier generating keys through it means installing Courier **doesn't
+    re-count everything you'd already banked**.
+  - `AegisExchange.ClaimMailScanning(name)` / `ReleaseMailScanning()` —
+    Aegis's own mail scanner stands down while Courier owns the inbox. Two
+    scanners on one mailbox means every sale counted twice.
+  - `AegisExchange.INTEGRATION_VERSION` — so a future signature change is a
+    detectable mismatch instead of a silent miscount.
+
+  No effect at all unless a companion addon is installed.
+
 ## [1.1.6]
 
 ### Changed
@@ -373,6 +423,8 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.1.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.1.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

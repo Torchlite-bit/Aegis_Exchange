@@ -22,10 +22,15 @@ A.name    = "Aegis_Exchange"   -- must match the folder / .toc / ADDON_LOADED
 -- Shown in the window title bar and printed at load. Bump on EVERY push the
 -- user will test — it is the only reliable way to know which build produced
 -- an in-game bug report.
-A.version = "1.1.6"
+A.version = "1.1.8"
 
 -- Detect Turtle WoW. Turtle exposes a global TURTLE_WOW_VERSION.
 A.isTurtle = (TURTLE_WOW_VERSION ~= nil)
+
+-- Companion-addon integration (Aegis: Courier) is defined in core/db.lua, next
+-- to the ledger it writes into: A.INTEGRATION_VERSION, A.RecordExternalTxn,
+-- A.MailTxnKey, A.ClaimMailScanning / A.ReleaseMailScanning and
+-- A.MailScanningExternal. That block is the whole public contract.
 
 -- ---------------------------------------------------------------------------
 -- Event dispatch

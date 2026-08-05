@@ -46,25 +46,55 @@ better attribution available, and it self-corrects within `KEEP_DAYS` as fresh
 scans age the old dailies out. Discarding history on upgrade would have been
 worse for everyone.
 
-### 0.2 Aegis: Courier integration surface
-**Decided** (contract; implementation is this phase's task). Expose the
-seam Courier will build against, so that repo has something stable from day
-one instead of chasing a moving target:
+### 0.2 Aegis: Courier integration surface — ✅ **DONE** (v1.1.7)
 
-- `AegisExchange.RecordExternalTxn(...)` (naming TBD at implementation time)
-  — the one function Courier calls to push a matched mail transaction into
-  Aegis's ledger. Courier never touches `AegisExchangeDB`'s internal shape
-  directly; this function is the whole contract, so Aegis's internals can
-  keep changing freely as long as the signature holds.
-- `AegisExchange.INTEGRATION_VERSION` (or similar) — a small version number
-  Courier checks so a future signature change is a detectable mismatch, not
-  a silent miscount.
-- Aegis's existing built-in mail scanner (`ui/frame.lua` `ScanMailSales` /
-  `AuctionSoldItem`, shipped 0.17.0) detects Courier at `ADDON_LOADED` and
-  **stands down** — skips installing its own mail hook — so a user running
-  both addons never gets double-hooked mailbox handlers or double-counted
-  sales. Courier becomes sole owner of mail scanning the moment it's
-  installed; Aegis's own scanner is only active when Courier isn't present.
+Shipped in `core/db.lua` under a single "Companion-addon integration surface"
+block — that block is the whole contract. **This is what Courier calls:**
+
+```lua
+-- Guard every use; Aegis may not be installed.
+if AegisExchange and AegisExchange.INTEGRATION_VERSION then
+
+    -- 1. Take ownership of the mailbox. Aegis's own scanner stands down.
+    --    Call from Courier's ADDON_LOADED.
+    AegisExchange.ClaimMailScanning("Aegis: Courier")
+
+    -- 2. Build the dedup key for an auction mail THROUGH THIS HELPER.
+    local key = AegisExchange.MailTxnKey(subject, money, daysLeft)
+
+    -- 3. Push the matched transaction.
+    local ok, why = AegisExchange.RecordExternalTxn({
+        kind   = "sale",        -- or "buy"
+        item   = "Silk Cloth",
+        amount = netProceeds,   -- copper, AFTER the 5% cut (what actually
+                                -- arrived in the mail)
+        itemId = 4306,          -- optional
+        key    = key,           -- optional; repeats are ignored
+    })
+end
+```
+
+`RecordExternalTxn` returns `true`, or `false` plus a short reason
+(`"duplicate"`, `"kind must be 'sale' or 'buy'"`, …) so Courier can surface
+failures rather than miscounting silently. `INTEGRATION_VERSION` is currently
+**1**; it bumps whenever a signature or field meaning changes.
+
+**Why `MailTxnKey` is exposed rather than left internal.** A user who ran Aegis
+alone already has auction mails in the ledger under *Aegis's* keys. If Courier
+invented its own key scheme it would re-report those mails and double-count
+every one of them on the day Courier is installed. Generating keys through the
+shared helper makes the handover seamless. This matters more than it looks — it
+is the single most likely way the integration could corrupt someone's history.
+
+**Mail ownership** is an explicit handshake (`ClaimMailScanning` /
+`ReleaseMailScanning`) rather than Aegis sniffing for a global, because explicit
+survives Courier being renamed. There *is* a global-name fallback for a Courier
+that loads without claiming, but it is a safety net, not the contract.
+
+> ⚠️ **Open, for the Courier session to close:** that fallback currently guesses
+> at `AegisCourier` / `Aegis_Courier`. Once Courier settles its real addon
+> global, trim `COURIER_GLOBALS` in `core/db.lua` to the true name. Harmless
+> either way as long as Courier calls `ClaimMailScanning`.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 
