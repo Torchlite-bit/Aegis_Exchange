@@ -305,20 +305,24 @@ local function ApplyUndercut(ref)
     return under
 end
 
+-- The price the competition is asking, per unit -- the reference both pricing
+-- buttons work from. Prefer the freshest thing we have: the lowest OTHER
+-- seller from the last item scan; else the DB's min buyout / market.
+-- Returns copper, or nil if we have no data for the item.
+function sell.MatchUnit(itemId)
+    local low = sell.LowestListingUnit(true)
+    if low and low > 1 then return low end
+    local s = sell.Suggest(itemId)
+    if not s then return nil end
+    return s.minBuyout or s.market
+end
+
 -- Per-unit price to undercut the cheapest seen buyout (falls back to market
 -- value). Returns copper, or nil if we have no data for the item.
 function sell.UndercutUnit(itemId)
-    -- Prefer the freshest thing we have: the lowest OTHER seller from the last
-    -- item scan; else the DB's min buyout / market. Both get the same percent.
-    local low = sell.LowestListingUnit(true)
-    if low and low > 1 then
-        return ApplyUndercut(low)
-    end
-    local s = sell.Suggest(itemId)
-    if not s then return nil end
-    local base = s.minBuyout or s.market
-    if not base then return nil end
-    return ApplyUndercut(base)
+    local ref = sell.MatchUnit(itemId)
+    if not ref then return nil end
+    return ApplyUndercut(ref)
 end
 
 -- ---------------------------------------------------------------------------

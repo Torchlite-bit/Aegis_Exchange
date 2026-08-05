@@ -12,6 +12,48 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.2.0]
+
+### Added
+- **Window scale** (Aegis tab). Resizing and scaling answer different questions:
+  a taller window shows *more rows* — vanilla frames never reflow, so that is
+  all it can do — while scale makes the same window physically bigger or
+  smaller. On a large monitor you want both. Steps of 5% between 70% and 150%,
+  with a Reset, remembered per character.
+- **Price match** alongside **Undercut** on the Sell tab. Undercut works from
+  the competition's price with your undercut rule applied; Price match uses
+  that same reference price untouched, for when you would rather sit level with
+  the cheapest seller than start a race to the bottom.
+
+### Changed
+- **The Sell tab is two columns.** The left half is *what am I posting* — both
+  sliders stacked, duration under them; the right half is *for how much* — the
+  two pricing buttons above the bid and buyout rows they write into. They used
+  to interleave on shared rows, which meant reading a price and reading a stack
+  size were the same eye movement.
+- **The flat undercut is entered in gold / silver / copper**, the same widget
+  the Sell tab's bid and buyout use, instead of typing `1s 50c` into a text
+  box. One way to type a price everywhere in the addon.
+- The Sell tab's **History block is gone**. The scan median, minimum buyout and
+  vendor price still sit on the line under the item name, and what things have
+  actually sold for lives on the History tab.
+- The posting status line moved to its own row under the buttons — squeezed
+  onto the duration row it had about 160px before it ran into the price column,
+  which is not enough for `Item 7 of 23 — Elemental Earth`.
+- Minimum window height is 472 (was 460), so the roomier Sell controls do not
+  cost the smallest window a row in its lists.
+
+### Fixed
+- **A taller window now fills with rows instead of growing around them.**
+  Releasing the resize grip refreshed the scan strip but never repainted the
+  open tab, so every list kept the row count it was last drawn with and the
+  extra height went to empty space (or, in the bag list, to more scrolling).
+- A saved window scale is re-applied on login even when the window was never
+  resized — the two are stored independently, and restoring bailed out early
+  when there was no saved size.
+
+---
+
 ## [1.1.9]
 
 ### Added
@@ -466,6 +508,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.2.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

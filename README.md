@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.1.9)
+# Aegis: Exchange (v1.2.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -62,16 +62,18 @@ need (all your tailoring mats, say) and search the whole list in one click.
 
 ### 💰 Sell — price it right the first time
 Drop an item in and Aegis scans the AH for *just that item*, shows you every
-competing listing, and pre-fills your price. **Undercut** by a percentage or a
-flat amount (yes, 1 copper works). Post **multiple stacks at once** — "3 stacks
-of 20" — with an approximate deposit and your listing count against the 120-auction
-cap. Click any competitor's row to steal their price.
+competing listing, and pre-fills your price. Two columns: on the left *what
+you're posting* — stack size and stack count on interlocking sliders, duration
+underneath; on the right *for how much* — **Undercut** (by a percentage or a
+flat amount; yes, 1 copper works) or **Price match** to sit level with the
+cheapest seller, above bid and buyout in gold / silver / copper.
 
-A **History** panel shows what your scans say the item is worth (median, the
-range you've seen, how many days of data) next to what it has **actually sold
-for** from your mailbox. And after a **bag scan**, Aegis loads the first item
-into the sell slot and walks you down the list — **Post** or **Skip** moves to
-the next one, so you can clear a full bag without clicking back and forth.
+Post **multiple stacks at once** — "3 stacks of 20" — with an approximate
+deposit and your listing count against the 120-auction cap. Click any
+competitor's row to steal their price. And after a **bag scan**, Aegis loads the
+first item into the sell slot and walks you down the list — **Post** or **Skip**
+moves to the next one, so you can clear a full bag without clicking back and
+forth.
 
 ### 🏪 Vendor list — some things just aren't worth listing
 Not everything belongs on the auction house. Hit **Vendor** on the Sell tab and
@@ -111,16 +113,17 @@ records every "Auction successful" for you. Purchases get logged when you buy.
 Then it tells you **Income · Spent · Net** over the last 24h, 7d, 30d, or all
 time.
 
-### 🪟 Resize it
-Drag the grip in the bottom-right corner. The lists re-fit as you drag, so a
-taller window shows **more rows** rather than more blank space. Your size is
-remembered per character.
+### 🪟 Resize it — or scale it
+Drag the grip in the bottom-right corner. The lists re-fit as you let go, so a
+taller window shows **more rows** rather than more blank space. Vanilla frames
+never reflow, so that's all size can do — for *bigger*, there's a **window
+scale** on the Aegis tab (70%–150%). Both are remembered per character.
 
 ### 🔍 Aegis tab — scanning + settings
 Run a full scan, a category-targeted scan, or scan everything in your bags to
 price it. Pause, resume, or **stop** whenever. Plus your defaults: post duration,
-undercut rule (% or flat), auto-fill price, tooltip lines, profit line, and the
-pfUI skin — all in one place.
+undercut rule (% or flat, entered in coins), auto-fill price, window scale,
+tooltip lines, profit line, and the pfUI skin — all in one place.
 
 ### 💬 Tooltips everywhere
 Bags, inventory, the auction house, merchants, the mailbox, **loot windows,
@@ -246,7 +249,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.1.9`) — quote it.
+1. Check the **version** in the window's title bar (`v1.2.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
