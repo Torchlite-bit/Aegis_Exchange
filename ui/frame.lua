@@ -117,6 +117,23 @@ function ui.RestoreWindowSize()
     ui.frame:SetHeight(h)
 end
 
+-- Skin any rows in `pool` that were grown after the skin's one-shot pass.
+-- Flagged per row so this stays cheap on the paint path -- it runs on every
+-- list update, but only ever does work the first time a row appears.
+function ui.SkinNewRows(pool)
+    if not pool or not A.skin or not A.skin.SkinNew then return end
+    local i = 1
+    local n = table.getn(pool)
+    while i <= n do
+        local row = pool[i]
+        if row and not row.aegisRowSkinned then
+            row.aegisRowSkinned = true
+            A.skin.SkinNew(row)
+        end
+        i = i + 1
+    end
+end
+
 -- How many rows of `rowH` actually fit in `scroll` at its current height,
 -- clamped to [minRows, maxRows]. This is what makes a taller window show more
 -- listings instead of more blank space: every list asks at paint time rather
@@ -287,10 +304,14 @@ function ui.BuildWindow()
     if f.SetMinResize then f:SetMinResize(MIN_W, MIN_H) end
     if f.SetMaxResize then f:SetMaxResize(MAX_W, MAX_H) end
 
+    -- On the OUTER border, not inside the content well. The well is inset 14
+    -- right / 16 bottom, so a 16px grip at -6,6 spanned 6..22 -- more than half
+    -- of it sitting inside the recessed panel. 14px at -2,2 spans 2..16, which
+    -- lands it on the frame's own border where a resize handle belongs.
     local grip = CreateFrame("Button", "AegisExchangeResizeGrip", f)
-    grip:SetWidth(16)
-    grip:SetHeight(16)
-    grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -6, 6)
+    grip:SetWidth(14)
+    grip:SetHeight(14)
+    grip:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
     grip:SetFrameLevel(f:GetFrameLevel() + 12)
     grip.aegisNoSkin = true
     local gripTex = grip:CreateTexture(nil, "OVERLAY")
@@ -1274,8 +1295,15 @@ end
 -- only the presentation changed.
 local function MakeMoneyGSC(parent, onChange)
     local grp = {}
-    -- Blizzard's own coin art, the same textures the stock money frame uses --
-    -- so a price here reads exactly like a price anywhere else in the game.
+    -- Blizzard's own coin art, the same the stock money frame uses -- so a
+    -- price here reads exactly like a price anywhere else in the game.
+    --
+    -- 1.12 has no per-denomination icon files. There is ONE sprite sheet,
+    -- UI-MoneyIcons, holding gold/silver/copper side by side, and the stock UI
+    -- picks one with SetTexCoord. Pointing at "UI-GoldIcon" (which is how later
+    -- clients do it) resolves to nothing at all, which is why the coins were
+    -- invisible rather than wrong.
+    local COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
     local function mk(w, coin)
         local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
         e:SetWidth(w)
@@ -1291,16 +1319,19 @@ local function MakeMoneyGSC(parent, onChange)
         end)
         -- `tag` stays the name the layout anchors off, texture or not.
         local tag = parent:CreateTexture(nil, "OVERLAY")
-        tag:SetTexture("Interface\\MoneyFrame\\UI-" .. coin .. "Icon")
+        tag:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
+        local u = COIN_U[coin] or 0
+        tag:SetTexCoord(u, u + 0.25, 0, 1)
         tag:SetWidth(13)
         tag:SetHeight(13)
         tag:SetPoint("LEFT", e, "RIGHT", 2, 0)
         e.tag = tag
+        e.coin = coin
         return e
     end
-    grp.g = mk(34, "Gold")
-    grp.s = mk(22, "Silver")
-    grp.c = mk(22, "Copper")
+    grp.g = mk(34, "gold")
+    grp.s = mk(22, "silver")
+    grp.c = mk(22, "copper")
 
     grp.GetText = function(self)
         local gg = tonumber(self.g:GetText()) or 0
@@ -1915,6 +1946,7 @@ function ui.UpdateBuySidebar()
     local flat = ui.buyFlat or {}
     local vis = ui.RowsFor(ui.buySideScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
     ui.GrowBuySideRows(vis)
+    ui.SkinNewRows(ui.buySideRows)
     FauxScrollFrame_Update(ui.buySideScroll, table.getn(flat), vis, SIDE_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.buySideScroll)
     local i = 1
@@ -2142,6 +2174,7 @@ function ui.UpdateBuyList()
     local total = table.getn(rows)
     local vis = ui.RowsFor(ui.buyScroll, BUY_ROW_H, BUY_ROWS, BUY_ROWS_MAX)
     ui.GrowBuyRows(vis)
+    ui.SkinNewRows(ui.buyRows)
     FauxScrollFrame_Update(ui.buyScroll, total, vis, BUY_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.buyScroll)
 
@@ -2499,6 +2532,7 @@ function ui.UpdateCraftTree()
     local vis = ui.RowsFor(ui.craftSideScroll, CSIDE_ROW_H, CSIDE_ROWS,
         CSIDE_ROWS_MAX)
     ui.GrowCraftSideRows(vis)
+    ui.SkinNewRows(ui.craftSideRows)
     FauxScrollFrame_Update(ui.craftSideScroll, table.getn(flat),
         vis, CSIDE_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.craftSideScroll)
@@ -2741,6 +2775,7 @@ function ui.UpdateCraftList()
     local total = table.getn(rows)
     local vis = ui.RowsFor(ui.craftScroll, CRAFT_ROW_H, CRAFT_ROWS, CRAFT_ROWS_MAX)
     ui.GrowCraftRows(vis)
+    ui.SkinNewRows(ui.craftRows)
     FauxScrollFrame_Update(ui.craftScroll, total, vis, CRAFT_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.craftScroll)
 
@@ -3132,6 +3167,7 @@ function ui.UpdateAuctionsList()
 
     local vis = ui.RowsFor(ui.aucScroll, AUC_ROW_H, AUC_ROWS, AUC_ROWS_MAX)
     ui.GrowAucRows(vis)
+    ui.SkinNewRows(ui.aucRows)
     FauxScrollFrame_Update(ui.aucScroll, total, vis, AUC_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.aucScroll)
     local i = 1
@@ -3486,6 +3522,7 @@ function ui.UpdateHistoryList()
     local total = table.getn(rows)
     local vis = ui.RowsFor(ui.histScroll, HIST_ROW_H, HIST_ROWS, HIST_ROWS_MAX)
     ui.GrowHistRows(vis)
+    ui.SkinNewRows(ui.histRows)
     FauxScrollFrame_Update(ui.histScroll, total, vis, HIST_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.histScroll)
     local i = 1
@@ -4053,6 +4090,7 @@ function ui.UpdateBagList()
     local flat = ui.bagFlat or {}
     local vis = ui.RowsFor(ui.bagScroll, BAG_ROW_H, BAG_ROWS, BAG_ROWS_MAX)
     ui.GrowBagRows(vis)
+    ui.SkinNewRows(ui.bagRows)
     FauxScrollFrame_Update(ui.bagScroll, table.getn(flat), vis, BAG_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.bagScroll)
     local i = 1
@@ -4273,6 +4311,7 @@ function ui.UpdateListingsList()
         ui.sellSortKey or "unit", ui.sellSortDir or "asc")
     local vis = ui.RowsFor(ui.listScroll, LIST_ROW_H, LIST_ROWS, LIST_ROWS_MAX)
     ui.GrowListRows(vis)
+    ui.SkinNewRows(ui.listRows)
     FauxScrollFrame_Update(ui.listScroll, table.getn(groups), vis, LIST_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.listScroll)
 

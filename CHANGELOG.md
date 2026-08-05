@@ -35,7 +35,8 @@ printed in the window title bar — quote it in bug reports.
 - **Prices are entered in gold / silver / copper**, one box each with the
   game's own coin icons, like the stock auction house — instead of typing
   `1g 88s`.
-- **The window resizes.** Grab the grip in the bottom-right corner and drag.
+- **The window resizes.** Grab the grip on the frame's bottom-right corner and
+  drag.
   Every list re-fits itself to the new height as you go, so a taller window
   shows **more rows**, not more empty space — up to ~3x the listings on the
   Sell and Buy tabs. Bounded to sensible limits (the old fixed size is the
