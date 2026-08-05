@@ -269,6 +269,20 @@ function skin.ApplyExternal()
     end
 end
 
+-- Skin a widget built AFTER the initial pass.
+--
+-- skin.Apply is deliberately one-shot, which was fine while every widget
+-- existed by the time it ran. Resizable lists changed that: rows are grown on
+-- demand, so a window dragged taller gains rows the skin never saw -- and you
+-- get skinned rows sitting directly above unskinned ones. Callers hand each
+-- new row here once.
+function skin.SkinNew(frame)
+    if not skin.Enabled() or not frame then return end
+    if not Env() then return end
+    SkinWidget(frame)
+    SkinTree(frame, 0)
+end
+
 -- Re-skin the lazily-built overlays the first time they appear.
 function skin.ApplyOverlay(frame)
     if not skin.Enabled() or not frame then return end
