@@ -52,13 +52,21 @@ local MakeMoneyGSC, MakeHSlider, SetSliderRange
 -- Window size bounds. The minimum is the old fixed size -- below it the Sell
 -- tab's header rows start colliding -- and the maximum is generous enough for
 -- a big monitor without letting the window escape a small one.
-local MIN_W, MIN_H = 832, 472
+local MIN_W, MIN_H = 832, 492
 local MAX_W, MAX_H = 1400, 900
 
--- Height of the Sell tab's control block -- everything above the divider. The
--- bag list and the listings table both hang off it, so the whole tab shifts
+-- Sell tab control block, top to bottom: a header band carrying the item and
+-- the four money figures, a control grid, then the action bar. The bag list
+-- and the listings table both hang off SELL_TOP_H, so the whole tab shifts
 -- together when the controls change.
-local SELL_TOP_H = 146
+local SELL_HEAD_H = 46    -- header band
+local SELL_FOOT_Y = 136   -- action bar starts here
+local SELL_TOP_H  = 166   -- ...and the whole block ends here
+
+-- The g/s/c triplet plus its coin icons, measured from its label's right edge.
+-- Both money rows hang this far in from the panel's right edge so the copper
+-- box lands exactly on it.
+local PRICE_GSC_W = 139
 
 -- Sub-tab order, left to right. "Scan" hosts the scanner controls (Full Scan /
 -- Pause / Resume / Stop / Categories + status and progress) and the settings
@@ -1458,9 +1466,12 @@ MakeMoneyGSC = function(parent, onChange)
         if not copper or copper <= 0 then
             self.g:SetText(""); self.s:SetText(""); self.c:SetText("")
         else
+            -- Blank LEADING zeros only. Gold already did this and silver did
+            -- not, so 11c drew as [ ][0][11] -- an empty box beside a zero
+            -- reads as a missing value rather than "no silver".
             local gg, ss, cc = util.MoneyParts(copper)
             self.g:SetText(gg > 0 and tostring(gg) or "")
-            self.s:SetText(tostring(ss))
+            self.s:SetText((gg > 0 or ss > 0) and tostring(ss) or "")
             self.c:SetText(tostring(cc))
         end
         self.quiet = false
@@ -3701,11 +3712,30 @@ function ui.BuildSellTab()
     ui.sellBuilt = true
     ui.sellDuration = A.db.Setting("duration") or A.sell.DEFAULT_DURATION
 
-    -- ---- Header: sell slot + item context -------------------------------
+    -- ------------------------------------------------------------------
+    -- HEADER BAND -- what you're selling, and what it comes to.
+    --
+    -- Four figures used to be four loose right-aligned strings that each
+    -- carried their own label ("Deposit ~1c (approx)", "1 x 11c = 11c").
+    -- As columns with a caption above the value they read at a glance and
+    -- stop competing with the item name for the same eye.
+    -- ------------------------------------------------------------------
+    local band = panel:CreateTexture(nil, "BACKGROUND")
+    band:SetTexture(C.titleBG[1], C.titleBG[2], C.titleBG[3], 0.85)
+    band:SetHeight(SELL_HEAD_H)
+    band:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    band:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
+
+    local bandEdge = panel:CreateTexture(nil, "ARTWORK")
+    bandEdge:SetTexture(C.border[1], C.border[2], C.border[3], 0.30)
+    bandEdge:SetHeight(1)
+    bandEdge:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -SELL_HEAD_H)
+    bandEdge:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_HEAD_H)
+
     local slot = CreateFrame("Button", "AegisExchangeSellSlot", panel)
-    slot:SetWidth(40)
-    slot:SetHeight(40)
-    slot:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -12)
+    slot:SetWidth(36)
+    slot:SetHeight(36)
+    slot:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -5)
     slot:SetBackdrop({
         bgFile = "Interface\\Buttons\\UI-EmptySlot",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -3740,90 +3770,81 @@ function ui.BuildSellTab()
     ui.sellSlot = slot
 
     ui.sellName = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.sellName:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -1)
+    ui.sellName:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -2)
     ui.sellName:SetJustifyH("LEFT")
     ui.sellName:SetText("Click a bag item, or drag one here")
-    ui.sellName:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.sellName:SetTextColor(0.94, 0.87, 0.70)
 
     ui.sellCtx = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellCtx:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -20)
+    ui.sellCtx:SetPoint("TOPLEFT", slot, "TOPRIGHT", 10, -21)
     ui.sellCtx:SetJustifyH("LEFT")
     ui.sellCtx:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    -- Vendor comparison lives in the RIGHT column (below the cap count) so it
-    -- can't collide with the unit-price row that sits just under the slot.
-    ui.sellVendor = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellVendor:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -60)
-    ui.sellVendor:SetJustifyH("RIGHT")
+    -- A summary column: dim caption on top, value under it, both right-aligned
+    -- on the same x so the four read as a row of figures.
+    local function statCol(dx, caption)
+        local cap = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cap:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -dx, -7)
+        cap:SetJustifyH("RIGHT")
+        cap:SetText(caption)
+        cap:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        local val = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        val:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -dx, -22)
+        val:SetJustifyH("RIGHT")
+        val:SetTextColor(C.text[1], C.text[2], C.text[3])
+        return val
+    end
+    ui.sellCap     = statCol(12,  "Listings")
+    ui.sellNet     = statCol(88,  "After cut")
+    ui.sellDeposit = statCol(166, "Deposit")
+    ui.sellTotal   = statCol(240, "Total")
+    ui.sellTotal:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
-    -- Deposit / total / cap count, right-aligned.
-    ui.sellDeposit = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellDeposit:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -12)
-    ui.sellDeposit:SetJustifyH("RIGHT")
-    ui.sellDeposit:SetTextColor(C.text[1], C.text[2], C.text[3])
+    -- ------------------------------------------------------------------
+    -- CONTROL GRID -- left column is what you're posting, right column is
+    -- for how much. One shared baseline per row, so the two line up.
+    -- ------------------------------------------------------------------
+    local ROW1, ROW2, ROW3 = -58, -82, -106
 
-    ui.sellTotal = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellTotal:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -28)
-    ui.sellTotal:SetJustifyH("RIGHT")
-    ui.sellTotal:SetTextColor(C.text[1], C.text[2], C.text[3])
+    -- Right-aligned caption in a fixed gutter: every control below starts at
+    -- the same x whatever the label says.
+    local function gutter(text, y)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, y)
+        fs:SetWidth(70)
+        fs:SetJustifyH("RIGHT")
+        fs:SetText(text)
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        return fs
+    end
 
-    ui.sellCap = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellCap:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -44)
-    ui.sellCap:SetJustifyH("RIGHT")
-
-    -- ---- LEFT column: what to post --------------------------------------
-    -- Two stacked sliders and the duration under them. Sliders because picking
-    -- a stack size is a "how do I want to split this" decision, not a number
-    -- you know up front -- dragging shows the trade-off immediately, and the
-    -- two are linked: a bigger stack means fewer of them.
-    --
-    -- The split into columns is deliberate: the left half answers "what am I
-    -- putting up", the right half "for how much". They used to interleave on
-    -- shared rows, which meant reading a price and reading a stack size were
-    -- the same eye movement.
-    local sizeLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sizeLabel:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -6)
-    sizeLabel:SetWidth(66)
-    sizeLabel:SetJustifyH("LEFT")
-    sizeLabel:SetText("Stack size:")
-    sizeLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
+    -- Sliders because picking a stack size is a "how do I want to split this"
+    -- decision, not a number you know up front -- dragging shows the trade-off
+    -- immediately, and the two are linked: a bigger stack means fewer of them.
+    local sizeLabel = gutter("Stack size", ROW1)
     ui.sellStackSize = MakeNumBox(panel, 34, function()
         ui.SyncSellPrices("size")
     end)
-
-    ui.sellSizeSlider = MakeHSlider(panel, 104, function(v)
+    ui.sellSizeSlider = MakeHSlider(panel, 150, function(v)
         ui.sellStackSize:SetText(tostring(math.floor(v)))
         ui.SyncSellPrices("size")
     end)
-    ui.sellSizeSlider:SetPoint("LEFT", sizeLabel, "RIGHT", 6, 0)
+    ui.sellSizeSlider:SetPoint("LEFT", sizeLabel, "RIGHT", 10, 0)
     ui.sellStackSize:SetPoint("LEFT", ui.sellSizeSlider, "RIGHT", 8, 0)
 
-    local cntLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    cntLabel:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -8)
-    cntLabel:SetWidth(66)
-    cntLabel:SetJustifyH("LEFT")
-    cntLabel:SetText("Stacks:")
-    cntLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
+    local cntLabel = gutter("Stacks", ROW2)
     ui.sellNumStacks = MakeNumBox(panel, 34, function() ui.RefreshSell() end)
-
-    ui.sellCountSlider = MakeHSlider(panel, 104, function(v)
+    ui.sellCountSlider = MakeHSlider(panel, 150, function(v)
         ui.sellNumStacks:SetText(tostring(math.floor(v)))
         ui.RefreshSell()
     end)
-    ui.sellCountSlider:SetPoint("LEFT", cntLabel, "RIGHT", 6, 0)
+    ui.sellCountSlider:SetPoint("LEFT", cntLabel, "RIGHT", 10, 0)
     ui.sellNumStacks:SetPoint("LEFT", ui.sellCountSlider, "RIGHT", 8, 0)
 
     ui.sellMaxInfo = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ui.sellMaxInfo:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 10, 0)
 
-    -- Duration, directly under the sliders.
-    local durLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    durLabel:SetPoint("TOPLEFT", cntLabel, "BOTTOMLEFT", 0, -10)
-    durLabel:SetText("Duration:")
-    durLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
+    local durLabel = gutter("Duration", ROW3)
     ui.sellDurBtns = {}
     local prev = nil
     local di = 1
@@ -3835,7 +3856,7 @@ function ui.BuildSellTab()
         if prev then
             b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else
-            b:SetPoint("LEFT", durLabel, "RIGHT", 8, 0)
+            b:SetPoint("LEFT", durLabel, "RIGHT", 10, 0)
         end
         b:SetText(d.label)
         b.minutes = d.minutes
@@ -3848,46 +3869,16 @@ function ui.BuildSellTab()
         di = di + 1
     end
 
-    local post = CreateFrame("Button", "AegisExchangeSellPostButton",
-        panel, "UIPanelButtonTemplate")
-    post:SetWidth(110)
-    post:SetHeight(22)
-    post:SetPoint("LEFT", prev, "RIGHT", 14, 0)
-    post:SetText("Post")
-    post:SetScript("OnClick", function()
-        ui.ConfirmPost()
-    end)
-    ui.sellPostBtn = post
-
-    local skip = CreateFrame("Button", "AegisExchangeSellSkipButton",
-        panel, "UIPanelButtonTemplate")
-    skip:SetWidth(60)
-    skip:SetHeight(22)
-    skip:SetPoint("LEFT", post, "RIGHT", 6, 0)
-    skip:SetText("Skip")
-    skip:SetScript("OnClick", function()
-        ui.SkipSell()
-    end)
-    ui.sellSkipBtn = skip
-
-    -- Status gets its own line under the buttons. Squeezed onto the duration
-    -- row it had ~160px before it ran into the price column, which is not
-    -- enough for "Item 7 of 23 -- Elemental Earth".
-    ui.sellStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.sellStatus:SetPoint("TOPLEFT", durLabel, "BOTTOMLEFT", 0, -8)
-    ui.sellStatus:SetJustifyH("LEFT")
-    ui.sellStatus:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
-
-    -- ---- RIGHT column: for how much -------------------------------------
-    -- Pricing shortcuts sit ABOVE the two money rows they write into, so the
-    -- reading order is "pick a strategy, see what it produced".
+    -- Right column. Every row is pinned to the panel's RIGHT edge, so the
+    -- copper box of both money rows and the right edge of the button pair all
+    -- land on the same line -- and nothing can drift into the left column when
+    -- the window is dragged wider.
     --
-    -- Two buttons, not three. Undercut and price-match are the only choices
-    -- that are actually about the market; "Market" was the same reference
-    -- price with no undercut applied (i.e. price-match with worse data) and
-    -- "Vendor" was a floor, not a strategy -- the vendor figure is still shown
-    -- in this column and the Vendor list still calls out items worth more to a
-    -- merchant than to the AH.
+    -- Two pricing buttons, not three. Undercut and price-match are the only
+    -- choices that are actually about the market; "Market" was the same
+    -- reference price with no undercut applied and "Vendor" is a floor, not a
+    -- strategy -- the vendor figure is on the context line and the Vendor list
+    -- still calls out items worth more to a merchant.
     local mkQuick = function(text, w, fn)
         local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
         b:SetWidth(w)
@@ -3906,7 +3897,7 @@ function ui.BuildSellTab()
             ui.SyncSellPrices("unit")
         end
     end)
-    ui.sellMatchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -78)
+    ui.sellMatchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, ROW1 + 4)
 
     ui.sellUnderBtn = mkQuick("Undercut", 70, function()
         local it = A.sell.GetItem()
@@ -3918,42 +3909,91 @@ function ui.BuildSellTab()
     end)
     ui.sellUnderBtn:SetPoint("RIGHT", ui.sellMatchBtn, "LEFT", -5, 0)
 
-    -- Bid / buyout per item, in gold-silver-copper. Right-aligned as a block:
-    -- the copper box is the rightmost thing on each row, so the two rows line
-    -- up denominator for denominator.
-    --
-    -- Anchored from the RIGHT edge rather than off the buttons above: the
-    -- triplet plus its coin icons is 139px wide from the label, so hanging it
-    -- off the (narrower) button row would push the copper box off the panel.
-    local PRICE_GSC_W = 139
-    local bidLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bidLabel:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -(PRICE_GSC_W + 12), -104)
-    bidLabel:SetWidth(66)
-    bidLabel:SetJustifyH("LEFT")
-    bidLabel:SetText("Bid / item:")
-    bidLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
+    -- The triplet plus its coin icons is PRICE_GSC_W wide measured from the
+    -- label's right edge, so the label hangs that far in from the panel edge
+    -- and the copper coin lands exactly on it.
+    local function moneyRow(text, y)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -(PRICE_GSC_W + 12), y)
+        fs:SetWidth(76)
+        fs:SetJustifyH("RIGHT")
+        fs:SetText(text)
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        return fs
+    end
 
     -- Left blank, the start bid follows the buyout -- which is what the Sell
     -- tab has always done.
+    local bidLabel = moneyRow("Bid each", ROW2)
     ui.sellBid = MakeMoneyGSC(panel, function() ui.RefreshSell() end)
     ui.sellBid:Attach(bidLabel, 6, 0)
 
-    local buyLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    buyLabel:SetPoint("TOPLEFT", bidLabel, "BOTTOMLEFT", 0, -8)
-    buyLabel:SetWidth(66)
-    buyLabel:SetJustifyH("LEFT")
-    buyLabel:SetText("Buy / item:")
-    buyLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-
+    local buyLabel = moneyRow("Buyout each", ROW3)
     ui.sellBuyout = MakeMoneyGSC(panel, function() ui.SyncSellPrices("unit") end)
     ui.sellBuyout:Attach(buyLabel, 6, 0)
+
+    -- ------------------------------------------------------------------
+    -- ACTION BAR -- status on the left, Post and Skip pinned right. Making
+    -- it a band of its own is the point: the rows above are all inputs, and
+    -- exactly one row commits them.
+    -- ------------------------------------------------------------------
+    local foot = panel:CreateTexture(nil, "BACKGROUND")
+    foot:SetTexture(C.titleBG[1], C.titleBG[2], C.titleBG[3], 0.85)
+    foot:SetHeight(SELL_TOP_H - SELL_FOOT_Y)
+    foot:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -SELL_FOOT_Y)
+    foot:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_FOOT_Y)
+
+    local footEdge = panel:CreateTexture(nil, "ARTWORK")
+    footEdge:SetTexture(C.border[1], C.border[2], C.border[3], 0.30)
+    footEdge:SetHeight(1)
+    footEdge:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -SELL_FOOT_Y)
+    footEdge:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_FOOT_Y)
+
+    local post = CreateFrame("Button", "AegisExchangeSellPostButton",
+        panel, "UIPanelButtonTemplate")
+    post:SetWidth(96)
+    post:SetHeight(22)
+    post:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -(SELL_FOOT_Y + 4))
+    post:SetText("Post")
+    post:SetScript("OnClick", function()
+        ui.ConfirmPost()
+    end)
+    ui.sellPostBtn = post
+
+    local skip = CreateFrame("Button", "AegisExchangeSellSkipButton",
+        panel, "UIPanelButtonTemplate")
+    skip:SetWidth(60)
+    skip:SetHeight(22)
+    skip:SetPoint("RIGHT", post, "LEFT", -6, 0)
+    skip:SetText("Skip")
+    skip:SetScript("OnClick", function()
+        ui.SkipSell()
+    end)
+    ui.sellSkipBtn = skip
+
+    -- ONE anchor point. A LEFT plus a TOP would each constrain the vertical
+    -- position and over-constrain the string; TOPLEFT with a measured offset
+    -- centres it on the bar without the ambiguity.
+    ui.sellStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -(SELL_FOOT_Y + 9))
+    ui.sellStatus:SetJustifyH("LEFT")
+    ui.sellStatus:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
+
+    -- Vendor warning. Only shown when the price is BELOW what a merchant
+    -- would pay -- the "you're well above vendor" case was reassurance nobody
+    -- needed taking up a permanent line, and the vendor figure itself is on
+    -- the context line either way.
+    ui.sellVendor = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.sellVendor:SetPoint("RIGHT", skip, "LEFT", -12, 0)
+    ui.sellVendor:SetJustifyH("RIGHT")
+    ui.sellVendor:SetTextColor(0.9, 0.4, 0.4)
 
     -- ---- Divider --------------------------------------------------------
     local div = panel:CreateTexture(nil, "ARTWORK")
     div:SetTexture(C.border[1], C.border[2], C.border[3], 0.4)
     div:SetHeight(1)
-    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -SELL_TOP_H)
-    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -SELL_TOP_H)
+    div:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -SELL_TOP_H)
+    div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_TOP_H)
 
     -- ---- Bottom-left: Your Bags ----------------------------------------
     local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -4507,7 +4547,7 @@ function ui.RefreshSell()
 
     local count = A.sell.OwnerCount()
     local atCap = count >= A.sell.CAP
-    ui.sellCap:SetText("Listings: " .. count .. " / " .. A.sell.CAP)
+    ui.sellCap:SetText(count .. "/" .. A.sell.CAP)
     if atCap then
         ui.sellCap:SetTextColor(0.9, 0.35, 0.35)
     else
@@ -4523,6 +4563,7 @@ function ui.RefreshSell()
         ui.sellVendor:SetText("")
         ui.sellDeposit:SetText("")
         ui.sellTotal:SetText("")
+        ui.sellNet:SetText("")
         ui.sellMaxInfo:SetText("")
         ui.sellPostBtn:Disable()
         ui.lastScanItemId = nil
@@ -4553,16 +4594,18 @@ function ui.RefreshSell()
     local sg = A.sell.Suggest(it.itemId)
     local parts = {}
     if sg and sg.market then
-        table.insert(parts, "Market " .. util.FormatMoney(sg.market, true))
+        table.insert(parts, "market " .. util.FormatMoney(sg.market, true))
     end
     if sg and sg.minBuyout then
-        table.insert(parts, "Min " .. util.FormatMoney(sg.minBuyout, true))
+        table.insert(parts, "lowest " .. util.FormatMoney(sg.minBuyout, true))
     end
     if sg and sg.vendor then
-        table.insert(parts, "Vendor " .. util.FormatMoney(sg.vendor, true))
+        table.insert(parts, "vendor " .. util.FormatMoney(sg.vendor, true))
     end
     if table.getn(parts) > 0 then
-        ui.sellCtx:SetText(table.concat(parts, "   "))
+        -- Middle dots, not runs of spaces: the three figures are one sentence
+        -- about the item, and separators make that read at a glance.
+        ui.sellCtx:SetText(table.concat(parts, " \226\128\162 "))
     else
         ui.sellCtx:SetText("No price data yet \226\128\148 scanning...")
     end
@@ -4593,23 +4636,26 @@ function ui.RefreshSell()
     local stackTotal = unitBuy and math.floor(unitBuy * size) or 0
     local grandTotal = stackTotal * nStacks
     if grandTotal > 0 then
-        ui.sellTotal:SetText(nStacks .. " x " .. util.FormatMoney(stackTotal)
-            .. " = " .. util.FormatMoney(grandTotal, true))
+        ui.sellTotal:SetText(util.FormatMoney(grandTotal, true))
+        -- What actually reaches your mailbox. The 5% consignment cut used to
+        -- be documented and never shown, so the headline total was always a
+        -- number you would not receive.
+        ui.sellNet:SetText(util.FormatMoney(
+            math.floor(grandTotal * (1 - A.sell.CUT)), true))
+        ui.sellNet:SetTextColor(0.35, 0.80, 0.35)
     else
         ui.sellTotal:SetText("")
+        ui.sellNet:SetText("")
     end
 
-    -- Vendor comparison: above vendor = fine (green), below = warning (red).
+    -- Vendor comparison, shown ONLY as a warning. "1371% of vendor - above
+    -- vendor" was reassurance nobody needed holding a permanent line; the
+    -- vendor figure itself is on the context line either way. Below vendor is
+    -- the case worth interrupting for: you would make more at a merchant.
     local vc = A.sell.VendorCompare(it.itemId, unitBuy)
-    if vc then
-        local word = vc.above and "above vendor" or "BELOW vendor"
+    if vc and not vc.above then
         ui.sellVendor:SetText(string.format(
-            "%d%% of vendor \226\128\162 %s", vc.pct, word))
-        if vc.above then
-            ui.sellVendor:SetTextColor(0.35, 0.8, 0.35)
-        else
-            ui.sellVendor:SetTextColor(0.9, 0.4, 0.4)
-        end
+            "Below vendor price (%d%%)", vc.pct))
     else
         ui.sellVendor:SetText("")
     end
@@ -4622,8 +4668,8 @@ function ui.RefreshSell()
         perStack = A.sell.EstimateDeposit(ui.sellDuration)
     end
     local depTotal = (perStack or 0) * nStacks
-    ui.sellDeposit:SetText("Deposit ~" .. util.FormatMoney(depTotal, true)
-        .. (approx and " (approx)" or ""))
+    ui.sellDeposit:SetText((approx and "~" or "")
+        .. util.FormatMoney(depTotal, true))
 
     -- Posting state / button enable.
     if posting then

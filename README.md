@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.2.0)
+# Aegis: Exchange (v1.3.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -68,9 +68,12 @@ underneath; on the right *for how much* — **Undercut** (by a percentage or a
 flat amount; yes, 1 copper works) or **Price match** to sit level with the
 cheapest seller, above bid and buyout in gold / silver / copper.
 
-Post **multiple stacks at once** — "3 stacks of 20" — with an approximate
-deposit and your listing count against the 120-auction cap. Click any
-competitor's row to steal their price. And after a **bag scan**, Aegis loads the
+A header band across the top carries the four figures that matter as labelled
+columns — **Total**, **Deposit**, **After cut** (what actually lands in your
+mailbox once the 5% consignment cut is taken) and **Listings** against the
+120-auction cap. Post **multiple stacks at once** — "3 stacks of 20". Click any
+competitor's row to steal their price. If your price ever drops below what a
+merchant would pay, the action bar says so. And after a **bag scan**, Aegis loads the
 first item into the sell slot and walks you down the list — **Post** or **Skip**
 moves to the next one, so you can clear a full bag without clicking back and
 forth.
@@ -249,7 +252,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.2.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.3.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
