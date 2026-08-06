@@ -12,6 +12,44 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.3.0]
+
+### Added
+- **The Sell tab has a header band.** The item sits on the left; on the right,
+  four figures as labelled columns — **Total**, **Deposit**, **After cut** and
+  **Listings**. They used to be four loose right-aligned sentences
+  (`1 x 11c = 11c`, `Deposit ~1c (approx)`, `Listings: 1 / 120`) each carrying
+  its own label and competing with the item name for the same eye.
+- **After cut** is new: what actually reaches your mailbox once the 5%
+  consignment cut is taken. The cut has always been documented and never
+  shown, so the headline total was a number you would not receive.
+
+### Changed
+- **The Sell tab's controls sit on one shared grid.** Left column and right
+  column now line up row for row — stack size, stacks and duration on the left;
+  the pricing buttons, bid and buyout on the right, every one of them pinned
+  flush to the panel's right edge. Before, the two halves ran on independent
+  baselines and nothing aligned across the middle.
+- **Post and Skip have their own action bar** across the bottom of the block,
+  with the posting status beside them. Post used to float mid-panel after the
+  duration pills, reading like part of the duration setting.
+- The context line under the item name reads `market 18c · lowest 12c ·
+  vendor 2c` — separators instead of runs of spaces.
+- **The vendor comparison is a warning now, not a status line.** It appears
+  only when your price is *below* what a merchant would pay. "1371% of vendor
+  · above vendor" was reassurance holding a permanent line, and the vendor
+  figure is on the context line either way.
+- Minimum window height is 492 (was 472), so the taller control block does not
+  cost the smallest window a row in its lists.
+
+### Fixed
+- **A price of `11c` drew as `[ ][0][11]`** in the coin boxes — an empty gold
+  box beside a zero silver, which reads as a missing value rather than "no
+  silver". Gold blanked its leading zero and silver did not; now every leading
+  zero blanks and interior zeros (`2g 0s 5c`) are kept.
+
+---
+
 ## [1.2.0]
 
 ### Added
@@ -508,6 +546,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.3.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.2.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
