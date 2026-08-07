@@ -1692,10 +1692,33 @@ function ui.FillResultRow(row, r)
         end
     end
     row.name:SetText(r.name)
-    if r.canUse == nil or r.canUse then
-        row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+    -- Colour the name by item QUALITY, the way its tooltip does -- a rare
+    -- reads blue, an epic purple. ITEM_QUALITY_COLORS is FrameXML's own table,
+    -- so the greens and blues match the rest of the game exactly rather than
+    -- being re-guessed here. Same treatment the Auctions tab already gives its
+    -- rows.
+    local q = r.quality
+    if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
+        local c = ITEM_QUALITY_COLORS[q]
+        row.name:SetTextColor(c.r, c.g, c.b)
     else
-        row.name:SetTextColor(0.9, 0.4, 0.4)
+        row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+    end
+    -- "You can't use this" used to be the name turning red, which quality
+    -- colouring now owns. It moves to a red tint on the ICON so the warning
+    -- survives -- the two cues were always fighting for the same pixels, and
+    -- the hover tooltip spells out the actual requirement either way.
+    --
+    -- The old test was `r.canUse == nil or r.canUse`, which never warned about
+    -- anything: GetAuctionItemInfo returns canUse as 1-or-NIL, so "nil" IS the
+    -- cannot-use answer, and treating it as unknown-so-assume-fine made the
+    -- red branch unreachable. Usable is simply "canUse is truthy".
+    if row.icon then
+        if r.canUse then
+            row.icon:SetVertexColor(1, 1, 1)
+        else
+            row.icon:SetVertexColor(1, 0.3, 0.3)
+        end
     end
     row.ct:SetText("x" .. r.count)
     row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")

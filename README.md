@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.5.0)
+# Aegis: Exchange (v1.5.1)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -67,15 +67,25 @@ changes. But the same box now takes a query language when you want one:
 |---|---|
 | `linen cloth` | exactly what it always did |
 | `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
+| `armor/leather` | the whole Leather Armor category |
+| `armor/plate/chest` | plate chest pieces |
 | `belt/quality3` or `belt/quality/rare` | rare-quality belts |
 | `sword/level20-30` | swords for levels 20–30 |
 | `runecloth/buyout` | skip bid-only auctions |
 | `mageweave/stack` | full stacks only |
-| `container/bag/tooltip/8` | *bag* items whose tooltip mentions **8** |
+| `container/bag/tooltip/8` | bags whose tooltip mentions **8** |
 | `linen;wool;silk` | all three, browsed as one list |
+
+**Categories are the game's own names** — whatever the auction house's own
+dropdowns say, in your own language. Class first, then subclass, then slot:
+`armor/leather` works, `leather/armor` treats "leather" as a name.
 
 Terms combine with `/`, and `;` runs several searches back to back — page past
 the end of one and it rolls straight into the next.
+
+Result names are **coloured by item quality**, the way their tooltips are, so
+a rare reads blue and an epic purple at a glance. An item you can't use gets a
+red-tinted icon.
 
 **Shortcuts while the Buy tab is open:** **right-click** any bag item to search
 for it, or **shift-click** any item *anywhere* — bags, a chat link, a tooltip —
@@ -276,7 +286,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.5.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.5.1`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

@@ -199,30 +199,56 @@ end
 --   buyout             -- exclude bid-only auctions. Post-filter.
 --   stack              -- keep only fully-stacked listings (count == the
 --                          item's max stack size). Post-filter.
+--   <class name>       -- an auction CATEGORY, by its own localized name:
+--                          "armor", "weapon", "container", "trade goods", ...
+--   <subclass name>    -- a subcategory of whatever class was named earlier in
+--                          the same term: "armor/leather", "container/bag".
+--   <slot name>        -- an equip slot within the current class/subclass,
+--                          e.g. "armor/plate/chest".
 --   tooltip            -- everything AFTER this point in the term accumulates
 --                          into a tooltip-substring search instead of the name
 --                          (post-filter, scans the auction's tooltip lines).
---                          Concrete disambiguation case:
---                            container/bag/tooltip/8  -> name "container bag",
---                                                         tooltip "8"
---                            container/bag/8          -> name "container bag 8"
+--                          Concrete disambiguation case, both with class
+--                          Container / subclass Bag consumed as categories:
+--                            container/bag/tooltip/8  -> tooltip contains "8"
+--                            container/bag/8          -> name contains "8"
 --
--- DEFERRED (not in this slice, so the grammar accepts but does not yet act on
--- them beyond folding them into the name text -- see ROADMAP.md 2a):
---   class/subclass/slot keywords (need GetAuctionItemClasses/SubClasses/
---   InvTypes index maps); exact's fuller promise of tightening those same
---   fields server-side; price/time-left post-filter primitives beyond
---   buyout/stack; prefix-notation and/or/not combinators (2d's territory --
---   this slice's post-filters simply all apply together, an implicit AND).
+-- DEFERRED (see ROADMAP.md): price/time-left/seller/rarity post-filter
+-- primitives; prefix-notation and/or/not combinators (2d's territory -- this
+-- slice's post-filters all apply together, an implicit AND).
+--
+-- NOTE on `exact`: aux's Filter Builder DISABLES the level/class/quality
+-- controls when exact is ticked. We deliberately don't -- ours is a pure
+-- post-filter on the name, so combining it with a category or level range is
+-- both harmless and occasionally useful, and silently dropping filters someone
+-- typed would be worse than honouring them.
 -- ---------------------------------------------------------------------------
 
+-- Quality names, keyed by the client's OWN localized strings first
+-- (ITEM_QUALITY<n>_DESC is how the game names them, and is what aux reads),
+-- with the English words kept as a fallback so the documented `quality/rare`
+-- spelling works even somewhere the globals are missing.
 buy.QUALITY_NAMES = {
     poor = 0, common = 1, uncommon = 2, rare = 3, epic = 4, legendary = 5,
 }
 
+local qualityByName
+local function QualityNames()
+    if qualityByName then return qualityByName end
+    qualityByName = {}
+    for word, idx in pairs(buy.QUALITY_NAMES) do qualityByName[word] = idx end
+    local i = 0
+    while i <= 5 do
+        local desc = getglobal("ITEM_QUALITY" .. i .. "_DESC")
+        if desc and desc ~= "" then qualityByName[string.lower(desc)] = i end
+        i = i + 1
+    end
+    return qualityByName
+end
+
 -- "2" or "rare" -> a quality index, or nil if neither parses.
 local function ParseQualityValue(tok)
-    local named = buy.QUALITY_NAMES[tok]
+    local named = QualityNames()[tok]
     if named then return named end
     local n = tonumber(tok)
     if n and n >= 0 and n <= 6 then return math.floor(n) end
@@ -234,8 +260,97 @@ local function ParseFusedQuality(tok)
     local _, _, digits = string.find(tok, "^quality(%d+)$")
     if digits then return tonumber(digits) end
     local _, _, name = string.find(tok, "^quality(%a+)$")
-    if name then return buy.QUALITY_NAMES[name] end
+    if name then return QualityNames()[name] end
     return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Auction categories (class / subclass / slot)
+--
+-- Resolved from the client's OWN localized names, exactly as aux does:
+-- GetAuctionItemClasses() -> class names, GetAuctionItemSubClasses(class) ->
+-- its subclass names, GetAuctionInvTypes(class, subclass) -> GLOBAL KEY
+-- strings ("INVTYPE_CHEST") whose _G lookup is the display name. Hard-coding
+-- English would have made "armor/leather" a non-English-client-only feature.
+--
+-- Built lazily and cached: these APIs only answer once the AH is open, so
+-- building at file scope would bake in an empty table forever.
+-- ---------------------------------------------------------------------------
+
+local categoryCache
+
+local function BuildCategoryCache()
+    local cache = { classes = {}, subclasses = {}, slots = {} }
+    if not GetAuctionItemClasses then return cache end
+    local cats = A.scan and A.scan.GetCategories and A.scan.GetCategories()
+    if not cats then return cache end
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local cat = cats[ci]
+        if cat.name then
+            cache.classes[string.lower(cat.name)] = cat.class
+            local subs = cat.subs or {}
+            local si = 1
+            while si <= table.getn(subs) do
+                local sub = subs[si]
+                if sub.name then
+                    -- Keyed by class: subclass names repeat across classes
+                    -- ("Miscellaneous" lives under several), so a flat map
+                    -- would resolve "armor/miscellaneous" to whichever class
+                    -- happened to be built last.
+                    local byClass = cache.subclasses[cat.class]
+                    if not byClass then
+                        byClass = {}
+                        cache.subclasses[cat.class] = byClass
+                    end
+                    byClass[string.lower(sub.name)] = sub.subclass
+                end
+                si = si + 1
+            end
+        end
+        ci = ci + 1
+    end
+    return cache
+end
+
+function buy.Categories()
+    if not categoryCache then categoryCache = BuildCategoryCache() end
+    return categoryCache
+end
+
+-- The AH session teaches us these names; drop the cache when it ends so a
+-- different locale or a late-loading client can rebuild.
+function buy.ResetCategories()
+    categoryCache = nil
+end
+
+-- Equip slots for a given class/subclass, lazily per pair. GetAuctionInvTypes
+-- is guarded: it is not present on every 1.12 build, and a nil call here would
+-- take the whole parse down.
+local function SlotsFor(class, subclass)
+    local cache = buy.Categories()
+    local key = tostring(class or 0) .. ":" .. tostring(subclass or 0)
+    local found = cache.slots[key]
+    if found then return found end
+    found = {}
+    if GetAuctionInvTypes then
+        local ok, list = pcall(function()
+            return { GetAuctionInvTypes(class or 0, subclass or 0) }
+        end)
+        if ok and list then
+            local i = 1
+            while i <= table.getn(list) do
+                local globalKey = list[i]
+                local label = globalKey and getglobal(globalKey)
+                if label and label ~= "" then
+                    found[string.lower(label)] = i
+                end
+                i = i + 1
+            end
+        end
+    end
+    cache.slots[key] = found
+    return found
 end
 
 -- "20" or "20-30" (the VALUE half of a two-token "level/..." form) -> min, max.
@@ -264,6 +379,7 @@ function buy.ParseTerm(text)
         nameWords = {}, tooltipWords = {}, inTooltip = false,
         exact = false, usable = false, buyoutOnly = false, stackOnly = false,
         quality = nil, minLevel = nil, maxLevel = nil,
+        class = nil, subclass = nil, slot = nil,
     }
     local function appendWord(word)
         if term.inTooltip then
@@ -272,6 +388,8 @@ function buy.ParseTerm(text)
             table.insert(term.nameWords, word)
         end
     end
+
+    local cats = buy.Categories()
 
     local tokens = util.Split(text, "/")
     local i, n = 1, table.getn(tokens)
@@ -305,15 +423,30 @@ function buy.ParseTerm(text)
             else appendWord(raw) end
         else
             local q = ParseFusedQuality(tok)
+            local mn, mx
+            if not q then mn, mx = ParseFusedLevel(tok) end
             if q then
                 term.quality = q
+            elseif mn then
+                term.minLevel = mn; term.maxLevel = mx
+            -- Categories, in the order they can be resolved. A subclass only
+            -- means anything once its class is known, and a slot only once
+            -- both are -- which is why "armor/leather" works and
+            -- "leather/armor" leaves "leather" as name text. Never inside a
+            -- tooltip clause: after `tooltip` every word is search text, so
+            -- searching tooltips for the literal word "bag" still works.
+            elseif not term.inTooltip and not term.class
+                and cats.classes[tok] then
+                term.class = cats.classes[tok]
+            elseif not term.inTooltip and term.class and not term.subclass
+                and cats.subclasses[term.class]
+                and cats.subclasses[term.class][tok] then
+                term.subclass = cats.subclasses[term.class][tok]
+            elseif not term.inTooltip and term.class and not term.slot
+                and SlotsFor(term.class, term.subclass)[tok] then
+                term.slot = SlotsFor(term.class, term.subclass)[tok]
             else
-                local mn, mx = ParseFusedLevel(tok)
-                if mn then
-                    term.minLevel = mn; term.maxLevel = mx
-                else
-                    appendWord(raw)
-                end
+                appendWord(raw)
             end
         end
         i = i + 1
@@ -359,26 +492,40 @@ function buy.MaxStackFor(itemId, link)
     return nil
 end
 
--- A dedicated, never-shown tooltip used only to read an auction listing's
--- tooltip text for the "tooltip" post-filter. 1.12 has no NumLines(); the
--- stock technique (see CLAUDE.md rule 14) is getglobal on the template's
--- numbered FontStrings until one comes back empty.
-local queryTip = CreateFrame("GameTooltip", "AegisExchangeQueryTooltip", nil,
-    "GameTooltipTemplate")
-queryTip:SetOwner(UIParent, "ANCHOR_NONE")
+-- A dedicated, never-shown tooltip for reading an auction listing's tooltip
+-- text (the "tooltip" post-filter).
+--
+-- Built LAZILY and read exactly the way sell.lua's IsAuctionable does it,
+-- because that one demonstrably works on the real client and the first
+-- version of this one did not:
+--   * lazy, not file scope -- a templated frame built while core/buy.lua is
+--     still loading is not reliably ready;
+--   * SetOwner BEFORE ClearLines, then the Set* call (this order);
+--   * bounded by NumLines(). GameTooltipTemplate reuses its TextLeftN
+--     FontStrings, so they survive from whatever was shown last -- walking
+--     until GetText() comes back nil either stops early on line 1 or reads
+--     stale text from a previous, longer tooltip. NumLines() is the only
+--     honest bound.
+local function QueryTip()
+    if not buy._queryTip then
+        buy._queryTip = CreateFrame("GameTooltip", "AegisExchangeQueryTooltip",
+            nil, "GameTooltipTemplate")
+    end
+    return buy._queryTip
+end
 
 local function TooltipContainsAt(index, needleLower)
-    if not queryTip.SetAuctionItem then return false end
-    queryTip:ClearLines()
-    queryTip:SetOwner(UIParent, "ANCHOR_NONE")
-    queryTip:SetAuctionItem("list", index)
+    local tip = QueryTip()
+    if not tip.SetAuctionItem then return false end
+    tip:SetOwner(UIParent, "ANCHOR_NONE")
+    tip:ClearLines()
+    tip:SetAuctionItem("list", index)
+    local n = tip:NumLines() or 0
     local i = 1
-    while i <= 30 do
+    while i <= n do
         local fs = getglobal("AegisExchangeQueryTooltipTextLeft" .. i)
-        if not fs then break end
-        local text = fs:GetText()
-        if not text then break end
-        if string.find(string.lower(text), needleLower, 1, true) then
+        local text = fs and fs:GetText()
+        if text and string.find(string.lower(text), needleLower, 1, true) then
             return true
         end
         i = i + 1
@@ -397,6 +544,9 @@ function buy.CompileTerm(term)
         maxLevel = term.maxLevel and tostring(term.maxLevel) or "",
         isUsable = term.usable and true or nil,
         quality  = term.quality,
+        class    = term.class,
+        subclass = term.subclass,
+        invType  = term.slot,
     }
     local exactName = term.exact and string.lower(term.name or "") or nil
     local tooltipNeedle = term.tooltipText and string.lower(term.tooltipText)
@@ -412,8 +562,14 @@ function buy.CompileTerm(term)
             return false
         end
         if stackOnly then
+            -- Fails OPEN when the max stack is unknown. GetItemInfo only
+            -- answers for items in the client's cache, so on a cold cache
+            -- "not max" was true for every row and /stack returned an empty
+            -- page -- indistinguishable from "no full stacks exist", which is
+            -- exactly how it got reported as broken. Showing a few partial
+            -- stacks until the cache warms is the better failure.
             local max = buy.MaxStackFor(row.itemId, row.link)
-            if not max or row.count ~= max then return false end
+            if max and row.count ~= max then return false end
         end
         if tooltipNeedle and not TooltipContainsAt(row.index, tooltipNeedle) then
             return false
@@ -527,10 +683,11 @@ end
 local function SendQuery()
     local st = buy.state
     local b = st.terms[st.termIndex].blizz
-    -- name/minLevel/maxLevel as strings (see CLAUDE.md rule 9); index/flag
-    -- args (isUsable, quality) stay nil for "no filter".
-    QueryAuctionItems(b.name, b.minLevel, b.maxLevel, nil, nil, nil,
-        st.page, b.isUsable, b.quality)
+    -- name/minLevel/maxLevel as strings (see CLAUDE.md rule 9); the index and
+    -- flag args (invType, class, subclass, isUsable, quality) stay nil for
+    -- "no filter".
+    QueryAuctionItems(b.name, b.minLevel, b.maxLevel, b.invType, b.class,
+        b.subclass, st.page, b.isUsable, b.quality)
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
     Notify()
@@ -714,6 +871,9 @@ end)
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     buy.state.phase = "idle"
     buy.driver:Hide()
+    -- The category names came from the session that just ended; drop them so
+    -- the next one rebuilds (they are only readable while the AH is open).
+    buy.ResetCategories()
 end)
 
 -- ---------------------------------------------------------------------------

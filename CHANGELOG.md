@@ -12,6 +12,59 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.5.1]
+
+### Added
+- **Search results are coloured by item quality**, matching each item's
+  tooltip — a rare reads blue, an epic purple. Colours come from FrameXML's own
+  `ITEM_QUALITY_COLORS`, so they match the rest of the game exactly rather than
+  being re-guessed. Applies to the Buy tab and the Crafting tab's reagent
+  results, which share a row painter.
+
+### Fixed
+- **`armor/leather` and other category searches returned nothing.** Class,
+  subclass and slot keywords were never implemented — they fell through to
+  being name text, so `armor/leather` searched for an item literally *called*
+  "armor leather". They now resolve against the auction house's **own
+  localized category names** (`GetAuctionItemClasses` /
+  `GetAuctionItemSubClasses` / `GetAuctionInvTypes`), so `armor/leather`,
+  `container/bag` and `armor/plate/chest` all work — in any client language.
+
+  Subclasses resolve *within* their class, because names repeat: "Leather"
+  exists under both Armor and Trade Goods, and "Mail" exists only under Armor.
+  `trade goods/mail` correctly leaves "mail" as name text instead of silently
+  searching a category you never asked for.
+
+- **`container/bag/tooltip/8` returned nothing** — same root cause. Now that
+  the categories resolve, both halves of that pair work as documented:
+  `container/bag/tooltip/8` filters tooltips for "8", `container/bag/8`
+  searches names for "8".
+
+- **`mageweave/stack` returned an empty page.** The fully-stacked filter needs
+  each item's max stack size from `GetItemInfo`, which only answers for items
+  already in the client's cache — and it was failing *closed*, so on a cold
+  cache every row was hidden, indistinguishable from "no full stacks exist".
+  It now fails open: a few partial stacks may show until the cache warms.
+
+- **Tooltip searches matched the wrong listings, or nothing at all.**
+  `GameTooltipTemplate` reuses its text lines, so text from a previous, longer
+  tooltip is still sitting in the higher-numbered ones. Reading "until a line
+  comes back empty" walked off the end of the current tooltip into that stale
+  text. Now bounded by `NumLines()`, and built lazily with the same
+  owner-then-clear-then-set sequence the Sell tab's bind-status scanner has
+  always used.
+
+- **The "you can't use this" warning never appeared.** `GetAuctionItemInfo`
+  returns `canUse` as `1`-or-`nil`, so `nil` *is* the cannot-use answer — but
+  the check treated it as "unknown, assume fine", making the warning
+  unreachable. It now fires correctly, and shows as a red icon tint (the name
+  colour having been taken over by item quality).
+
+- Quality keywords now also accept the client's own localized names via
+  `ITEM_QUALITY<n>_DESC`, with the English words kept as a fallback.
+
+---
+
 ## [1.5.0]
 
 ### Added
@@ -631,6 +684,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.5.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.4.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.3.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -285,19 +285,34 @@ typing an item name searches by name exactly as before. Shipped in the same box:
   right-click-to-slot untouched — each fires only on its own tab), shift-click
   any item anywhere to search it, Tab-completion from every learned item name.
 
-**Two notes for 2b/2d:**
+**Categories** (`armor/leather`, `container/bag`, `armor/plate/chest`) landed
+in v1.5.1 after the first cut shipped without them and immediately read as
+broken — they fell through to name text, so `armor/leather` searched for an
+item *called* "armor leather". `buy.Categories()` caches the class → subclass
+map from the client's own localized names and `SlotsFor()` does slots; **2b's
+Filter Builder should populate its dropdowns from those same two, not build a
+parallel map.** Subclasses are keyed BY CLASS deliberately: names repeat
+("Leather" under both Armor and Trade Goods) and "Mail" exists only under
+Armor, so a flat map silently searches a category the user never asked for.
 
-1. `class`/`subclass`/`slot` keywords are **not** in this slice. They need
-   index maps built from `GetAuctionItemClasses` / `GetAuctionItemSubClasses` /
-   inventory-type constants; the Filter Builder (2b) needs those same maps for
-   its dropdowns, so build them once there and let the parser share them.
-2. This slice's post-filters all apply together — an implicit AND. Prefix
-   `and`/`or`/`not` combination is 2d's job, and `CompileTerm`'s single
-   `filter` closure is the seam it should compose into.
+**One note for 2d:** this slice's post-filters all apply together — an implicit
+AND. Prefix `and`/`or`/`not` combination is 2d's job, and `CompileTerm`'s
+single `filter` closure is the seam it should compose into.
 
-**Watch out for** (found the hard way): `local a, b = cond and f()` silently
-drops `f`'s second return whenever `and` truncates to one value. Cost a
-half-parsed level range until a test caught it.
+**Watch out for** (all found the hard way):
+
+- `local a, b = cond and f()` silently drops `f`'s second return whenever `and`
+  truncates to one value. Cost a half-parsed level range until a test caught it.
+- **`GameTooltipTemplate` reuses its `TextLeftN` FontStrings.** Reading them
+  "until one comes back empty" walks off the end of the current tooltip into
+  whatever longer tooltip was shown before. Bound the loop with `NumLines()`,
+  and copy `sell.lua`'s owner → clear → set sequence rather than inventing one.
+- **A filter that needs `GetItemInfo` must fail OPEN.** It only answers for
+  cached items, so failing closed empties the entire page on a cold cache and
+  looks exactly like "no matches exist".
+- **`canUse` from `GetAuctionItemInfo` is `1`-or-`nil`** — `nil` means cannot
+  use, not "unknown". Treating nil as unknown made a warning unreachable for
+  the entire life of the Buy tab.
 
 **Also fixed on the way:** `core/buy.lua` was folding every browsed listing
 into the price DB, which `core/scan.lua`'s `RecordVisiblePage` already does for
