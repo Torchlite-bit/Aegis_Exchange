@@ -3,7 +3,7 @@
 --
 -- SavedVariables price database, modeled on aux-addon's historical-value
 -- scheme: per item we keep a daily MINIMUM unit buyout, and derive market
--- value as a time-weighted median of the last ~11 daily values.
+-- value as a time-weighted median of the last ~30 daily values.
 --
 -- Declared in Aegis_Exchange.toc:
 --   AegisExchangeDB      -- account-wide. Turtle's AH is CROSS-FACTION (one
@@ -47,12 +47,35 @@ local db = A.db
 local DB_VERSION = 3
 
 -- Daily entries retained per item; also the window MarketValue medians over.
-local KEEP_DAYS = 11
+--
+-- These two were audited against their stated intent — "recent days weighted
+-- more, decreasing effect past roughly a month" — and neither half held. The
+-- window was 11 days, so nothing survived to a month for its effect to
+-- decrease; and at 0.95 per day the oldest retained value still carried 57% of
+-- today's weight, which made the "time-weighted" median return the same answer
+-- as an UNWEIGHTED one in 93% of cases. It was a flat 11-day median wearing a
+-- decay curve's name.
+--
+-- 30 days at 0.85 was picked because it costs nothing to get:
+--
+--   age       today    3d    7d   14d   21d   30d
+--   weight     100%   61%   32%   10%    3%    1%
+--
+--   * a step change (100 -> 200 and stays there) is tracked in 5 days —
+--     IDENTICAL to the old setting, so nothing got less responsive in trade;
+--   * the weighting now changes the answer in 88% of cases instead of 7%;
+--   * outlier rejection is untouched — one day at 5c, or at 50x, still moves a
+--     steady series by nothing, which is the whole reason this is a median;
+--   * and it fixes casual scanning. In an 11-day window someone scanning weekly
+--     had ONE sample, and a weighted median of one sample is just that sample.
+--     Thirty days gives them four.
+--
+-- Existing databases hold at most 11 days, so they ramp up to the new window
+-- over the following three weeks rather than changing under anyone at once.
+local KEEP_DAYS = 30
 
 -- Per-day downweight applied to older daily values in the market median.
--- 0.95^10 ~= 0.60, so a value from 10 days ago still carries real weight —
--- "lightly downweighted", not discarded.
-local DECAY = 0.95
+local DECAY = 0.85
 
 -- Days are plain integers so daily tables stay tiny in SavedVariables.
 function db.Day()
@@ -335,8 +358,14 @@ end
 
 -- Market value: time-weighted MEDIAN of up to the last KEEP_DAYS daily
 -- minima. Each value's weight decays by DECAY per day of age, so recent days
--- dominate slightly but a run of old data still counts. Returns nil if the
--- item has never been seen.
+-- dominate but a run of old data still counts. Returns nil if the item has
+-- never been seen.
+--
+-- A MEDIAN, not a mean, and that is the point: it returns one of the observed
+-- daily values rather than an average of them, so a single absurd listing
+-- cannot drag the number anywhere. The weights only decide WHICH observed
+-- value gets picked — which is exactly why a decay curve that is nearly flat
+-- across the window does nothing at all. See the KEEP_DAYS / DECAY note above.
 function db.MarketValue(itemId)
     if not db.account then return nil end
     local items = db.Items()

@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.3.0)
+# Aegis: Exchange (v1.4.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -241,8 +241,10 @@ Aegis_Exchange/
 ```
 
 Market value is a **time-weighted median** of each item's daily minimum buyout
-over ~11 days, so one weird lowball doesn't wreck your numbers and a genuine
-price shift still moves them.
+over the last **30 days**, weighted so today counts fully, a week ago about a
+third, and a month ago barely at all. One weird lowball can't wreck your
+numbers — it's a median, so a single absurd listing moves it by nothing — while
+a genuine price shift is tracked within about five days.
 
 Everything is **Lua 5.0 and 1.12 API only** — no `string.match`, no `#`, no `%`
 operator, no secure hooks. If you're contributing, `CLAUDE.md` has the full rules
@@ -252,7 +254,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.3.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.4.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
