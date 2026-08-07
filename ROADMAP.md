@@ -59,32 +59,54 @@ if AegisExchange and AegisExchange.INTEGRATION_VERSION then
     --    Call from Courier's ADDON_LOADED.
     AegisExchange.ClaimMailScanning("Aegis: Courier")
 
-    -- 2. Build the dedup key for an auction mail THROUGH THIS HELPER.
-    local key = AegisExchange.MailTxnKey(subject, money, daysLeft)
-
-    -- 3. Push the matched transaction.
+    -- 2. Push the matched transaction. ONE TABLE -- see the warning below.
     local ok, why = AegisExchange.RecordExternalTxn({
         kind   = "sale",        -- or "buy"
         item   = "Silk Cloth",
         amount = netProceeds,   -- copper, AFTER the 5% cut (what actually
                                 -- arrived in the mail)
         itemId = 4306,          -- optional
-        key    = key,           -- optional; repeats are ignored
+        -- key = ...            -- OPTIONAL, and usually WRONG. See below.
     })
 end
 ```
+
+> 🚨 **It takes ONE TABLE, and calling it positionally fails SILENTLY.**
+> `RecordExternalTxn` reports a bad payload by **returning** `false, reason` —
+> it does not raise — so a caller that wraps it in `pcall` and checks only the
+> ok flag sees success while every entry is dropped. Courier shipped exactly
+> that bug and it survived from its first release to v1.0.2, because its test
+> double had the same wrong signature and agreed with it. **Check the returned
+> value, not just that the call didn't error.**
 
 `RecordExternalTxn` returns `true`, or `false` plus a short reason
 (`"duplicate"`, `"kind must be 'sale' or 'buy'"`, …) so Courier can surface
 failures rather than miscounting silently. `INTEGRATION_VERSION` is currently
 **1**; it bumps whenever a signature or field meaning changes.
 
-**Why `MailTxnKey` is exposed rather than left internal.** A user who ran Aegis
-alone already has auction mails in the ledger under *Aegis's* keys. If Courier
-invented its own key scheme it would re-report those mails and double-count
-every one of them on the day Courier is installed. Generating keys through the
-shared helper makes the handover seamless. This matters more than it looks — it
-is the single most likely way the integration could corrupt someone's history.
+**Why `MailTxnKey` is exposed — and why Courier does NOT use it.** It was put
+here for a caller that books mail on **arrival**, as Aegis's own scanner does:
+such a caller sees the same mail on every inbox refresh and needs a fingerprint
+to avoid re-reporting it, and sharing Aegis's own key scheme means a user who
+ran Aegis alone doesn't get their existing entries double-counted on the day
+the companion is installed.
+
+**That advice is wrong for a caller that books on collection, and Courier is
+one.** `MailTxnKey` buckets `subject | money | arrival-hour`, so **two identical
+stacks sold at the same price within the same hour produce the same key** — the
+second is rejected as `"duplicate"` and lost. A collision *under*-counts, and a
+missing sale is invisible in a way a doubled one is not. Courier books when a
+mail is emptied (`take.Confirm`), which is self-limiting: an emptied mail has
+nothing left to book, so it sends no key at all.
+
+The residual overlap is accepted on both sides and written down in Courier's
+`bridge.lua`: mail Aegis already booked on arrival that is **still uncollected**
+when Courier is installed gets counted twice. That is a one-time, bounded
+handover window, not an ongoing defect.
+
+So: keep `MailTxnKey` exposed — Aegis's own standalone scanner uses it, and an
+arrival-time companion would want it — but it is **not** part of the recommended
+Courier path.
 
 **Mail ownership** is an explicit handshake (`ClaimMailScanning` /
 `ReleaseMailScanning`) rather than Aegis sniffing for a global, because explicit
@@ -97,27 +119,25 @@ that loads without claiming, but it is a safety net, not the contract.
 is now the single confirmed name. A test pins it: sniffing the folder name must
 NOT stand Aegis's scanner down.
 
-> 🚨 **Open — the two repos disagree about `RecordExternalTxn`'s shape, and it
-> fails SILENTLY.** Aegis takes **one table** (above). Courier's
-> `core/bridge.lua` calls it with **four positional args**:
-> ```lua
-> local ok = pcall(AegisExchange.RecordExternalTxn, kind, item, amount, itemId)
-> ```
-> Aegis then sees `txn = "sale"`, hits `type(txn) ~= "table"` and **returns**
-> `false, "payload must be a table"` — it does not error, so `pcall` reports
-> success, `bridge.Push` returns true, and every push is dropped with no
-> warning on either side. Both repos claim `INTEGRATION_VERSION = 1`, so the
-> version guard cannot catch it. Courier also never sends `key`, so
-> `MailTxnKey` dedup never engages.
->
-> Not fixed here, because which side moves is a cross-repo call:
-> - **Change Courier** (`bridge.Push` builds the table, passes `key`) — keeps
->   Aegis's published contract, and Courier is the newer, unshipped side.
-> - **Change Aegis** to also accept the positional form — wider blast radius
->   and two shapes to keep working forever. Not recommended.
->
-> Either way `bridge.Push` should check the RETURNED value, not just `pcall`'s
-> ok flag, or a rejected payload stays invisible.
+**The seam was dead from Courier's first release until its v1.0.2.** Courier
+called `RecordExternalTxn` with four positional arguments instead of the table.
+Aegis saw `txn = "sale"`, failed its own type check and **returned** false —
+without erroring — so Courier's `pcall` reported success and every push was
+dropped with no warning on either side. Both repos claimed
+`INTEGRATION_VERSION = 1`, so the version guard could not catch it.
+
+**Fixed entirely on Courier's side** (its PR #7); nothing in Aegis changed and
+`INTEGRATION_VERSION` stays at **1** — the table shape was always the published
+contract, and Aegis had no wrong caller to accommodate. Courier now also reads
+the returned value rather than just `pcall`'s ok flag, which is the part that
+kept the bug invisible.
+
+Worth remembering when the next companion is written: **this API's failure mode
+is a silent false success.** Returning `false, reason` is friendlier than
+erroring right up until a caller ignores the return. If a third integration
+ever appears, consider having `RecordExternalTxn` print a one-time developer
+warning when it is handed a string where a table belongs — the positional call
+is unmistakable, and it would turn this exact mistake into something visible.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 
