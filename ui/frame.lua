@@ -2348,11 +2348,21 @@ function ui.UpdateBuyList()
     local offset = FauxScrollFrame_GetOffset(ui.buyScroll)
 
     if A.buy then
-        local _, page, totalPages, totalAuctions, termIndex, totalTerms =
+        local _, page, totalPages, totalAuctions, termIndex, totalTerms, stats =
             A.buy.GetResults()
+        local unknown = stats and stats.unknownStack or 0
         if ui.buyResults then
             if table.getn(all) == 0 then
-                ui.buyStatus:SetText("No auctions found.")
+                if unknown > 0 then
+                    -- Never a bare "No auctions found" when a filter threw rows
+                    -- away for want of data: an unexplained empty page is
+                    -- indistinguishable from a broken filter, which is exactly
+                    -- how /stack got reported.
+                    ui.buyStatus:SetText("No full stacks \226\128\162 " .. unknown
+                        .. " skipped (stack size unknown \226\128\148 search again)")
+                else
+                    ui.buyStatus:SetText("No auctions found.")
+                end
             else
                 local order = dir == "asc" and "low to high" or "high to low"
                 local shown = ""
@@ -2367,6 +2377,10 @@ function ui.UpdateBuyList()
                 local headline = table.getn(all) .. " match(es)"
                 if table.getn(all) ~= totalAuctions then
                     headline = headline .. " (of " .. totalAuctions .. ")"
+                end
+                if unknown > 0 then
+                    shown = shown .. " \226\128\162 " .. unknown
+                        .. " skipped (stack size unknown)"
                 end
                 ui.buyStatus:SetText(headline .. " \226\128\162 "
                     .. sortKey .. " " .. order .. shown)

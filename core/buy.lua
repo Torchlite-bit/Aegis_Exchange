@@ -318,6 +318,42 @@ function buy.Categories()
     return categoryCache
 end
 
+-- Look a typed word up in one of those name -> index maps.
+--
+-- Exact match is not enough on its own: the game's own category names are
+-- PLURAL and often qualified ("Daggers", "One-Handed Swords", "Food & Drink"),
+-- while people type the singular. `weapon/dagger` matched nothing, fell back
+-- to name text, and returned every thrown weapon with "Dagger" in its name --
+-- which is exactly how it got reported.
+--
+-- So: exact, then a unique prefix, then a unique substring. UNIQUE is the
+-- whole safety property -- "sword" matches both One-Handed and Two-Handed
+-- Swords, so it stays name text rather than silently picking one and
+-- returning a confidently wrong page.
+local function ResolveCategory(map, tok)
+    if not map then return nil end
+    local exact = map[tok]
+    if exact then return exact end
+
+    local found, count = nil, 0
+    for name, index in pairs(map) do
+        if string.find(name, tok, 1, true) == 1 then
+            found, count = index, count + 1
+        end
+    end
+    if count == 1 then return found end
+    if count > 1 then return nil end   -- ambiguous prefix: do not guess
+
+    found, count = nil, 0
+    for name, index in pairs(map) do
+        if string.find(name, tok, 1, true) then
+            found, count = index, count + 1
+        end
+    end
+    if count == 1 then return found end
+    return nil
+end
+
 -- The AH session teaches us these names; drop the cache when it ends so a
 -- different locale or a late-loading client can rebuild.
 function buy.ResetCategories()
@@ -436,15 +472,14 @@ function buy.ParseTerm(text)
             -- tooltip clause: after `tooltip` every word is search text, so
             -- searching tooltips for the literal word "bag" still works.
             elseif not term.inTooltip and not term.class
-                and cats.classes[tok] then
-                term.class = cats.classes[tok]
+                and ResolveCategory(cats.classes, tok) then
+                term.class = ResolveCategory(cats.classes, tok)
             elseif not term.inTooltip and term.class and not term.subclass
-                and cats.subclasses[term.class]
-                and cats.subclasses[term.class][tok] then
-                term.subclass = cats.subclasses[term.class][tok]
+                and ResolveCategory(cats.subclasses[term.class], tok) then
+                term.subclass = ResolveCategory(cats.subclasses[term.class], tok)
             elseif not term.inTooltip and term.class and not term.slot
-                and SlotsFor(term.class, term.subclass)[tok] then
-                term.slot = SlotsFor(term.class, term.subclass)[tok]
+                and ResolveCategory(SlotsFor(term.class, term.subclass), tok) then
+                term.slot = ResolveCategory(SlotsFor(term.class, term.subclass), tok)
             else
                 appendWord(raw)
             end
@@ -476,20 +511,42 @@ function buy.ParseQuery(text)
     return terms
 end
 
--- Item link -> cached max stack size, or nil (not yet client-cached). Used by
--- the "stack" (fully-stacked-only) post-filter.
+-- Max stack size for an item, or nil if genuinely not known yet.
+--
+-- The ONLY 1.12 source is GetItemInfo's 8th return, and it answers only for
+-- items already in the client's local item cache -- exactly the wrong
+-- behaviour for an auction house, where the items you have never handled are
+-- the ones you are shopping for. sell.lua already documents the same hazard.
+--
+-- So: check what we have LEARNED first, ask the client second, and persist
+-- anything the client does tell us. Over a couple of sessions the DB fills in
+-- and the filter stops guessing.
 buy.stackCache = {}
 function buy.MaxStackFor(itemId, link)
     if not itemId then return nil end
     local cached = buy.stackCache[itemId]
     if cached then return cached end
+    local stored = A.db and A.db.GetMaxStack and A.db.GetMaxStack(itemId)
+    if stored then
+        buy.stackCache[itemId] = stored
+        return stored
+    end
     if not link then return nil end
     local _, _, _, _, _, _, _, stackCount = GetItemInfo(link)
     if stackCount and stackCount > 0 then
         buy.stackCache[itemId] = stackCount
+        buy.LearnMaxStack(itemId, stackCount)
         return stackCount
     end
     return nil
+end
+
+-- Record a max stack we just learned, from wherever. Cheap and idempotent, so
+-- every code path that happens to hold a good GetItemInfo result can call it.
+function buy.LearnMaxStack(itemId, count)
+    if not itemId or not count or count < 1 then return end
+    buy.stackCache[itemId] = count
+    if A.db and A.db.SetMaxStack then A.db.SetMaxStack(itemId, count) end
 end
 
 -- A dedicated, never-shown tooltip for reading an auction listing's tooltip
@@ -554,7 +611,7 @@ function buy.CompileTerm(term)
     local buyoutOnly = term.buyoutOnly
     local stackOnly  = term.stackOnly
 
-    local function filter(row)
+    local function filter(row, stats)
         if buyoutOnly and not (row.buyout and row.buyout > 0) then
             return false
         end
@@ -562,14 +619,16 @@ function buy.CompileTerm(term)
             return false
         end
         if stackOnly then
-            -- Fails OPEN when the max stack is unknown. GetItemInfo only
-            -- answers for items in the client's cache, so on a cold cache
-            -- "not max" was true for every row and /stack returned an empty
-            -- page -- indistinguishable from "no full stacks exist", which is
-            -- exactly how it got reported as broken. Showing a few partial
-            -- stacks until the cache warms is the better failure.
+            -- An unknown max stack EXCLUDES the row -- "keep it just in case"
+            -- was worse: it let every partial stack through, so /stack looked
+            -- like it did nothing at all. But a silent exclusion looks equally
+            -- broken, so the count is reported and the caller surfaces it.
             local max = buy.MaxStackFor(row.itemId, row.link)
-            if max and row.count ~= max then return false end
+            if not max then
+                if stats then stats.unknownStack = (stats.unknownStack or 0) + 1 end
+                return false
+            end
+            if row.count ~= max then return false end
         end
         if tooltipNeedle and not TooltipContainsAt(row.index, tooltipNeedle) then
             return false
@@ -773,13 +832,21 @@ function buy.ReadPage()
 
     -- A plain-text search (the common case) compiles to an always-true filter,
     -- so rows == rawRows and nothing about existing behaviour changes.
+    local stats = { unknownStack = 0 }
     local rows = {}
     local ri = 1
     while ri <= table.getn(rawRows) do
         local r = rawRows[ri]
-        if term.filter(r) then table.insert(rows, r) end
+        -- Learn every max stack this page happens to expose, whether or not
+        -- the row survives the filter -- the next search benefits either way.
+        if r.itemId and r.link then
+            local _, _, _, _, _, _, _, sc = GetItemInfo(r.link)
+            if sc and sc > 0 then buy.LearnMaxStack(r.itemId, sc) end
+        end
+        if term.filter(r, stats) then table.insert(rows, r) end
         ri = ri + 1
     end
+    st.stats = stats
 
     -- Cheapest unit buyout first (bid-only auctions, unit = nil, sink to the
     -- bottom); the real `index` is preserved so buying still hits the right
@@ -852,7 +919,7 @@ end
 function buy.GetResults()
     local st = buy.state
     return st.rows, st.page, st.totalPages, st.total, st.termIndex,
-        table.getn(st.terms)
+        table.getn(st.terms), st.stats
 end
 
 -- ---------------------------------------------------------------------------

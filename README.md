@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.5.1)
+# Aegis: Exchange (v1.5.2)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -78,7 +78,15 @@ changes. But the same box now takes a query language when you want one:
 
 **Categories are the game's own names** — whatever the auction house's own
 dropdowns say, in your own language. Class first, then subclass, then slot:
-`armor/leather` works, `leather/armor` treats "leather" as a name.
+`armor/leather` works, `leather/armor` treats "leather" as a name. You don't
+have to match them exactly — `weapon/dagger` finds the "Daggers" category —
+but a word matching *several* categories (`weapon/sword` hits both One-Handed
+and Two-Handed Swords) is left as a name search rather than guessing.
+
+`stack` needs to know each item's maximum stack size, which vanilla only
+reports for items your client has already seen. Aegis remembers every one it
+learns, so the filter gets more complete as you play; anything it can't size
+yet is skipped and counted in the status line rather than silently dropped.
 
 Terms combine with `/`, and `;` runs several searches back to back — page past
 the end of one and it rolls straight into the next.
@@ -286,7 +294,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.5.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.5.2`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

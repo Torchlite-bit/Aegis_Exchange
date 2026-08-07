@@ -92,6 +92,17 @@ local function DefaultAccountDB()
         -- Game constants, shared by every realm (see header note).
         vendors = {},   -- itemID   -> vendor sell price, per unit
         names   = {},   -- itemName -> itemID
+        -- Max stack size per item (20 for Mageweave, 10 for Copper Ore, ...).
+        -- Account-wide because it is a property of the ITEM, identical on
+        -- every realm -- same reasoning as vendor prices above.
+        --
+        -- Persisted because the only 1.12 source, GetItemInfo, answers ONLY
+        -- for items already in the client's local cache. An auction for
+        -- something you have never handled returns nil, so anything that asks
+        -- at browse time gets nil for exactly the items it most needs. We
+        -- learn opportunistically (bags, browsing, any successful lookup) and
+        -- keep it forever.
+        stacks  = {},   -- itemID   -> max stack size
         -- Shopping (Buy tab): saved lists + recent searches, account-wide so
         -- every character shares them.
         shopping = {
@@ -412,6 +423,21 @@ end
 function db.GetVendor(itemId)
     if not db.account or not db.account.vendors then return nil end
     return db.account.vendors[itemId]
+end
+
+-- Max stack size, learned opportunistically. See the `stacks` note in
+-- DefaultAccountDB for why this has to be persisted rather than asked for on
+-- demand.
+function db.SetMaxStack(itemId, count)
+    if not db.account or not itemId then return end
+    if not count or count < 1 then return end
+    if not db.account.stacks then db.account.stacks = {} end
+    db.account.stacks[itemId] = count
+end
+
+function db.GetMaxStack(itemId)
+    if not db.account or not db.account.stacks or not itemId then return nil end
+    return db.account.stacks[itemId]
 end
 
 -- Resolve an item name to an itemID (for tooltips with no link, e.g. the

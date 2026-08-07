@@ -12,6 +12,35 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.5.2]
+
+### Fixed
+- **`stack` showed every stack size, not just full ones.** v1.5.1 made the
+  filter fail *open* when an item's maximum stack size was unknown, which
+  turned out to mean "always" for items your client hasn't cached — so it let
+  everything through instead of everything being hidden. Both failure modes
+  looked equally broken.
+
+  Max stack size has exactly one source on 1.12 — `GetItemInfo`, which only
+  answers for items already in the client's local cache, i.e. not the ones
+  you're shopping for. **Aegis now remembers every stack size it learns**
+  (account-wide, alongside vendor prices — it's a property of the item, not
+  the realm), so the filter fills in as you browse and play. Anything still
+  unknown is excluded *and counted*, with the status line saying so:
+  `No full stacks • 12 skipped (stack size unknown — search again)`.
+
+- **`weapon/dagger` returned thrown weapons with "Dagger" in the name.** The
+  game's category names are plural and often qualified — "Daggers",
+  "One-Handed Swords" — so the singular never matched, fell through to a name
+  search, and dragged in anything called "…Dagger". Categories now match on an
+  exact name, then a unique prefix, then a unique substring.
+
+  Deliberately *unique*: `weapon/sword` matches both One-Handed and Two-Handed
+  Swords, so it stays a name search rather than silently picking one half and
+  returning a confidently wrong page. Naming one exactly still works.
+
+---
+
 ## [1.5.1]
 
 ### Added
@@ -684,6 +713,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.5.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.4.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
