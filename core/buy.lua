@@ -539,33 +539,13 @@ function buy.ParseQuery(text)
     return terms
 end
 
--- Max stack size out of a GetItemInfo call, WITHOUT counting return slots.
---
--- The return list differs between clients:
---   vanilla 1.12   name, link, quality, minLevel, type, subType,
---                  stackCount, equipLoc, texture              (9 values)
---   later clients  ...insert itemLevel at position 4, pushing
---                  everything after it down one                (10 values)
---
--- So a fixed index reads stackCount on one client and equipLoc on the other.
--- That is what made `/stack` report "stack size unknown" for a stack of Silk
--- Cloth sitting in the player's own bags: reading slot 8 got equipLoc, which
--- is empty for a trade good -- and would have thrown outright on a piece of
--- gear, where equipLoc is a string like "INVTYPE_CHEST".
---
--- In BOTH layouts stackCount is the LAST NUMBER in the list -- everything
--- after it (equipLoc, texture) is a string. Find that instead of counting.
+-- Max stack size, via the shared util.ItemInfo normaliser (which is where the
+-- "GetItemInfo's slots move between clients" problem is solved once, for every
+-- caller -- see its comment).
 local function StackCountFromItemInfo(link)
-    if not link then return nil end
-    local r = { GetItemInfo(link) }
-    local i = table.getn(r)
-    while i >= 1 do
-        if type(r[i]) == "number" then
-            if r[i] > 0 then return r[i] end
-            return nil
-        end
-        i = i - 1
-    end
+    local info = util.ItemInfo(link)
+    local n = info and info.stackCount
+    if n and n > 0 then return n end
     return nil
 end
 buy.StackCountFromItemInfo = StackCountFromItemInfo

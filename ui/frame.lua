@@ -5836,7 +5836,12 @@ function ui.TrySellFromBag(bag, slot)
     local itemId = util.ItemIdFromLink(link)
     if not itemId then return false end
     local texture, count = GetContainerItemInfo(bag, slot)
-    local iname = GetItemInfo(link)
+    -- Via util.ItemInfo like every other caller. The NAME is position 1 and
+    -- never moved between client layouts, so this is uniformity rather than a
+    -- fix -- but it stops a second return being bolted on here later and
+    -- quietly reintroducing the shift.
+    local info = util.ItemInfo(link)
+    local iname = info and info.name
     if not iname then
         -- Same cold-item-cache fallback sell.ScanBags uses.
         local _, _, n = string.find(link, "%[([^%]]+)%]")
@@ -5862,7 +5867,12 @@ function ui.TryBuySearchFromBag(bag, slot)
     if CursorHasItem and CursorHasItem() then return false end
     local link = GetContainerItemLink(bag, slot)
     if not link then return false end
-    local iname = GetItemInfo(link)
+    -- Via util.ItemInfo like every other caller. The NAME is position 1 and
+    -- never moved between client layouts, so this is uniformity rather than a
+    -- fix -- but it stops a second return being bolted on here later and
+    -- quietly reintroducing the shift.
+    local info = util.ItemInfo(link)
+    local iname = info and info.name
     if not iname then
         local _, _, n = string.find(link, "%[([^%]]+)%]")
         iname = n
@@ -5947,7 +5957,8 @@ function ui.HookItemShiftClick()
     HandleModifiedItemClick = function(link)
         if ui.BuyRightClickActive() and IsShiftKeyDown and IsShiftKeyDown()
             and link then
-            local name = GetItemInfo(link)
+            local shiftInfo = util.ItemInfo(link)
+            local name = shiftInfo and shiftInfo.name
             if not name then
                 local _, _, n = string.find(link, "%[([^%]]+)%]")
                 name = n
