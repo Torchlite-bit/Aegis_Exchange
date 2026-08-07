@@ -91,10 +91,33 @@ is the single most likely way the integration could corrupt someone's history.
 survives Courier being renamed. There *is* a global-name fallback for a Courier
 that loads without claiming, but it is a safety net, not the contract.
 
-> ⚠️ **Open, for the Courier session to close:** that fallback currently guesses
-> at `AegisCourier` / `Aegis_Courier`. Once Courier settles its real addon
-> global, trim `COURIER_GLOBALS` in `core/db.lua` to the true name. Harmless
-> either way as long as Courier calls `ClaimMailScanning`.
+**Closed (v1.7.0):** the fallback used to guess at `AegisCourier` /
+`Aegis_Courier`. Courier's `core/init.lua` declares **`AegisCourier`**, and
+`Aegis_Courier` is only the folder / `.toc` name — never a global — so the list
+is now the single confirmed name. A test pins it: sniffing the folder name must
+NOT stand Aegis's scanner down.
+
+> 🚨 **Open — the two repos disagree about `RecordExternalTxn`'s shape, and it
+> fails SILENTLY.** Aegis takes **one table** (above). Courier's
+> `core/bridge.lua` calls it with **four positional args**:
+> ```lua
+> local ok = pcall(AegisExchange.RecordExternalTxn, kind, item, amount, itemId)
+> ```
+> Aegis then sees `txn = "sale"`, hits `type(txn) ~= "table"` and **returns**
+> `false, "payload must be a table"` — it does not error, so `pcall` reports
+> success, `bridge.Push` returns true, and every push is dropped with no
+> warning on either side. Both repos claim `INTEGRATION_VERSION = 1`, so the
+> version guard cannot catch it. Courier also never sends `key`, so
+> `MailTxnKey` dedup never engages.
+>
+> Not fixed here, because which side moves is a cross-repo call:
+> - **Change Courier** (`bridge.Push` builds the table, passes `key`) — keeps
+>   Aegis's published contract, and Courier is the newer, unshipped side.
+> - **Change Aegis** to also accept the positional form — wider blast radius
+>   and two shapes to keep working forever. Not recommended.
+>
+> Either way `bridge.Push` should check the RETURNED value, not just `pcall`'s
+> ok flag, or a rejected payload stays invisible.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 

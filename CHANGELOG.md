@@ -43,6 +43,11 @@ printed in the window title bar — quote it in bug reports.
   for several releases, and the Sell tab's bag-list headers, which grouped by
   item *type* on one client and *subtype* on the other. No caller indexes
   `GetItemInfo` by position any more.
+- The Courier detection fallback no longer guesses at the companion addon's
+  global. Confirmed against Aegis: Courier's own source, it is `AegisCourier`;
+  `Aegis_Courier` is the folder and `.toc` name and is never a global, so it is
+  no longer accepted. Only affects a Courier that loads without calling
+  `ClaimMailScanning` — the explicit handshake was and remains the contract.
 
 ---
 
