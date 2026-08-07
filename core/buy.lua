@@ -28,7 +28,10 @@ buy.TIMEOUT     = 8      -- seconds to wait for a page reply before retrying
 buy.state = {
     phase      = "idle",   -- idle | wait_query | wait_results
     name       = "",
-    page       = 0,        -- 0-indexed current page
+    terms      = { { blizz = { name = "", minLevel = "", maxLevel = "" },
+                      filter = function() return true end } },
+    termIndex  = 1,        -- 1-based: which OR term (see Query language below)
+    page       = 0,        -- 0-indexed current page, WITHIN the active term
     totalPages = 0,
     total      = 0,
     rows       = {},       -- current page's listings (sorted for display)
@@ -93,6 +96,33 @@ function buy.PushRecent(term)
     end
 end
 
+-- Tab-autocomplete candidates for the search box: known item names (learned
+-- from every scan, search, or AH browse -- db.account.names is fed from all
+-- three) plus recent search terms, case-insensitive PREFIX match, deduped,
+-- alphabetical.
+function buy.AutocompleteCandidates(prefix)
+    local out = {}
+    if not prefix or prefix == "" then return out end
+    local low = string.lower(prefix)
+    local seen = {}
+    local function consider(name)
+        if not name or name == "" or seen[name] then return end
+        if string.find(string.lower(name), low, 1, true) == 1 then
+            seen[name] = true
+            table.insert(out, name)
+        end
+    end
+    local names = A.db and A.db.account and A.db.account.names
+    if names then
+        for name in pairs(names) do consider(name) end
+    end
+    local recent = buy.Recent()
+    local i = 1
+    while i <= table.getn(recent) do consider(recent[i]); i = i + 1 end
+    table.sort(out)
+    return out
+end
+
 function buy.AddList(name)
     local s = Store()
     if not s or not name or name == "" then return nil end
@@ -145,19 +175,286 @@ function buy.RemoveItemFromList(index, itemName)
     end
 end
 
--- Kick off a fresh search for `name` at page 0.
-function buy.Search(name, callbacks)
+-- ---------------------------------------------------------------------------
+-- Query language (ROADMAP Phase 2a)
+--
+-- The grammar is aux's, not a new Aegis-native dialect (decided in ROADMAP.md):
+-- slash-delimited terms, semicolon-separated OR at the top level, keyword
+-- modifiers. This is an ORIGINAL implementation of that known grammar shape --
+-- no code from any reference addon.
+--
+-- Nothing about today's casual usage changes: typing a plain item name still
+-- just searches by name, because a bare word with no recognized keyword is
+-- exactly what it always was -- text appended to the name filter.
+--
+-- Recognized tokens (slash-delimited), case-insensitive:
+--   exact              -- keep only rows whose AUCTION NAME matches the typed
+--                          name exactly (not just "contains"). Post-filter.
+--   usable             -- server-side isUsable flag.
+--   quality/<n-or-name> or the fused form qualityN (e.g. "quality2") --
+--                          server-side quality index. Names: poor, common,
+--                          uncommon, rare, epic, legendary.
+--   level/<n> or level/<min>-<max>, or the fused forms levelN / levelN-M --
+--                          server-side level range.
+--   buyout             -- exclude bid-only auctions. Post-filter.
+--   stack              -- keep only fully-stacked listings (count == the
+--                          item's max stack size). Post-filter.
+--   tooltip            -- everything AFTER this point in the term accumulates
+--                          into a tooltip-substring search instead of the name
+--                          (post-filter, scans the auction's tooltip lines).
+--                          Concrete disambiguation case:
+--                            container/bag/tooltip/8  -> name "container bag",
+--                                                         tooltip "8"
+--                            container/bag/8          -> name "container bag 8"
+--
+-- DEFERRED (not in this slice, so the grammar accepts but does not yet act on
+-- them beyond folding them into the name text -- see ROADMAP.md 2a):
+--   class/subclass/slot keywords (need GetAuctionItemClasses/SubClasses/
+--   InvTypes index maps); exact's fuller promise of tightening those same
+--   fields server-side; price/time-left post-filter primitives beyond
+--   buyout/stack; prefix-notation and/or/not combinators (2d's territory --
+--   this slice's post-filters simply all apply together, an implicit AND).
+-- ---------------------------------------------------------------------------
+
+buy.QUALITY_NAMES = {
+    poor = 0, common = 1, uncommon = 2, rare = 3, epic = 4, legendary = 5,
+}
+
+-- "2" or "rare" -> a quality index, or nil if neither parses.
+local function ParseQualityValue(tok)
+    local named = buy.QUALITY_NAMES[tok]
+    if named then return named end
+    local n = tonumber(tok)
+    if n and n >= 0 and n <= 6 then return math.floor(n) end
+    return nil
+end
+
+-- Fused "quality2" / "qualityrare" -> a quality index, or nil.
+local function ParseFusedQuality(tok)
+    local _, _, digits = string.find(tok, "^quality(%d+)$")
+    if digits then return tonumber(digits) end
+    local _, _, name = string.find(tok, "^quality(%a+)$")
+    if name then return buy.QUALITY_NAMES[name] end
+    return nil
+end
+
+-- "20" or "20-30" (the VALUE half of a two-token "level/..." form) -> min, max.
+local function ParseLevelValue(tok)
+    local _, _, mn, mx = string.find(tok, "^(%d+)%-(%d+)$")
+    if mn then return tonumber(mn), tonumber(mx) end
+    local _, _, single = string.find(tok, "^(%d+)$")
+    if single then local n = tonumber(single); return n, n end
+    return nil
+end
+
+-- Fused "level20" / "level20-30" -> min, max, or nil.
+local function ParseFusedLevel(tok)
+    local _, _, mn, mx = string.find(tok, "^level(%d+)%-(%d+)$")
+    if mn then return tonumber(mn), tonumber(mx) end
+    local _, _, single = string.find(tok, "^level(%d+)$")
+    if single then local n = tonumber(single); return n, n end
+    return nil
+end
+
+-- Parse ONE slash-delimited term (already split out of the semicolon OR list)
+-- into its structured pieces. Never errors: an unrecognized token always falls
+-- back to becoming literal name/tooltip text, so a query never "breaks".
+function buy.ParseTerm(text)
+    local term = {
+        nameWords = {}, tooltipWords = {}, inTooltip = false,
+        exact = false, usable = false, buyoutOnly = false, stackOnly = false,
+        quality = nil, minLevel = nil, maxLevel = nil,
+    }
+    local function appendWord(word)
+        if term.inTooltip then
+            table.insert(term.tooltipWords, word)
+        else
+            table.insert(term.nameWords, word)
+        end
+    end
+
+    local tokens = util.Split(text, "/")
+    local i, n = 1, table.getn(tokens)
+    while i <= n do
+        local raw = util.Trim(tokens[i])
+        local tok = string.lower(raw)
+        if tok == "exact" then
+            term.exact = true
+        elseif tok == "usable" then
+            term.usable = true
+        elseif tok == "buyout" then
+            term.buyoutOnly = true
+        elseif tok == "stack" then
+            term.stackOnly = true
+        elseif tok == "tooltip" then
+            term.inTooltip = true
+        elseif tok == "quality" then
+            local nxt = tokens[i + 1]
+            local q = nxt and ParseQualityValue(string.lower(util.Trim(nxt)))
+            if q then term.quality = q; i = i + 1
+            else appendWord(raw) end
+        elseif tok == "level" then
+            -- NOT "nxt and ParseLevelValue(...)": `and` adjusts its right
+            -- operand to a single value, which silently drops ParseLevelValue's
+            -- second return (maxLevel) whenever it truncates. Caught by a test
+            -- asserting level/20-30 keeps BOTH ends of the range.
+            local nxt = tokens[i + 1]
+            local mn, mx
+            if nxt then mn, mx = ParseLevelValue(util.Trim(nxt)) end
+            if mn then term.minLevel = mn; term.maxLevel = mx; i = i + 1
+            else appendWord(raw) end
+        else
+            local q = ParseFusedQuality(tok)
+            if q then
+                term.quality = q
+            else
+                local mn, mx = ParseFusedLevel(tok)
+                if mn then
+                    term.minLevel = mn; term.maxLevel = mx
+                else
+                    appendWord(raw)
+                end
+            end
+        end
+        i = i + 1
+    end
+
+    term.name = util.Trim(table.concat(term.nameWords, " "))
+    if table.getn(term.tooltipWords) > 0 then
+        term.tooltipText = util.Trim(table.concat(term.tooltipWords, " "))
+    else
+        term.tooltipText = nil
+    end
+    return term
+end
+
+-- Split on the top-level semicolon OR, into an array of parsed terms. Always
+-- returns at least one term (an all-blank query is one empty-name term, same
+-- as browsing everything today).
+function buy.ParseQuery(text)
+    local groups = util.Split(text or "", ";")
+    if table.getn(groups) == 0 then groups = { "" } end
+    local terms = {}
+    local i = 1
+    while i <= table.getn(groups) do
+        table.insert(terms, buy.ParseTerm(groups[i]))
+        i = i + 1
+    end
+    return terms
+end
+
+-- Item link -> cached max stack size, or nil (not yet client-cached). Used by
+-- the "stack" (fully-stacked-only) post-filter.
+buy.stackCache = {}
+function buy.MaxStackFor(itemId, link)
+    if not itemId then return nil end
+    local cached = buy.stackCache[itemId]
+    if cached then return cached end
+    if not link then return nil end
+    local _, _, _, _, _, _, _, stackCount = GetItemInfo(link)
+    if stackCount and stackCount > 0 then
+        buy.stackCache[itemId] = stackCount
+        return stackCount
+    end
+    return nil
+end
+
+-- A dedicated, never-shown tooltip used only to read an auction listing's
+-- tooltip text for the "tooltip" post-filter. 1.12 has no NumLines(); the
+-- stock technique (see CLAUDE.md rule 14) is getglobal on the template's
+-- numbered FontStrings until one comes back empty.
+local queryTip = CreateFrame("GameTooltip", "AegisExchangeQueryTooltip", nil,
+    "GameTooltipTemplate")
+queryTip:SetOwner(UIParent, "ANCHOR_NONE")
+
+local function TooltipContainsAt(index, needleLower)
+    if not queryTip.SetAuctionItem then return false end
+    queryTip:ClearLines()
+    queryTip:SetOwner(UIParent, "ANCHOR_NONE")
+    queryTip:SetAuctionItem("list", index)
+    local i = 1
+    while i <= 30 do
+        local fs = getglobal("AegisExchangeQueryTooltipTextLeft" .. i)
+        if not fs then break end
+        local text = fs:GetText()
+        if not text then break end
+        if string.find(string.lower(text), needleLower, 1, true) then
+            return true
+        end
+        i = i + 1
+    end
+    return false
+end
+
+-- Compile a parsed term into what the engine actually needs: the 1.12
+-- QueryAuctionItems args (CLAUDE.md rule 9: strings for name/min/max, "" when
+-- unused, never nil; flag/index args stay nil for "no filter") plus a
+-- post-filter closure applied to each row as its page loads.
+function buy.CompileTerm(term)
+    local blizz = {
+        name     = term.name or "",
+        minLevel = term.minLevel and tostring(term.minLevel) or "",
+        maxLevel = term.maxLevel and tostring(term.maxLevel) or "",
+        isUsable = term.usable and true or nil,
+        quality  = term.quality,
+    }
+    local exactName = term.exact and string.lower(term.name or "") or nil
+    local tooltipNeedle = term.tooltipText and string.lower(term.tooltipText)
+        or nil
+    local buyoutOnly = term.buyoutOnly
+    local stackOnly  = term.stackOnly
+
+    local function filter(row)
+        if buyoutOnly and not (row.buyout and row.buyout > 0) then
+            return false
+        end
+        if exactName and string.lower(row.name or "") ~= exactName then
+            return false
+        end
+        if stackOnly then
+            local max = buy.MaxStackFor(row.itemId, row.link)
+            if not max or row.count ~= max then return false end
+        end
+        if tooltipNeedle and not TooltipContainsAt(row.index, tooltipNeedle) then
+            return false
+        end
+        return true
+    end
+
+    return { blizz = blizz, filter = filter, raw = term }
+end
+
+function buy.CompileQuery(text)
+    local terms = buy.ParseQuery(text)
+    local compiled = {}
+    local i = 1
+    while i <= table.getn(terms) do
+        table.insert(compiled, buy.CompileTerm(terms[i]))
+        i = i + 1
+    end
+    return compiled
+end
+
+-- ---------------------------------------------------------------------------
+-- Browsing engine
+-- ---------------------------------------------------------------------------
+
+-- Kick off a fresh search for `text` (plain name, or the query language above)
+-- at term 1, page 0.
+function buy.Search(text, callbacks)
     if buy.IsBusy() then
         return false, "The AH is busy (scan or posting in progress)."
     end
     local st = buy.state
-    st.name      = name or ""
+    st.terms     = buy.CompileQuery(text)
+    st.termIndex = 1
+    st.name      = st.terms[1].blizz.name   -- kept for existing readers
     st.page      = 0
     st.callbacks = callbacks or st.callbacks
     st.phase     = "wait_query"
     st.cooldown  = 0
     st.timeout   = 0
-    buy.PushRecent(util.Trim(st.name))
+    buy.PushRecent(util.Trim(text or ""))
     buy.driver:Show()
     Notify()
     return true
@@ -184,22 +481,56 @@ function buy.GotoPage(page)
     Notify()
 end
 
+-- Switch the active OR term (see the Query language section above) and query
+-- its page 0.
+function buy.GotoTerm(termIndex)
+    if buy.IsBusy() then return end
+    local st = buy.state
+    local total = table.getn(st.terms)
+    if termIndex < 1 then termIndex = 1 end
+    if termIndex > total then termIndex = total end
+    st.termIndex = termIndex
+    st.name      = st.terms[termIndex].blizz.name   -- kept for existing readers
+    st.page      = 0
+    st.phase     = "wait_query"
+    st.cooldown  = buy.QUERY_DELAY
+    buy.driver:Show()
+    Notify()
+end
+
+-- Past the last page of the active term, roll into the next OR term rather
+-- than stopping -- a semicolon-separated query is meant to read as one
+-- combined browse, not N separate searches you have to notice and re-run.
 function buy.NextPage()
-    if buy.state.page + 1 < buy.state.totalPages then
-        buy.GotoPage(buy.state.page + 1)
+    local st = buy.state
+    if st.page + 1 < st.totalPages then
+        buy.GotoPage(st.page + 1)
+    elseif st.termIndex < table.getn(st.terms) then
+        buy.GotoTerm(st.termIndex + 1)
     end
 end
 
+-- Symmetric with NextPage, EXCEPT crossing a term boundary backwards lands on
+-- that term's FIRST page rather than a deep link to its last one -- we don't
+-- know its page count until we've queried it, and reaching back across an OR
+-- boundary is rare enough that a second round trip to discover "the last
+-- page" isn't worth the complexity.
 function buy.PrevPage()
-    if buy.state.page > 0 then
-        buy.GotoPage(buy.state.page - 1)
+    local st = buy.state
+    if st.page > 0 then
+        buy.GotoPage(st.page - 1)
+    elseif st.termIndex > 1 then
+        buy.GotoTerm(st.termIndex - 1)
     end
 end
 
 local function SendQuery()
     local st = buy.state
-    -- name/minLevel/maxLevel as strings (see CLAUDE.md rule 9).
-    QueryAuctionItems(st.name or "", "", "", nil, nil, nil, st.page, nil, nil)
+    local b = st.terms[st.termIndex].blizz
+    -- name/minLevel/maxLevel as strings (see CLAUDE.md rule 9); index/flag
+    -- args (isUsable, quality) stay nil for "no filter".
+    QueryAuctionItems(b.name, b.minLevel, b.maxLevel, nil, nil, nil,
+        st.page, b.isUsable, b.quality)
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
     Notify()
@@ -226,13 +557,14 @@ buy.driver:SetScript("OnUpdate", function() buy.OnUpdate(arg1) end)
 -- real `index` so a later bid/buyout targets the right auction.
 function buy.ReadPage()
     local st = buy.state
+    local term = st.terms[st.termIndex]
     local numOnPage, total = GetNumAuctionItems("list")
     st.total = total or 0
     st.totalPages = math.ceil(st.total / buy.PAGE_SIZE)
     if st.totalPages < 1 then st.totalPages = 1 end
 
     local me = UnitName and UnitName("player") or nil
-    local rows = {}
+    local rawRows = {}
     local i = 1
     while i <= numOnPage do
         local name, texture, count, quality, canUse, level, minBid, minInc,
@@ -245,7 +577,8 @@ function buy.ReadPage()
             else
                 nextBid = minBid or 0
             end
-            table.insert(rows, {
+            local link = GetAuctionItemLink("list", i)
+            table.insert(rawRows, {
                 index   = i,
                 name    = name,
                 texture = texture,
@@ -260,22 +593,34 @@ function buy.ReadPage()
                 bidAmount = bidAmount or 0,
                 nextBid = nextBid,
                 owner   = owner,
-                itemId  = util.ItemIdFromLink(GetAuctionItemLink("list", i)),
+                link    = link,
+                itemId  = util.ItemIdFromLink(link),
                 mine    = (owner and me and owner == me) and true or false,
             })
         end
         i = i + 1
     end
 
-    -- Ordinary browsing feeds the price DB too (not just full scans): fold each
-    -- listing's unit buyout into today's daily minimum. This is what makes the
-    -- % market column and the crafting profit estimate work off searches alone.
+    -- NOTE: browsing DOES feed the price DB, but not from here. scan.lua's
+    -- AUCTION_ITEM_LIST_UPDATE handler calls RecordVisiblePage() on every
+    -- result page anyone looks at -- including this one, from the same event
+    -- -- so a loop here would just record the identical values a second time.
+    -- (This file used to do exactly that. Adding the post-filter below is what
+    -- surfaced it: a sabotage that fed the DB from the FILTERED rows instead
+    -- of the raw ones changed nothing observable, because scan.lua had already
+    -- recorded every row regardless.)
+    --
+    -- The important consequence is worth stating: the post-filter narrows what
+    -- is DISPLAYED and never what is learned. A "buyout only" or "exact"
+    -- search still teaches the price DB what every listing on the page costs.
+
+    -- A plain-text search (the common case) compiles to an always-true filter,
+    -- so rows == rawRows and nothing about existing behaviour changes.
+    local rows = {}
     local ri = 1
-    while ri <= table.getn(rows) do
-        local r = rows[ri]
-        if r.itemId and r.unit then
-            A.db.RecordAuction(r.itemId, r.unit, r.name)
-        end
+    while ri <= table.getn(rawRows) do
+        local r = rawRows[ri]
+        if term.filter(r) then table.insert(rows, r) end
         ri = ri + 1
     end
 
@@ -348,7 +693,9 @@ function buy.Bid(row, amount)
 end
 
 function buy.GetResults()
-    return buy.state.rows, buy.state.page, buy.state.totalPages, buy.state.total
+    local st = buy.state
+    return st.rows, st.page, st.totalPages, st.total, st.termIndex,
+        table.getn(st.terms)
 end
 
 -- ---------------------------------------------------------------------------

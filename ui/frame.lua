@@ -1932,6 +1932,7 @@ ui.GrowBuySideRows = function(n)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
+    box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
     ui.buyBox = box
 
     local maxLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -2244,6 +2245,30 @@ end
 
 -- ---- search + results --------------------------------------------------
 
+-- Cycle through autocomplete candidates for whatever's currently typed.
+-- Re-bases off the live text on the FIRST Tab press for a given prefix (so it
+-- always completes what you actually typed), then keeps cycling through the
+-- same candidate list on repeated presses without re-querying it each time.
+function ui.BuyAutocomplete()
+    if not ui.buyBox or not A.buy then return end
+    local cur = ui.buyBox:GetText() or ""
+    local ac = ui.buyAC
+    if not ac or cur ~= ac.current then
+        ac = { base = cur, candidates = A.buy.AutocompleteCandidates(cur),
+               index = 0 }
+        ui.buyAC = ac
+    end
+    local n = table.getn(ac.candidates)
+    if n == 0 then return end
+    ac.index = math.mod(ac.index, n) + 1
+    local pick = ac.candidates[ac.index]
+    ui.buyBox:SetText(pick)
+    ac.current = pick
+    if ui.buyBox.SetCursorPosition then
+        ui.buyBox:SetCursorPosition(string.len(pick))
+    end
+end
+
 function ui.DoBuySearch()
     if not ui.buyBox then return end
     ui.buyBox:ClearFocus()
@@ -2300,7 +2325,8 @@ function ui.UpdateBuyList()
     local offset = FauxScrollFrame_GetOffset(ui.buyScroll)
 
     if A.buy then
-        local _, page, totalPages, totalAuctions = A.buy.GetResults()
+        local _, page, totalPages, totalAuctions, termIndex, totalTerms =
+            A.buy.GetResults()
         if ui.buyResults then
             if table.getn(all) == 0 then
                 ui.buyStatus:SetText("No auctions found.")
@@ -2310,10 +2336,29 @@ function ui.UpdateBuyList()
                 if maxUnit and maxUnit > 0 then
                     shown = " \226\128\162 " .. total .. " under max"
                 end
-                ui.buyStatus:SetText(totalAuctions .. " auction(s) \226\128\162 "
+                -- `all` is already query-filtered (buyout-only, exact, tooltip
+                -- -- see buy.ReadPage's post-filter); totalAuctions is the raw
+                -- Blizzard count for this page's query, which can be bigger
+                -- once a filter is active. Showing both keeps the bigger
+                -- number from reading as "how many I can buy".
+                local headline = table.getn(all) .. " match(es)"
+                if table.getn(all) ~= totalAuctions then
+                    headline = headline .. " (of " .. totalAuctions .. ")"
+                end
+                ui.buyStatus:SetText(headline .. " \226\128\162 "
                     .. sortKey .. " " .. order .. shown)
             end
-            ui.buyPageText:SetText("Page " .. (page + 1) .. " / " .. totalPages)
+            local pageTxt = "Page " .. (page + 1) .. " / " .. totalPages
+            -- Multiple semicolon-separated OR terms browse as one combined
+            -- search (NextPage/PrevPage roll across term boundaries), so the
+            -- pager names which term you're currently on -- but only when
+            -- there's more than one, so the common single-term case looks
+            -- exactly as it always has.
+            if totalTerms and totalTerms > 1 then
+                pageTxt = "Term " .. termIndex .. "/" .. totalTerms
+                    .. "  \226\128\162  " .. pageTxt
+            end
+            ui.buyPageText:SetText(pageTxt)
         else
             ui.buyPageText:SetText("")
         end
@@ -5759,6 +5804,30 @@ function ui.TrySellFromBag(bag, slot)
     return true
 end
 
+-- Right-click a bag item while the BUY tab is up: search for it. Mirrors
+-- TrySellFromBag's shape but has no "auctionable" gate (you can shop for
+-- soulbound/conjured items even though you could never post them yourself).
+function ui.BuyRightClickActive()
+    return (ui.frame and ui.frame:IsVisible() and true or false)
+        and ui.selectedSubTab == "Buy"
+end
+
+function ui.TryBuySearchFromBag(bag, slot)
+    if not bag or not slot then return false end
+    if CursorHasItem and CursorHasItem() then return false end
+    local link = GetContainerItemLink(bag, slot)
+    if not link then return false end
+    local iname = GetItemInfo(link)
+    if not iname then
+        local _, _, n = string.find(link, "%[([^%]]+)%]")
+        iname = n
+    end
+    if not iname then return false end
+    if ui.buyBox then ui.buyBox:SetText(iname) end
+    ui.DoBuySearch()
+    return true
+end
+
 -- Save-and-replace (no secure hooks on 1.12) on BOTH right-click paths:
 --
 --   ContainerFrameItemButton_OnClick -- the stock bag buttons.
@@ -5767,21 +5836,33 @@ end
 --                                       UIs (pfUI, Stonkz's Bags, ...) work too.
 --
 -- The first hook returns without chaining when it handles the click, so the
--- second never double-fires for the stock bags.
+-- second never double-fires for the stock bags. Sell (place in slot) and Buy
+-- (search for it) are mutually exclusive by construction -- each Active()
+-- check requires its OWN sub-tab to be the visible one.
 function ui.HookBagRightClick()
     if ui.bagClickHooked then return end
     ui.bagClickHooked = true
 
+    local function tryHandle(bag, slot)
+        if ui.SellRightClickActive() and ui.TrySellFromBag(bag, slot) then
+            return true
+        end
+        if ui.BuyRightClickActive() and ui.TryBuySearchFromBag(bag, slot) then
+            return true
+        end
+        return false
+    end
+
     if ContainerFrameItemButton_OnClick then
         ui.orig_ContainerFrameItemButton_OnClick = ContainerFrameItemButton_OnClick
         ContainerFrameItemButton_OnClick = function(button, ignoreModifiers)
-            if button == "RightButton" and ui.SellRightClickActive() then
+            if button == "RightButton" then
                 -- `this` is the clicked item button; its parent carries the bag id.
                 local btn = this
                 local parent = btn and btn.GetParent and btn:GetParent() or nil
                 local bag = parent and parent.GetID and parent:GetID() or nil
                 local slot = btn and btn.GetID and btn:GetID() or nil
-                if ui.TrySellFromBag(bag, slot) then return end
+                if tryHandle(bag, slot) then return end
             end
             return ui.orig_ContainerFrameItemButton_OnClick(button, ignoreModifiers)
         end
@@ -5790,11 +5871,49 @@ function ui.HookBagRightClick()
     if UseContainerItem then
         ui.orig_UseContainerItem = UseContainerItem
         UseContainerItem = function(bag, slot, onSelf)
-            if ui.SellRightClickActive() and ui.TrySellFromBag(bag, slot) then
-                return
-            end
+            if tryHandle(bag, slot) then return end
             return ui.orig_UseContainerItem(bag, slot, onSelf)
         end
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Shift-click an item to search for it on the Buy tab
+--
+-- The ROADMAP quick win is worded as "drag an inventory item onto the search
+-- box, or right-click an item link in chat". 1.12 has no generic way to ask
+-- "what item is on the cursor" for an arbitrary custom frame like our search
+-- box -- that only exists for API-blessed drop targets (the AH's own sell
+-- slot uses ClickAuctionSellItemButton precisely because of this gap). Assume
+-- the generic form does not exist, per CLAUDE.md.
+--
+-- What 1.12 DOES have, and is the standard vanilla idiom for exactly this
+-- interaction, is HandleModifiedItemClick(itemLink) -- the single global every
+-- shift-click on an item funnels through, whether the item is in a bag, a
+-- tooltip, an AH row, OR a chat link. Hooking it covers both halves of the
+-- ROADMAP bullet with one well-understood, save-and-replace-safe hook instead
+-- of two separate guesses at cursor APIs.
+function ui.HookItemShiftClick()
+    if ui.shiftClickHooked then return end
+    ui.shiftClickHooked = true
+    if not HandleModifiedItemClick then return end
+
+    ui.orig_HandleModifiedItemClick = HandleModifiedItemClick
+    HandleModifiedItemClick = function(link)
+        if ui.BuyRightClickActive() and IsShiftKeyDown and IsShiftKeyDown()
+            and link then
+            local name = GetItemInfo(link)
+            if not name then
+                local _, _, n = string.find(link, "%[([^%]]+)%]")
+                name = n
+            end
+            if name then
+                if ui.buyBox then ui.buyBox:SetText(name) end
+                ui.DoBuySearch()
+                return
+            end
+        end
+        return ui.orig_HandleModifiedItemClick(link)
     end
 end
 
@@ -5802,6 +5921,7 @@ function ui.OpenWindow()
     ui.BuildWindow()
     ui.HookAuctionFrame()
     ui.HookBagRightClick()
+    ui.HookItemShiftClick()
     ui.showBlizzard = false
     -- Synchronous hide is safe HERE: our AUCTION_HOUSE_SHOW handler runs
     -- after the client's AuctionFrame_Show() has already passed its

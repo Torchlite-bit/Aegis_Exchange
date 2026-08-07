@@ -12,6 +12,60 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.5.0]
+
+### Added
+- **A search query language on the Buy tab** (ROADMAP 2a). Typing a plain item
+  name still does exactly what it always did — a bare word with no keyword is
+  just name text, same as ever. The same box now also understands:
+
+  | Query | Effect |
+  |---|---|
+  | `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
+  | `belt/quality3`, `belt/quality/rare` | server-side quality filter |
+  | `sword/level20-30`, `sword/level/25` | server-side level range |
+  | `belt/usable` | server-side "usable by me" flag |
+  | `runecloth/buyout` | exclude bid-only auctions |
+  | `mageweave/stack` | fully-stacked listings only |
+  | `container/bag/tooltip/8` | name *container bag*, tooltip contains *8* |
+  | `linen;wool;silk` | three searches browsed as one list |
+
+  The grammar is aux's (settled in ROADMAP.md) — this is an original
+  implementation of that shape, not ported code. Filters split into the parts
+  the 1.12 server can do (one `QueryAuctionItems` per term) and the parts it
+  can't (applied client-side as each page loads). An unrecognised token can
+  never break a query: it falls back to being literal name text.
+
+  Semicolon terms browse as **one** list — page past the end of one and it
+  rolls into the next, rather than leaving you to notice and re-run.
+
+- **Right-click a bag item on the Buy tab to search for it.** The Sell tab's
+  existing right-click-to-slot is untouched; each only fires on its own tab.
+- **Shift-click any item to search for it** — a bag slot, a chat link, a
+  tooltip. Works through `HandleModifiedItemClick`, the single 1.12 global
+  every shift-click funnels through.
+- **Tab-completion in the search box**, from every item name Aegis has learned
+  (scans, searches, browsing) plus your recent searches. Press Tab again to
+  cycle through the matches.
+
+### Changed
+- The Buy tab's result count now reads `N match(es) (of M)` when a query filter
+  is narrowing the page, so the bigger Blizzard-side number can't be mistaken
+  for "how many I can buy". The pager names the current term (`Term 1/3`) only
+  when a query actually has more than one — a single-term search looks exactly
+  as it always has.
+
+### Fixed
+- Removed a duplicate price-database write on the browse path. `core/buy.lua`
+  folded every browsed listing into the price DB, but `core/scan.lua`'s
+  `RecordVisiblePage` already does that for *every* result page anyone looks
+  at — from the same event, with identical values. Surfaced by a sabotage test
+  that fed the DB from filtered rows instead of raw ones and changed nothing
+  observable. Behaviour is unchanged (and still verified): a filtered search
+  narrows what is **displayed**, never what is **learned**.
+
+---
+
 ## [1.4.0]
 
 ### Changed
@@ -577,6 +631,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.5.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.4.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.3.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.2.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

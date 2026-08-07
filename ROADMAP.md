@@ -265,27 +265,44 @@ current layout rather than replacing it:
   **Saved Searches**, and **Filter Builder** — reusing the sidebar's screen
   real estate rather than adding a fourth top-level sub-tab.
 
-### 2a — Parser, compiler, core primitives (same search box)
-Nothing about today's casual usage changes: typing an item name still just
-searches by name. Additionally supported in the same box:
-- Blizzard-query / post-filter split — one Blizzard query per search term
-  (drives page count via the existing 9-arg `QueryAuctionItems`), unlimited
-  post-filters applied client-side as each page loads (`buy.ReadPage`
-  already reads one page at a time — post-filters slot into that loop).
-- `exact` modifier, tailored as tightly as the Blizzard query allows
-  (level range, class/subclass/slot, quality) — cannot combine with a
-  manual filter on those same fields.
-- Tooltip-substring search, with the leading-term-vs-tooltip disambiguation
-  aux uses (name search before any category term, tooltip search after; the
-  `container/bag/tooltip/8` vs `container/bag/8` case is the concrete test).
-- The two filters explicitly requested: buyout-only (exclude bid-only
-  auctions), and fully-stacked-only (stack size == max for that item).
-- Quick wins that only need the existing box, done here while it's already
-  being touched: 
-   - Right-click an item in your bags while on the Buy tab to instantly initiate a search for that item.
-   - Right-click an item in your bags while on the Sell tab to automatically place it directly into the sell slot for auction creation.
-   - Dragging an inventory item onto the search box or right-clicking an item link in chat.
-   - Tab-autocompletion in the search bar.
+### 2a — Parser, compiler, core primitives — ✅ **DONE** (v1.5.0)
+Casual usage is untouched: a bare word with no keyword is just name text, so
+typing an item name searches by name exactly as before. Shipped in the same box:
+
+- **Blizzard-query / post-filter split.** `buy.CompileTerm` returns `{ blizz,
+  filter }` — one 9-arg `QueryAuctionItems` per term, plus a closure applied to
+  each row as `buy.ReadPage` loads it. Server-side: name, level range, quality,
+  usable. Client-side: exact, buyout-only, fully-stacked, tooltip substring.
+- **`exact`**, **buyout-only**, **fully-stacked-only**, and **tooltip
+  substring** — including the `container/bag/tooltip/8` vs `container/bag/8`
+  disambiguation, which is a test.
+- **Semicolon OR** browses as ONE list: `buy.NextPage` rolls past the last page
+  of a term into the next term rather than stopping. (`PrevPage` crossing
+  backwards lands on the previous term's *first* page — we don't know its page
+  count until we query it, and a round trip just to deep-link "its last page"
+  isn't worth it.)
+- Quick wins: right-click a bag item on the Buy tab to search it (Sell tab's
+  right-click-to-slot untouched — each fires only on its own tab), shift-click
+  any item anywhere to search it, Tab-completion from every learned item name.
+
+**Two notes for 2b/2d:**
+
+1. `class`/`subclass`/`slot` keywords are **not** in this slice. They need
+   index maps built from `GetAuctionItemClasses` / `GetAuctionItemSubClasses` /
+   inventory-type constants; the Filter Builder (2b) needs those same maps for
+   its dropdowns, so build them once there and let the parser share them.
+2. This slice's post-filters all apply together — an implicit AND. Prefix
+   `and`/`or`/`not` combination is 2d's job, and `CompileTerm`'s single
+   `filter` closure is the seam it should compose into.
+
+**Watch out for** (found the hard way): `local a, b = cond and f()` silently
+drops `f`'s second return whenever `and` truncates to one value. Cost a
+half-parsed level range until a test caught it.
+
+**Also fixed on the way:** `core/buy.lua` was folding every browsed listing
+into the price DB, which `core/scan.lua`'s `RecordVisiblePage` already does for
+every result page anyone looks at — same event, identical values. The duplicate
+is gone; the price feed still works because it always came from scan.lua.
 
 ### 2b — Filter Builder tab
 Form-driven query construction mirroring aux's layout (Name / Level Range /

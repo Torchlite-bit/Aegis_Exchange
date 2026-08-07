@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.4.0)
+# Aegis: Exchange (v1.5.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -59,6 +59,28 @@ Search the AH, sort by unit price, stack price, or % of market value, and buy or
 bid straight from the results. Colour-coded so bargains jump out: **green is
 under market, red is over.** Keep **shopping lists** of the things you always
 need (all your tailoring mats, say) and search the whole list in one click.
+
+**Typing a name still just searches for that name** — nothing you already do
+changes. But the same box now takes a query language when you want one:
+
+| Type this | Get that |
+|---|---|
+| `linen cloth` | exactly what it always did |
+| `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
+| `belt/quality3` or `belt/quality/rare` | rare-quality belts |
+| `sword/level20-30` | swords for levels 20–30 |
+| `runecloth/buyout` | skip bid-only auctions |
+| `mageweave/stack` | full stacks only |
+| `container/bag/tooltip/8` | *bag* items whose tooltip mentions **8** |
+| `linen;wool;silk` | all three, browsed as one list |
+
+Terms combine with `/`, and `;` runs several searches back to back — page past
+the end of one and it rolls straight into the next.
+
+**Shortcuts while the Buy tab is open:** **right-click** any bag item to search
+for it, or **shift-click** any item *anywhere* — bags, a chat link, a tooltip —
+to drop its name in the box and go. **Tab** completes what you've typed from
+every item Aegis has ever seen, pressing it again to cycle through the matches.
 
 ### 💰 Sell — price it right the first time
 Drop an item in and Aegis scans the AH for *just that item*, shows you every
@@ -254,7 +276,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.4.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.5.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
