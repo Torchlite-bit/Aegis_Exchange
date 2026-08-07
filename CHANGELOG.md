@@ -12,6 +12,37 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.4.0]
+
+### Changed
+- **Market value now looks back 30 days instead of 11, and actually weights
+  those days** (ROADMAP 0.3). The old setting was described as "recent days
+  weighted more, decreasing effect past roughly a month" and did neither: the
+  window was 11 days, so nothing survived to a month, and at 0.95 decay per day
+  the oldest retained value still carried 57% of today's weight — which made
+  the "time-weighted" median return the same answer as an unweighted one in
+  **93% of cases**. It was a flat 11-day median wearing a decay curve's name.
+
+  The new curve is 30 days at 0.85 per day:
+
+  | age | today | 3d | 7d | 14d | 21d | 30d |
+  |---|---|---|---|---|---|---|
+  | weight | 100% | 61% | 32% | 10% | 3% | 1% |
+
+  Nothing was traded away to get it. A real price shift (100 → 200 and it
+  stays) is tracked in **5 days — exactly as fast as before**. One absurd
+  listing still moves a steady series by nothing, because it is still a median.
+  And it fixes casual scanning: in an 11-day window someone scanning weekly had
+  **one** sample, and a weighted median of one sample is just that sample.
+  Thirty days gives them four.
+
+  **Nothing to do on your end.** No migration, no reset. Existing databases hold
+  at most 11 days, so they ramp up to the full window over the next three weeks
+  rather than changing under you at once. Price history keeps roughly 3 MB of
+  SavedVariables at 6000 tracked items, up from about 1 MB.
+
+---
+
 ## [1.3.0]
 
 ### Added
@@ -546,6 +577,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.4.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.3.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.2.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.1.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

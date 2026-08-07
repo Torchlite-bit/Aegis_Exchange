@@ -98,18 +98,55 @@ that loads without claiming, but it is a safety net, not the contract.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 
-### 0.3 Historical-value weighting audit
-**Decided to do; outcome open.** `core/db.lua` `db.MarketValue` already does
-daily-minimum + weighted-median over ~11 days. Before building the line
-graph in Phase 3 (which will visualize this value), audit the actual
-weighting curve against the target behavior — recent days weighted more,
-decreasing effect past roughly a month — and close any gap between what's
-implemented and what's intended. This is mostly verification, not new code.
+### 0.3 Historical-value weighting audit — ✅ **DONE** (v1.4.0)
+**The gap was real, and it was both halves of the intent.** Target behaviour was
+"recent days weighted more, decreasing effect past roughly a month". Neither
+held:
 
-### 0.4 Dynamic Window Scaling & Resizing
-Decided. Add a grab-and-drag scaling handle on the bottom-right corner of the main Aegis frame.
-- Allows users to freely adjust the frame size by dragging the corner.
-- Ensures inner UI panels, tables, and buttons dynamically rescale and re-anchor without breaking layout proportions or pixel density.
+- **The window was 11 days**, and `PruneDaily` deletes everything past it — so
+  nothing survived to a month for its effect to decrease.
+- **The curve was nearly flat.** At `DECAY = 0.95` the oldest retained value
+  still carried 57% of today's weight. Measured against an *unweighted* median
+  over 3000 random series, the shipped weighting changed the answer in **6.9% of
+  cases**. It was a flat 11-day median wearing a decay curve's name.
+
+The audit method is worth repeating for Phase 3: reimplement the algorithm
+independently, prove the reimplementation matches `db.MarketValue` exactly on
+hundreds of random series, *then* sweep parameters with the verified model.
+Sweeping an unverified model measures the model, not the addon.
+
+Shipped: `KEEP_DAYS 11 → 30`, `DECAY 0.95 → 0.85`.
+
+| | today | 3d | 7d | 14d | 21d | 30d |
+|---|---|---|---|---|---|---|
+| weight | 100% | 61% | 32% | 10% | 3% | 1% |
+
+Chosen because it costs nothing to get: step response (100 → 200 and stays)
+is **5 days, identical to the old setting**; the weighting now changes the
+answer in 88% of cases instead of 7%; outlier rejection is untouched; and it
+fixes casual scanning — in an 11-day window someone scanning weekly had **one**
+sample, and a weighted median of one sample is just that sample. Thirty days
+gives them four.
+
+Storage cost is real but modest: ~3.4 MB of SavedVariables at 6000 items ×
+30 days, up from ~1.3 MB. No migration — existing DBs simply stop being pruned
+so hard and ramp to the full window over three weeks.
+
+> **Note for Phase 3's line graph:** the value being plotted is a *median*, so
+> it returns one of the observed daily values rather than a smooth average.
+> Expect a step-shaped series, not a curve.
+
+### 0.4 Dynamic Window Scaling & Resizing — ✅ **DONE** (v1.2.0)
+Grab-and-drag grip on the bottom-right corner, size remembered per character,
+every list re-fitting itself to the new height on release.
+
+One thing turned out not to be possible as written: "inner UI panels, tables,
+and buttons dynamically rescale". **Vanilla frames do not reflow** — a 1.12
+layout is fixed anchors and fixed font sizes, so a bigger window can only ever
+show *more rows*, never larger ones. That is a client limit, not a shortcut.
+So the item shipped as **two** controls rather than one: resizing for more
+rows, and a separate **window scale** setting (70–150%, also per character) for
+physically bigger. On a large monitor you generally want both.
 
 ---
 
@@ -297,8 +334,8 @@ Decided. Integrate default Blizzard-style category browsing directly into the se
 - **Line graph** of profit/loss over time on the History tab. No charting
   primitive exists in 1.12 FrameXML — needs a short design spike (grid of
   `Texture` pixels vs. a `StatusBar`-based sparkline) before committing to
-  an approach. Depends on Phase 0.3's weighting audit being settled first,
-  since the graph visualizes that value.
+  an approach. **Phase 0.3 is settled (v1.4.0)**, so this is unblocked; read
+  its note about plotting a median before designing the axes.
 - **Disenchant value** in the tooltip — needs a feasibility check first
   (is a disenchant-value source even available via 1.12 API); not committed
   until that's answered.
