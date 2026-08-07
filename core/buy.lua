@@ -511,12 +511,43 @@ function buy.ParseQuery(text)
     return terms
 end
 
+-- Max stack size out of a GetItemInfo call, WITHOUT counting return slots.
+--
+-- The return list differs between clients:
+--   vanilla 1.12   name, link, quality, minLevel, type, subType,
+--                  stackCount, equipLoc, texture              (9 values)
+--   later clients  ...insert itemLevel at position 4, pushing
+--                  everything after it down one                (10 values)
+--
+-- So a fixed index reads stackCount on one client and equipLoc on the other.
+-- That is what made `/stack` report "stack size unknown" for a stack of Silk
+-- Cloth sitting in the player's own bags: reading slot 8 got equipLoc, which
+-- is empty for a trade good -- and would have thrown outright on a piece of
+-- gear, where equipLoc is a string like "INVTYPE_CHEST".
+--
+-- In BOTH layouts stackCount is the LAST NUMBER in the list -- everything
+-- after it (equipLoc, texture) is a string. Find that instead of counting.
+local function StackCountFromItemInfo(link)
+    if not link then return nil end
+    local r = { GetItemInfo(link) }
+    local i = table.getn(r)
+    while i >= 1 do
+        if type(r[i]) == "number" then
+            if r[i] > 0 then return r[i] end
+            return nil
+        end
+        i = i - 1
+    end
+    return nil
+end
+buy.StackCountFromItemInfo = StackCountFromItemInfo
+
 -- Max stack size for an item, or nil if genuinely not known yet.
 --
--- The ONLY 1.12 source is GetItemInfo's 8th return, and it answers only for
--- items already in the client's local item cache -- exactly the wrong
--- behaviour for an auction house, where the items you have never handled are
--- the ones you are shopping for. sell.lua already documents the same hazard.
+-- GetItemInfo only answers for items already in the client's local item cache
+-- -- exactly the wrong behaviour for an auction house, where the items you
+-- have never handled are the ones you are shopping for. sell.lua already
+-- documents the same hazard.
 --
 -- So: check what we have LEARNED first, ask the client second, and persist
 -- anything the client does tell us. Over a couple of sessions the DB fills in
@@ -531,10 +562,8 @@ function buy.MaxStackFor(itemId, link)
         buy.stackCache[itemId] = stored
         return stored
     end
-    if not link then return nil end
-    local _, _, _, _, _, _, _, stackCount = GetItemInfo(link)
-    if stackCount and stackCount > 0 then
-        buy.stackCache[itemId] = stackCount
+    local stackCount = StackCountFromItemInfo(link)
+    if stackCount then
         buy.LearnMaxStack(itemId, stackCount)
         return stackCount
     end
@@ -840,8 +869,8 @@ function buy.ReadPage()
         -- Learn every max stack this page happens to expose, whether or not
         -- the row survives the filter -- the next search benefits either way.
         if r.itemId and r.link then
-            local _, _, _, _, _, _, _, sc = GetItemInfo(r.link)
-            if sc and sc > 0 then buy.LearnMaxStack(r.itemId, sc) end
+            local sc = StackCountFromItemInfo(r.link)
+            if sc then buy.LearnMaxStack(r.itemId, sc) end
         end
         if term.filter(r, stats) then table.insert(rows, r) end
         ri = ri + 1

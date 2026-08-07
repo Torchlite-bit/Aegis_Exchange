@@ -12,6 +12,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.5.3]
+
+### Fixed
+- **`stack` said "stack size unknown" even for items sitting in your own bags.**
+  A stack of 20 Silk Cloth is definitely in the client's item cache, so the
+  cache was never the problem — the code was reading the wrong value out of
+  `GetItemInfo`.
+
+  Its return list is not the same on every client: vanilla 1.12 returns nine
+  values, while later clients insert `itemLevel` at position 4 and shift
+  everything after it down a slot. Counting slots therefore reads the stack
+  count on one client and the equip slot on the other — which is empty for a
+  trade good (hence "unknown" for every cloth, ore and herb) and a string like
+  `INVTYPE_CHEST` for gear, where it would have thrown outright.
+
+  The stack count is the **last number** in that list under both layouts —
+  everything after it is a string — so that is what Aegis looks for now,
+  instead of counting positions. The test suite runs these checks under *both*
+  return layouts, so a fix that only works on one can't pass.
+
+---
+
 ## [1.5.2]
 
 ### Fixed
@@ -713,6 +735,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.5.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
