@@ -310,13 +310,13 @@ prefix-notation combination, plus stat-suffix matching (the
 `+3 stamina/+3 agility` wristband-suffix case) and any remaining aux
 primitives worth carrying over.
 
-### 3e — Blizzard-style Category Navigation Tree
+### 2e — Blizzard-style Category Navigation Tree
 Decided. Integrate default Blizzard-style category browsing directly into the search interface
 - Displays a collapsible category tree on the left side of the search view (e.g., Weapons > Two-Handed Maces or Armor > Leather).
 - Allows users to easily browse specific item slots or types visually without having to rely strictly on typing name search queries or remembering syntax.
  - Category filters feed cleanly into the underlying search engine alongside post-filter rules.
 
-### 3f — Session Purchase & Crafting Material Tracker
+### 2f — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
 
