@@ -12,6 +12,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.6.0]
+
+### Added
+- **`stack <n>` — search for an exact stack size.** `silk cloth/stack 20`,
+  `silk cloth/stack 8`. It compares each listing's own count and needs no item
+  data whatsoever, so it works on the first search, for any item, however cold
+  the client's item cache is. Three spellings all work: `stack 20`,
+  `stack/20`, `stack20` — the spaced one matters because search terms split on
+  `/`, so `stack 20` arrives as a single token.
+
+### Changed
+- **Bare `stack` no longer dead-ends when an item's maximum can't be read.**
+  It still means "full stacks" and still prefers the real maximum, but when
+  the client can't supply one it now falls back to the largest stack of that
+  item on the page — which needs no item data at all — and says
+  `biggest on this page` in the status line so the weaker promise is never
+  passed off as the stronger one.
+
+  This is a pragmatic answer to `GetItemInfo` being unreliable here in ways
+  three attempts haven't fully pinned down. `stack <n>` is the form to use
+  when you want a guarantee.
+
+---
+
 ## [1.5.3]
 
 ### Fixed
@@ -735,6 +759,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.6.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

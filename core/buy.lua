@@ -398,6 +398,21 @@ local function ParseLevelValue(tok)
     return nil
 end
 
+-- "stack20" and "stack 20" -> 20, or nil.
+--
+-- The spaced form matters because tokens are split on "/", so typing
+-- "silk cloth/stack 20" hands the parser ONE token, "stack 20" -- it never
+-- reaches the two-token "stack" branch. Supporting all three spellings means
+-- the obvious thing to type works whichever way you reach for it.
+local function ParseFusedStack(tok)
+    local _, _, digits = string.find(tok, "^stack%s*(%d+)$")
+    if digits then
+        local n = tonumber(digits)
+        if n and n >= 1 then return n end
+    end
+    return nil
+end
+
 -- Fused "level20" / "level20-30" -> min, max, or nil.
 local function ParseFusedLevel(tok)
     local _, _, mn, mx = string.find(tok, "^level(%d+)%-(%d+)$")
@@ -414,6 +429,7 @@ function buy.ParseTerm(text)
     local term = {
         nameWords = {}, tooltipWords = {}, inTooltip = false,
         exact = false, usable = false, buyoutOnly = false, stackOnly = false,
+        stackSize = nil,
         quality = nil, minLevel = nil, maxLevel = nil,
         class = nil, subclass = nil, slot = nil,
     }
@@ -439,7 +455,16 @@ function buy.ParseTerm(text)
         elseif tok == "buyout" then
             term.buyoutOnly = true
         elseif tok == "stack" then
-            term.stackOnly = true
+            -- "stack/20" -- an EXPLICIT size. Needs no item data at all, which
+            -- is the whole point: it works on the first search, for any item,
+            -- however cold the client's cache is.
+            local nxt = tokens[i + 1]
+            local sz = nxt and tonumber(util.Trim(nxt))
+            if sz and sz >= 1 then
+                term.stackSize = math.floor(sz); i = i + 1
+            else
+                term.stackOnly = true
+            end
         elseif tok == "tooltip" then
             term.inTooltip = true
         elseif tok == "quality" then
@@ -459,10 +484,13 @@ function buy.ParseTerm(text)
             else appendWord(raw) end
         else
             local q = ParseFusedQuality(tok)
+            local sz = ParseFusedStack(tok)
             local mn, mx
-            if not q then mn, mx = ParseFusedLevel(tok) end
+            if not q and not sz then mn, mx = ParseFusedLevel(tok) end
             if q then
                 term.quality = q
+            elseif sz then
+                term.stackSize = sz
             elseif mn then
                 term.minLevel = mn; term.maxLevel = mx
             -- Categories, in the order they can be resolved. A subclass only
@@ -639,6 +667,7 @@ function buy.CompileTerm(term)
         or nil
     local buyoutOnly = term.buyoutOnly
     local stackOnly  = term.stackOnly
+    local stackSize  = term.stackSize
 
     local function filter(row, stats)
         if buyoutOnly and not (row.buyout and row.buyout > 0) then
@@ -647,12 +676,22 @@ function buy.CompileTerm(term)
         if exactName and string.lower(row.name or "") ~= exactName then
             return false
         end
-        if stackOnly then
-            -- An unknown max stack EXCLUDES the row -- "keep it just in case"
-            -- was worse: it let every partial stack through, so /stack looked
-            -- like it did nothing at all. But a silent exclusion looks equally
-            -- broken, so the count is reported and the caller surfaces it.
+        -- An EXPLICIT size needs no item data whatsoever -- just compare the
+        -- listing's own count. This is the reliable form.
+        if stackSize then
+            if row.count ~= stackSize then return false end
+        elseif stackOnly then
+            -- Bare `stack` means "full stacks", which needs the item's maximum
+            -- -- and GetItemInfo only knows that for items the client has
+            -- cached. Rather than dead-end on "unknown", fall back to the
+            -- largest count for that item ON THIS PAGE, which needs no item
+            -- data at all and is a fair reading of "the big stacks". The
+            -- caller is told which rule was used so the status line can say.
             local max = buy.MaxStackFor(row.itemId, row.link)
+            if not max then
+                max = stats and stats.pageMax and stats.pageMax[row.itemId]
+                if max and stats then stats.usedPageMax = true end
+            end
             if not max then
                 if stats then stats.unknownStack = (stats.unknownStack or 0) + 1 end
                 return false
@@ -861,7 +900,22 @@ function buy.ReadPage()
 
     -- A plain-text search (the common case) compiles to an always-true filter,
     -- so rows == rawRows and nothing about existing behaviour changes.
-    local stats = { unknownStack = 0 }
+    -- Largest count per item on this page, computed BEFORE filtering so bare
+    -- `stack` has something to fall back on when the client cannot tell us an
+    -- item's real maximum.
+    local pageMax = {}
+    local pi = 1
+    while pi <= table.getn(rawRows) do
+        local r = rawRows[pi]
+        if r.itemId and r.count then
+            if not pageMax[r.itemId] or r.count > pageMax[r.itemId] then
+                pageMax[r.itemId] = r.count
+            end
+        end
+        pi = pi + 1
+    end
+
+    local stats = { unknownStack = 0, pageMax = pageMax }
     local rows = {}
     local ri = 1
     while ri <= table.getn(rawRows) do

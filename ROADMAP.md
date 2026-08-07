@@ -307,9 +307,19 @@ single `filter` closure is the seam it should compose into.
   "until one comes back empty" walks off the end of the current tooltip into
   whatever longer tooltip was shown before. Bound the loop with `NumLines()`,
   and copy `sell.lua`'s owner → clear → set sequence rather than inventing one.
-- **A filter that needs `GetItemInfo` must fail OPEN.** It only answers for
-  cached items, so failing closed empties the entire page on a cold cache and
-  looks exactly like "no matches exist".
+- **Do not build a filter on `GetItemInfo` at all if you can avoid it.** The
+  fully-stacked filter took four attempts: fail-closed emptied every page,
+  fail-open filtered nothing, and two different theories about which return
+  slot holds the stack count were both wrong in the field. What finally worked
+  was letting the user state the number (`stack 20`) so no item lookup is
+  needed, with a page-derived fallback for the bare form. When a 1.12 API is
+  this unreliable, prefer a design that does not need it over a cleverer way
+  of calling it.
+- **`GetItemInfo`'s return list is not the same on every client** -- vanilla
+  1.12 has no `itemLevel`, so every slot after position 3 shifts by one
+  against later clients. Never index it positionally. `stackCount` is the last
+  NUMBER in the list on both, which is how `buy.StackCountFromItemInfo` finds
+  it.
 - **`canUse` from `GetAuctionItemInfo` is `1`-or-`nil`** — `nil` means cannot
   use, not "unknown". Treating nil as unknown made a warning unreachable for
   the entire life of the Buy tab.

@@ -2352,6 +2352,7 @@ function ui.UpdateBuyList()
             A.buy.GetResults()
         local unknown = stats and stats.unknownStack or 0
         if ui.buyResults then
+            local usedPageMax = stats and stats.usedPageMax
             if table.getn(all) == 0 then
                 if unknown > 0 then
                     -- Never a bare "No auctions found" when a filter threw rows
@@ -2377,6 +2378,13 @@ function ui.UpdateBuyList()
                 local headline = table.getn(all) .. " match(es)"
                 if table.getn(all) ~= totalAuctions then
                     headline = headline .. " (of " .. totalAuctions .. ")"
+                end
+                if usedPageMax then
+                    -- Say which rule produced these rows: "biggest on this
+                    -- page" is not the same promise as "a full stack", and
+                    -- quietly swapping one for the other would be worse than
+                    -- the dead end it replaced.
+                    shown = shown .. " \226\128\162 biggest on this page"
                 end
                 if unknown > 0 then
                     shown = shown .. " \226\128\162 " .. unknown
