@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.7.0]
+
+### Added
+- **Filter Builder on the Buy tab** (ROADMAP 2b). A **Builder** view sitting
+  beside **Results** in the same space: fill in a form — Name, Exact, Level
+  range, Class, Subclass, Slot, Quality, Usable, plus Buyout only, Full stacks,
+  Stack size and Tooltip contains — and it writes the query for you, shown live
+  as you go.
+
+  Class gates Subclass gates Slot, the way the auction house's own dropdowns
+  do, and every list is populated from the game's **own localized category
+  names** — the same source the typed query language reads, so there is no
+  second copy to drift.
+
+  **Search** runs it. **To box** copies the query into the search box, **+ OR**
+  appends it as another `;` term, **From box** loads a typed query back into
+  the form. Round-tripping is the feature's contract and is tested: whatever
+  the form builds must parse back to the same search.
+
+  The form edits **one** term. Loading a multi-term query fills in the first
+  and says so explicitly rather than quietly dropping the rest.
+
+### Changed
+- `GetItemInfo` is now read through one shared normaliser (`util.ItemInfo`)
+  that returns **named** fields. Its return list differs between clients —
+  vanilla 1.12 has no `itemLevel`, so every field after the third sits one slot
+  earlier than on later clients — and two separate positional reads had already
+  shipped with bugs from it: the stack-size lookup that made `/stack` misbehave
+  for several releases, and the Sell tab's bag-list headers, which grouped by
+  item *type* on one client and *subtype* on the other. No caller indexes
+  `GetItemInfo` by position any more.
+
+---
+
 ## [1.6.0]
 
 ### Added
@@ -759,6 +793,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.7.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.6.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

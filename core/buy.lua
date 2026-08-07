@@ -280,7 +280,8 @@ end
 local categoryCache
 
 local function BuildCategoryCache()
-    local cache = { classes = {}, subclasses = {}, slots = {} }
+    local cache = { classes = {}, subclasses = {}, slots = {},
+                    classNames = {}, subNames = {}, slotNames = {} }
     if not GetAuctionItemClasses then return cache end
     local cats = A.scan and A.scan.GetCategories and A.scan.GetCategories()
     if not cats then return cache end
@@ -289,6 +290,7 @@ local function BuildCategoryCache()
         local cat = cats[ci]
         if cat.name then
             cache.classes[string.lower(cat.name)] = cat.class
+            cache.classNames[cat.class] = cat.name
             local subs = cat.subs or {}
             local si = 1
             while si <= table.getn(subs) do
@@ -304,6 +306,10 @@ local function BuildCategoryCache()
                         cache.subclasses[cat.class] = byClass
                     end
                     byClass[string.lower(sub.name)] = sub.subclass
+                    -- Reverse map, for the Filter Builder: it has to render
+                    -- the localized name for an index it holds.
+                    cache.subNames[cat.class] = cache.subNames[cat.class] or {}
+                    cache.subNames[cat.class][sub.subclass] = sub.name
                 end
                 si = si + 1
             end
@@ -360,6 +366,41 @@ function buy.ResetCategories()
     categoryCache = nil
 end
 
+-- Reverse lookups: an index back to the localized name. The Filter Builder
+-- holds indices (that is what the query carries) but must SHOW names.
+function buy.ClassName(class)
+    local c = buy.Categories()
+    return class and c.classNames[class] or nil
+end
+
+function buy.SubclassName(class, subclass)
+    local c = buy.Categories()
+    local m = class and c.subNames[class]
+    return m and subclass and m[subclass] or nil
+end
+
+-- Ordered { { value = index, text = name } } lists for the builder's dropdowns.
+-- Sorted by index so the order matches the auction house's own dropdowns
+-- rather than alphabetically by whatever the locale happens to call things.
+local function OptionsFrom(nameMap)
+    local out = {}
+    if not nameMap then return out end
+    for idx, name in pairs(nameMap) do
+        table.insert(out, { value = idx, text = name })
+    end
+    table.sort(out, function(a, b) return a.value < b.value end)
+    return out
+end
+
+function buy.ClassOptions()
+    return OptionsFrom(buy.Categories().classNames)
+end
+
+function buy.SubclassOptions(class)
+    if not class then return {} end
+    return OptionsFrom(buy.Categories().subNames[class])
+end
+
 -- Equip slots for a given class/subclass, lazily per pair. GetAuctionInvTypes
 -- is guarded: it is not present on every 1.12 build, and a nil call here would
 -- take the whole parse down.
@@ -380,6 +421,12 @@ local function SlotsFor(class, subclass)
                 local label = globalKey and getglobal(globalKey)
                 if label and label ~= "" then
                     found[string.lower(label)] = i
+                    local names = cache.slotNames[key]
+                    if not names then
+                        names = {}
+                        cache.slotNames[key] = names
+                    end
+                    names[i] = label
                 end
                 i = i + 1
             end
@@ -387,6 +434,30 @@ local function SlotsFor(class, subclass)
     end
     cache.slots[key] = found
     return found
+end
+
+-- Slot options / name. Both force SlotsFor first so the reverse map exists --
+-- it is only populated as a side effect of the forward lookup.
+function buy.SlotOptions(class, subclass)
+    if not class then return {} end
+    SlotsFor(class, subclass)
+    local key = tostring(class) .. ":" .. tostring(subclass or 0)
+    local out = {}
+    local names = buy.Categories().slotNames[key]
+    if not names then return out end
+    for idx, name in pairs(names) do
+        table.insert(out, { value = idx, text = name })
+    end
+    table.sort(out, function(a, b) return a.value < b.value end)
+    return out
+end
+
+function buy.SlotName(class, subclass, slot)
+    if not class or not slot then return nil end
+    SlotsFor(class, subclass)
+    local key = tostring(class) .. ":" .. tostring(subclass or 0)
+    local names = buy.Categories().slotNames[key]
+    return names and names[slot] or nil
 end
 
 -- "20" or "20-30" (the VALUE half of a two-token "level/..." form) -> min, max.
@@ -522,6 +593,83 @@ function buy.ParseTerm(text)
         term.tooltipText = nil
     end
     return term
+end
+
+-- ---------------------------------------------------------------------------
+-- Query generation (ROADMAP 2b -- the Filter Builder's other direction)
+-- ---------------------------------------------------------------------------
+
+-- Turn a parsed-term-shaped table back into a query string.
+--
+-- ORDER MATTERS and is not cosmetic. ParseTerm resolves a token as a subclass
+-- only once a class is known, and as a slot only after that -- so categories
+-- must be emitted class, subclass, slot, in that sequence. The name goes FIRST
+-- so its words are consumed as name text before any category token sets the
+-- class and starts eating them.
+--
+-- Round-tripping is by VALUE, not by string: a name that is itself a category
+-- word ("armor") re-parses into the same term with the tokens in a different
+-- order. Compare parsed terms, never the strings.
+function buy.TermToQuery(term)
+    if not term then return "" end
+    local parts = {}
+    local function add(p)
+        if p and p ~= "" then table.insert(parts, p) end
+    end
+
+    add(term.name)
+    if term.exact then add("exact") end
+
+    add(term.class and buy.ClassName(term.class))
+    add(term.class and term.subclass
+        and buy.SubclassName(term.class, term.subclass))
+    add(term.class and term.slot
+        and buy.SlotName(term.class, term.subclass, term.slot))
+
+    if term.quality then add("quality/" .. term.quality) end
+    if term.minLevel then
+        if term.maxLevel and term.maxLevel ~= term.minLevel then
+            add("level/" .. term.minLevel .. "-" .. term.maxLevel)
+        else
+            add("level/" .. term.minLevel)
+        end
+    end
+    if term.usable then add("usable") end
+    if term.buyoutOnly then add("buyout") end
+    if term.stackSize then
+        add("stack/" .. term.stackSize)
+    elseif term.stackOnly then
+        add("stack")
+    end
+    -- Tooltip LAST: everything after the keyword is swallowed as tooltip text,
+    -- so anything emitted after it would silently stop being a filter.
+    if term.tooltipText and term.tooltipText ~= "" then
+        add("tooltip/" .. term.tooltipText)
+    end
+
+    return table.concat(parts, "/")
+end
+
+-- Two parsed terms mean the same search? Used by the builder's round-trip
+-- check, and by its tests, because string equality is the wrong comparison
+-- (see TermToQuery).
+function buy.TermsEqual(a, b)
+    if not a or not b then return false end
+    local keys = { "name", "exact", "usable", "buyoutOnly", "stackOnly",
+                   "stackSize", "quality", "minLevel", "maxLevel",
+                   "class", "subclass", "slot", "tooltipText" }
+    local i = 1
+    while i <= table.getn(keys) do
+        local k = keys[i]
+        -- false and nil both mean "off" for the flags; normalise before
+        -- comparing so an unset checkbox matches an absent field.
+        local av, bv = a[k], b[k]
+        if av == false then av = nil end
+        if bv == false then bv = nil end
+        if av ~= bv then return false end
+        i = i + 1
+    end
+    return true
 end
 
 -- Split on the top-level semicolon OR, into an array of parsed terms. Always

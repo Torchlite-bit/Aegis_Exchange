@@ -329,16 +329,55 @@ into the price DB, which `core/scan.lua`'s `RecordVisiblePage` already does for
 every result page anyone looks at — same event, identical values. The duplicate
 is gone; the price feed still works because it always came from scan.lua.
 
-### 2b — Filter Builder tab
-Form-driven query construction mirroring aux's layout (Name / Level Range /
-Item Class / Subclass / Slot / Min Quality on one side for the Blizzard
-filter, primitives + combination on the other for post-filters) — but
-**more efficient than aux's**, per your ask: aux requires hand-typing
-arity-prefixed operators (`and2`, `or3`, ...) to nest conditions correctly,
-which is a well-known rough edge. Aegis's builder manages that nesting
-automatically — click **+ Condition**, pick AND/OR, and the generated query
-string is always correctly nested without the user ever typing polish
-notation by hand. Search / Export / Import actions, same as aux.
+### 2b — Filter Builder tab — ✅ **DONE** (v1.7.0)
+Form-driven query construction, reached from the **Results / Builder** switch
+on the Buy tab (the Shopping Lists sidebar is untouched). Layout mirrors aux's:
+Name / Exact / Level Range / Item Class / Subclass / Slot / Min Quality /
+Usable on the Blizzard-filter side, post-filter primitives on the other.
+Search / Export / Import, same as aux — but the user never types polish
+notation, which was the whole point.
+
+**How it stays honest — round-trip is the acceptance test.** The form emits a
+string, the string parses back to a term, and the term repaints the form.
+That is checked **by value, not by string**: `buy.TermsEqual` compares all 13
+term keys (normalising `false` → `nil`), so a cosmetic difference in how the
+string was spelled can't mask a dropped field. 15 engine-level cases cover it,
+and they were written *before* any UI existed on top.
+
+**Settled while building it:**
+
+- **Dropdowns read `buy.Categories()` / `buy.SlotOptions()`** — the same maps
+  `armor/leather` searches through, exactly as this file asked. No parallel
+  category table exists anywhere in the addon.
+- **Class gates Subclass gates Slot.** Changing the class repopulates the
+  subclass list and drops a subclass the new class doesn't offer; same one
+  level down. `SetOptions` enforces that itself rather than trusting the
+  gating callback — a sabotage proved the callback alone would have hidden it.
+- **`buy.TermToQuery` emits in a fixed order**: name first, then
+  class/subclass/slot, then quality/level/usable/buyout/stack, **tooltip
+  last**. Not cosmetic — `container/bag/tooltip/8` only disambiguates from
+  `container/bag/8` if tooltip text can't be mistaken for a trailing category
+  token.
+- **The form edits ONE term.** `+ OR` appends it to the query box as a
+  semicolon term, which is the only combinator the engine has today.
+  Prefix `and`/`or`/`not` over post-filters is still **2d's** job, and the
+  builder's nesting-free promise above is a claim about 2d's UI, not this
+  slice's.
+- **Dropdowns are hand-built from `Frame` + `Button`**, following
+  `MakeHSlider`'s precedent, rather than inheriting a `UIDropDownMenu`
+  template whose 1.12 helper surface we couldn't verify against the Turtle UI
+  source. Popups parent to `ui.frame` so they aren't clipped by the panel;
+  one module-level `openDropdown` closes the previous one.
+- **Repainting the form must not fire the gating callbacks** — `SetValue(v,
+  silent)` and a `ui.builderPainting` re-entry guard, or importing a query
+  clears the very fields it just set.
+
+**Precursor shipped with it:** `util.ItemInfo(link)` normalises `GetItemInfo`
+into a named table (`name, link, quality, minLevel, type, subType, stackCount,
+equipLoc, texture`) by locating `stackCount` as the last number in the list, so
+the vanilla-vs-later 9/10-value shift can't bite again. `sell.ScanBags` and
+`buy.StackCountFromItemInfo` both route through it; **no caller indexes
+`GetItemInfo` positionally any more**, and the suite runs under both layouts.
 
 ### 2c — Saved Searches tab
 Favorites and Recent, styled after aux's split-column layout. Hover for a

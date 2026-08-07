@@ -1488,6 +1488,146 @@ MakeMoneyGSC = function(parent, onChange)
     return grp
 end
 
+-- A compact dropdown: a button showing the current choice, and a popup list.
+--
+-- Hand-built from Frame + Button for the same reason MakeHSlider is hand-built
+-- from Slider. UIDropDownMenuTemplate does exist on 1.12 -- aux uses it -- but
+-- it is a fiddly template with its own initialise-timing and width rules, and
+-- this file's standing policy is to build from primitives that always exist
+-- rather than inherit a template whose behaviour we have not verified here.
+--
+-- The popup is parented to the WINDOW, not to the row, so it draws above
+-- everything and is not clipped by whatever panel the dropdown sits in.
+local openDropdown
+local function MakeDropdown(parent, width, onSelect)
+    local dd = {}
+    dd.options = {}
+    dd.value = nil
+
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetWidth(width)
+    btn:SetHeight(20)
+    btn:SetText("All")
+    dd.button = btn
+
+    local list = CreateFrame("Frame", nil, ui.frame)
+    list:SetFrameLevel(parent:GetFrameLevel() + 20)
+    list:SetBackdrop({
+        bgFile = "Interface\Tooltips\UI-Tooltip-Background",
+        edgeFile = "Interface\Tooltips\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    list:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    list:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    list:EnableMouse(true)     -- swallow clicks; don't fall through to the form
+    list:Hide()
+    dd.list = list
+    dd.rows = {}
+
+    local ROW_H = 15
+
+    function dd:Close()
+        list:Hide()
+        if openDropdown == dd then openDropdown = nil end
+    end
+
+    -- Label for the currently selected value, or "All" when nothing is set.
+    function dd:Repaint()
+        local text = "All"
+        local i = 1
+        while i <= table.getn(dd.options) do
+            if dd.options[i].value == dd.value then
+                text = dd.options[i].text
+                break
+            end
+            i = i + 1
+        end
+        ui.SetTextClipped(btn:GetFontString(), text, width - 8)
+    end
+
+    function dd:SetOptions(opts)
+        dd.options = opts or {}
+        -- A value that is no longer offered cannot stay selected -- this is
+        -- what clears Subclass when the Class above it changes.
+        local stillValid = (dd.value == nil)
+        local i = 1
+        while i <= table.getn(dd.options) do
+            if dd.options[i].value == dd.value then stillValid = true end
+            i = i + 1
+        end
+        if not stillValid then dd.value = nil end
+        dd:Repaint()
+    end
+
+    function dd:SetValue(v, silent)
+        dd.value = v
+        dd:Repaint()
+        if not silent and onSelect then onSelect(v) end
+    end
+
+    function dd:GetValue() return dd.value end
+
+    function dd:SetEnabled(on)
+        if on then btn:Enable() else btn:Disable(); dd:Close() end
+    end
+
+    function dd:Open()
+        if openDropdown and openDropdown ~= dd then openDropdown:Close() end
+        -- "All" plus one row per option; All clears the filter.
+        local entries = { { text = "All", value = nil } }
+        local i = 1
+        while i <= table.getn(dd.options) do
+            table.insert(entries, dd.options[i])
+            i = i + 1
+        end
+        local n = table.getn(entries)
+        list:SetWidth(width)
+        list:SetHeight(n * ROW_H + 8)
+        list:ClearAllPoints()
+        list:SetPoint("TOPLEFT", btn, "BOTTOMLEFT", 0, -2)
+
+        local r = 1
+        while r <= n do
+            local row = dd.rows[r]
+            if not row then
+                row = CreateFrame("Button", nil, list)
+                row:SetHeight(ROW_H)
+                row:SetPoint("TOPLEFT", list, "TOPLEFT", 4, -(4 + (r - 1) * ROW_H))
+                row:SetPoint("TOPRIGHT", list, "TOPRIGHT", -4, -(4 + (r - 1) * ROW_H))
+                row:SetHighlightTexture(
+                    "Interface\QuestFrame\UI-QuestTitleHighlight")
+                row.aegisNoSkin = true
+                local fs = row:CreateFontString(nil, "OVERLAY",
+                    "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", 3, 0)
+                fs:SetJustifyH("LEFT")
+                row.label = fs
+                row:SetScript("OnClick", function()
+                    dd:SetValue(row.optValue)
+                    dd:Close()
+                end)
+                dd.rows[r] = row
+            end
+            row.optValue = entries[r].value
+            ui.SetTextClipped(row.label, entries[r].text, width - 12)
+            row:Show()
+            r = r + 1
+        end
+        while r <= table.getn(dd.rows) do dd.rows[r]:Hide(); r = r + 1 end
+
+        list:Show()
+        openDropdown = dd
+    end
+
+    btn:SetScript("OnClick", function()
+        if list:IsVisible() then dd:Close() else dd:Open() end
+    end)
+
+    dd:Repaint()
+    return dd
+end
+
 -- Horizontal slider, hand-built from the base Slider widget for the same reason
 -- as the Aegis tab's scroll bar: Slider is a primitive that always exists, so
 -- there's no "Couldn't find inherited node" risk from guessing a 1.12 template.
@@ -1980,6 +2120,31 @@ ui.GrowBuySideRows = function(n)
     addToList:SetText("Add to list")
     addToList:SetScript("OnClick", function() ui.BuyAddSearchToList() end)
 
+    -- View switcher. The ROADMAP wants Results / Saved Searches / Filter
+    -- Builder sharing this space rather than a fourth top-level sub-tab;
+    -- Saved Searches is 2c and slots in here without rework.
+    ui.buyViewBtns = {}
+    local views = { { "Results", "results" }, { "Builder", "builder" } }
+    local prevView = nil
+    local vi = 1
+    while vi <= table.getn(views) do
+        local v = views[vi]
+        local b = CreateFrame("Button", "AegisExchangeBuyView" .. v[2],
+            panel, "UIPanelButtonTemplate")
+        b:SetWidth(62); b:SetHeight(20)
+        if prevView then
+            b:SetPoint("LEFT", prevView, "RIGHT", 4, 0)
+        else
+            b:SetPoint("TOPLEFT", searchBtn, "TOPLEFT", 232, 0)
+        end
+        b:SetText(v[1])
+        b.view = v[2]
+        b:SetScript("OnClick", function() ui.SetBuyView(b.view) end)
+        ui.buyViewBtns[vi] = b
+        prevView = b
+        vi = vi + 1
+    end
+
     -- Pager.
     local nextBtn = CreateFrame("Button", "AegisExchangeBuyNextButton",
         panel, "UIPanelButtonTemplate")
@@ -2044,7 +2209,369 @@ ui.GrowBuyRows = function(n)
     end
     ui.GrowBuyRows(BUY_ROWS)
 
+    ui.BuildFilterBuilder(panel, rowLeft)
+    ui.SetBuyView("results")
+
     ui.RefreshBuySidebar()
+end
+
+-- ---------------------------------------------------------------------------
+-- Filter Builder (ROADMAP 2b)
+--
+-- Form-driven query construction: pick from dropdowns, get a valid query
+-- string. It occupies the same area as the results table and the two swap via
+-- ui.SetBuyView -- the ROADMAP calls for a row of switchable views (Results /
+-- Saved Searches / Filter Builder) reusing this space rather than adding a
+-- fourth top-level sub-tab. Saved Searches is 2c; the switcher is built to
+-- take a third entry without rework.
+--
+-- Every dropdown is populated from buy.Categories() / buy.SlotOptions(), which
+-- read the auction house's OWN localized names -- there is no second copy of
+-- the category list here to drift out of sync.
+-- ---------------------------------------------------------------------------
+
+function ui.SetBuyView(name)
+    ui.buyView = name
+    local builder = (name == "builder")
+    if ui.buyBuilder then
+        if builder then ui.buyBuilder:Show() else ui.buyBuilder:Hide() end
+    end
+    -- Everything belonging to the results view hides together.
+    local resultsBits = { ui.buyScroll, ui.buyPageText }
+    local i = 1
+    while i <= table.getn(resultsBits) do
+        local w = resultsBits[i]
+        if w then if builder then w:Hide() else w:Show() end end
+        i = i + 1
+    end
+    if ui.buyHeaders then
+        for _, h in pairs(ui.buyHeaders) do
+            if builder then h:Hide() else h:Show() end
+        end
+    end
+    local ri = 1
+    while ri <= table.getn(ui.buyRows or {}) do
+        if builder then ui.buyRows[ri]:Hide() end
+        ri = ri + 1
+    end
+    if ui.buyViewBtns then
+        local bi = 1
+        while bi <= table.getn(ui.buyViewBtns) do
+            local b = ui.buyViewBtns[bi]
+            if b.view == name then b:LockHighlight() else b:UnlockHighlight() end
+            bi = bi + 1
+        end
+    end
+    if not builder then ui.UpdateBuyList() end
+end
+
+function ui.BuildFilterBuilder(panel, rowLeft)
+    if ui.buyBuilder then return end
+
+    local f = CreateFrame("Frame", "AegisExchangeFilterBuilder", panel)
+    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
+    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 10)
+    f:Hide()
+    ui.buyBuilder = f
+
+    local function header(text, x, y)
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        fs:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+        fs:SetText(text)
+        fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        return fs
+    end
+    local function label(text, x, y)
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+        fs:SetWidth(58)
+        fs:SetJustifyH("RIGHT")
+        fs:SetText(text)
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        return fs
+    end
+    local function check(text, x, y, onClick)
+        local c = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+        c:SetWidth(20); c:SetHeight(20)
+        c:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+        local fs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", c, "RIGHT", 2, 0)
+        fs:SetText(text)
+        fs:SetTextColor(C.text[1], C.text[2], C.text[3])
+        c:SetScript("OnClick", function()
+            if onClick then onClick() end
+            ui.RefreshBuilder()
+        end)
+        return c
+    end
+
+    local LX, RXX = 0, 250        -- the form's two columns
+    local DDW = 116
+
+    -- ---- Blizzard-side filters ----------------------------------------
+    header("AUCTION HOUSE FILTER", LX, 0)
+
+    label("Name", LX, -22)
+    local nameBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    nameBox:SetWidth(DDW); nameBox:SetHeight(18)
+    nameBox:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -19)
+    nameBox:SetAutoFocus(false)
+    nameBox:SetScript("OnEscapePressed", function() nameBox:ClearFocus() end)
+    nameBox:SetScript("OnEnterPressed", function()
+        nameBox:ClearFocus(); ui.RefreshBuilder()
+    end)
+    nameBox:SetScript("OnTextChanged", function() ui.RefreshBuilder() end)
+    ui.fbName = nameBox
+
+    ui.fbExact = check("Exact match", LX + 62, -42)
+
+    label("Level", LX, -70)
+    ui.fbMinLevel = MakeNumBox(f, 32, function() ui.RefreshBuilder() end)
+    ui.fbMinLevel:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -67)
+    local dash = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 4, 0)
+    dash:SetText("\226\128\147")
+    dash:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    ui.fbMaxLevel = MakeNumBox(f, 32, function() ui.RefreshBuilder() end)
+    ui.fbMaxLevel:SetPoint("LEFT", dash, "RIGHT", 4, 0)
+
+    label("Class", LX, -94)
+    ui.fbClass = MakeDropdown(f, DDW, function()
+        -- Class gates Subclass gates Slot: changing it invalidates both below.
+        ui.fbSubclass:SetValue(nil, true)
+        ui.fbSlot:SetValue(nil, true)
+        ui.RefreshBuilder()
+    end)
+    ui.fbClass.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -91)
+
+    label("Subclass", LX, -118)
+    ui.fbSubclass = MakeDropdown(f, DDW, function()
+        ui.fbSlot:SetValue(nil, true)
+        ui.RefreshBuilder()
+    end)
+    ui.fbSubclass.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -115)
+
+    label("Slot", LX, -142)
+    ui.fbSlot = MakeDropdown(f, DDW, function() ui.RefreshBuilder() end)
+    ui.fbSlot.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -139)
+
+    label("Quality", LX, -166)
+    ui.fbQuality = MakeDropdown(f, DDW, function() ui.RefreshBuilder() end)
+    ui.fbQuality.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -163)
+
+    ui.fbUsable = check("Usable by me", LX + 62, -186)
+
+    -- ---- Post-filters --------------------------------------------------
+    header("EXTRA FILTERS", RXX, 0)
+
+    ui.fbBuyout = check("Buyout only", RXX, -20)
+    ui.fbStack  = check("Full stacks only", RXX, -42)
+
+    local ssLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ssLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -70)
+    ssLbl:SetText("Stack size")
+    ssLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    ui.fbStackSize = MakeNumBox(f, 34, function() ui.RefreshBuilder() end)
+    ui.fbStackSize:SetPoint("LEFT", ssLbl, "RIGHT", 6, 0)
+    local ssNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ssNote:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -88)
+    ssNote:SetText("exact size; beats 'full stacks'")
+
+    local ttLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ttLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -114)
+    ttLbl:SetText("Tooltip contains")
+    ttLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    local ttBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    ttBox:SetWidth(DDW); ttBox:SetHeight(18)
+    ttBox:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 4, -132)
+    ttBox:SetAutoFocus(false)
+    ttBox:SetScript("OnEscapePressed", function() ttBox:ClearFocus() end)
+    ttBox:SetScript("OnEnterPressed", function()
+        ttBox:ClearFocus(); ui.RefreshBuilder()
+    end)
+    ttBox:SetScript("OnTextChanged", function() ui.RefreshBuilder() end)
+    ui.fbTooltip = ttBox
+
+    -- ---- Preview + actions ---------------------------------------------
+    local pvLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    pvLbl:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -216)
+    pvLbl:SetText("Query")
+    pvLbl:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    ui.fbPreview = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.fbPreview:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 44, -216)
+    ui.fbPreview:SetJustifyH("LEFT")
+    ui.fbPreview:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
+
+    ui.fbNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.fbNote:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -234)
+    ui.fbNote:SetJustifyH("LEFT")
+
+    local function action(text, w, prev, fn)
+        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        b:SetWidth(w); b:SetHeight(20)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 5, 0)
+        else b:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -258) end
+        b:SetText(text)
+        b:SetScript("OnClick", fn)
+        return b
+    end
+    local bSearch = action("Search", 62, nil, function() ui.BuilderSearch() end)
+    local bTo = action("To box", 62, bSearch, function() ui.BuilderExport() end)
+    local bOr = action("+ OR", 52, bTo, function() ui.BuilderExport(true) end)
+    local bFrom = action("From box", 70, bOr, function() ui.BuilderImport() end)
+    action("Clear", 52, bFrom, function() ui.BuilderClear() end)
+    ui.fbSearchBtn = bSearch
+
+    ui.BuilderClear()
+end
+
+
+-- ---- Filter Builder: form <-> term --------------------------------------
+
+-- Quality dropdown options, from the client's own localized names.
+local function BuilderQualityOptions()
+    local out = {}
+    local i = 0
+    while i <= 5 do
+        local desc = getglobal("ITEM_QUALITY" .. i .. "_DESC")
+        if desc and desc ~= "" then
+            table.insert(out, { value = i, text = desc })
+        end
+        i = i + 1
+    end
+    return out
+end
+
+-- Read the form into a parsed-term-shaped table -- the same shape
+-- buy.ParseTerm produces, so buy.TermToQuery and buy.TermsEqual both apply.
+function ui.BuilderTerm()
+    local function num(box)
+        local n = tonumber(util.Trim(box:GetText() or ""))
+        if n and n >= 1 then return math.floor(n) end
+        return nil
+    end
+    local minL, maxL = num(ui.fbMinLevel), num(ui.fbMaxLevel)
+    -- One end of a range alone still means a range; the parser stores both.
+    if minL and not maxL then maxL = minL end
+    if maxL and not minL then minL = maxL end
+
+    local tip = util.Trim(ui.fbTooltip:GetText() or "")
+    return {
+        name       = util.Trim(ui.fbName:GetText() or ""),
+        exact      = ui.fbExact:GetChecked() and true or false,
+        usable     = ui.fbUsable:GetChecked() and true or false,
+        buyoutOnly = ui.fbBuyout:GetChecked() and true or false,
+        stackOnly  = ui.fbStack:GetChecked() and true or false,
+        stackSize  = num(ui.fbStackSize),
+        quality    = ui.fbQuality:GetValue(),
+        minLevel   = minL,
+        maxLevel   = maxL,
+        class      = ui.fbClass:GetValue(),
+        subclass   = ui.fbSubclass:GetValue(),
+        slot       = ui.fbSlot:GetValue(),
+        tooltipText = (tip ~= "") and tip or nil,
+    }
+end
+
+-- Push a parsed term INTO the form. Dropdowns are set silently so filling the
+-- form doesn't fire the gating callbacks and immediately clear what we just
+-- set -- the gating is re-applied once, by RefreshBuilder, at the end.
+function ui.BuilderSetTerm(t)
+    t = t or {}
+    ui.fbName:SetText(t.name or "")
+    ui.fbExact:SetChecked(t.exact and 1 or nil)
+    ui.fbUsable:SetChecked(t.usable and 1 or nil)
+    ui.fbBuyout:SetChecked(t.buyoutOnly and 1 or nil)
+    ui.fbStack:SetChecked(t.stackOnly and 1 or nil)
+    ui.fbStackSize:SetText(t.stackSize and tostring(t.stackSize) or "")
+    ui.fbMinLevel:SetText(t.minLevel and tostring(t.minLevel) or "")
+    ui.fbMaxLevel:SetText(t.maxLevel and tostring(t.maxLevel) or "")
+    ui.fbTooltip:SetText(t.tooltipText or "")
+
+    ui.fbClass:SetOptions(A.buy.ClassOptions())
+    ui.fbClass:SetValue(t.class, true)
+    ui.fbSubclass:SetOptions(A.buy.SubclassOptions(t.class))
+    ui.fbSubclass:SetValue(t.subclass, true)
+    ui.fbSlot:SetOptions(A.buy.SlotOptions(t.class, t.subclass))
+    ui.fbSlot:SetValue(t.slot, true)
+    ui.fbQuality:SetOptions(BuilderQualityOptions())
+    ui.fbQuality:SetValue(t.quality, true)
+
+    ui.RefreshBuilder()
+end
+
+function ui.BuilderClear()
+    ui.BuilderSetTerm(nil)
+    if ui.fbNote then ui.fbNote:SetText("") end
+end
+
+-- Re-apply the class -> subclass -> slot gating, then repaint the preview.
+function ui.RefreshBuilder()
+    if not ui.buyBuilder or ui.builderPainting then return end
+    -- SetOptions can clear a now-invalid value, which would re-enter here.
+    ui.builderPainting = true
+
+    local class = ui.fbClass:GetValue()
+    ui.fbSubclass:SetOptions(A.buy.SubclassOptions(class))
+    ui.fbSubclass:SetEnabled(class ~= nil)
+    local subclass = ui.fbSubclass:GetValue()
+    ui.fbSlot:SetOptions(A.buy.SlotOptions(class, subclass))
+    ui.fbSlot:SetEnabled(class ~= nil
+        and table.getn(A.buy.SlotOptions(class, subclass)) > 0)
+
+    local term = ui.BuilderTerm()
+    local q = A.buy.TermToQuery(term)
+    ui.fbPreview:SetText(q ~= "" and q or "(everything)")
+    if ui.fbSearchBtn then ui.fbSearchBtn:Enable() end
+
+    ui.builderPainting = false
+end
+
+function ui.BuilderSearch()
+    local q = A.buy.TermToQuery(ui.BuilderTerm())
+    if ui.buyBox then ui.buyBox:SetText(q) end
+    ui.SetBuyView("results")
+    ui.DoBuySearch()
+end
+
+-- Put the built query into the search box. `orTerm` appends it as another
+-- semicolon term instead of replacing -- the builder edits ONE term, and this
+-- is how you assemble a multi-term query out of it.
+function ui.BuilderExport(orTerm)
+    local q = A.buy.TermToQuery(ui.BuilderTerm())
+    if not ui.buyBox then return end
+    local cur = util.Trim(ui.buyBox:GetText() or "")
+    if orTerm and cur ~= "" and q ~= "" then
+        ui.buyBox:SetText(cur .. ";" .. q)
+        ui.fbNote:SetText("Appended as another OR term.")
+    else
+        ui.buyBox:SetText(q)
+        ui.fbNote:SetText("Copied to the search box.")
+    end
+    ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+end
+
+-- Load the search box back into the form.
+--
+-- The builder edits ONE term, so a multi-term query loads its FIRST term and
+-- SAYS so. Silently dropping the rest would be the worst option: you would
+-- edit what looked like your query and export something narrower.
+function ui.BuilderImport()
+    if not ui.buyBox then return end
+    local text = util.Trim(ui.buyBox:GetText() or "")
+    local terms = A.buy.ParseQuery(text)
+    ui.BuilderSetTerm(terms[1])
+    local n = table.getn(terms)
+    if n > 1 then
+        ui.fbNote:SetText("Loaded term 1 of " .. n
+            .. " \226\128\148 the other " .. (n - 1)
+            .. " are not shown here, and 'To box' will replace them.")
+        ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+    else
+        ui.fbNote:SetText("Loaded from the search box.")
+        ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
 end
 
 -- ---- sidebar model + paint ---------------------------------------------
@@ -2295,6 +2822,9 @@ end
 function ui.DoBuySearch()
     if not ui.buyBox then return end
     ui.buyBox:ClearFocus()
+    -- Any search shows its results. Running one while the form is up and
+    -- leaving the form covering the answer would be its own small bug.
+    if ui.buyView == "builder" then ui.SetBuyView("results") end
     if not A.buy then
         ui.buyStatus:SetText("Buy engine not loaded \226\128\148 fully restart WoW.")
         return
@@ -2325,7 +2855,13 @@ end
 function ui.RefreshBuy()
     if not ui.buyBuilt then return end
     ui.RefreshBuySidebar()
-    ui.UpdateBuyList()
+    if ui.buyView == "builder" then
+        -- The builder owns this space right now; repainting the results list
+        -- would un-hide its rows over the top of the form.
+        ui.RefreshBuilder()
+    else
+        ui.UpdateBuyList()
+    end
 end
 
 function ui.UpdateBuyList()
