@@ -299,10 +299,11 @@ Search Results / Saved Searches / Filter Builder split, mapped onto Aegis's
 current layout rather than replacing it:
 
 - The existing **Shopping Lists sidebar** (`ui/frame.lua` `BuildBuyTab`,
-  named multi-item lists searched sequentially) stays exactly as-is — aux
-  doesn't have an equivalent concept, and it's a genuinely different use
-  case from a single saved query. It is not being merged into Saved
-  Searches.
+  named multi-item lists searched sequentially) stays — aux doesn't have an
+  equivalent concept, and it's a genuinely different use case from a single
+  saved query. It is not being merged into Saved Searches. (Since 2e it
+  lives behind the left column's **Advanced** toggle, sharing the space
+  with the category tree; nothing about how it works changed.)
 - The right-hand content area gains a row of switchable views — **Search
   Results** (today's results table, now also accepting typed query syntax),
   **Saved Searches**, and **Filter Builder** — reusing the sidebar's screen
@@ -434,13 +435,39 @@ prefix-notation combination, plus stat-suffix matching (the
 `+3 stamina/+3 agility` wristband-suffix case) and any remaining aux
 primitives worth carrying over.
 
-### 3e — Blizzard-style Category Navigation Tree
-Decided. Integrate default Blizzard-style category browsing directly into the search interface
-- Displays a collapsible category tree on the left side of the search view (e.g., Weapons > Two-Handed Maces or Armor > Leather).
-- Allows users to easily browse specific item slots or types visually without having to rely strictly on typing name search queries or remembering syntax.
- - Category filters feed cleanly into the underlying search engine alongside post-filter rules.
+### 2e — Blizzard-style Category Navigation Tree — ✅ **DONE** (v1.8.0)
+(Numbered 3e when it was written; it shipped inside Phase 2, out of order,
+because the user asked for it ahead of 2c/2d.)
 
-### 3f — Session Purchase & Crafting Material Tracker
+The Buy tab's left column now opens as a collapsible **class > subclass >
+slot** tree (Weapons > Two-Handed Swords; Armor > Leather > Chest). Clicking
+a node searches it immediately. A **Categories / Advanced** toggle at the top
+swaps between the tree and the original Shopping Lists sidebar (lists +
+recent searches); the choice persists per character, tree by default.
+
+**Settled while building it:**
+
+- **Tree picks COMPOSE with the query box.** A click parses the box's first
+  term, swaps only class/subclass/slot, regenerates and searches — so typed
+  name/quality/stack/tooltip filters stay applied on top of the picked
+  category, and extra `;` terms are regenerated untouched (TermToQuery
+  round-trips by value, so this loses nothing). This is the "feed cleanly
+  into the underlying search engine" requirement, and it is pinned by a
+  sabotage-verified test.
+- **The tree reads `buy.ClassOptions` / `SubclassOptions` / `SlotOptions`** —
+  the exact three calls the Builder's dropdowns use. Still no second category
+  list anywhere.
+- **The paint paths are mode-guarded**, not just the widgets hidden: every
+  search refreshes the recent list, and an unguarded sidebar repaint would
+  `Show()` its rows straight over the tree. A test drives a search from the
+  tree and asserts the sidebar stays down.
+- **"Advanced replaces the tree"** is interpreted as: Advanced shows the
+  Shopping Lists sidebar (which contains the saved/recent searches), while
+  the Results/Builder switch on the right stays available in BOTH modes.
+  When 2c ships a dedicated Saved Searches view it slots into the existing
+  right-hand view switcher, not the left column.
+
+### 2f — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
 

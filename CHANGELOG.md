@@ -12,6 +12,52 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.8.0]
+
+### Added
+- **Category tree on the Buy tab** (ROADMAP 2e). The left column now opens as
+  a Blizzard-style **category tree**: click **Weapons > Two-Handed Swords** or
+  **Armor > Leather > Chest** and it searches — no typing, no syntax. Every
+  list in it comes from the client's own localized category names, the same
+  source the query language and the Builder's dropdowns read.
+
+  A tree pick **composes** with whatever is already in the search box rather
+  than replacing it: pick a category with `quality/rare/stack 20` typed and
+  you get rare 20-stacks *of that category*. Extra `;` terms ride along
+  untouched. That composition is the feature's contract and is tested.
+
+  The **Advanced** button swaps the tree back to the shopping-list sidebar
+  (lists + recent searches); **Categories** brings the tree back. The choice
+  sticks per character.
+
+### Fixed
+- **Exact match with an empty Name matched nothing at all.** `""` is truthy
+  in Lua, so a nameless term's exact filter compared every listing against an
+  empty string and rejected the entire page — an Exact checkbox ticked
+  without a name could never return a single result, whatever else was set.
+  Exact now only engages when there is a name to be exact *about*. (This was
+  the likely shape of the reported "Silk Cloth + stack 10 + Exact finds
+  nothing": the named form of that search passes, and passes a test now.)
+- **A page emptied by filters no longer reads as "No auctions found."** It
+  now says `0 match(es) (of N) • filters removed this page's rows — try the
+  next page`, because an unexplained empty page is indistinguishable from a
+  broken filter — exactly how `/stack` got reported in 1.5.x, and how this
+  one got reported too.
+- **The dropdown menus in the Filter Builder were see-through.** Their
+  texture paths were written with single backslashes, which Lua silently
+  swallows (`"\T"` is not an escape), so the client was asked for
+  `InterfaceTooltips...` — a texture that does not exist — and drew no
+  background and no hover highlight at all. Paths doubled, popup made fully
+  opaque, and lifted to its own strata so nothing in the window can paint
+  over it. Three tests now pin those strings byte-for-byte.
+- **Long recent searches wrecked the sidebar.** A long query wrapped onto a
+  second line and painted across the row below it. Sidebar rows now clip
+  with an ellipsis and show the **full query in a tooltip** on hover.
+- **The Builder view no longer shows the results status line or pager.**
+  "7 match(es) • unit low to high" used to print straight through the form's
+  heading, and the `<` `>` buttons still paged (and queried the server) for
+  a list you couldn't see.
+
 ## [1.7.0]
 
 ### Added
@@ -798,6 +844,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.8.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.7.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.6.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.5.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -790,7 +790,16 @@ function buy.CompileTerm(term)
         subclass = term.subclass,
         invType  = term.slot,
     }
-    local exactName = term.exact and string.lower(term.name or "") or nil
+    -- Exact only means something when there IS a name. Guarding the empty
+    -- string matters because "" is truthy in Lua: `term.exact and
+    -- lower(term.name or "")` yields exactName == "" for a nameless term, and
+    -- since no listing is named "", that filtered out EVERY row on EVERY page
+    -- -- an Exact checkbox ticked with an empty Name field could never return
+    -- a single result, whatever else the form said.
+    local exactName
+    if term.exact and term.name and term.name ~= "" then
+        exactName = string.lower(term.name)
+    end
     local tooltipNeedle = term.tooltipText and string.lower(term.tooltipText)
         or nil
     local buyoutOnly = term.buyoutOnly

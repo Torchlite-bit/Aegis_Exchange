@@ -1511,13 +1511,26 @@ local function MakeDropdown(parent, width, onSelect)
     dd.button = btn
 
     local list = CreateFrame("Frame", nil, ui.frame)
+    -- The popup must cover EVERYTHING in the window, so it gets its own
+    -- strata rather than a frame-level bid inside the panel's -- the same
+    -- move Blizzard's own DropDownList makes. Level alone lost to the form's
+    -- edit boxes.
+    list:SetFrameStrata("FULLSCREEN_DIALOG")
     list:SetFrameLevel(parent:GetFrameLevel() + 20)
+    -- DOUBLED backslashes, and this file has three tests pinning them: in Lua
+    -- source "\T" is not an escape, so a single backslash silently vanishes
+    -- and the client gets "InterfaceTooltips..." -- a texture that does not
+    -- exist. SetBackdrop draws nothing for a bad path, which shipped as a
+    -- see-through popup with the form bleeding through the option text.
     list:SetBackdrop({
-        bgFile = "Interface\Tooltips\UI-Tooltip-Background",
-        edgeFile = "Interface\Tooltips\UI-Tooltip-Border",
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         tile = true, tileSize = 16, edgeSize = 12,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
+    -- Fully opaque. The default tooltip backdrop color is translucent by
+    -- design (tooltips hover over the world); a menu you read options from
+    -- is not a tooltip.
     list:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
     list:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
     list:EnableMouse(true)     -- swallow clicks; don't fall through to the form
@@ -1596,7 +1609,7 @@ local function MakeDropdown(parent, width, onSelect)
                 row:SetPoint("TOPLEFT", list, "TOPLEFT", 4, -(4 + (r - 1) * ROW_H))
                 row:SetPoint("TOPRIGHT", list, "TOPRIGHT", -4, -(4 + (r - 1) * ROW_H))
                 row:SetHighlightTexture(
-                    "Interface\QuestFrame\UI-QuestTitleHighlight")
+                    "Interface\\QuestFrame\\UI-QuestTitleHighlight")
                 row.aegisNoSkin = true
                 local fs = row:CreateFontString(nil, "OVERLAY",
                     "GameFontHighlightSmall")
@@ -2006,11 +2019,25 @@ function ui.BuildBuyTab()
     ui.buyBuilt = true
     ui.buyExpanded = {}
 
-    -- ===== Left: shopping-list sidebar ==================================
-    local sideHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -10)
-    sideHdr:SetText("Shopping Lists")
-    sideHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    -- ===== Left: category tree OR shopping-list sidebar (ROADMAP 2e) ====
+    -- Two modes share this column. "Categories" is the Blizzard-style browse
+    -- tree -- click your way to Weapons > Two-Handed Swords without typing a
+    -- query. "Advanced" is the original Shopping Lists sidebar (lists +
+    -- recent searches). ui.SetBuyLeft switches them; the choice persists per
+    -- character.
+    local catModeBtn = CreateFrame("Button", "AegisExchangeBuyLeftCats",
+        panel, "UIPanelButtonTemplate")
+    catModeBtn:SetWidth(78); catModeBtn:SetHeight(18)
+    catModeBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -6)
+    catModeBtn:SetText("Categories")
+    catModeBtn:SetScript("OnClick", function() ui.SetBuyLeft("cats") end)
+    local advModeBtn = CreateFrame("Button", "AegisExchangeBuyLeftAdv",
+        panel, "UIPanelButtonTemplate")
+    advModeBtn:SetWidth(76); advModeBtn:SetHeight(18)
+    advModeBtn:SetPoint("LEFT", catModeBtn, "RIGHT", 4, 0)
+    advModeBtn:SetText("Advanced")
+    advModeBtn:SetScript("OnClick", function() ui.SetBuyLeft("adv") end)
+    ui.buyLeftBtns = { cats = catModeBtn, adv = advModeBtn }
 
     local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeBuySideScroll",
         panel, "FauxScrollFrameTemplate")
@@ -2044,10 +2071,24 @@ ui.GrowBuySideRows = function(n)
             row.ex = ex
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             lbl:SetPoint("LEFT", row, "LEFT", 14, 0)
-            lbl:SetWidth(SIDE_W - 16)
+            -- NO SetWidth here. A constrained FontString WRAPS long text onto
+            -- a second line on 1.12 (SetTextClipped's comment), and these rows
+            -- are 18px tall -- a wrapped recent-search query painted itself
+            -- across the row below. The paint clips with SetTextClipped
+            -- instead.
             lbl:SetJustifyH("LEFT")
             row.label = lbl
             row:SetScript("OnClick", function() ui.OnBuySideClick(row.entry) end)
+            -- A clipped entry is unreadable without the full text somewhere:
+            -- long queries are exactly the rows that get cut.
+            row:SetScript("OnEnter", function()
+                if row.full then
+                    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                    GameTooltip:SetText(row.full, 1, 1, 1)
+                    GameTooltip:Show()
+                end
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row:Hide()
             ui.buySideRows[i] = row
             i = i + 1
@@ -2084,6 +2125,52 @@ ui.GrowBuySideRows = function(n)
     listSearchBtn:SetText("Search entire list")
     listSearchBtn:SetScript("OnClick", function() ui.BuySearchList() end)
     ui.buyListSearchBtn = listSearchBtn
+
+    -- Everything that exists only in Advanced mode, so SetBuyLeft can swap
+    -- the whole column in one loop. Sidebar ROWS are not here: their paint
+    -- (UpdateBuySidebar) shows them again, so it is mode-guarded instead.
+    ui.buyAdvBits = { sideScroll, addBtn, renBtn, delBtn, listSearchBtn }
+
+    -- ===== Left, mode 2: the category tree (ROADMAP 2e) =================
+    local catScroll = CreateFrame("ScrollFrame", "AegisExchangeBuyCatScroll",
+        panel, "FauxScrollFrameTemplate")
+    catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
+    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
+    catScroll:SetWidth(SIDE_W)
+    catScroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateCatTree)
+    end)
+    catScroll:Hide()
+    ui.buyCatScroll = catScroll
+
+    ui.buyCatRows = {}
+    ui.buyCatExpanded = {}
+    ui.GrowCatRows = function(n)
+        if n > SIDE_ROWS_MAX then n = SIDE_ROWS_MAX end
+        local i = table.getn(ui.buyCatRows) + 1
+        while i <= n do
+            local row = CreateFrame("Button", nil, panel)
+            row:SetHeight(SIDE_ROW_H)
+            row:SetWidth(SIDE_W)
+            if i == 1 then
+                row:SetPoint("TOPLEFT", catScroll, "TOPLEFT", 0, 0)
+            else
+                row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
+            end
+            local lbl = row:CreateFontString(nil, "OVERLAY",
+                "GameFontHighlightSmall")
+            lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
+            -- No width constraint; the paint clips (same rule as the
+            -- sidebar rows and for the same wrap-onto-the-next-row reason).
+            lbl:SetJustifyH("LEFT")
+            row.label = lbl
+            row:SetScript("OnClick", function() ui.OnCatClick(row.entry) end)
+            row:Hide()
+            ui.buyCatRows[i] = row
+            i = i + 1
+        end
+    end
+    ui.GrowCatRows(SIDE_ROWS)
 
     -- ===== Right: filter row + results ==================================
     local RX = SIDE_W + 24    -- right-column origin
@@ -2164,6 +2251,10 @@ ui.GrowBuySideRows = function(n)
     prevBtn:SetPoint("RIGHT", ui.buyPageText, "LEFT", -6, 0)
     prevBtn:SetText("<")
     prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
+    -- Kept on ui so SetBuyView can hide the pager with the rest of the
+    -- results view -- paging results you cannot see still queries the server.
+    ui.buyPrevBtn = prevBtn
+    ui.buyNextBtn = nextBtn
 
     ui.buyStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.buyStatus:SetPoint("TOPLEFT", searchBtn, "BOTTOMLEFT", 0, -8)
@@ -2212,7 +2303,12 @@ ui.GrowBuyRows = function(n)
     ui.BuildFilterBuilder(panel, rowLeft)
     ui.SetBuyView("results")
 
-    ui.RefreshBuySidebar()
+    -- Left-column mode: restore the per-character choice; the tree is the
+    -- default for a fresh character (2e: Blizzard-style browsing out of the
+    -- box, with Advanced one click away).
+    local saved = A.db and A.db.char and A.db.char.ui
+        and A.db.char.ui.buyLeft
+    ui.SetBuyLeft(saved == "adv" and "adv" or "cats")
 end
 
 -- ---------------------------------------------------------------------------
@@ -2236,8 +2332,13 @@ function ui.SetBuyView(name)
     if ui.buyBuilder then
         if builder then ui.buyBuilder:Show() else ui.buyBuilder:Hide() end
     end
-    -- Everything belonging to the results view hides together.
-    local resultsBits = { ui.buyScroll, ui.buyPageText }
+    -- Everything belonging to the results view hides together. buyStatus is
+    -- in the list because it paints at the same height as the form's first
+    -- header -- "7 match(es) ..." showing through "AUCTION HOUSE FILTER" was
+    -- a reported bug. The pager goes with it: its buttons still worked while
+    -- invisible results were underneath, so a stray click queried the server.
+    local resultsBits = { ui.buyScroll, ui.buyPageText, ui.buyStatus,
+                          ui.buyPrevBtn, ui.buyNextBtn }
     local i = 1
     while i <= table.getn(resultsBits) do
         local w = resultsBits[i]
@@ -2609,12 +2710,16 @@ end
 
 function ui.RefreshBuySidebar()
     if not ui.buySideScroll then return end
+    -- In Categories mode this column belongs to the tree; painting here
+    -- would Show() sidebar rows straight over it.
+    if ui.buyLeft == "cats" then return end
     ui.FlattenShopping()
     ui.UpdateBuySidebar()
 end
 
 function ui.UpdateBuySidebar()
     if not ui.buySideScroll then return end
+    if ui.buyLeft == "cats" then return end
     local flat = ui.buyFlat or {}
     local vis = ui.RowsFor(ui.buySideScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
     ui.GrowBuySideRows(vis)
@@ -2628,27 +2733,40 @@ function ui.UpdateBuySidebar()
         if e then
             row.entry = e
             row.ex:SetText("")
+            -- Clip, never wrap: the label has no width constraint (see
+            -- GrowBuySideRows), so a long query must be cut here or it runs
+            -- over the scrollbar and the rows beside it. When it IS cut,
+            -- remember the full text for the row's hover tooltip.
+            local LW = SIDE_W - 18
+            local function put(text, full)
+                ui.SetTextClipped(row.label, text, LW)
+                if row.label:GetText() ~= text then
+                    row.full = full or text
+                else
+                    row.full = nil
+                end
+            end
             if e.kind == "hdr" then
-                row.label:SetText(e.text)
+                put(e.text)
                 row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
             elseif e.kind == "list" then
                 row.ex:SetText(ui.buyExpanded[e.index] and "-" or "+")
                 local mark = ""
                 if ui.buySelList == e.index then mark = "> " end
-                row.label:SetText(mark .. e.name)
+                put(mark .. e.name, e.name)
                 if ui.buySelList == e.index then
                     row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
                 else
                     row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
                 end
             elseif e.kind == "item" then
-                row.label:SetText("  " .. e.name)
+                put("  " .. e.name, e.name)
                 row.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
             elseif e.kind == "recent" then
-                row.label:SetText(e.name)
+                put(e.name)
                 row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
             else
-                row.label:SetText("  " .. (e.text or ""))
+                put("  " .. (e.text or ""), e.text)
                 row.label:SetTextColor(0.5, 0.5, 0.5)
             end
             row:Show()
@@ -2673,6 +2791,197 @@ function ui.OnBuySideClick(e)
         ui.buyBox:SetText(e.name)
         ui.DoBuySearch()
     end
+end
+
+-- ---- category tree (ROADMAP 2e) ----------------------------------------
+
+-- Switch the left column between the category tree ("cats") and the
+-- Shopping Lists sidebar ("adv"), remembering the choice per character.
+function ui.SetBuyLeft(mode)
+    if mode ~= "adv" then mode = "cats" end
+    ui.buyLeft = mode
+    if A.db and A.db.char then
+        A.db.char.ui = A.db.char.ui or {}
+        A.db.char.ui.buyLeft = mode
+    end
+
+    local adv = (mode == "adv")
+    local i = 1
+    while i <= table.getn(ui.buyAdvBits or {}) do
+        local w = ui.buyAdvBits[i]
+        if w then if adv then w:Show() else w:Hide() end end
+        i = i + 1
+    end
+    local ri = 1
+    while ri <= table.getn(ui.buySideRows or {}) do
+        if not adv then ui.buySideRows[ri]:Hide() end
+        ri = ri + 1
+    end
+    if ui.buyCatScroll then
+        if adv then ui.buyCatScroll:Hide() else ui.buyCatScroll:Show() end
+    end
+    ri = 1
+    while ri <= table.getn(ui.buyCatRows or {}) do
+        if adv then ui.buyCatRows[ri]:Hide() end
+        ri = ri + 1
+    end
+    if ui.buyLeftBtns then
+        if adv then
+            ui.buyLeftBtns.adv:LockHighlight()
+            ui.buyLeftBtns.cats:UnlockHighlight()
+        else
+            ui.buyLeftBtns.cats:LockHighlight()
+            ui.buyLeftBtns.adv:UnlockHighlight()
+        end
+    end
+
+    if adv then ui.RefreshBuySidebar() else ui.RefreshCatTree() end
+end
+
+-- Flatten the class > subclass > slot hierarchy into visible rows, honouring
+-- what is expanded. Everything comes from buy.ClassOptions / SubclassOptions
+-- / SlotOptions -- the same three calls the Filter Builder's dropdowns use,
+-- which read the client's own localized names. No category list lives here.
+function ui.FlattenCats()
+    local flat = { { kind = "all", name = "All Categories" } }
+    local classes = A.buy and A.buy.ClassOptions() or {}
+    local ci = 1
+    while ci <= table.getn(classes) do
+        local c = classes[ci]
+        local cx = ui.buyCatExpanded[c.value] and true or false
+        table.insert(flat, { kind = "class", class = c.value,
+            name = c.text, expanded = cx })
+        if cx then
+            local subs = A.buy.SubclassOptions(c.value)
+            local si = 1
+            while si <= table.getn(subs) do
+                local s = subs[si]
+                local skey = c.value .. ":" .. s.value
+                local slots = A.buy.SlotOptions(c.value, s.value)
+                local canX = table.getn(slots) > 0
+                local sx = (canX and ui.buyCatExpanded[skey]) and true or false
+                table.insert(flat, { kind = "sub", class = c.value,
+                    subclass = s.value, name = s.text,
+                    expandable = canX, expanded = sx })
+                if sx then
+                    local li = 1
+                    while li <= table.getn(slots) do
+                        table.insert(flat, { kind = "slot", class = c.value,
+                            subclass = s.value, slot = slots[li].value,
+                            name = slots[li].text })
+                        li = li + 1
+                    end
+                end
+                si = si + 1
+            end
+        end
+        ci = ci + 1
+    end
+    ui.buyCatFlat = flat
+end
+
+function ui.RefreshCatTree()
+    if not ui.buyCatScroll or ui.buyLeft ~= "cats" then return end
+    ui.FlattenCats()
+    ui.UpdateCatTree()
+end
+
+function ui.UpdateCatTree()
+    if not ui.buyCatScroll or ui.buyLeft ~= "cats" then return end
+    local flat = ui.buyCatFlat or {}
+    local vis = ui.RowsFor(ui.buyCatScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
+    ui.GrowCatRows(vis)
+    ui.SkinNewRows(ui.buyCatRows)
+    FauxScrollFrame_Update(ui.buyCatScroll, table.getn(flat), vis, SIDE_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.buyCatScroll)
+    local i = 1
+    while i <= table.getn(ui.buyCatRows) do
+        local row = ui.buyCatRows[i]
+        local e = (i <= vis) and flat[i + offset] or nil
+        if e then
+            row.entry = e
+            -- The +/- fold glyph and the depth indent live in the label
+            -- text itself: one FontString per row keeps the rows cheap.
+            local text
+            if e.kind == "all" then
+                text = e.name
+            elseif e.kind == "class" then
+                text = (e.expanded and "- " or "+ ") .. e.name
+            elseif e.kind == "sub" then
+                if e.expandable then
+                    text = "   " .. (e.expanded and "- " or "+ ") .. e.name
+                else
+                    text = "   " .. e.name
+                end
+            else
+                text = "      " .. e.name
+            end
+            ui.SetTextClipped(row.label, text, SIDE_W - 8)
+            local key = ui.CatKey(e)
+            if key == ui.buyCatSel then
+                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            else
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- Identity of a tree node, for selection highlighting.
+function ui.CatKey(e)
+    if not e or e.kind == "all" then return "all" end
+    if e.kind == "class" then return "c" .. e.class end
+    if e.kind == "sub" then return "c" .. e.class .. ":" .. e.subclass end
+    return "c" .. e.class .. ":" .. e.subclass .. ":" .. e.slot
+end
+
+function ui.OnCatClick(e)
+    if not e then return end
+    if e.kind == "class" then
+        ui.buyCatExpanded[e.class] = not ui.buyCatExpanded[e.class]
+        ui.CatApply(e.class, nil, nil)
+    elseif e.kind == "sub" then
+        if e.expandable then
+            local skey = e.class .. ":" .. e.subclass
+            ui.buyCatExpanded[skey] = not ui.buyCatExpanded[skey]
+        end
+        ui.CatApply(e.class, e.subclass, nil)
+    elseif e.kind == "slot" then
+        ui.CatApply(e.class, e.subclass, e.slot)
+    else
+        ui.CatApply(nil, nil, nil)
+    end
+    ui.buyCatSel = ui.CatKey(e)
+    ui.RefreshCatTree()
+end
+
+-- Feed a tree pick into the SAME engine the query box uses: rewrite the
+-- box's first term with the picked class/subclass/slot and search. Name
+-- text, quality, stack, tooltip -- every other filter the user already has
+-- in the box -- survives, because the term is parsed, modified and
+-- regenerated rather than replaced. Additional semicolon terms are
+-- regenerated untouched; TermToQuery round-trips by value, so this loses
+-- nothing.
+function ui.CatApply(class, subclass, slot)
+    if not (ui.buyBox and A.buy) then return end
+    local terms = A.buy.ParseQuery(util.Trim(ui.buyBox:GetText() or ""))
+    if table.getn(terms) == 0 then terms = { {} } end
+    terms[1].class = class
+    terms[1].subclass = subclass
+    terms[1].slot = slot
+    local parts = {}
+    local i = 1
+    while i <= table.getn(terms) do
+        table.insert(parts, A.buy.TermToQuery(terms[i]))
+        i = i + 1
+    end
+    ui.buyBox:SetText(table.concat(parts, ";"))
+    ui.DoBuySearch()
 end
 
 -- ---- list management (via a name-entry popup) --------------------------
@@ -2854,7 +3163,11 @@ end
 
 function ui.RefreshBuy()
     if not ui.buyBuilt then return end
-    ui.RefreshBuySidebar()
+    if ui.buyLeft == "cats" then
+        ui.RefreshCatTree()
+    else
+        ui.RefreshBuySidebar()
+    end
     if ui.buyView == "builder" then
         -- The builder owns this space right now; repainting the results list
         -- would un-hide its rows over the top of the form.
@@ -2897,6 +3210,19 @@ function ui.UpdateBuyList()
                     -- how /stack got reported.
                     ui.buyStatus:SetText("No full stacks \226\128\162 " .. unknown
                         .. " skipped (stack size unknown \226\128\148 search again)")
+                elseif totalAuctions and totalAuctions > 0 then
+                    -- The server DID match auctions; the post-filter (exact,
+                    -- stack size, buyout, tooltip) removed every one on this
+                    -- page. Same rule as above: an emptied page must say a
+                    -- filter emptied it -- a bare "No auctions found" here
+                    -- reads as a broken filter, and hides that another page
+                    -- may still hold matches.
+                    local t = "0 match(es) (of " .. totalAuctions .. ") \226\128\162 "
+                        .. "filters removed this page's rows"
+                    if totalPages and totalPages > 1 then
+                        t = t .. " \226\128\162 try the next page"
+                    end
+                    ui.buyStatus:SetText(t)
                 else
                     ui.buyStatus:SetText("No auctions found.")
                 end
