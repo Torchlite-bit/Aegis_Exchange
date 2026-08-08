@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.4.0)
+# Aegis: Exchange (v1.8.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -59,6 +59,67 @@ Search the AH, sort by unit price, stack price, or % of market value, and buy or
 bid straight from the results. Colour-coded so bargains jump out: **green is
 under market, red is over.** Keep **shopping lists** of the things you always
 need (all your tailoring mats, say) and search the whole list in one click.
+
+**Typing a name still just searches for that name** — nothing you already do
+changes. But the same box now takes a query language when you want one:
+
+| Type this | Get that |
+|---|---|
+| `linen cloth` | exactly what it always did |
+| `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
+| `armor/leather` | the whole Leather Armor category |
+| `armor/plate/chest` | plate chest pieces |
+| `belt/quality3` or `belt/quality/rare` | rare-quality belts |
+| `sword/level20-30` | swords for levels 20–30 |
+| `runecloth/buyout` | skip bid-only auctions |
+| `mageweave/stack 20` | stacks of exactly 20 |
+| `mageweave/stack` | the biggest stacks |
+| `container/bag/tooltip/8` | bags whose tooltip mentions **8** |
+| `linen;wool;silk` | all three, browsed as one list |
+
+**Categories are the game's own names** — whatever the auction house's own
+dropdowns say, in your own language. Class first, then subclass, then slot:
+`armor/leather` works, `leather/armor` treats "leather" as a name. You don't
+have to match them exactly — `weapon/dagger` finds the "Daggers" category —
+but a word matching *several* categories (`weapon/sword` hits both One-Handed
+and Two-Handed Swords) is left as a name search rather than guessing.
+
+**`stack 20` is the reliable form** — it just compares each listing's own
+count, so it needs no item data and works on the first search for any item.
+`stack 8`, `stack 1`, whatever you want. All three spellings work:
+`stack 20`, `stack/20`, `stack20`.
+
+Bare **`stack`** means "full stacks", which needs the item's *maximum* size —
+and vanilla only reports that for items your client has already cached. Aegis
+remembers every maximum it learns, and when it still doesn't know one it falls
+back to the biggest stack of that item on the page, saying so in the status
+line. If you want a guarantee rather than a best guess, give the number.
+
+Terms combine with `/`, and `;` runs several searches back to back — page past
+the end of one and it rolls straight into the next.
+
+Result names are **coloured by item quality**, the way their tooltips are, so
+a rare reads blue and an epic purple at a glance. An item you can't use gets a
+red-tinted icon.
+
+**Don't want to learn the syntax?** Two ways around it. The left side of the
+Buy tab is a **category tree**, just like the stock auction house: click
+**Weapons > Two-Handed Swords** or **Armor > Leather > Chest** and it
+searches, no typing needed — and anything already in the search box (a name,
+`quality/rare`, `stack 20`…) stays applied on top of the category you picked.
+The **Advanced** button swaps the tree back to your shopping lists and recent
+searches.
+
+Or hit **Builder** and fill in a form instead — name, level range, class,
+subclass, slot, quality, and the extra filters — with the query it builds
+shown live underneath. **Search** runs it, **To box** copies it out, **+ OR**
+appends it to what's already there, and **From box** loads a typed query back
+into the form so you can adjust it.
+
+**Shortcuts while the Buy tab is open:** **right-click** any bag item to search
+for it, or **shift-click** any item *anywhere* — bags, a chat link, a tooltip —
+to drop its name in the box and go. **Tab** completes what you've typed from
+every item Aegis has ever seen, pressing it again to cycle through the matches.
 
 ### 💰 Sell — price it right the first time
 Drop an item in and Aegis scans the AH for *just that item*, shows you every
@@ -254,7 +315,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.4.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.8.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

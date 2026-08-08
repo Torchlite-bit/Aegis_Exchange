@@ -592,8 +592,8 @@ function sell.IsAuctionable(bag, slot)
     return true
 end
 
--- Walk bags 0..4 and group every POSTABLE item by its category (GetItemInfo's
--- itemType). Soulbound / quest / conjured items are skipped. Returns an ordered
+-- Walk bags 0..4 and group every POSTABLE item by its category (util.ItemInfo's
+-- normalised itemType). Soulbound / quest / conjured items are skipped. Returns an ordered
 -- list of { name = className, items = { entry, ... } } where entry =
 -- { bag, slot, itemId, name, texture, count }. Order follows first appearance
 -- so the grouping is stable between refreshes.
@@ -608,7 +608,14 @@ function sell.ScanBags()
             local link = GetContainerItemLink(bag, slot)
             if link and sell.IsAuctionable(bag, slot) then
                 local texture, count = GetContainerItemInfo(bag, slot)
-                local iname, _, _, _, _, itype = GetItemInfo(link)
+                -- Through util.ItemInfo, NOT by indexing GetItemInfo: its
+                -- slots shift by one between vanilla 1.12 and later clients,
+                -- so the old `select 6` read the item's SUBTYPE ("Cloth") on
+                -- one and its TYPE ("Trade Goods") on the other -- meaning
+                -- these group headers silently differed by client.
+                local info = util.ItemInfo(link)
+                local iname = info and info.name
+                local itype = info and info.type
                 -- On 1.12 GetItemInfo may return nil until the client-side
                 -- item cache is warm. Fall back to the name between [...] in
                 -- the link so AH queries don't send a raw item-link string

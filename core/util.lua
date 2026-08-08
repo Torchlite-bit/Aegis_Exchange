@@ -188,3 +188,60 @@ function util.CountKeys(t)
     end
     return n
 end
+
+-- ---------------------------------------------------------------------------
+-- GetItemInfo, normalised
+-- ---------------------------------------------------------------------------
+
+-- GetItemInfo's return LIST is not the same on every client:
+--
+--   vanilla 1.12   name link quality minLevel type subType
+--                  stackCount equipLoc texture                    (9 values)
+--   later clients  name link quality iLevel minLevel type subType
+--                  stackCount equipLoc texture                   (10 values)
+--
+-- itemLevel is inserted at position 4, so EVERY field after position 3 sits
+-- one slot further along on a later client. Indexing a fixed position is
+-- therefore wrong on one client or the other, silently: it reads the subtype
+-- where the type was meant, or the equip slot where the stack size was meant.
+-- Both of those shipped, and the second cost four rounds of "why does /stack
+-- do nothing".
+--
+-- Rather than detect the client (which we cannot do reliably, and which would
+-- be one more thing to get wrong), anchor on a field we can FIND: stackCount
+-- is the last NUMBER in the list, because everything after it is a string.
+-- Once its index is known, type / subType / minLevel are fixed offsets back
+-- from it, and equipLoc / texture fixed offsets forward. name / link / quality
+-- never move, so they are read absolutely.
+--
+-- Returns a named table, or nil when the client has no data for the item yet
+-- (which it often does not -- GetItemInfo only answers for cached items).
+function util.ItemInfo(link)
+    if not link then return nil end
+    local r = { GetItemInfo(link) }
+    local n = table.getn(r)
+    if n < 1 or not r[1] then return nil end
+
+    -- Index of the last number = stackCount.
+    local s = n
+    while s >= 1 and type(r[s]) ~= "number" do
+        s = s - 1
+    end
+    -- Nothing numeric at all means this is not a shape we understand; return
+    -- what is safe to read rather than guessing at the rest.
+    if s < 4 then
+        return { name = r[1], link = r[2], quality = r[3] }
+    end
+
+    return {
+        name       = r[1],
+        link       = r[2],
+        quality    = r[3],
+        minLevel   = r[s - 3],
+        type       = r[s - 2],
+        subType    = r[s - 1],
+        stackCount = r[s],
+        equipLoc   = r[s + 1],
+        texture    = r[s + 2],
+    }
+end

@@ -92,6 +92,17 @@ local function DefaultAccountDB()
         -- Game constants, shared by every realm (see header note).
         vendors = {},   -- itemID   -> vendor sell price, per unit
         names   = {},   -- itemName -> itemID
+        -- Max stack size per item (20 for Mageweave, 10 for Copper Ore, ...).
+        -- Account-wide because it is a property of the ITEM, identical on
+        -- every realm -- same reasoning as vendor prices above.
+        --
+        -- Persisted because the only 1.12 source, GetItemInfo, answers ONLY
+        -- for items already in the client's local cache. An auction for
+        -- something you have never handled returns nil, so anything that asks
+        -- at browse time gets nil for exactly the items it most needs. We
+        -- learn opportunistically (bags, browsing, any successful lookup) and
+        -- keep it forever.
+        stacks  = {},   -- itemID   -> max stack size
         -- Shopping (Buy tab): saved lists + recent searches, account-wide so
         -- every character shares them.
         shopping = {
@@ -414,6 +425,21 @@ function db.GetVendor(itemId)
     return db.account.vendors[itemId]
 end
 
+-- Max stack size, learned opportunistically. See the `stacks` note in
+-- DefaultAccountDB for why this has to be persisted rather than asked for on
+-- demand.
+function db.SetMaxStack(itemId, count)
+    if not db.account or not itemId then return end
+    if not count or count < 1 then return end
+    if not db.account.stacks then db.account.stacks = {} end
+    db.account.stacks[itemId] = count
+end
+
+function db.GetMaxStack(itemId)
+    if not db.account or not db.account.stacks or not itemId then return nil end
+    return db.account.stacks[itemId]
+end
+
 -- Resolve an item name to an itemID (for tooltips with no link, e.g. the
 -- 1.12 mail inbox).
 function db.IdFromName(name)
@@ -556,24 +582,19 @@ function A.ReleaseMailScanning()
     return true
 end
 
--- Globals we also accept as proof a Courier is present, for the case where it
--- loads without calling ClaimMailScanning.
+-- The global we also accept as proof a Courier is present, for the case where
+-- it loads without calling ClaimMailScanning.
 --
--- PLACEHOLDER: Aegis: Courier has not named its addon global yet. Confirm the
--- real name once that repo settles it and trim this list -- the explicit claim
--- above is the contract, this is only a safety net.
-local COURIER_GLOBALS = { "AegisCourier", "Aegis_Courier" }
+-- Confirmed against Aegis: Courier's own core/init.lua, which declares
+-- `AegisCourier = {}`. NOT "Aegis_Courier" -- that is the addon folder and
+-- .toc name, and is never a global. The explicit claim above is the contract;
+-- this is only a safety net for a Courier that never got round to claiming.
+local COURIER_GLOBAL = "AegisCourier"
 
 -- Is something else responsible for reading the mailbox?
 function A.MailScanningExternal()
     if A.mailScanOwner then return true end
-    local i = 1
-    while i <= table.getn(COURIER_GLOBALS) do
-        local g = getglobal(COURIER_GLOBALS[i])
-        if type(g) == "table" then return true end
-        i = i + 1
-    end
-    return false
+    return type(getglobal(COURIER_GLOBAL)) == "table"
 end
 
 -- Income / spend / count over transactions at or after `sinceEpoch` (nil = all).

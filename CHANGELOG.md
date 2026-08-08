@@ -12,6 +12,273 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.8.0]
+
+### Added
+- **Category tree on the Buy tab** (ROADMAP 2e). The left column now opens as
+  a Blizzard-style **category tree**: click **Weapons > Two-Handed Swords** or
+  **Armor > Leather > Chest** and it searches — no typing, no syntax. Every
+  list in it comes from the client's own localized category names, the same
+  source the query language and the Builder's dropdowns read.
+
+  A tree pick **composes** with whatever is already in the search box rather
+  than replacing it: pick a category with `quality/rare/stack 20` typed and
+  you get rare 20-stacks *of that category*. Extra `;` terms ride along
+  untouched. That composition is the feature's contract and is tested.
+
+  The **Advanced** button swaps the tree back to the shopping-list sidebar
+  (lists + recent searches); **Categories** brings the tree back. The choice
+  sticks per character.
+
+### Fixed
+- **Exact match with an empty Name matched nothing at all.** `""` is truthy
+  in Lua, so a nameless term's exact filter compared every listing against an
+  empty string and rejected the entire page — an Exact checkbox ticked
+  without a name could never return a single result, whatever else was set.
+  Exact now only engages when there is a name to be exact *about*. (This was
+  the likely shape of the reported "Silk Cloth + stack 10 + Exact finds
+  nothing": the named form of that search passes, and passes a test now.)
+- **A page emptied by filters no longer reads as "No auctions found."** It
+  now says `0 match(es) (of N) • filters removed this page's rows — try the
+  next page`, because an unexplained empty page is indistinguishable from a
+  broken filter — exactly how `/stack` got reported in 1.5.x, and how this
+  one got reported too.
+- **The dropdown menus in the Filter Builder were see-through.** Their
+  texture paths were written with single backslashes, which Lua silently
+  swallows (`"\T"` is not an escape), so the client was asked for
+  `InterfaceTooltips...` — a texture that does not exist — and drew no
+  background and no hover highlight at all. Paths doubled, popup made fully
+  opaque, and lifted to its own strata so nothing in the window can paint
+  over it. Three tests now pin those strings byte-for-byte.
+- **Long recent searches wrecked the sidebar.** A long query wrapped onto a
+  second line and painted across the row below it. Sidebar rows now clip
+  with an ellipsis and show the **full query in a tooltip** on hover.
+- **The Builder view no longer shows the results status line or pager.**
+  "7 match(es) • unit low to high" used to print straight through the form's
+  heading, and the `<` `>` buttons still paged (and queried the server) for
+  a list you couldn't see.
+
+## [1.7.0]
+
+### Added
+- **Filter Builder on the Buy tab** (ROADMAP 2b). A **Builder** view sitting
+  beside **Results** in the same space: fill in a form — Name, Exact, Level
+  range, Class, Subclass, Slot, Quality, Usable, plus Buyout only, Full stacks,
+  Stack size and Tooltip contains — and it writes the query for you, shown live
+  as you go.
+
+  Class gates Subclass gates Slot, the way the auction house's own dropdowns
+  do, and every list is populated from the game's **own localized category
+  names** — the same source the typed query language reads, so there is no
+  second copy to drift.
+
+  **Search** runs it. **To box** copies the query into the search box, **+ OR**
+  appends it as another `;` term, **From box** loads a typed query back into
+  the form. Round-tripping is the feature's contract and is tested: whatever
+  the form builds must parse back to the same search.
+
+  The form edits **one** term. Loading a multi-term query fills in the first
+  and says so explicitly rather than quietly dropping the rest.
+
+### Changed
+- `GetItemInfo` is now read through one shared normaliser (`util.ItemInfo`)
+  that returns **named** fields. Its return list differs between clients —
+  vanilla 1.12 has no `itemLevel`, so every field after the third sits one slot
+  earlier than on later clients — and two separate positional reads had already
+  shipped with bugs from it: the stack-size lookup that made `/stack` misbehave
+  for several releases, and the Sell tab's bag-list headers, which grouped by
+  item *type* on one client and *subtype* on the other. No caller indexes
+  `GetItemInfo` by position any more.
+- The Courier detection fallback no longer guesses at the companion addon's
+  global. Confirmed against Aegis: Courier's own source, it is `AegisCourier`;
+  `Aegis_Courier` is the folder and `.toc` name and is never a global, so it is
+  no longer accepted. Only affects a Courier that loads without calling
+  `ClaimMailScanning` — the explicit handshake was and remains the contract.
+
+---
+
+## [1.6.0]
+
+### Added
+- **`stack <n>` — search for an exact stack size.** `silk cloth/stack 20`,
+  `silk cloth/stack 8`. It compares each listing's own count and needs no item
+  data whatsoever, so it works on the first search, for any item, however cold
+  the client's item cache is. Three spellings all work: `stack 20`,
+  `stack/20`, `stack20` — the spaced one matters because search terms split on
+  `/`, so `stack 20` arrives as a single token.
+
+### Changed
+- **Bare `stack` no longer dead-ends when an item's maximum can't be read.**
+  It still means "full stacks" and still prefers the real maximum, but when
+  the client can't supply one it now falls back to the largest stack of that
+  item on the page — which needs no item data at all — and says
+  `biggest on this page` in the status line so the weaker promise is never
+  passed off as the stronger one.
+
+  This is a pragmatic answer to `GetItemInfo` being unreliable here in ways
+  three attempts haven't fully pinned down. `stack <n>` is the form to use
+  when you want a guarantee.
+
+---
+
+## [1.5.3]
+
+### Fixed
+- **`stack` said "stack size unknown" even for items sitting in your own bags.**
+  A stack of 20 Silk Cloth is definitely in the client's item cache, so the
+  cache was never the problem — the code was reading the wrong value out of
+  `GetItemInfo`.
+
+  Its return list is not the same on every client: vanilla 1.12 returns nine
+  values, while later clients insert `itemLevel` at position 4 and shift
+  everything after it down a slot. Counting slots therefore reads the stack
+  count on one client and the equip slot on the other — which is empty for a
+  trade good (hence "unknown" for every cloth, ore and herb) and a string like
+  `INVTYPE_CHEST` for gear, where it would have thrown outright.
+
+  The stack count is the **last number** in that list under both layouts —
+  everything after it is a string — so that is what Aegis looks for now,
+  instead of counting positions. The test suite runs these checks under *both*
+  return layouts, so a fix that only works on one can't pass.
+
+---
+
+## [1.5.2]
+
+### Fixed
+- **`stack` showed every stack size, not just full ones.** v1.5.1 made the
+  filter fail *open* when an item's maximum stack size was unknown, which
+  turned out to mean "always" for items your client hasn't cached — so it let
+  everything through instead of everything being hidden. Both failure modes
+  looked equally broken.
+
+  Max stack size has exactly one source on 1.12 — `GetItemInfo`, which only
+  answers for items already in the client's local cache, i.e. not the ones
+  you're shopping for. **Aegis now remembers every stack size it learns**
+  (account-wide, alongside vendor prices — it's a property of the item, not
+  the realm), so the filter fills in as you browse and play. Anything still
+  unknown is excluded *and counted*, with the status line saying so:
+  `No full stacks • 12 skipped (stack size unknown — search again)`.
+
+- **`weapon/dagger` returned thrown weapons with "Dagger" in the name.** The
+  game's category names are plural and often qualified — "Daggers",
+  "One-Handed Swords" — so the singular never matched, fell through to a name
+  search, and dragged in anything called "…Dagger". Categories now match on an
+  exact name, then a unique prefix, then a unique substring.
+
+  Deliberately *unique*: `weapon/sword` matches both One-Handed and Two-Handed
+  Swords, so it stays a name search rather than silently picking one half and
+  returning a confidently wrong page. Naming one exactly still works.
+
+---
+
+## [1.5.1]
+
+### Added
+- **Search results are coloured by item quality**, matching each item's
+  tooltip — a rare reads blue, an epic purple. Colours come from FrameXML's own
+  `ITEM_QUALITY_COLORS`, so they match the rest of the game exactly rather than
+  being re-guessed. Applies to the Buy tab and the Crafting tab's reagent
+  results, which share a row painter.
+
+### Fixed
+- **`armor/leather` and other category searches returned nothing.** Class,
+  subclass and slot keywords were never implemented — they fell through to
+  being name text, so `armor/leather` searched for an item literally *called*
+  "armor leather". They now resolve against the auction house's **own
+  localized category names** (`GetAuctionItemClasses` /
+  `GetAuctionItemSubClasses` / `GetAuctionInvTypes`), so `armor/leather`,
+  `container/bag` and `armor/plate/chest` all work — in any client language.
+
+  Subclasses resolve *within* their class, because names repeat: "Leather"
+  exists under both Armor and Trade Goods, and "Mail" exists only under Armor.
+  `trade goods/mail` correctly leaves "mail" as name text instead of silently
+  searching a category you never asked for.
+
+- **`container/bag/tooltip/8` returned nothing** — same root cause. Now that
+  the categories resolve, both halves of that pair work as documented:
+  `container/bag/tooltip/8` filters tooltips for "8", `container/bag/8`
+  searches names for "8".
+
+- **`mageweave/stack` returned an empty page.** The fully-stacked filter needs
+  each item's max stack size from `GetItemInfo`, which only answers for items
+  already in the client's cache — and it was failing *closed*, so on a cold
+  cache every row was hidden, indistinguishable from "no full stacks exist".
+  It now fails open: a few partial stacks may show until the cache warms.
+
+- **Tooltip searches matched the wrong listings, or nothing at all.**
+  `GameTooltipTemplate` reuses its text lines, so text from a previous, longer
+  tooltip is still sitting in the higher-numbered ones. Reading "until a line
+  comes back empty" walked off the end of the current tooltip into that stale
+  text. Now bounded by `NumLines()`, and built lazily with the same
+  owner-then-clear-then-set sequence the Sell tab's bind-status scanner has
+  always used.
+
+- **The "you can't use this" warning never appeared.** `GetAuctionItemInfo`
+  returns `canUse` as `1`-or-`nil`, so `nil` *is* the cannot-use answer — but
+  the check treated it as "unknown, assume fine", making the warning
+  unreachable. It now fires correctly, and shows as a red icon tint (the name
+  colour having been taken over by item quality).
+
+- Quality keywords now also accept the client's own localized names via
+  `ITEM_QUALITY<n>_DESC`, with the English words kept as a fallback.
+
+---
+
+## [1.5.0]
+
+### Added
+- **A search query language on the Buy tab** (ROADMAP 2a). Typing a plain item
+  name still does exactly what it always did — a bare word with no keyword is
+  just name text, same as ever. The same box now also understands:
+
+  | Query | Effect |
+  |---|---|
+  | `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
+  | `belt/quality3`, `belt/quality/rare` | server-side quality filter |
+  | `sword/level20-30`, `sword/level/25` | server-side level range |
+  | `belt/usable` | server-side "usable by me" flag |
+  | `runecloth/buyout` | exclude bid-only auctions |
+  | `mageweave/stack` | fully-stacked listings only |
+  | `container/bag/tooltip/8` | name *container bag*, tooltip contains *8* |
+  | `linen;wool;silk` | three searches browsed as one list |
+
+  The grammar is aux's (settled in ROADMAP.md) — this is an original
+  implementation of that shape, not ported code. Filters split into the parts
+  the 1.12 server can do (one `QueryAuctionItems` per term) and the parts it
+  can't (applied client-side as each page loads). An unrecognised token can
+  never break a query: it falls back to being literal name text.
+
+  Semicolon terms browse as **one** list — page past the end of one and it
+  rolls into the next, rather than leaving you to notice and re-run.
+
+- **Right-click a bag item on the Buy tab to search for it.** The Sell tab's
+  existing right-click-to-slot is untouched; each only fires on its own tab.
+- **Shift-click any item to search for it** — a bag slot, a chat link, a
+  tooltip. Works through `HandleModifiedItemClick`, the single 1.12 global
+  every shift-click funnels through.
+- **Tab-completion in the search box**, from every item name Aegis has learned
+  (scans, searches, browsing) plus your recent searches. Press Tab again to
+  cycle through the matches.
+
+### Changed
+- The Buy tab's result count now reads `N match(es) (of M)` when a query filter
+  is narrowing the page, so the bigger Blizzard-side number can't be mistaken
+  for "how many I can buy". The pager names the current term (`Term 1/3`) only
+  when a query actually has more than one — a single-term search looks exactly
+  as it always has.
+
+### Fixed
+- Removed a duplicate price-database write on the browse path. `core/buy.lua`
+  folded every browsed listing into the price DB, but `core/scan.lua`'s
+  `RecordVisiblePage` already does that for *every* result page anyone looks
+  at — from the same event, with identical values. Surfaced by a sabotage test
+  that fed the DB from filtered rows instead of raw ones and changed nothing
+  observable. Behaviour is unchanged (and still verified): a filtered search
+  narrows what is **displayed**, never what is **learned**.
+
+---
+
 ## [1.4.0]
 
 ### Changed
@@ -577,6 +844,13 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.8.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.7.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.6.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.5.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.5.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.5.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.5.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.4.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.3.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.2.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

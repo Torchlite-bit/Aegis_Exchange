@@ -59,42 +59,85 @@ if AegisExchange and AegisExchange.INTEGRATION_VERSION then
     --    Call from Courier's ADDON_LOADED.
     AegisExchange.ClaimMailScanning("Aegis: Courier")
 
-    -- 2. Build the dedup key for an auction mail THROUGH THIS HELPER.
-    local key = AegisExchange.MailTxnKey(subject, money, daysLeft)
-
-    -- 3. Push the matched transaction.
+    -- 2. Push the matched transaction. ONE TABLE -- see the warning below.
     local ok, why = AegisExchange.RecordExternalTxn({
         kind   = "sale",        -- or "buy"
         item   = "Silk Cloth",
         amount = netProceeds,   -- copper, AFTER the 5% cut (what actually
                                 -- arrived in the mail)
         itemId = 4306,          -- optional
-        key    = key,           -- optional; repeats are ignored
+        -- key = ...            -- OPTIONAL, and usually WRONG. See below.
     })
 end
 ```
+
+> 🚨 **It takes ONE TABLE, and calling it positionally fails SILENTLY.**
+> `RecordExternalTxn` reports a bad payload by **returning** `false, reason` —
+> it does not raise — so a caller that wraps it in `pcall` and checks only the
+> ok flag sees success while every entry is dropped. Courier shipped exactly
+> that bug and it survived from its first release to v1.0.2, because its test
+> double had the same wrong signature and agreed with it. **Check the returned
+> value, not just that the call didn't error.**
 
 `RecordExternalTxn` returns `true`, or `false` plus a short reason
 (`"duplicate"`, `"kind must be 'sale' or 'buy'"`, …) so Courier can surface
 failures rather than miscounting silently. `INTEGRATION_VERSION` is currently
 **1**; it bumps whenever a signature or field meaning changes.
 
-**Why `MailTxnKey` is exposed rather than left internal.** A user who ran Aegis
-alone already has auction mails in the ledger under *Aegis's* keys. If Courier
-invented its own key scheme it would re-report those mails and double-count
-every one of them on the day Courier is installed. Generating keys through the
-shared helper makes the handover seamless. This matters more than it looks — it
-is the single most likely way the integration could corrupt someone's history.
+**Why `MailTxnKey` is exposed — and why Courier does NOT use it.** It was put
+here for a caller that books mail on **arrival**, as Aegis's own scanner does:
+such a caller sees the same mail on every inbox refresh and needs a fingerprint
+to avoid re-reporting it, and sharing Aegis's own key scheme means a user who
+ran Aegis alone doesn't get their existing entries double-counted on the day
+the companion is installed.
+
+**That advice is wrong for a caller that books on collection, and Courier is
+one.** `MailTxnKey` buckets `subject | money | arrival-hour`, so **two identical
+stacks sold at the same price within the same hour produce the same key** — the
+second is rejected as `"duplicate"` and lost. A collision *under*-counts, and a
+missing sale is invisible in a way a doubled one is not. Courier books when a
+mail is emptied (`take.Confirm`), which is self-limiting: an emptied mail has
+nothing left to book, so it sends no key at all.
+
+The residual overlap is accepted on both sides and written down in Courier's
+`bridge.lua`: mail Aegis already booked on arrival that is **still uncollected**
+when Courier is installed gets counted twice. That is a one-time, bounded
+handover window, not an ongoing defect.
+
+So: keep `MailTxnKey` exposed — Aegis's own standalone scanner uses it, and an
+arrival-time companion would want it — but it is **not** part of the recommended
+Courier path.
 
 **Mail ownership** is an explicit handshake (`ClaimMailScanning` /
 `ReleaseMailScanning`) rather than Aegis sniffing for a global, because explicit
 survives Courier being renamed. There *is* a global-name fallback for a Courier
 that loads without claiming, but it is a safety net, not the contract.
 
-> ⚠️ **Open, for the Courier session to close:** that fallback currently guesses
-> at `AegisCourier` / `Aegis_Courier`. Once Courier settles its real addon
-> global, trim `COURIER_GLOBALS` in `core/db.lua` to the true name. Harmless
-> either way as long as Courier calls `ClaimMailScanning`.
+**Closed (v1.7.0):** the fallback used to guess at `AegisCourier` /
+`Aegis_Courier`. Courier's `core/init.lua` declares **`AegisCourier`**, and
+`Aegis_Courier` is only the folder / `.toc` name — never a global — so the list
+is now the single confirmed name. A test pins it: sniffing the folder name must
+NOT stand Aegis's scanner down.
+
+**The seam was dead from Courier's first release until its v1.0.2.** Courier
+called `RecordExternalTxn` with four positional arguments instead of the table.
+Aegis saw `txn = "sale"`, failed its own type check and **returned** false —
+without erroring — so Courier's `pcall` reported success and every push was
+dropped with no warning on either side. Both repos claimed
+`INTEGRATION_VERSION = 1`, so the version guard could not catch it.
+
+**Fixed entirely on Courier's side** (its PR #7); nothing in Aegis changed and
+`INTEGRATION_VERSION` stays at **1** — the table shape was always the published
+contract, and Aegis had no wrong caller to accommodate. Courier now also reads
+the returned value rather than just `pcall`'s ok flag, which is the part that
+kept the bug invisible.
+
+Worth remembering when the next companion is written: **this API's failure mode
+is a silent false success.** Returning `false, reason` is friendlier than
+erroring right up until a caller ignores the return. If a third integration
+ever appears, consider having `RecordExternalTxn` print a one-time developer
+warning when it is handed a string where a table belongs — the positional call
+is unmistakable, and it would turn this exact mistake into something visible.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 
@@ -256,47 +299,129 @@ Search Results / Saved Searches / Filter Builder split, mapped onto Aegis's
 current layout rather than replacing it:
 
 - The existing **Shopping Lists sidebar** (`ui/frame.lua` `BuildBuyTab`,
-  named multi-item lists searched sequentially) stays exactly as-is — aux
-  doesn't have an equivalent concept, and it's a genuinely different use
-  case from a single saved query. It is not being merged into Saved
-  Searches.
+  named multi-item lists searched sequentially) stays — aux doesn't have an
+  equivalent concept, and it's a genuinely different use case from a single
+  saved query. It is not being merged into Saved Searches. (Since 2e it
+  lives behind the left column's **Advanced** toggle, sharing the space
+  with the category tree; nothing about how it works changed.)
 - The right-hand content area gains a row of switchable views — **Search
   Results** (today's results table, now also accepting typed query syntax),
   **Saved Searches**, and **Filter Builder** — reusing the sidebar's screen
   real estate rather than adding a fourth top-level sub-tab.
 
-### 2a — Parser, compiler, core primitives (same search box)
-Nothing about today's casual usage changes: typing an item name still just
-searches by name. Additionally supported in the same box:
-- Blizzard-query / post-filter split — one Blizzard query per search term
-  (drives page count via the existing 9-arg `QueryAuctionItems`), unlimited
-  post-filters applied client-side as each page loads (`buy.ReadPage`
-  already reads one page at a time — post-filters slot into that loop).
-- `exact` modifier, tailored as tightly as the Blizzard query allows
-  (level range, class/subclass/slot, quality) — cannot combine with a
-  manual filter on those same fields.
-- Tooltip-substring search, with the leading-term-vs-tooltip disambiguation
-  aux uses (name search before any category term, tooltip search after; the
-  `container/bag/tooltip/8` vs `container/bag/8` case is the concrete test).
-- The two filters explicitly requested: buyout-only (exclude bid-only
-  auctions), and fully-stacked-only (stack size == max for that item).
-- Quick wins that only need the existing box, done here while it's already
-  being touched: 
-   - Right-click an item in your bags while on the Buy tab to instantly initiate a search for that item.
-   - Right-click an item in your bags while on the Sell tab to automatically place it directly into the sell slot for auction creation.
-   - Dragging an inventory item onto the search box or right-clicking an item link in chat.
-   - Tab-autocompletion in the search bar.
+### 2a — Parser, compiler, core primitives — ✅ **DONE** (v1.5.0)
+Casual usage is untouched: a bare word with no keyword is just name text, so
+typing an item name searches by name exactly as before. Shipped in the same box:
 
-### 2b — Filter Builder tab
-Form-driven query construction mirroring aux's layout (Name / Level Range /
-Item Class / Subclass / Slot / Min Quality on one side for the Blizzard
-filter, primitives + combination on the other for post-filters) — but
-**more efficient than aux's**, per your ask: aux requires hand-typing
-arity-prefixed operators (`and2`, `or3`, ...) to nest conditions correctly,
-which is a well-known rough edge. Aegis's builder manages that nesting
-automatically — click **+ Condition**, pick AND/OR, and the generated query
-string is always correctly nested without the user ever typing polish
-notation by hand. Search / Export / Import actions, same as aux.
+- **Blizzard-query / post-filter split.** `buy.CompileTerm` returns `{ blizz,
+  filter }` — one 9-arg `QueryAuctionItems` per term, plus a closure applied to
+  each row as `buy.ReadPage` loads it. Server-side: name, level range, quality,
+  usable. Client-side: exact, buyout-only, fully-stacked, tooltip substring.
+- **`exact`**, **buyout-only**, **fully-stacked-only**, and **tooltip
+  substring** — including the `container/bag/tooltip/8` vs `container/bag/8`
+  disambiguation, which is a test.
+- **Semicolon OR** browses as ONE list: `buy.NextPage` rolls past the last page
+  of a term into the next term rather than stopping. (`PrevPage` crossing
+  backwards lands on the previous term's *first* page — we don't know its page
+  count until we query it, and a round trip just to deep-link "its last page"
+  isn't worth it.)
+- Quick wins: right-click a bag item on the Buy tab to search it (Sell tab's
+  right-click-to-slot untouched — each fires only on its own tab), shift-click
+  any item anywhere to search it, Tab-completion from every learned item name.
+
+**Categories** (`armor/leather`, `container/bag`, `armor/plate/chest`) landed
+in v1.5.1 after the first cut shipped without them and immediately read as
+broken — they fell through to name text, so `armor/leather` searched for an
+item *called* "armor leather". `buy.Categories()` caches the class → subclass
+map from the client's own localized names and `SlotsFor()` does slots; **2b's
+Filter Builder should populate its dropdowns from those same two, not build a
+parallel map.** Subclasses are keyed BY CLASS deliberately: names repeat
+("Leather" under both Armor and Trade Goods) and "Mail" exists only under
+Armor, so a flat map silently searches a category the user never asked for.
+
+**One note for 2d:** this slice's post-filters all apply together — an implicit
+AND. Prefix `and`/`or`/`not` combination is 2d's job, and `CompileTerm`'s
+single `filter` closure is the seam it should compose into.
+
+**Watch out for** (all found the hard way):
+
+- `local a, b = cond and f()` silently drops `f`'s second return whenever `and`
+  truncates to one value. Cost a half-parsed level range until a test caught it.
+- **`GameTooltipTemplate` reuses its `TextLeftN` FontStrings.** Reading them
+  "until one comes back empty" walks off the end of the current tooltip into
+  whatever longer tooltip was shown before. Bound the loop with `NumLines()`,
+  and copy `sell.lua`'s owner → clear → set sequence rather than inventing one.
+- **Do not build a filter on `GetItemInfo` at all if you can avoid it.** The
+  fully-stacked filter took four attempts: fail-closed emptied every page,
+  fail-open filtered nothing, and two different theories about which return
+  slot holds the stack count were both wrong in the field. What finally worked
+  was letting the user state the number (`stack 20`) so no item lookup is
+  needed, with a page-derived fallback for the bare form. When a 1.12 API is
+  this unreliable, prefer a design that does not need it over a cleverer way
+  of calling it.
+- **`GetItemInfo`'s return list is not the same on every client** -- vanilla
+  1.12 has no `itemLevel`, so every slot after position 3 shifts by one
+  against later clients. Never index it positionally. `stackCount` is the last
+  NUMBER in the list on both, which is how `buy.StackCountFromItemInfo` finds
+  it.
+- **`canUse` from `GetAuctionItemInfo` is `1`-or-`nil`** — `nil` means cannot
+  use, not "unknown". Treating nil as unknown made a warning unreachable for
+  the entire life of the Buy tab.
+
+**Also fixed on the way:** `core/buy.lua` was folding every browsed listing
+into the price DB, which `core/scan.lua`'s `RecordVisiblePage` already does for
+every result page anyone looks at — same event, identical values. The duplicate
+is gone; the price feed still works because it always came from scan.lua.
+
+### 2b — Filter Builder tab — ✅ **DONE** (v1.7.0)
+Form-driven query construction, reached from the **Results / Builder** switch
+on the Buy tab (the Shopping Lists sidebar is untouched). Layout mirrors aux's:
+Name / Exact / Level Range / Item Class / Subclass / Slot / Min Quality /
+Usable on the Blizzard-filter side, post-filter primitives on the other.
+Search / Export / Import, same as aux — but the user never types polish
+notation, which was the whole point.
+
+**How it stays honest — round-trip is the acceptance test.** The form emits a
+string, the string parses back to a term, and the term repaints the form.
+That is checked **by value, not by string**: `buy.TermsEqual` compares all 13
+term keys (normalising `false` → `nil`), so a cosmetic difference in how the
+string was spelled can't mask a dropped field. 15 engine-level cases cover it,
+and they were written *before* any UI existed on top.
+
+**Settled while building it:**
+
+- **Dropdowns read `buy.Categories()` / `buy.SlotOptions()`** — the same maps
+  `armor/leather` searches through, exactly as this file asked. No parallel
+  category table exists anywhere in the addon.
+- **Class gates Subclass gates Slot.** Changing the class repopulates the
+  subclass list and drops a subclass the new class doesn't offer; same one
+  level down. `SetOptions` enforces that itself rather than trusting the
+  gating callback — a sabotage proved the callback alone would have hidden it.
+- **`buy.TermToQuery` emits in a fixed order**: name first, then
+  class/subclass/slot, then quality/level/usable/buyout/stack, **tooltip
+  last**. Not cosmetic — `container/bag/tooltip/8` only disambiguates from
+  `container/bag/8` if tooltip text can't be mistaken for a trailing category
+  token.
+- **The form edits ONE term.** `+ OR` appends it to the query box as a
+  semicolon term, which is the only combinator the engine has today.
+  Prefix `and`/`or`/`not` over post-filters is still **2d's** job, and the
+  builder's nesting-free promise above is a claim about 2d's UI, not this
+  slice's.
+- **Dropdowns are hand-built from `Frame` + `Button`**, following
+  `MakeHSlider`'s precedent, rather than inheriting a `UIDropDownMenu`
+  template whose 1.12 helper surface we couldn't verify against the Turtle UI
+  source. Popups parent to `ui.frame` so they aren't clipped by the panel;
+  one module-level `openDropdown` closes the previous one.
+- **Repainting the form must not fire the gating callbacks** — `SetValue(v,
+  silent)` and a `ui.builderPainting` re-entry guard, or importing a query
+  clears the very fields it just set.
+
+**Precursor shipped with it:** `util.ItemInfo(link)` normalises `GetItemInfo`
+into a named table (`name, link, quality, minLevel, type, subType, stackCount,
+equipLoc, texture`) by locating `stackCount` as the last number in the list, so
+the vanilla-vs-later 9/10-value shift can't bite again. `sell.ScanBags` and
+`buy.StackCountFromItemInfo` both route through it; **no caller indexes
+`GetItemInfo` positionally any more**, and the suite runs under both layouts.
 
 ### 2c — Saved Searches tab
 Favorites and Recent, styled after aux's split-column layout. Hover for a
@@ -310,11 +435,37 @@ prefix-notation combination, plus stat-suffix matching (the
 `+3 stamina/+3 agility` wristband-suffix case) and any remaining aux
 primitives worth carrying over.
 
-### 2e — Blizzard-style Category Navigation Tree
-Decided. Integrate default Blizzard-style category browsing directly into the search interface
-- Displays a collapsible category tree on the left side of the search view (e.g., Weapons > Two-Handed Maces or Armor > Leather).
-- Allows users to easily browse specific item slots or types visually without having to rely strictly on typing name search queries or remembering syntax.
- - Category filters feed cleanly into the underlying search engine alongside post-filter rules.
+### 2e — Blizzard-style Category Navigation Tree — ✅ **DONE** (v1.8.0)
+(Numbered 3e when it was written; it shipped inside Phase 2, out of order,
+because the user asked for it ahead of 2c/2d.)
+
+The Buy tab's left column now opens as a collapsible **class > subclass >
+slot** tree (Weapons > Two-Handed Swords; Armor > Leather > Chest). Clicking
+a node searches it immediately. A **Categories / Advanced** toggle at the top
+swaps between the tree and the original Shopping Lists sidebar (lists +
+recent searches); the choice persists per character, tree by default.
+
+**Settled while building it:**
+
+- **Tree picks COMPOSE with the query box.** A click parses the box's first
+  term, swaps only class/subclass/slot, regenerates and searches — so typed
+  name/quality/stack/tooltip filters stay applied on top of the picked
+  category, and extra `;` terms are regenerated untouched (TermToQuery
+  round-trips by value, so this loses nothing). This is the "feed cleanly
+  into the underlying search engine" requirement, and it is pinned by a
+  sabotage-verified test.
+- **The tree reads `buy.ClassOptions` / `SubclassOptions` / `SlotOptions`** —
+  the exact three calls the Builder's dropdowns use. Still no second category
+  list anywhere.
+- **The paint paths are mode-guarded**, not just the widgets hidden: every
+  search refreshes the recent list, and an unguarded sidebar repaint would
+  `Show()` its rows straight over the tree. A test drives a search from the
+  tree and asserts the sidebar stays down.
+- **"Advanced replaces the tree"** is interpreted as: Advanced shows the
+  Shopping Lists sidebar (which contains the saved/recent searches), while
+  the Results/Builder switch on the right stays available in BOTH modes.
+  When 2c ships a dedicated Saved Searches view it slots into the existing
+  right-hand view switcher, not the left column.
 
 ### 2f — Session Purchase & Crafting Material Tracker
 
