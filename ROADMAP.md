@@ -141,6 +141,21 @@ is unmistakable, and it would turn this exact mistake into something visible.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 
+**The other cross-addon convention: event-handler cost.** The integration
+contract above is about *data*; this one is about *not freezing the client*,
+and it binds all four Aegis addons. A 1.12 client populates its item cache
+lazily, so the first mailbox open of a session with unseen attachments fires
+`MAIL_INBOX_UPDATE` / `BAG_UPDATE` dozens of times in a few frames. Any
+handler that does an unbounded rescan, a `GetItemInfo` per item, a
+`GameTooltip:Set*` per item, or a list repaint inline gets multiplied by that
+storm — which is what froze Courier and stalled RallyPower (~18s, from a bag
+event, with no mailbox feature at all) while Exchange stayed clean.
+
+**Exchange is the reference implementation; the rule and the three safe
+shapes are HARD RULE 16 in [`CLAUDE.md`](CLAUDE.md).** Port that rule and its
+self-check line into the other repos' `CLAUDE.md` verbatim rather than
+restating it here — one wording, four addons.
+
 ### 0.3 Historical-value weighting audit — ✅ **DONE** (v1.4.0)
 **The gap was real, and it was both halves of the intent.** Target behaviour was
 "recent days weighted more, decreasing effect past roughly a month". Neither

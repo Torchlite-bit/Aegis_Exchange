@@ -135,6 +135,65 @@ or silent breakage on the 1.12 / Lua 5.0 client.
       passes a number as the update function and FrameXML crashes with
       "attempt to call local 'updateFunction' (a number value)".
 
+### Event handler cost — SUITE-WIDE (applies to every Aegis addon)
+
+16. **A handler for an event that can STORM must be O(1), state-gated, or
+    coalesced behind a once-per-frame flush. Never an unbounded rescan, and
+    never a per-item client query, inline in the handler.**
+
+    This is a freeze rule, not a tidiness rule. On 1.12 the client populates
+    its item cache lazily, so the **first** time a session sees mail with
+    unseen attachments, the client fires `MAIL_INBOX_UPDATE` (and, because
+    the stock `MAIL_SHOW` handler calls `OpenBackpack()`, `BAG_UPDATE`)
+    repeatedly as each item resolves — dozens of fires in a few frames.
+    Later opens do not, which is why the symptom is *"only the first time,
+    and it goes away if you open the mailbox once with the addon
+    disabled"*. Any handler doing real work per fire gets multiplied by that
+    storm.
+
+    Measured across the suite on one 1.12 client (SuperWoW + nampower +
+    UnitXP_SP3, ~10+ mails): **Courier hard-froze, RallyPower stalled ~18s
+    despite having no mailbox feature at all** (it registers a bag/inventory
+    event, which is enough), Blizzard's own UI and TurtleMail were fine, and
+    **Exchange was clean**. Exchange is the reference case, and the reason is
+    entirely structural — see below.
+
+    **The three shapes that are safe.** All three are in this repo already;
+    copy whichever fits:
+
+    - **O(1) / bounded, no item queries.** `ui.ScanMailSales`
+      (`ui/frame.lua`) does ONE pass over the mail headers per fire, reading
+      only `GetInboxHeaderInfo` — header text and money, never
+      `GetInboxItem`, never a tooltip. It touches no item data at all, so it
+      cannot participate in the cache storm no matter how often it fires,
+      and it repaints nothing unless the History tab is the visible one. N
+      fires × M mails costs N×M cheap header reads and nothing else.
+    - **State-gated.** `core/buy.lua`'s `AUCTION_ITEM_LIST_UPDATE` handler
+      runs `ReadPage` only while `phase == "wait_results"`, and `ReadPage`
+      sets `phase = "idle"` before it returns. Repeat fires in the same
+      frame are no-ops. This is what makes the one expensive auction path
+      (up to 50 `GetItemInfo` calls per page) self-limiting: exactly one
+      execution per query WE sent, paced by `CanSendAuctionQuery()`.
+    - **Dirty flag + once-per-frame flush.** Set a boolean in the handler,
+      do the work in an existing `OnUpdate`. Use this whenever the work is a
+      full rescan that cannot be made cheap.
+
+    **What must never appear inline in a stormable handler:**
+    `GetItemInfo` per item, any `GameTooltip:Set*` per item, a full bag or
+    inventory walk, or a list repaint. If a handler needs any of those, it
+    needs a dirty flag.
+
+    **Corollary — keep private scanning tooltips private.** `ui/tooltip.lua`
+    hooks by assigning to the **`GameTooltip` object** (`GameTooltip[name] =
+    ...`), which shadows the shared widget metatable for that one frame.
+    Our own scanning tooltips (`AegisExchangeQueryTooltip` in `core/buy.lua`,
+    and `core/sell.lua`'s) are separate frames, so their `Set*` calls resolve
+    through the metatable to the untouched original and do **not** re-enter
+    our price-line code. Hooking the metatable instead would make every
+    per-row tooltip read in a filter or bag scan run the full tooltip
+    extension — turning a bounded scan into an unbounded one. Never
+    "simplify" the hook that way.
+
 ---
 
 ## Turtle WoW specifics
@@ -269,6 +328,10 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 - [ ] No `#` — used `table.getn`. No `table.setn`.
 - [ ] No `%` operator — used `math.mod`.
 - [ ] Event handlers read `event` / `arg1…` globals (not `self, event, ...`).
+- [ ] No handler for a stormable event (`MAIL_INBOX_UPDATE`, `BAG_UPDATE`,
+      `AUCTION_ITEM_LIST_UPDATE`, …) does an unbounded rescan, a
+      `GetItemInfo`/`GameTooltip:Set*` per item, or a list repaint inline —
+      it is O(1), state-gated, or behind a dirty flag flushed once per frame.
 - [ ] No `hooksecurefunc` / secure hooks — saved original + replaced.
 - [ ] AH reads match the 12-value `GetAuctionItemInfo` and 9-arg
       `QueryAuctionItems` signatures; queries gated on `CanSendAuctionQuery()`.
