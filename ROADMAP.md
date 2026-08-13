@@ -620,6 +620,12 @@ component that quietly did nothing was not an option.
 
 ### 2l — Concept-parity polish — ✅ **DONE** (v1.12.0)
 
+> **⚠️ The button-colour decision below was REVERSED in v1.14.0 — see 2n.**
+> The analysis still holds (the plates really were vanilla's own art, and
+> matching the concept really did mean drawing every button ourselves); the
+> conclusion changed once the question was the whole addon rather than one
+> tab. Everything else in this entry stands.
+
 **Settled: the button colour was never a bug.** The warm red-brown plates are
 vanilla's own `UIPanelButtonTemplate` art, which is what every stock button
 looks like unskinned. The concept's flat dark plates with thin gold borders
@@ -694,6 +700,52 @@ Everything else in the pass:
 - **The favourite menu opens below its row**, inside the favourites column.
   1.12 has no menu-flip logic — placement is whatever you anchor, so anchor
   it somewhere it cannot cover either column.
+
+### 2n — Custom button art — ✅ **DONE** (v1.14.0)
+
+**This REVERSES 2l's "keep the stock art" decision. Read that entry first.**
+2l settled that the warm red-brown plates were vanilla's own
+`UIPanelButtonTemplate` and not a bug, and that matching the concept would
+mean backdrop-drawing every button in the addon. Both of those statements are
+still true — what changed is the answer, not the analysis. 2l was weighing the
+concept against *the Buy tab's* Blizzlike premise; applied to all six tabs,
+the concept art is simply what the addon was always meant to look like, and
+the half-and-half state 2l implicitly preferred reads as an unfinished port
+rather than a deliberate choice.
+
+- **`ui.MakeButton(parent, kind, name)`** is a drop-in for the template: it
+  answers `SetText` / `GetText` / `GetFontString` / `Enable` / `Disable` /
+  `IsEnabled` the same way, so the 56 call sites changed only their
+  constructor.
+- **Two kinds, from the concept's own stylesheet.** `primary` is the deep red
+  plate with the gold label (`.btn`), and there is exactly ONE per area — the
+  thing that area exists to do. `quiet` is the dark neutral plate
+  (`.btn-quiet`) and is the default.
+- **The four states are now ours to draw.** Normal, hover, pressed and
+  disabled, plus the 1px label nudge on press. Disabled is the one that
+  matters: the template supplied it free, and a hand-drawn plate that skips
+  it ships a button which looks live and silently ignores clicks. It is
+  DERIVED from each kind's colours rather than hand-picked, so a palette edit
+  cannot leave it behind.
+- **Scripts close over their own button rather than reading `this`.** `this`
+  is right for a handler SHARED across frames, but it is only set when the
+  CLIENT invokes the script — and the Filter Builder hides its action buttons
+  from Lua the moment it builds them. That path errored on a nil `this`.
+- **pfUI**: the plates ride on pfUI's backdrop child, resolved at PAINT time
+  because it does not exist until `skin.Apply` runs. The generic `SkinButton`
+  pass skips ours, which would otherwise double-border a button that already
+  has a backdrop. Same arrangement the sub-tab pills use.
+- **`ui.TintButton` is gone.** It vertex-coloured template textures; there are
+  none left. `ui.SetButtonKind` replaces it.
+
+**Process note, because this bit twice in one session.** The bulk conversion
+was first attempted with a DOTALL regex over the whole file. Its `.+?` spanned
+from an unrelated `CreateFrame("Button", ...)` to the next template match and
+ate two buttons' parent arguments — leaving valid Lua that still took clicks
+and still painted, attached to nothing. **Every test passed.** Do bulk edits
+line-oriented, with a bounded window, and diff-audit every deletion; and note
+that the suite could not see this class of bug at all until 2n added a
+parentage check and a source lint for a Button constructed without a parent.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

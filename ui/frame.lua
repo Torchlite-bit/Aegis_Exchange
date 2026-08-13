@@ -85,24 +85,220 @@ local function ChatMsg(text)
     DEFAULT_CHAT_FRAME:AddMessage(text, 0.35, 0.78, 0.98)
 end
 
--- Tint a UIPanelButtonTemplate button by vertex-colouring the textures it
--- already has, rather than replacing them -- the pressed and highlight states
--- keep working, and there is no new art to ship.
+-- ui.TintButton lived here. It vertex-coloured a template button's existing
+-- textures so one button could stand out, and it has no work left to do: no
+-- button in the addon inherits UIPanelButtonTemplate any more, so there are
+-- no textures to colour. ui.SetButtonKind replaces it.
+
+-- ---------------------------------------------------------------------------
+-- Buttons
 --
--- Every call is guarded: not every 1.12 build exposes all three getters, and
--- a pfUI reskin can replace or drop them entirely. A missing texture must
--- cost the tint, never the tab.
-function ui.TintButton(btn, r, g, b)
-    if not btn then return end
-    local function tint(getter)
-        if type(btn[getter]) ~= "function" then return end
-        local ok, tex = pcall(function() return btn[getter](btn) end)
-        if ok and tex and tex.SetVertexColor then
-            pcall(function() tex:SetVertexColor(r, g, b) end)
+-- We draw our own rather than inherit UIPanelButtonTemplate. The template's
+-- warm red-brown plate is vanilla's own art and there is nothing wrong with
+-- it -- ROADMAP 2l settled that explicitly -- but the design concept asks for
+-- flat dark plates with a thin border, and no vanilla template produces that.
+-- So the plate is a backdrop and we own all four visual states.
+--
+-- Two kinds, straight from the concept's stylesheet:
+--   * "primary" -- the deep red plate with a gold label (.btn). ONE per area:
+--     the thing the area exists to do (Search, Post, Full Scan).
+--   * "quiet"   -- the dark neutral plate with a tan label (.btn-quiet).
+--     Everything else. This is the common case, so it is the default.
+--
+-- What the template gave away for free and is hand-written below: the hover
+-- and pressed plates, the 1px label nudge on press (a button that does not
+-- move when clicked feels dead), and the disabled look. Note that a bare
+-- CreateFrame("Button") DOES have working Enable/Disable/IsEnabled -- they
+-- just have no appearance attached, which is exactly the trap that would ship
+-- a button that stops responding while still looking clickable.
+-- ---------------------------------------------------------------------------
+
+local BTN_KIND = {
+    primary = {
+        bg     = { 0.35, 0.08, 0.08 },
+        over   = { 0.46, 0.12, 0.12 },
+        down   = { 0.24, 0.05, 0.05 },
+        border = { 0.55, 0.20, 0.16 },
+        text   = { 0.94, 0.75, 0.25 },
+        font   = "GameFontNormal",
+    },
+    quiet = {
+        bg     = { 0.17, 0.16, 0.15 },
+        over   = { 0.27, 0.25, 0.22 },
+        down   = { 0.11, 0.10, 0.09 },
+        border = { 0.30, 0.26, 0.16 },
+        text   = { 0.80, 0.71, 0.42 },
+        font   = "GameFontNormalSmall",
+    },
+}
+
+-- Disabled is DERIVED, not a fourth hand-picked row: the concept just drops
+-- the opacity. Deriving it means a palette edit can never leave the disabled
+-- colour behind pointing at the old plate.
+local BTN_DIM_BG, BTN_DIM_TEXT = 0.55, 0.45
+
+local function DimRGB(c, f)
+    return c[1] * f, c[2] * f, c[3] * f
+end
+
+-- Repaint `b` for its current state. Reads the state off the button rather
+-- than taking it as an argument so every script can just call Repaint(b).
+--
+-- The backdrop target is resolved HERE, every time, not cached at creation:
+-- under pfUI the visible plate is pfUI's own child frame (b.backdrop), and it
+-- does not exist until skin.Apply runs -- which is after the window is built.
+-- Same reason TintTab resolves it late for the sub-tabs.
+local function RepaintButton(b)
+    local k = BTN_KIND[b.aegisKind] or BTN_KIND.quiet
+    local target = b
+    if b.backdrop and b.backdrop.SetBackdropColor then target = b.backdrop end
+
+    -- 1.12 returns 1/nil from IsEnabled(), not a boolean.
+    local enabled = true
+    if b.IsEnabled then
+        local ok, v = pcall(function() return b:IsEnabled() end)
+        if ok and not v then enabled = false end
+    end
+
+    local bg, br, tx = k.bg, k.border, k.text
+    if enabled then
+        if b.aegisDown then
+            bg = k.down
+        elseif b.aegisOver then
+            bg = k.over
         end
     end
-    tint("GetNormalTexture")
-    tint("GetPushedTexture")
+
+    if target.SetBackdropColor then
+        if enabled then
+            target:SetBackdropColor(bg[1], bg[2], bg[3], 1)
+        else
+            local r, g, bl = DimRGB(bg, BTN_DIM_BG)
+            target:SetBackdropColor(r, g, bl, 1)
+        end
+    end
+    if target.SetBackdropBorderColor then
+        if enabled then
+            target:SetBackdropBorderColor(br[1], br[2], br[3])
+        else
+            local r, g, bl = DimRGB(br, BTN_DIM_BG)
+            target:SetBackdropBorderColor(r, g, bl)
+        end
+    end
+
+    if b.label then
+        if enabled then
+            b.label:SetTextColor(tx[1], tx[2], tx[3])
+        else
+            local r, g, bl = DimRGB(tx, BTN_DIM_TEXT)
+            b.label:SetTextColor(r, g, bl)
+        end
+        -- Press nudge. Done by moving the label ourselves rather than via
+        -- SetPushedTextOffset, because that only fires for a font string
+        -- registered with SetFontString and we deliberately do not depend on
+        -- that call existing.
+        local dy = 0
+        if enabled and b.aegisDown then dy = -1 end
+        b.label:ClearAllPoints()
+        b.label:SetPoint("CENTER", b, "CENTER", 0, dy)
+    end
+end
+
+-- Change a button's kind after creation and repaint it. This replaces what
+-- ui.TintButton did for the accent buttons: there are no template textures to
+-- vertex-colour any more, so "make this one stand out" means "make it
+-- primary".
+function ui.SetButtonKind(b, kind)
+    if not b or not b.aegisButton then return end
+    b.aegisKind = BTN_KIND[kind] and kind or "quiet"
+    RepaintButton(b)
+end
+
+-- Build an Aegis button. Drop-in for
+--     ui.MakeButton(parent, "quiet", name)
+-- -- the returned frame answers SetText/GetText/Enable/Disable/IsEnabled the
+-- same way, so existing call sites keep working after the constructor swap.
+function ui.MakeButton(parent, kind, name)
+    local b = CreateFrame("Button", name, parent)
+    b.aegisButton = true
+    b.aegisKind = BTN_KIND[kind] and kind or "quiet"
+    b:SetHeight(22)
+    b:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+
+    local fs = b:CreateFontString(nil, "OVERLAY",
+        (BTN_KIND[b.aegisKind] or BTN_KIND.quiet).font)
+    fs:SetPoint("CENTER", b, "CENTER", 0, 0)
+    b.label = fs
+
+    -- SetText/GetText are defined on the OBJECT, shadowing the widget
+    -- metatable for this frame only -- the same containment rule the tooltip
+    -- hook follows. Nothing else that draws a Button is affected.
+    b.SetText = function(self, t)
+        self.aegisText = t or ""
+        self.label:SetText(self.aegisText)
+    end
+    b.GetText = function(self) return self.aegisText or "" end
+    -- Real 1.12 returns the font string REGISTERED with SetFontString, which
+    -- for a template-less button is nil. Two callers measure a button's label
+    -- through this to clip it (both dropdowns), and nil would error there, so
+    -- answer it properly rather than leaving a hole for the sweep to fall in.
+    b.GetFontString = function(self) return self.label end
+
+    -- Enable/Disable exist and work already; they just have no look. Wrap
+    -- them so the plate follows the state.
+    local origEnable, origDisable = b.Enable, b.Disable
+    b.Enable = function(self)
+        if origEnable then origEnable(self) end
+        RepaintButton(self)
+    end
+    b.Disable = function(self)
+        if origDisable then origDisable(self) end
+        self.aegisDown = false
+        self.aegisOver = false
+        RepaintButton(self)
+    end
+
+    -- These close over `b` rather than reading the global `this`. `this` is
+    -- the right mechanism for a handler SHARED across frames, but each button
+    -- already has itself in scope, and depending on the global means the
+    -- script only works when the CLIENT is the one invoking it. It is not:
+    -- the Filter Builder hides its action buttons from Lua the moment it
+    -- builds them, which fires OnHide with no `this` set.
+    b:SetScript("OnEnter", function()
+        b.aegisOver = true
+        RepaintButton(b)
+    end)
+    -- A press that drags off the button never sends it an OnMouseUp, so the
+    -- pressed plate would stick until the next hover. OnLeave clears BOTH
+    -- flags for that reason, not just the hover one.
+    b:SetScript("OnLeave", function()
+        b.aegisOver = false
+        b.aegisDown = false
+        RepaintButton(b)
+    end)
+    b:SetScript("OnMouseDown", function()
+        b.aegisDown = true
+        RepaintButton(b)
+    end)
+    b:SetScript("OnMouseUp", function()
+        b.aegisDown = false
+        RepaintButton(b)
+    end)
+    -- Hiding mid-press leaves the same stuck plate waiting for the reshow.
+    b:SetScript("OnHide", function()
+        b.aegisDown = false
+        b.aegisOver = false
+        RepaintButton(b)
+    end)
+
+    b:SetText("")
+    RepaintButton(b)
+    return b
 end
 
 -- Set `text` on a FontString, shortened with an ellipsis if it would run wider
@@ -349,8 +545,7 @@ function ui.BuildWindow()
     -- Swap to the stock Blizzard AH (its counterpart button swaps back —
     -- see HookAuctionFrame). Raised above the title bar's drag region and
     -- anchored to the close button so it sits neatly on the extended bar.
-    local blizBtn = CreateFrame("Button", "AegisExchangeBlizzardButton", f,
-        "UIPanelButtonTemplate")
+    local blizBtn = ui.MakeButton(f, "quiet", "AegisExchangeBlizzardButton")
     blizBtn:SetWidth(92)
     blizBtn:SetHeight(20)
     blizBtn:SetPoint("RIGHT", close, "LEFT", -4, 0)
@@ -464,8 +659,7 @@ function ui.BuildWindow()
     -- Scan tab: Full Scan / Pause / Resume / Categories + status + progress.
     local scanPanel = ui.panels["Scan"]
 
-    local fullScan = CreateFrame("Button", "AegisExchangeFullScanButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local fullScan = ui.MakeButton(scanPanel, "primary", "AegisExchangeFullScanButton")
     fullScan:SetWidth(100)
     fullScan:SetHeight(22)
     fullScan:SetPoint("TOPLEFT", scanPanel, "TOPLEFT", 8, -10)
@@ -475,8 +669,7 @@ function ui.BuildWindow()
     end)
     ui.fullScanBtn = fullScan
 
-    local pause = CreateFrame("Button", "AegisExchangePauseButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local pause = ui.MakeButton(scanPanel, "quiet", "AegisExchangePauseButton")
     pause:SetWidth(74)
     pause:SetHeight(22)
     pause:SetPoint("LEFT", fullScan, "RIGHT", 6, 0)
@@ -487,8 +680,7 @@ function ui.BuildWindow()
     end)
     ui.pauseBtn = pause
 
-    local resume = CreateFrame("Button", "AegisExchangeResumeButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local resume = ui.MakeButton(scanPanel, "quiet", "AegisExchangeResumeButton")
     resume:SetWidth(74)
     resume:SetHeight(22)
     resume:SetPoint("LEFT", pause, "RIGHT", 6, 0)
@@ -502,8 +694,7 @@ function ui.BuildWindow()
     -- Stop: abandon the scan entirely and free the AH for browsing/posting.
     -- (Pause keeps progress for Resume, but the scanner is shared, so it still
     -- holds the query channel -- Stop is the way to bail out completely.)
-    local stop = CreateFrame("Button", "AegisExchangeStopButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local stop = ui.MakeButton(scanPanel, "quiet", "AegisExchangeStopButton")
     stop:SetWidth(60)
     stop:SetHeight(22)
     stop:SetPoint("LEFT", resume, "RIGHT", 6, 0)
@@ -515,8 +706,7 @@ function ui.BuildWindow()
     end)
     ui.stopBtn = stop
 
-    local cats = CreateFrame("Button", "AegisExchangeCategoriesButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local cats = ui.MakeButton(scanPanel, "quiet", "AegisExchangeCategoriesButton")
     cats:SetWidth(94)
     cats:SetHeight(22)
     cats:SetPoint("LEFT", stop, "RIGHT", 6, 0)
@@ -769,7 +959,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local di = 1
     while di <= table.getn(A.sell.DURATIONS) do
         local d = A.sell.DURATIONS[di]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(44); b:SetHeight(20)
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", durLbl, "RIGHT", 10, 0) end
@@ -788,7 +978,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- ---- Default undercut: percent OR a flat copper amount ----------------
     local ucLbl = label("Default undercut:", durLbl, -20)
 
-    local pctMode = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local pctMode = ui.MakeButton(panel, "quiet")
     pctMode:SetWidth(34); pctMode:SetHeight(20)
     pctMode:SetPoint("LEFT", ucLbl, "RIGHT", 10, 0)
     pctMode:SetText("%")
@@ -796,7 +986,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     pctMode:SetScript("OnClick", function()
         A.db.SetSetting("undercutMode", "pct"); ui.RefreshSettings()
     end)
-    local flatMode = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local flatMode = ui.MakeButton(panel, "quiet")
     flatMode:SetWidth(48); flatMode:SetHeight(20)
     flatMode:SetPoint("LEFT", pctMode, "RIGHT", 3, 0)
     flatMode:SetText("Flat")
@@ -851,7 +1041,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local mi = 1
     while mi <= table.getn(modes) do
         local m = modes[mi]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(72); b:SetHeight(20)
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", spLbl, "RIGHT", 10, 0) end
@@ -873,7 +1063,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- steps have no such problem and are easier to land on a round number.
     local scLbl = label("Window scale:", spLbl, -20)
 
-    local scDown = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scDown = ui.MakeButton(panel, "quiet")
     scDown:SetWidth(24); scDown:SetHeight(20)
     scDown:SetPoint("LEFT", scLbl, "RIGHT", 10, 0)
     scDown:SetText("-")
@@ -885,13 +1075,13 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     ui.setScaleText:SetJustifyH("CENTER")
     ui.setScaleText:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    local scUp = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scUp = ui.MakeButton(panel, "quiet")
     scUp:SetWidth(24); scUp:SetHeight(20)
     scUp:SetPoint("LEFT", ui.setScaleText, "RIGHT", 8, 0)
     scUp:SetText("+")
     scUp:SetScript("OnClick", function() ui.StepWindowScale(SCALE_STEP) end)
 
-    local scReset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scReset = ui.MakeButton(panel, "quiet")
     scReset:SetWidth(56); scReset:SetHeight(20)
     scReset:SetPoint("LEFT", scUp, "RIGHT", 10, 0)
     scReset:SetText("Reset")
@@ -1022,7 +1212,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local ti = 1
     while ti <= table.getn(modes) do
         local m = modes[ti]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(64); b:SetHeight(20)
         if prevTh then b:SetPoint("LEFT", prevTh, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", thLbl, "RIGHT", 10, 0) end
@@ -1047,7 +1237,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     ui.setDataText:SetPoint("TOPLEFT", thLbl, "BOTTOMLEFT", 0, -14)
     ui.setDataText:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local clearBtn = ui.MakeButton(panel, "quiet")
     clearBtn:SetWidth(120); clearBtn:SetHeight(20)
     clearBtn:SetPoint("LEFT", ui.setDataText, "RIGHT", 14, 0)
     clearBtn:SetText("Clear price data")
@@ -1594,7 +1784,7 @@ local function MakeDropdown(parent, width, onSelect, noAll)
     dd.value = nil
     dd.noAll = noAll and true or false
 
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    local btn = ui.MakeButton(parent, "quiet")
     btn:SetWidth(width)
     btn:SetHeight(20)
     btn:SetText("All")
@@ -1885,7 +2075,10 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         sel:Hide()
         row.selTex = sel
     else
-        local buyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        -- Buy is the primary plate and Bid the quiet one, exactly as the
+        -- concept has them: on a row of listings the buyout is the action,
+        -- and a bid is the hedge.
+        local buyBtn = ui.MakeButton(row, "primary")
         buyBtn:SetWidth(50); buyBtn:SetHeight(17)
         buyBtn:SetPoint("LEFT", row, "LEFT", RCX.buy, 0)
         buyBtn:SetText("Buy")
@@ -1893,7 +2086,7 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
             if row.entry then ui.ConfirmBuyout(row.entry) end
         end)
         row.buyBtn = buyBtn
-        local bidBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        local bidBtn = ui.MakeButton(row, "quiet")
         bidBtn:SetWidth(44); bidBtn:SetHeight(17)
         bidBtn:SetPoint("LEFT", row, "LEFT", RCX.bid, 0)
         bidBtn:SetText("Bid")
@@ -2290,8 +2483,8 @@ function ui.BuildBuyTab()
     usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
     ui.buyUsableLbl = usableLbl
 
-    local searchBtn = CreateFrame("Button", "AegisExchangeBuySearchButton",
-        panel, "UIPanelButtonTemplate")
+    local searchBtn = ui.MakeButton(panel, "primary",
+        "AegisExchangeBuySearchButton")
     searchBtn:SetWidth(70); searchBtn:SetHeight(20)
     searchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -112, -22)
     searchBtn:SetText("Search")
@@ -2300,22 +2493,22 @@ function ui.BuildBuyTab()
 
     -- The one addition to the stock layout, in the slot where Blizzard's
     -- "Display on Character" sat.
-    local advBtn = CreateFrame("Button", "AegisExchangeBuyAdvancedButton",
-        panel, "UIPanelButtonTemplate")
+    --
+    -- It used to carry a purple vertex tint, on the reasoning that the one
+    -- addition to an otherwise Blizzlike strip should read as the odd one
+    -- out. That reasoning is spent: the strip is no longer Blizzlike, it is
+    -- concept art, so a third colour on top of it just read as a smudge over
+    -- the button -- which is exactly how it was reported. Quiet plate.
+    local advBtn = ui.MakeButton(panel, "quiet",
+        "AegisExchangeBuyAdvancedButton")
     advBtn:SetWidth(96); advBtn:SetHeight(20)
     advBtn:SetPoint("LEFT", searchBtn, "RIGHT", 8, 0)
     advBtn:SetText("Advanced >")
     advBtn:SetScript("OnClick", function() ui.SetBuyMode("advanced") end)
-    -- Tint it, so the one addition to a Blizzlike strip reads as the odd one
-    -- out. Vertex-colouring the template's own textures rather than swapping
-    -- them keeps the button's pressed/highlight states intact, and the pcall
-    -- means a pfUI reskin that drops a texture cannot break the tab.
-    ui.TintButton(advBtn, 0.62, 0.44, 0.86)
     ui.buyAdvBtn = advBtn
 
     -- ---- ADVANCED-mode strip -------------------------------------------
-    local backBtn = CreateFrame("Button", "AegisExchangeBuyBackButton",
-        panel, "UIPanelButtonTemplate")
+    local backBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBackButton")
     backBtn:SetWidth(58); backBtn:SetHeight(20)
     backBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -12)
     backBtn:SetText("< Back")
@@ -2347,8 +2540,8 @@ function ui.BuildBuyTab()
     local vi = 1
     while vi <= table.getn(views) do
         local v = views[vi]
-        local b = CreateFrame("Button", "AegisExchangeBuyView" .. v[2],
-            panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet",
+            "AegisExchangeBuyView" .. v[2])
         b:SetWidth(112); b:SetHeight(20)
         if prevView then
             b:SetPoint("LEFT", prevView, "RIGHT", 5, 0)
@@ -2366,8 +2559,7 @@ function ui.BuildBuyTab()
     -- Pager, bottom-right of the results area. It used to sit at the panel's
     -- TOP right -- the same spot the Advanced button now occupies, which is
     -- where the stray "< >" over that button came from.
-    local nextBtn = CreateFrame("Button", "AegisExchangeBuyNextButton",
-        panel, "UIPanelButtonTemplate")
+    local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
     nextBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 36)
     nextBtn:SetText(">")
@@ -2378,8 +2570,7 @@ function ui.BuildBuyTab()
     ui.buyPageText:SetJustifyH("RIGHT")
     ui.buyPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    local prevBtn = CreateFrame("Button", "AegisExchangeBuyPrevButton",
-        panel, "UIPanelButtonTemplate")
+    local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyPrevButton")
     prevBtn:SetWidth(24); prevBtn:SetHeight(20)
     prevBtn:SetPoint("RIGHT", ui.buyPageText, "LEFT", -6, 0)
     prevBtn:SetText("<")
@@ -2440,16 +2631,16 @@ ui.GrowBuyRows = function(n)
     -- ===== Bottom action bar (both modes) ===============================
     -- Blizzard's shape: your money on the left, a bid entry, then
     -- Bid / Buyout / Close. All three act on the SELECTED row.
-    local closeBtn = CreateFrame("Button", "AegisExchangeBuyCloseButton",
-        panel, "UIPanelButtonTemplate")
+    local closeBtn = ui.MakeButton(panel, "quiet",
+        "AegisExchangeBuyCloseButton")
     closeBtn:SetWidth(64); closeBtn:SetHeight(21)
     closeBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 8)
     closeBtn:SetText("Close")
     closeBtn:SetScript("OnClick", function() ui.CloseWindow() end)
     ui.buyCloseBtn = closeBtn
 
-    local buyoutBtn = CreateFrame("Button", "AegisExchangeBuyBuyoutButton",
-        panel, "UIPanelButtonTemplate")
+    local buyoutBtn = ui.MakeButton(panel, "primary",
+        "AegisExchangeBuyBuyoutButton")
     buyoutBtn:SetWidth(70); buyoutBtn:SetHeight(21)
     buyoutBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
     buyoutBtn:SetText("Buyout")
@@ -2458,8 +2649,7 @@ ui.GrowBuyRows = function(n)
     end)
     ui.buyBuyoutBtn = buyoutBtn
 
-    local bidBtn = CreateFrame("Button", "AegisExchangeBuyBidButton",
-        panel, "UIPanelButtonTemplate")
+    local bidBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBidButton")
     bidBtn:SetWidth(58); bidBtn:SetHeight(21)
     bidBtn:SetPoint("RIGHT", buyoutBtn, "LEFT", -5, 0)
     bidBtn:SetText("Bid")
@@ -2948,8 +3138,8 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     --
     -- Built right-to-left from the Bid box so the row stays put whatever the
     -- window width. Only shown while the Builder view is up.
-    local function action(text, w, rightOf, fn)
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local function action(text, w, rightOf, fn, kind)
+        local b = ui.MakeButton(panel, kind or "quiet")
         b:SetWidth(w); b:SetHeight(21)
         b:SetPoint("RIGHT", rightOf, "LEFT", -5, 0)
         b:SetText(text)
@@ -2972,8 +3162,11 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     -- still a component, so the button bought nothing for the space.
     local bBuild = action("Build >", 66, bImport,
         function() ui.BuilderExport() end)
-    local bSearch = action("Search", 62, bBuild, function() ui.BuilderSearch() end)
-    ui.TintButton(bBuild, 0.62, 0.44, 0.86)
+    -- Search is the primary plate here for the same reason it is on the
+    -- default strip: it is what the Builder exists to reach. Build > lost its
+    -- purple tint with the Advanced button's, and for the same reason.
+    local bSearch = action("Search", 62, bBuild,
+        function() ui.BuilderSearch() end, "primary")
     ui.fbSearchBtn = bSearch
     ui.fbBuildBtn = bBuild
     ui.fbImportBtn = bImport
@@ -4063,8 +4256,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftNetFS:SetWidth(CSIDE_W); ui.craftNetFS:SetJustifyH("LEFT")
 
     -- Fill the DB with a fresh price for the crafted item and every reagent.
-    local priceBtn = CreateFrame("Button", "AegisExchangeCraftPriceButton",
-        panel, "UIPanelButtonTemplate")
+    local priceBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPriceButton")
     priceBtn:SetWidth(CSIDE_W); priceBtn:SetHeight(18)
     priceBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 42)
     priceBtn:SetText("Price recipe")
@@ -4072,8 +4264,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftPriceBtn = priceBtn
 
     -- Delete the selected recipe.
-    local delBtn = CreateFrame("Button", "AegisExchangeCraftDelButton",
-        panel, "UIPanelButtonTemplate")
+    local delBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftDelButton")
     delBtn:SetWidth(CSIDE_W); delBtn:SetHeight(18)
     delBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
     delBtn:SetText("Remove recipe")
@@ -4099,16 +4290,14 @@ ui.GrowCraftSideRows = function(n)
 
     -- Search button sits to the RIGHT of the box (not below it), so the yellow
     -- label never lands on the "Item" column header underneath.
-    local searchBtn = CreateFrame("Button", "AegisExchangeCraftSearchButton",
-        panel, "UIPanelButtonTemplate")
+    local searchBtn = ui.MakeButton(panel, "primary", "AegisExchangeCraftSearchButton")
     searchBtn:SetWidth(64); searchBtn:SetHeight(20)
     searchBtn:SetPoint("LEFT", box, "RIGHT", 10, 0)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoCraftSearch() end)
 
     -- Pager (mirrors the Buy tab).
-    local nextBtn = CreateFrame("Button", "AegisExchangeCraftNextButton",
-        panel, "UIPanelButtonTemplate")
+    local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
     nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -34)
     nextBtn:SetText(">")
@@ -4119,8 +4308,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftPageText:SetJustifyH("RIGHT")
     ui.craftPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    local prevBtn = CreateFrame("Button", "AegisExchangeCraftPrevButton",
-        panel, "UIPanelButtonTemplate")
+    local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPrevButton")
     prevBtn:SetWidth(24); prevBtn:SetHeight(20)
     prevBtn:SetPoint("RIGHT", ui.craftPageText, "LEFT", -6, 0)
     prevBtn:SetText("<")
@@ -4526,7 +4714,7 @@ end
 -- button. Save-original-and-replace only: no secure hooks on 1.12.
 function ui.AttachCraftButton(frame, name, anchorNames)
     if not frame or getglobal(name) then return end
-    local b = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
+    local b = ui.MakeButton(frame, "quiet", name)
     b:SetWidth(96); b:SetHeight(20)
     -- Anchor to the window's OWN Exit/Create button, not to the frame corner.
     -- Same principle as the pfUI header fix: anchor to something that moves
@@ -4702,16 +4890,14 @@ function ui.BuildAuctionsTab()
     ui.aucSummary:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.aucSummary:SetText("Your auctions")
 
-    local refresh = CreateFrame("Button", "AegisExchangeAucRefreshButton",
-        panel, "UIPanelButtonTemplate")
+    local refresh = ui.MakeButton(panel, "quiet", "AegisExchangeAucRefreshButton")
     refresh:SetWidth(72); refresh:SetHeight(20)
     refresh:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
     refresh:SetText("Refresh")
     refresh:SetScript("OnClick", function() ui.RefreshAuctions(true) end)
 
     -- Clear out everything you've been undercut on in one go.
-    local cancelAll = CreateFrame("Button", "AegisExchangeAucCancelAllButton",
-        panel, "UIPanelButtonTemplate")
+    local cancelAll = ui.MakeButton(panel, "quiet", "AegisExchangeAucCancelAllButton")
     cancelAll:SetWidth(132); cancelAll:SetHeight(20)
     cancelAll:SetPoint("RIGHT", refresh, "LEFT", -6, 0)
     cancelAll:SetText("Cancel all undercuts")
@@ -4780,7 +4966,7 @@ ui.GrowAucRows = function(n)
             row.stack = mk(ACX.stack, ACW.stack)
             row.time = mk(ACX.time, ACW.time)
             row.mkt  = mk(ACX.mkt, ACW.mkt)
-            local cancel = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            local cancel = ui.MakeButton(row, "quiet")
             cancel:SetWidth(64); cancel:SetHeight(18)
             cancel:SetPoint("LEFT", row, "LEFT", ACX.cancel, 0)
             cancel:SetText("Cancel")
@@ -5070,7 +5256,7 @@ function ui.BuildHistoryTab()
     local prev = nil
     local pi = 1
     while pi <= table.getn(HIST_PERIODS) do
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(44); b:SetHeight(20)
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", perLbl, "RIGHT", 8, 0) end
@@ -5085,7 +5271,7 @@ function ui.BuildHistoryTab()
         pi = pi + 1
     end
 
-    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local clearBtn = ui.MakeButton(panel, "quiet")
     clearBtn:SetWidth(100); clearBtn:SetHeight(20)
     clearBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -12)
     clearBtn:SetText("Clear history")
@@ -5411,7 +5597,7 @@ function ui.BuildSellTab()
     local di = 1
     while di <= table.getn(A.sell.DURATIONS) do
         local d = A.sell.DURATIONS[di]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(44)
         b:SetHeight(20)
         if prev then
@@ -5441,7 +5627,7 @@ function ui.BuildSellTab()
     -- strategy -- the vendor figure is on the context line and the Vendor list
     -- still calls out items worth more to a merchant.
     local mkQuick = function(text, w, fn)
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(w)
         b:SetHeight(20)
         b:SetText(text)
@@ -5510,8 +5696,7 @@ function ui.BuildSellTab()
     footEdge:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -SELL_FOOT_Y)
     footEdge:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_FOOT_Y)
 
-    local post = CreateFrame("Button", "AegisExchangeSellPostButton",
-        panel, "UIPanelButtonTemplate")
+    local post = ui.MakeButton(panel, "primary", "AegisExchangeSellPostButton")
     post:SetWidth(96)
     post:SetHeight(22)
     post:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -(SELL_FOOT_Y + 4))
@@ -5521,8 +5706,7 @@ function ui.BuildSellTab()
     end)
     ui.sellPostBtn = post
 
-    local skip = CreateFrame("Button", "AegisExchangeSellSkipButton",
-        panel, "UIPanelButtonTemplate")
+    local skip = ui.MakeButton(panel, "quiet", "AegisExchangeSellSkipButton")
     skip:SetWidth(60)
     skip:SetHeight(22)
     skip:SetPoint("RIGHT", post, "LEFT", -6, 0)
@@ -5571,8 +5755,7 @@ function ui.BuildSellTab()
     bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, 10)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
-    local vendListBtn = CreateFrame("Button", "AegisExchangeVendorListButton",
-        panel, "UIPanelButtonTemplate")
+    local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
     vendListBtn:SetWidth(56)
     vendListBtn:SetHeight(18)
     vendListBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -52, 18)
@@ -5580,7 +5763,7 @@ function ui.BuildSellTab()
     vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
     ui.sellVendorListBtn = vendListBtn
 
-    local scanAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scanAllBtn = ui.MakeButton(panel, "quiet")
     scanAllBtn:SetWidth(48)
     scanAllBtn:SetHeight(18)
     scanAllBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 18)
@@ -6311,7 +6494,7 @@ function ui.BuildVendorList()
     title:SetText("Better at a vendor than on the AH")
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local closeBtn = ui.MakeButton(f, "quiet")
     closeBtn:SetWidth(60); closeBtn:SetHeight(20)
     closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -8)
     closeBtn:SetText("Close")
@@ -6323,7 +6506,7 @@ function ui.BuildVendorList()
     ui.vendNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     -- Mark-all / clear, so you can flag the whole list for the merchant.
-    local markAll = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local markAll = ui.MakeButton(f, "quiet")
     markAll:SetWidth(74); markAll:SetHeight(20)
     markAll:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
     markAll:SetText("Mark all")
@@ -6337,7 +6520,7 @@ function ui.BuildVendorList()
         ui.UpdateVendorList()
     end)
 
-    local clearMarks = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local clearMarks = ui.MakeButton(f, "quiet")
     clearMarks:SetWidth(74); clearMarks:SetHeight(20)
     clearMarks:SetPoint("RIGHT", markAll, "LEFT", -4, 0)
     clearMarks:SetText("Clear all")
@@ -6505,8 +6688,7 @@ StaticPopupDialogs["AEGIS_EXCHANGE_VENDORSELL"] = {
 function ui.AttachMerchantButton()
     if not MerchantFrame then return end
     if not ui.merchantBtn then
-        local b = CreateFrame("Button", "AegisExchangeMerchantSellButton",
-            MerchantFrame, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(MerchantFrame, "quiet", "AegisExchangeMerchantSellButton")
         b:SetWidth(150); b:SetHeight(22)
         -- Sit in the tab row, to the right of Merchant / Buyback -- effectively
         -- a third tab position.
@@ -7027,8 +7209,7 @@ function ui.BuildCategoryPicker()
     divider:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 10, 42)
     divider:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -10, 42)
 
-    local scanSel = CreateFrame("Button", "AegisExchangePickerScanButton",
-        picker, "UIPanelButtonTemplate")
+    local scanSel = ui.MakeButton(picker, "primary", "AegisExchangePickerScanButton")
     scanSel:SetWidth(150)
     scanSel:SetHeight(22)
     scanSel:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 12, 12)
@@ -7038,8 +7219,7 @@ function ui.BuildCategoryPicker()
     end)
     ui.scanSelBtn = scanSel
 
-    local clear = CreateFrame("Button", "AegisExchangePickerClearButton",
-        picker, "UIPanelButtonTemplate")
+    local clear = ui.MakeButton(picker, "quiet", "AegisExchangePickerClearButton")
     clear:SetWidth(70)
     clear:SetHeight(22)
     clear:SetPoint("LEFT", scanSel, "RIGHT", 6, 0)
@@ -7048,8 +7228,7 @@ function ui.BuildCategoryPicker()
         ui.ClearChecks()
     end)
 
-    local closeBtn = CreateFrame("Button", "AegisExchangePickerCloseButton",
-        picker, "UIPanelButtonTemplate")
+    local closeBtn = ui.MakeButton(picker, "quiet", "AegisExchangePickerCloseButton")
     closeBtn:SetWidth(70)
     closeBtn:SetHeight(22)
     closeBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -12, 12)
@@ -7246,8 +7425,7 @@ function ui.HookAuctionFrame()
     -- the documented return path (README: "Aegis UI button (on the stock AH)").
     -- Everything else Aegis draws lives under UIParent.
     if not ui.blizSwapBtn then
-        local b = CreateFrame("Button", "AegisExchangeSwapButton",
-            AuctionFrame, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(AuctionFrame, "quiet", "AegisExchangeSwapButton")
         b:SetWidth(70)
         b:SetHeight(19)
         local blizClose = getglobal("AuctionFrameCloseButton")

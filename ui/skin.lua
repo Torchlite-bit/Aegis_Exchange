@@ -128,6 +128,22 @@ local function SkinWidget(f)
         return false
     end
 
+    -- Our own backdrop-drawn buttons (ui.MakeButton). pfUI's SkinButton strips
+    -- template textures and applies its plate -- but these have no template
+    -- textures and already carry a backdrop, so the generic path would leave
+    -- them double-bordered. Give them a pfUI backdrop instead and let the
+    -- button's own repaint colour it: RepaintButton re-resolves its target to
+    -- f.backdrop, which is the child pfUI creates below. Same arrangement the
+    -- sub-tab pills use.
+    if f.aegisButton then
+        Backdrop(f, 1)
+        f.aegisSkinned = true
+        if A.ui and A.ui.SetButtonKind then
+            A.ui.SetButtonKind(f, f.aegisKind)
+        end
+        return true
+    end
+
     if otype == "Button" or otype == "CheckButton" then
         if otype == "CheckButton" then
             Checkbox(f)

@@ -12,6 +12,49 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.14.0]
+
+Every button in the addon is now drawn by Aegis rather than inherited from
+Blizzard's `UIPanelButtonTemplate`. `/reload`.
+
+### Changed
+- **New button art across all six tabs**, matching the design concept: flat
+  dark plates with a thin border, in two weights. The deep red plate with the
+  gold label marks the *one* action each area exists to perform — Search,
+  Post, Full Scan, Buyout, Scan Selected, and Buy on a listing row. Everything
+  beside it takes the quiet dark plate.
+
+  This reverses the decision recorded in 1.12.0, which kept the stock art on
+  the grounds that "the default view looks like the stock auction house" was
+  the point. That held while only the Buy tab was in question; carrying it
+  across the whole addon is what the concept always showed, and a half-
+  converted window looks like a bug rather than a choice.
+- **The purple tint is gone** from the Advanced and Build buttons. It existed
+  to mark them as the one non-stock addition to an otherwise Blizzlike strip.
+  With the strip no longer Blizzlike, a third colour on top of the new plates
+  just read as a smudge over the button — which is how it was reported.
+
+### Fixed
+- **Buttons now have a disabled look.** `UIPanelButtonTemplate` supplied one
+  for free and hand-drawn plates do not: without it a button that has been
+  disabled still looks live, and silently ignores the click. Disabled plates
+  and labels are dimmed, and they no longer light up on hover or press.
+- **A press dragged off a button no longer sticks.** The button never receives
+  the mouse-up in that case, so the pressed plate would stay dark until the
+  next hover.
+
+### Internal
+- `ui.MakeButton(parent, kind, name)` replaces the template at 56 call sites
+  and owns all four visual states. `ui.SetButtonKind` replaces `ui.TintButton`,
+  which vertex-coloured template textures that no longer exist and has been
+  removed.
+- Under pfUI the plates ride on pfUI's own backdrop, resolved at paint time
+  rather than at creation — pfUI's skin runs long after the window is built.
+  The generic `SkinButton` pass skips these, since a button that already has
+  a backdrop would come out double-bordered.
+
+---
+
 ## [1.13.0]
 
 Buy tab fixes and layout, following the 1.12.0 polish pass. `/reload`.
@@ -1074,6 +1117,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.14.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.13.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.12.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.11.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
