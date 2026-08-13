@@ -523,6 +523,14 @@ end
 -- "silk cloth/stack 20" hands the parser ONE token, "stack 20" -- it never
 -- reaches the two-token "stack" branch. Supporting all three spellings means
 -- the obvious thing to type works whichever way you reach for it.
+-- Component names that are accepted by the parser but not yet implemented by
+-- CompileOperand. Kept next to the parser so the two lists cannot drift.
+local PENDING_COMPONENT = {
+    ["item"] = true, ["min-level"] = true, ["max-level"] = true,
+    ["rarity"] = true, ["seller"] = true, ["percent"] = true,
+    ["vendor-profit"] = true, ["left"] = true, ["disenchant-profit"] = true,
+}
+
 local function ParseFusedStack(tok)
     local _, _, digits = string.find(tok, "^stack%s*(%d+)$")
     if digits then
@@ -605,6 +613,18 @@ function buy.ParseTerm(text)
             end
         elseif tok == "and" or tok == "or" or tok == "not" then
             addPost(tok)
+        elseif PENDING_COMPONENT[tok] then
+            -- Reserved component names. They parse and round-trip so a query
+            -- containing one survives an edit, but they narrow nothing yet --
+            -- CompileOperand returns "always true" for them and the builder
+            -- draws them as inert. Emitting them silently as NAME text would
+            -- be worse: the search would quietly become a name search.
+            local nxt = tokens[i + 1]
+            if nxt and util.Trim(nxt) ~= "" then
+                addPost(tok, util.Trim(nxt)); i = i + 1
+            else
+                addPost(tok, "")
+            end
         elseif tok == "max-unit-buy" or tok == "min-unit-buy" then
             -- Per-UNIT price bound, so a stack of 20 compares against a
             -- stack of 1 honestly. Values are money text ("5g", "50s").
@@ -732,6 +752,10 @@ function buy.TermToQuery(term)
             add("tooltip/" .. tostring(e.value))
         elseif e.kind == "max-unit-buy" or e.kind == "min-unit-buy" then
             add(e.kind .. "/" .. util.FormatMoney(e.value))
+        elseif e.value and e.value ~= "" then
+            add(e.kind .. "/" .. tostring(e.value))
+        else
+            add(e.kind)
         end
         pi = pi + 1
     end

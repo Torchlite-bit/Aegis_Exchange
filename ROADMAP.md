@@ -582,6 +582,42 @@ existing entry is a no-op rather than a jump to the bottom, and the ends of
 the list are walls rather than wrap-arounds. The order is the user's, so
 nothing is allowed to quietly rearrange it.
 
+### 2k — Buy tab layout pass — ✅ **DONE** (v1.11.0)
+
+Reported against the concept with screenshots; every finding fixed.
+
+**All three "widget is somewhere it cannot be used" bugs had one cause:** a
+widget anchored to ANOTHER widget that later moved. The view switcher was
+pinned 232px right of the Search button, which was correct until 2g moved
+Search to the right edge and threw all three tabs clean off the window. The
+pager and the Advanced button were both anchored to the panel's top-right,
+so they landed on top of each other. Both now hang off the panel at fixed
+corners, and three tests assert the anchor RELATIONSHIP rather than a
+coordinate, so the next widget that moves cannot drag them with it.
+
+**Advanced has no left column.** The Shopping Lists sidebar is gone, and with
+it `+ Add` / `Rename` / `Del` / `Search entire list`, the `Max` box and
+`Add to list`. The Builder and Saved views span the full content width, which
+is what the concept shows and what was clipping the form's headings.
+
+The list ENGINE (`buy.Lists` and friends) is deliberately left in place and
+still tested. The saved data is untouched, so nothing a user built is lost
+and re-homing the feature costs a UI rather than a rewrite.
+
+**Placeholder components are LABELLED, not silent.** `item`, `min-level`,
+`max-level`, `rarity`, `seller`, `percent`, `vendor-profit`, `left` and
+`disenchant-profit` are in the dropdown so the finished shape is visible, and
+they parse and round-trip so a query containing one survives an edit. They
+narrow nothing yet, so each is marked `(soon)` in the list and drawn dim with
+"not wired up yet — ignored" in the Post Filter. **This addon has twice
+shipped a filter that silently matched nothing**, so an unimplemented
+component that quietly did nothing was not an option.
+
+> ⚠️ **Import is absent from the bottom row on purpose.** The concept PNG
+> still shows it because that image predates the "you can remove the import
+> button" instruction. `ui.BuilderImport` went with the button. One line to
+> put back if the concept is the intent.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

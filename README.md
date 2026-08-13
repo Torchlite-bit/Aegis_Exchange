@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.10.0)
+# Aegis: Exchange (v1.11.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -57,8 +57,7 @@ and feature ideas.
 ### 🛒 Buy — shop like you mean it
 Search the AH, sort by unit price, stack price, or % of market value, and buy or
 bid straight from the results. Colour-coded so bargains jump out: **green is
-under market, red is over.** Keep **shopping lists** of the things you always
-need (all your tailoring mats, say) and search the whole list in one click.
+under market, red is over.**
 
 **Typing a name still just searches for that name** — nothing you already do
 changes. But the same box now takes a query language when you want one:
@@ -354,7 +353,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.10.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.11.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

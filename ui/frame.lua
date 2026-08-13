@@ -85,6 +85,26 @@ local function ChatMsg(text)
     DEFAULT_CHAT_FRAME:AddMessage(text, 0.35, 0.78, 0.98)
 end
 
+-- Tint a UIPanelButtonTemplate button by vertex-colouring the textures it
+-- already has, rather than replacing them -- the pressed and highlight states
+-- keep working, and there is no new art to ship.
+--
+-- Every call is guarded: not every 1.12 build exposes all three getters, and
+-- a pfUI reskin can replace or drop them entirely. A missing texture must
+-- cost the tint, never the tab.
+function ui.TintButton(btn, r, g, b)
+    if not btn then return end
+    local function tint(getter)
+        if type(btn[getter]) ~= "function" then return end
+        local ok, tex = pcall(function() return btn[getter](btn) end)
+        if ok and tex and tex.SetVertexColor then
+            pcall(function() tex:SetVertexColor(r, g, b) end)
+        end
+    end
+    tint("GetNormalTexture")
+    tint("GetPushedTexture")
+end
+
 -- Set `text` on a FontString, shortened with an ellipsis if it would run wider
 -- than `maxWidth` pixels.
 --
@@ -2051,109 +2071,16 @@ function ui.BuildBuyTab()
     ui.buyBuilt = true
     ui.buyExpanded = {}
 
-    -- ===== Left column ==================================================
-    -- DEFAULT mode: the Blizzard-style category tree (built below).
-    -- ADVANCED mode: the Shopping Lists sidebar.
-    -- ui.SetBuyMode swaps them along with the rest of each mode's furniture.
+    -- ===== Left column: the category tree (DEFAULT mode only) ===========
+    -- The Shopping Lists sidebar is gone. Advanced has NO left column at all
+    -- now -- its Builder and Saved views span the full content width, which
+    -- is what the approved concept shows and what stops the form's headings
+    -- being clipped by a column that had no business being there.
     local browseHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     browseHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -10)
     browseHdr:SetText("Browse")
     browseHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.buyBrowseHdr = browseHdr
-
-    local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeBuySideScroll",
-        panel, "FauxScrollFrameTemplate")
-    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 62)
-    sideScroll:SetWidth(SIDE_W)
-    sideScroll:SetScript("OnVerticalScroll", function()
-        FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateBuySidebar)
-    end)
-    ui.buySideScroll = sideScroll
-
-    ui.buySideRows = {}
-ui.GrowBuySideRows = function(n)
-        if n > SIDE_ROWS_MAX then n = SIDE_ROWS_MAX end
-        -- Built on demand: a minimum-size window costs exactly what it
-        -- did before, and dragging taller adds only the rows needed.
-        local i = table.getn(ui.buySideRows) + 1
-        while i <= n do
-            local row = CreateFrame("Button", nil, panel)
-            row:SetHeight(SIDE_ROW_H)
-            row:SetWidth(SIDE_W)
-            if i == 1 then
-                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", 0, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.buySideRows[i - 1], "BOTTOMLEFT", 0, 0)
-            end
-            local ex = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            ex:SetPoint("LEFT", row, "LEFT", 2, 0)
-            ex:SetWidth(12)
-            ex:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-            row.ex = ex
-            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 14, 0)
-            -- NO SetWidth here. A constrained FontString WRAPS long text onto
-            -- a second line on 1.12 (SetTextClipped's comment), and these rows
-            -- are 18px tall -- a wrapped recent-search query painted itself
-            -- across the row below. The paint clips with SetTextClipped
-            -- instead.
-            lbl:SetJustifyH("LEFT")
-            row.label = lbl
-            row:SetScript("OnClick", function() ui.OnBuySideClick(row.entry) end)
-            -- A clipped entry is unreadable without the full text somewhere:
-            -- long queries are exactly the rows that get cut.
-            row:SetScript("OnEnter", function()
-                if row.full then
-                    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(row.full, 1, 1, 1)
-                    GameTooltip:Show()
-                end
-            end)
-            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            row:Hide()
-            ui.buySideRows[i] = row
-            i = i + 1
-        end
-    end
-    ui.GrowBuySideRows(SIDE_ROWS)
-
-    -- Sidebar action buttons.
-    local addBtn = CreateFrame("Button", "AegisExchangeBuyAddListButton",
-        panel, "UIPanelButtonTemplate")
-    addBtn:SetWidth(50); addBtn:SetHeight(18)
-    addBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 40)
-    addBtn:SetText("+ Add")
-    addBtn:SetScript("OnClick", function() ui.BuyAddList() end)
-
-    local renBtn = CreateFrame("Button", "AegisExchangeBuyRenameButton",
-        panel, "UIPanelButtonTemplate")
-    renBtn:SetWidth(56); renBtn:SetHeight(18)
-    renBtn:SetPoint("LEFT", addBtn, "RIGHT", 4, 0)
-    renBtn:SetText("Rename")
-    renBtn:SetScript("OnClick", function() ui.BuyRenameList() end)
-
-    local delBtn = CreateFrame("Button", "AegisExchangeBuyDelButton",
-        panel, "UIPanelButtonTemplate")
-    delBtn:SetWidth(40); delBtn:SetHeight(18)
-    delBtn:SetPoint("LEFT", renBtn, "RIGHT", 4, 0)
-    delBtn:SetText("Del")
-    delBtn:SetScript("OnClick", function() ui.BuyDeleteList() end)
-
-    local listSearchBtn = CreateFrame("Button", "AegisExchangeBuyListSearchButton",
-        panel, "UIPanelButtonTemplate")
-    listSearchBtn:SetWidth(SIDE_W); listSearchBtn:SetHeight(18)
-    listSearchBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
-    listSearchBtn:SetText("Search entire list")
-    listSearchBtn:SetScript("OnClick", function() ui.BuySearchList() end)
-    ui.buyListSearchBtn = listSearchBtn
-
-    -- Everything that exists only in Advanced mode, so SetBuyMode can swap
-    -- the whole column in one loop. Sidebar ROWS are not here: their paint
-    -- (UpdateBuySidebar) shows them again, so it is mode-guarded instead.
-    -- Kept on ui so SetBuyMode's BitsFor("advanced") can raise and lower the
-    -- whole sidebar with the rest of that mode's furniture.
-    ui.buyAddBtn, ui.buyRenBtn, ui.buyDelBtn = addBtn, renBtn, delBtn
 
     -- ===== Left, mode 2: the category tree (ROADMAP 2e) =================
     local catScroll = CreateFrame("ScrollFrame", "AegisExchangeBuyCatScroll",
@@ -2210,7 +2137,7 @@ ui.GrowBuySideRows = function(n)
 
     local box = CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
         "InputBoxTemplate")
-    box:SetWidth(196); box:SetHeight(18)
+    box:SetWidth(176); box:SetHeight(18)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 10, -24)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
@@ -2235,7 +2162,7 @@ ui.GrowBuySideRows = function(n)
     qLbl:SetPoint("BOTTOMLEFT", ui.buyMaxLevel, "TOPRIGHT", 12, 2)
     qLbl:SetText("Min Quality")
     ui.buyQualLbl = qLbl
-    ui.buyQuality = MakeDropdown(panel, 108, function() end)
+    ui.buyQuality = MakeDropdown(panel, 96, function() end)
     ui.buyQuality.button:SetPoint("TOPLEFT", ui.buyMaxLevel, "TOPRIGHT", 12, 1)
 
     ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -2243,14 +2170,14 @@ ui.GrowBuySideRows = function(n)
     ui.buyUsable:SetPoint("LEFT", ui.buyQuality.button, "RIGHT", 10, 0)
     local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     usableLbl:SetPoint("LEFT", ui.buyUsable, "RIGHT", 1, 0)
-    usableLbl:SetText("Usable items")
+    usableLbl:SetText("Usable")
     usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
     ui.buyUsableLbl = usableLbl
 
     local searchBtn = CreateFrame("Button", "AegisExchangeBuySearchButton",
         panel, "UIPanelButtonTemplate")
     searchBtn:SetWidth(70); searchBtn:SetHeight(20)
-    searchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -104, -22)
+    searchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -112, -22)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
     ui.buySearchBtn = searchBtn
@@ -2259,10 +2186,15 @@ ui.GrowBuySideRows = function(n)
     -- "Display on Character" sat.
     local advBtn = CreateFrame("Button", "AegisExchangeBuyAdvancedButton",
         panel, "UIPanelButtonTemplate")
-    advBtn:SetWidth(88); advBtn:SetHeight(20)
-    advBtn:SetPoint("LEFT", searchBtn, "RIGHT", 6, 0)
-    advBtn:SetText("Advanced")
+    advBtn:SetWidth(96); advBtn:SetHeight(20)
+    advBtn:SetPoint("LEFT", searchBtn, "RIGHT", 8, 0)
+    advBtn:SetText("Advanced >")
     advBtn:SetScript("OnClick", function() ui.SetBuyMode("advanced") end)
+    -- Tint it, so the one addition to a Blizzlike strip reads as the odd one
+    -- out. Vertex-colouring the template's own textures rather than swapping
+    -- them keeps the button's pressed/highlight states intact, and the pcall
+    -- means a pfUI reskin that drops a texture cannot break the tab.
+    ui.TintButton(advBtn, 0.62, 0.44, 0.86)
     ui.buyAdvBtn = advBtn
 
     -- ---- ADVANCED-mode strip -------------------------------------------
@@ -2286,25 +2218,12 @@ ui.GrowBuySideRows = function(n)
     end)
     ui.buyQueryBox:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
 
-    local maxLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    maxLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -40)
-    maxLbl:SetText("Max")
-    ui.buyMaxLbl = maxLbl
-    ui.buyMax = MakeMoneyBox(panel, 78)
-    ui.buyMax:SetPoint("LEFT", maxLbl, "RIGHT", 4, 0)
-    ui.buyMax:SetScript("OnTextChanged", function() ui.UpdateBuyList() end)
 
-    local addToList = CreateFrame("Button", "AegisExchangeBuyAddToListButton",
-        panel, "UIPanelButtonTemplate")
-    addToList:SetWidth(90); addToList:SetHeight(20)
-    addToList:SetPoint("LEFT", ui.buyMax, "RIGHT", 10, 0)
-    addToList:SetText("Add to list")
-    addToList:SetScript("OnClick", function() ui.BuyAddSearchToList() end)
-    ui.buyAddToListBtn = addToList
-
-    -- View switcher. The ROADMAP wants Results / Saved Searches / Filter
-    -- Builder sharing this space rather than a fourth top-level sub-tab;
-    -- Saved Searches is 2c and slots in here without rework.
+    -- View switcher: a row of three, INSIDE the frame and under the query
+    -- box. It used to be anchored 232px right of the Search button -- which
+    -- was fine while Search lived on the left, and threw all three clean off
+    -- the window the moment Phase 2 moved Search to the right edge. Anchored
+    -- to the panel now, so it cannot follow another widget off screen.
     ui.buyViewBtns = {}
     local views = { { "Results", "results" }, { "Saved", "saved" },
                     { "Builder", "builder" } }
@@ -2314,11 +2233,11 @@ ui.GrowBuySideRows = function(n)
         local v = views[vi]
         local b = CreateFrame("Button", "AegisExchangeBuyView" .. v[2],
             panel, "UIPanelButtonTemplate")
-        b:SetWidth(62); b:SetHeight(20)
+        b:SetWidth(112); b:SetHeight(20)
         if prevView then
-            b:SetPoint("LEFT", prevView, "RIGHT", 4, 0)
+            b:SetPoint("LEFT", prevView, "RIGHT", 5, 0)
         else
-            b:SetPoint("TOPLEFT", searchBtn, "TOPLEFT", 232, 0)
+            b:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -38)
         end
         b:SetText(v[1])
         b.view = v[2]
@@ -2328,11 +2247,13 @@ ui.GrowBuySideRows = function(n)
         vi = vi + 1
     end
 
-    -- Pager.
+    -- Pager, bottom-right of the results area. It used to sit at the panel's
+    -- TOP right -- the same spot the Advanced button now occupies, which is
+    -- where the stray "< >" over that button came from.
     local nextBtn = CreateFrame("Button", "AegisExchangeBuyNextButton",
         panel, "UIPanelButtonTemplate")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
-    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -12)
+    nextBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 36)
     nextBtn:SetText(">")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
@@ -2352,8 +2273,11 @@ ui.GrowBuySideRows = function(n)
     ui.buyPrevBtn = prevBtn
     ui.buyNextBtn = nextBtn
 
+    -- Result count / sort, bottom-LEFT of the results area, opposite the
+    -- pager. It hung off the Search button before, which dragged it to the
+    -- top right when Search moved.
     ui.buyStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.buyStatus:SetPoint("TOPLEFT", searchBtn, "BOTTOMLEFT", 0, -8)
+    ui.buyStatus:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RX + 6, 40)
     ui.buyStatus:SetJustifyH("LEFT")
     ui.buyStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.buyStatus:SetText("Type an item name and Search.")
@@ -2377,8 +2301,8 @@ ui.GrowBuySideRows = function(n)
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
-    -- 40px of headroom at the bottom for the Blizzlike action bar below.
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 40)
+    -- Headroom for the status/pager row AND the action bar beneath it.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 62)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BUY_ROW_H, ui.UpdateBuyList)
     end)
@@ -2482,6 +2406,14 @@ function ui.SetBuyView(name)
     if ui.buySaved then
         if saved then ui.buySaved:Show() else ui.buySaved:Hide() end
     end
+    -- The builder's action row lives on the window's action bar, so it is
+    -- raised and lowered here rather than with the builder frame.
+    local ai = 1
+    while ai <= table.getn(ui.fbActionBtns or {}) do
+        if builder then ui.fbActionBtns[ai]:Show()
+        else ui.fbActionBtns[ai]:Hide() end
+        ai = ai + 1
+    end
     if saved then ui.RefreshSavedSearches() end
     -- Everything belonging to the results view hides together. buyStatus is
     -- in the list because it paints at the same height as the form's first
@@ -2536,8 +2468,8 @@ function ui.BuildSavedSearches(panel, rowLeft)
     if ui.buySaved then return end
 
     local f = CreateFrame("Frame", "AegisExchangeSavedSearches", panel)
-    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
-    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 40)
+    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -66)
+    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 36)
     f:Hide()
     ui.buySaved = f
 
@@ -2709,8 +2641,8 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     if ui.buyBuilder then return end
 
     local f = CreateFrame("Frame", "AegisExchangeFilterBuilder", panel)
-    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
-    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 10)
+    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -66)
+    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 36)
     f:Hide()
     ui.buyBuilder = f
 
@@ -2801,17 +2733,6 @@ function ui.BuildFilterBuilder(panel, rowLeft)
 
     ui.fbUsable = check("Usable by me", LX + 62, -186)
 
-    -- Term FLAGS stay on this side with the rest of the form: they are
-    -- one-of-a-kind switches, not repeatable clauses.
-    ui.fbBuyout = check("Buyout only", LX + 62, -206)
-    ui.fbStack  = check("Full stacks only", LX + 62, -226)
-    local ssLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ssLbl:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 6, -250)
-    ssLbl:SetText("Stack size")
-    ssLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.fbStackSize = MakeNumBox(f, 34, function() ui.RefreshBuilder() end)
-    ui.fbStackSize:SetPoint("LEFT", ssLbl, "RIGHT", 6, 0)
-
     -- ---- Component / post-filter system --------------------------------
     -- Pick a component, type a value, press Enter: the clause is appended to
     -- the list below. Stacked clauses are ANDed; `and`/`or`/`not` are there
@@ -2827,20 +2748,12 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     ui.fbComponent.button:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 74, -19)
 
     local cvBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    cvBox:SetWidth(150); cvBox:SetHeight(18)
+    cvBox:SetWidth(210); cvBox:SetHeight(18)
     cvBox:SetPoint("TOPLEFT", ui.fbComponent.button, "TOPRIGHT", 10, -1)
     cvBox:SetAutoFocus(false)
     cvBox:SetScript("OnEscapePressed", function() cvBox:ClearFocus() end)
     cvBox:SetScript("OnEnterPressed", function() ui.BuilderAddComponent() end)
     ui.fbCompValue = cvBox
-
-    local addBtn = CreateFrame("Button", "AegisExchangeBuilderAddComponent",
-        f, "UIPanelButtonTemplate")
-    addBtn:SetWidth(46); addBtn:SetHeight(18)
-    addBtn:SetPoint("LEFT", cvBox, "RIGHT", 8, 0)
-    addBtn:SetText("Add")
-    addBtn:SetScript("OnClick", function() ui.BuilderAddComponent() end)
-    ui.fbAddCompBtn = addBtn
 
     local pfLbl = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     pfLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -46)
@@ -2872,39 +2785,42 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     ui.fbPostHint:SetJustifyH("LEFT")
 
     -- ---- Preview + actions ---------------------------------------------
-    local pvLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    pvLbl:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -216)
-    pvLbl:SetText("Query")
-    pvLbl:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-
-    ui.fbPreview = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.fbPreview:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 44, -216)
-    ui.fbPreview:SetJustifyH("LEFT")
-    ui.fbPreview:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
-
     ui.fbNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ui.fbNote:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -234)
     ui.fbNote:SetJustifyH("LEFT")
 
-    local function action(text, w, prev, fn)
-        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetWidth(w); b:SetHeight(20)
-        if prev then b:SetPoint("LEFT", prev, "RIGHT", 5, 0)
-        else b:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -258) end
+    -- Action row: parented to the PANEL and anchored bottom-right, not to the
+    -- builder frame. It sits on the window's action bar beside Bid / Buyout /
+    -- Close, so it must line up with them rather than float wherever the
+    -- builder's own bottom edge happens to land.
+    --
+    -- Built right-to-left from the Bid box so the row stays put whatever the
+    -- window width. Only shown while the Builder view is up.
+    local function action(text, w, rightOf, fn)
+        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        b:SetWidth(w); b:SetHeight(21)
+        b:SetPoint("RIGHT", rightOf, "LEFT", -5, 0)
         b:SetText(text)
         b:SetScript("OnClick", fn)
+        b:Hide()
         return b
     end
-    -- "Build" is the old "To box": it translates the form into a query string
-    -- and pushes it into the search bar. Import was dropped at the owner's
-    -- request -- the builder is for BUILDING a query; reading one back was the
-    -- least-used direction and it is still reachable by editing the box.
-    local bSearch = action("Search", 62, nil, function() ui.BuilderSearch() end)
-    local bBuild = action("Build", 62, bSearch, function() ui.BuilderExport() end)
-    local bOr = action("+ OR", 52, bBuild, function() ui.BuilderExport(true) end)
-    action("Clear", 52, bOr, function() ui.BuilderClear() end)
+    -- Right to left: Clear, + OR, Build, Search -- so on screen they read
+    -- Search | Build | + OR | Clear, then the window's Bid / Buyout / Close.
+    --
+    -- Import is deliberately absent: it was removed at the owner's explicit
+    -- request in the previous pass, along with ui.BuilderImport. The button
+    -- still appears in the concept PNG, which predates that decision.
+    local bClear = action("Clear", 54, ui.buyBidEntryLbl,
+        function() ui.BuilderClear() end)
+    local bOr = action("+ OR", 52, bClear, function() ui.BuilderExport(true) end)
+    local bBuild = action("Build >", 66, bOr, function() ui.BuilderExport() end)
+    local bSearch = action("Search", 62, bBuild, function() ui.BuilderSearch() end)
+    ui.TintButton(bBuild, 0.62, 0.44, 0.86)
     ui.fbSearchBtn = bSearch
     ui.fbBuildBtn = bBuild
+    -- Raised and lowered with the Builder view by SetBuyView.
+    ui.fbActionBtns = { bSearch, bBuild, bOr, bClear }
 
     ui.BuilderClear()
 end
@@ -2943,9 +2859,6 @@ function ui.BuilderTerm()
         name       = util.Trim(ui.fbName:GetText() or ""),
         exact      = ui.fbExact:GetChecked() and true or false,
         usable     = ui.fbUsable:GetChecked() and true or false,
-        buyoutOnly = ui.fbBuyout:GetChecked() and true or false,
-        stackOnly  = ui.fbStack:GetChecked() and true or false,
-        stackSize  = num(ui.fbStackSize),
         quality    = ui.fbQuality:GetValue(),
         minLevel   = minL,
         maxLevel   = maxL,
@@ -2967,9 +2880,6 @@ function ui.BuilderSetTerm(t)
     ui.fbName:SetText(t.name or "")
     ui.fbExact:SetChecked(t.exact and 1 or nil)
     ui.fbUsable:SetChecked(t.usable and 1 or nil)
-    ui.fbBuyout:SetChecked(t.buyoutOnly and 1 or nil)
-    ui.fbStack:SetChecked(t.stackOnly and 1 or nil)
-    ui.fbStackSize:SetText(t.stackSize and tostring(t.stackSize) or "")
     ui.fbMinLevel:SetText(t.minLevel and tostring(t.minLevel) or "")
     ui.fbMaxLevel:SetText(t.maxLevel and tostring(t.maxLevel) or "")
     ui.builderPost = util.CopyList(t.post)
@@ -2998,8 +2908,26 @@ end
 -- honour: an option that silently does nothing is worse than an absent one.
 -- The combinators come first because they are the ones you reach for to
 -- CHANGE the default, and the default (stacking = AND) needs no component.
+-- Components that are NOT wired to the engine yet. They appear in the
+-- dropdown so the shape of the finished list is visible, and they parse and
+-- round-trip -- but they narrow nothing, so every one of them is labelled
+-- and drawn as inert. A component that silently did nothing would be
+-- indistinguishable from a broken filter, which is the exact failure this
+-- addon keeps having to fix.
+ui.PENDING_COMPONENTS = {
+    ["item"]              = true,
+    ["min-level"]         = true,
+    ["max-level"]         = true,
+    ["rarity"]            = true,
+    ["seller"]            = true,
+    ["percent"]           = true,
+    ["vendor-profit"]     = true,
+    ["left"]              = true,
+    ["disenchant-profit"] = true,
+}
+
 local function BuilderComponentOptions()
-    return {
+    local out = {
         { value = "tooltip",      text = "tooltip" },
         { value = "max-unit-buy", text = "max-unit-buy" },
         { value = "min-unit-buy", text = "min-unit-buy" },
@@ -3007,12 +2935,22 @@ local function BuilderComponentOptions()
         { value = "or",           text = "or" },
         { value = "not",          text = "not" },
     }
+    -- Listed in the order the concept shows them, after the working ones.
+    local pending = { "item", "min-level", "max-level", "rarity", "seller",
+                      "percent", "vendor-profit", "left", "disenchant-profit" }
+    local i = 1
+    while i <= table.getn(pending) do
+        table.insert(out, { value = pending[i], text = pending[i] .. " (soon)" })
+        i = i + 1
+    end
+    return out
 end
 
 -- Does this component need a typed value?
 local function ComponentTakesValue(kind)
-    return kind == "tooltip" or kind == "max-unit-buy"
-        or kind == "min-unit-buy"
+    if not kind then return false end
+    if kind == "and" or kind == "or" or kind == "not" then return false end
+    return true
 end
 
 -- Append the chosen component to the Post Filter list. This is the Enter key
@@ -3033,7 +2971,7 @@ function ui.BuilderAddComponent()
             ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
             return
         end
-        if kind == "tooltip" then
+        if kind == "tooltip" or ui.PENDING_COMPONENTS[kind] then
             value = raw
         else
             value = util.ParseMoney(raw)
@@ -3082,6 +3020,10 @@ local function PaintPostFilter()
                 else
                     note = ""
                 end
+            elseif ui.PENDING_COMPONENTS[e.kind] then
+                -- Drawn dim and labelled, because it does not filter yet.
+                text = "|cff5f5340" .. e.kind .. ": " .. tostring(e.value) .. "|r"
+                note = "  |cffd08050not wired up yet \226\128\148 ignored|r"
             else
                 text = "|cff7fd0ff" .. e.kind .. ":|r "
                     .. util.FormatMoney(e.value, true)
@@ -3141,7 +3083,6 @@ function ui.RefreshBuilder()
 
     local term = ui.BuilderTerm()
     local q = A.buy.TermToQuery(term)
-    ui.fbPreview:SetText(q ~= "" and q or "(everything)")
     if ui.fbSearchBtn then ui.fbSearchBtn:Enable() end
 
     ui.builderPainting = false
@@ -3179,124 +3120,6 @@ end
 
 -- ---- sidebar model + paint ---------------------------------------------
 
-function ui.FlattenShopping()
-    local flat = {}
-    table.insert(flat, { kind = "hdr", text = "LISTS" })
-    local lists = A.buy and A.buy.Lists() or {}
-    local li = 1
-    while li <= table.getn(lists) do
-        local L = lists[li]
-        table.insert(flat, { kind = "list", index = li, name = L.name })
-        if ui.buyExpanded[li] then
-            local ii = 1
-            while ii <= table.getn(L.items) do
-                table.insert(flat, { kind = "item", listIndex = li,
-                    name = L.items[ii] })
-                ii = ii + 1
-            end
-            if table.getn(L.items) == 0 then
-                table.insert(flat, { kind = "note", text = "(empty)" })
-            end
-        end
-        li = li + 1
-    end
-    table.insert(flat, { kind = "hdr", text = "RECENT" })
-    local recent = A.buy and A.buy.Recent() or {}
-    local ri = 1
-    while ri <= table.getn(recent) do
-        table.insert(flat, { kind = "recent", name = recent[ri] })
-        ri = ri + 1
-    end
-    ui.buyFlat = flat
-end
-
-function ui.RefreshBuySidebar()
-    if not ui.buySideScroll then return end
-    -- In DEFAULT mode this column belongs to the category tree; painting
-    -- here would Show() sidebar rows straight over it.
-    if ui.buyMode ~= "advanced" then return end
-    ui.FlattenShopping()
-    ui.UpdateBuySidebar()
-end
-
-function ui.UpdateBuySidebar()
-    if not ui.buySideScroll then return end
-    if ui.buyMode ~= "advanced" then return end
-    local flat = ui.buyFlat or {}
-    local vis = ui.RowsFor(ui.buySideScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
-    ui.GrowBuySideRows(vis)
-    ui.SkinNewRows(ui.buySideRows)
-    FauxScrollFrame_Update(ui.buySideScroll, table.getn(flat), vis, SIDE_ROW_H)
-    local offset = FauxScrollFrame_GetOffset(ui.buySideScroll)
-    local i = 1
-    while i <= table.getn(ui.buySideRows) do
-        local row = ui.buySideRows[i]
-        local e = (i <= vis) and flat[i + offset] or nil
-        if e then
-            row.entry = e
-            row.ex:SetText("")
-            -- Clip, never wrap: the label has no width constraint (see
-            -- GrowBuySideRows), so a long query must be cut here or it runs
-            -- over the scrollbar and the rows beside it. When it IS cut,
-            -- remember the full text for the row's hover tooltip.
-            local LW = SIDE_W - 18
-            local function put(text, full)
-                ui.SetTextClipped(row.label, text, LW)
-                if row.label:GetText() ~= text then
-                    row.full = full or text
-                else
-                    row.full = nil
-                end
-            end
-            if e.kind == "hdr" then
-                put(e.text)
-                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-            elseif e.kind == "list" then
-                row.ex:SetText(ui.buyExpanded[e.index] and "-" or "+")
-                local mark = ""
-                if ui.buySelList == e.index then mark = "> " end
-                put(mark .. e.name, e.name)
-                if ui.buySelList == e.index then
-                    row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-                else
-                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-                end
-            elseif e.kind == "item" then
-                put("  " .. e.name, e.name)
-                row.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-            elseif e.kind == "recent" then
-                put(e.name)
-                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-            else
-                put("  " .. (e.text or ""), e.text)
-                row.label:SetTextColor(0.5, 0.5, 0.5)
-            end
-            row:Show()
-        else
-            row.entry = nil
-            row:Hide()
-        end
-        i = i + 1
-    end
-end
-
-function ui.OnBuySideClick(e)
-    if not e then return end
-    if e.kind == "list" then
-        ui.buySelList = e.index
-        ui.buyExpanded[e.index] = not ui.buyExpanded[e.index]
-        ui.RefreshBuySidebar()
-    elseif e.kind == "item" then
-        local b = ui.ActiveSearchBox()
-        if b then b:SetText(e.name) end
-        ui.DoBuySearch()
-    elseif e.kind == "recent" then
-        local b = ui.ActiveSearchBox()
-        if b then b:SetText(e.name) end
-        ui.DoBuySearch()
-    end
-end
-
 -- ---- category tree (ROADMAP 2e) ----------------------------------------
 
 -- ---- Buy tab view mode (ROADMAP 2f) ------------------------------------
@@ -3315,9 +3138,7 @@ end
 -- paint functions are mode-guarded too.
 local function BitsFor(mode)
     if mode == "advanced" then
-        return { ui.buyBackBtn, ui.buyQueryBox, ui.buyMaxLbl, ui.buyMax,
-                 ui.buyAddToListBtn, ui.buySideScroll, ui.buyAddBtn,
-                 ui.buyRenBtn, ui.buyDelBtn, ui.buyListSearchBtn,
+        return { ui.buyBackBtn, ui.buyQueryBox,
                  ui.buyViewBtns and ui.buyViewBtns[1],
                  ui.buyViewBtns and ui.buyViewBtns[2],
                  ui.buyViewBtns and ui.buyViewBtns[3] }
@@ -3374,17 +3195,12 @@ function ui.SetBuyMode(mode)
 
     -- Rows of the column that is now hidden, put down explicitly.
     local ri = 1
-    while ri <= table.getn(ui.buySideRows or {}) do
-        if not adv then ui.buySideRows[ri]:Hide() end
-        ri = ri + 1
-    end
-    ri = 1
     while ri <= table.getn(ui.buyCatRows or {}) do
         if adv then ui.buyCatRows[ri]:Hide() end
         ri = ri + 1
     end
 
-    if adv then ui.RefreshBuySidebar() else ui.RefreshCatTree() end
+    if not adv then ui.RefreshCatTree() end
     ui.RefreshBuyMoney()
     ui.RefreshBuyActionBar()
 end
@@ -3640,125 +3456,14 @@ function ui.CatApply(class, subclass, slot)
     ui.DoBuySearch()
 end
 
--- ---- list management (via a name-entry popup) --------------------------
-
-StaticPopupDialogs["AEGIS_EXCHANGE_LISTNAME"] = {
-    text = "%s",
-    button1 = "OK",
-    button2 = "Cancel",
-    hasEditBox = 1,
-    maxLetters = 40,
-    OnAccept = function()
-        local eb = getglobal(this:GetParent():GetName() .. "EditBox")
-        ui.OnListNameEntered(eb and eb:GetText() or "")
-    end,
-    EditBoxOnEnterPressed = function()
-        local eb = this
-        ui.OnListNameEntered(eb:GetText() or "")
-        eb:GetParent():Hide()
-    end,
-    timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
-
-function ui.OnListNameEntered(text)
-    text = util.Trim(text or "")
-    if text == "" then return end
-    if ui.listNameMode == "add" then
-        local list = A.buy and A.buy.AddList(text)
-        if list then ui.buySelList = table.getn(A.buy.Lists()) end
-    elseif ui.listNameMode == "rename" and ui.buySelList then
-        if A.buy then A.buy.RenameList(ui.buySelList, text) end
-    end
-    ui.RefreshBuySidebar()
-end
-
-function ui.BuyAddList()
-    if not A.buy then return end
-    ui.listNameMode = "add"
-    StaticPopup_Show("AEGIS_EXCHANGE_LISTNAME", "Name for the new shopping list:")
-end
-
-function ui.BuyRenameList()
-    if not A.buy or not ui.buySelList then
-        ChatMsg("Aegis: select a list first.")
-        return
-    end
-    ui.listNameMode = "rename"
-    StaticPopup_Show("AEGIS_EXCHANGE_LISTNAME", "Rename this shopping list:")
-end
-
-function ui.BuyDeleteList()
-    if not A.buy or not ui.buySelList then
-        ChatMsg("Aegis: select a list first.")
-        return
-    end
-    A.buy.DeleteList(ui.buySelList)
-    ui.buySelList = nil
-    ui.RefreshBuySidebar()
-end
-
-function ui.BuyAddSearchToList()
-    if not A.buy then return end
-    if not ui.buySelList then
-        ChatMsg("Aegis: select a list on the left first.")
-        return
-    end
-    local ab = ui.ActiveSearchBox()
-    local term = util.Trim((ab and ab:GetText()) or "")
-    if term == "" then
-        ChatMsg("Aegis: type an item name to add.")
-        return
-    end
-    if A.buy.AddItemToList(ui.buySelList, term) then
-        ChatMsg("Aegis: added '" .. term .. "' to the list.")
-    end
-    ui.buyExpanded[ui.buySelList] = true
-    ui.RefreshBuySidebar()
-end
-
--- Search each item in the selected list, one after another. Only the LAST
--- item's results stay on the AH page (and are buyable); the rest just warm the
--- price DB. A convenience for reviewing a whole list's prices.
-function ui.BuySearchList()
-    if not A.buy or not ui.buySelList then
-        ChatMsg("Aegis: select a list first.")
-        return
-    end
-    local list = A.buy.Lists()[ui.buySelList]
-    if not list or table.getn(list.items) == 0 then
-        ChatMsg("Aegis: that list is empty.")
-        return
-    end
-    ui.buyListQueue = {}
-    local i = 1
-    while i <= table.getn(list.items) do
-        table.insert(ui.buyListQueue, list.items[i])
-        i = i + 1
-    end
-    ui.BuyRunListQueue()
-end
-
-function ui.BuyRunListQueue()
-    if not ui.buyListQueue or table.getn(ui.buyListQueue) == 0 then
-        ui.buyListQueue = nil
-        return
-    end
-    local term = table.remove(ui.buyListQueue, 1)
-    local qb = ui.ActiveSearchBox()
-    if qb then qb:SetText(term) end
-    A.buy.Search(term, {
-        onResults = function(rows)
-            ui.buyResults = rows
-            ui.UpdateBuyList()
-            if ui.buyListQueue and table.getn(ui.buyListQueue) > 0 then
-                ui.BuyRunListQueue()   -- next item
-            else
-                ui.RefreshBuySidebar()
-            end
-        end,
-        onState = function() ui.RefreshBuyStatus() end,
-    })
-end
+-- ---- (shopping lists removed) -------------------------------------------
+--
+-- The Shopping Lists sidebar and its list-management popups are gone: the
+-- concept has no left column in Advanced, and every entry point into these
+-- functions went with the sidebar. The ENGINE side (buy.Lists / AddList /
+-- AddItemToList and friends in core/buy.lua) is deliberately left in place
+-- and still tested -- the saved data is untouched, so nothing a user built is
+-- lost, and re-homing the feature later costs a UI, not a rewrite.
 
 -- ---- search + results --------------------------------------------------
 
@@ -3819,7 +3524,6 @@ function ui.DoBuySearch()
     else
         ui.buyStatus:SetText("Searching...")
     end
-    ui.RefreshBuySidebar()   -- recent search list changed
 end
 
 function ui.RefreshBuyStatus()
@@ -3835,8 +3539,7 @@ function ui.RefreshBuy()
     if ui.buyMode ~= "advanced" then
         ui.RefreshCatTree()
     else
-        ui.RefreshBuySidebar()
-    end
+        end
     if ui.buyView == "builder" then
         -- The builder owns this space right now; repainting the results list
         -- would un-hide its rows over the top of the form.
@@ -3857,10 +3560,10 @@ function ui.UpdateBuyList()
     -- value typed there keep narrowing results after the box itself was
     -- hidden -- an invisible filter, which is precisely the failure the empty
     -- "No auctions found" fix exists to prevent. Advanced has `max-unit-buy`.
+    -- The Max box is gone (not in the concept). Its job is the
+    -- `max-unit-buy` post-filter component, which lives in the query where
+    -- it is visible and saveable rather than in a box you can leave set.
     local maxUnit = nil
-    if ui.buyMode == "advanced" and ui.buyMax then
-        maxUnit = util.ParseMoney(util.Trim(ui.buyMax:GetText() or ""))
-    end
     local sortKey = ui.buySortKey or "unit"
     local dir = ui.buySortDir or "asc"
     local rows = ui.SortResults(all, sortKey, dir, maxUnit)

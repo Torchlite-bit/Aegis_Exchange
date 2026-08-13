@@ -12,6 +12,57 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.11.0]
+
+Layout pass over the Buy tab, against the approved concept. `/reload`.
+
+### Fixed
+- **The Results / Saved / Builder tabs were off the window entirely.** They
+  were anchored 232px right of the Search button — fine while Search sat on
+  the left, and clean off the frame the moment v1.9.0 moved Search to the
+  right edge. They hang off the panel now, under the search bar, so they
+  cannot follow another widget off screen again.
+- **The pager sat on top of the Advanced button**, which is where the stray
+  `< >` over it came from. Both were anchored to the panel's top-right. The
+  pager moved to the bottom of the results area, with the match count
+  opposite it on the left — where the concept puts them.
+- **"Usable items" crowded the Search button.** Shortened to "Usable", the
+  Name box and Quality dropdown gave back some width, and Search/Advanced
+  moved right.
+- **The `< Back` button and the query box** now have real padding between
+  them.
+
+### Changed
+- **Advanced has no left column at all.** The Builder and Saved views span
+  the full content width, which is what the concept shows and what stops the
+  form's headings being clipped by a column that had no business being there.
+- **The Shopping Lists sidebar is gone**, along with `+ Add` / `Rename` /
+  `Del` / `Search entire list` and the `Max` box and `Add to list` button
+  that floated under the Advanced search bar. Recent searches live in
+  **Saved**; `max-unit-buy` does the Max box's job inside a query, where it
+  is visible and saveable.
+
+  Your saved lists are **not deleted** — the storage and its API are
+  untouched, so re-homing the feature later is a UI job, not a rewrite.
+- **The Builder form lost its Query preview and its Buyout only / Full
+  stacks / Stack size controls.** Those filters are still in the query
+  language (`/buyout`, `/stack 20`); the built query is visible in the search
+  bar after **Build**.
+- **The Add button beside the component input is gone** — Enter appends, as
+  the concept intends.
+- **Bottom row is now Search / Build > / + OR / Clear**, on the window's
+  action bar beside Bid / Buyout / Close rather than floating inside the
+  builder frame. **Build >** is tinted to match Advanced.
+
+### Added
+- **The rest of the component list**: `item`, `min-level`, `max-level`,
+  `rarity`, `seller`, `percent`, `vendor-profit`, `left` and
+  `disenchant-profit`. These are **placeholders** — they parse, round-trip
+  and save, but they do not filter yet, so every one is labelled `(soon)` in
+  the dropdown and drawn dim with "not wired up yet — ignored" in the Post
+  Filter. A component that silently did nothing would be indistinguishable
+  from a broken filter, which is a mistake this addon has already made twice.
+
 ## [1.10.0]
 
 Builds out the **Advanced** side: saved searches, and a post-filter system
@@ -934,6 +985,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.11.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.10.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.9.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.8.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
