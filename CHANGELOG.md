@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.14.1]
+
+Cleanup pass on 1.14.0, from screenshots. `/reload`.
+
+### Fixed
+- **The Search button no longer prints through the "Usable" checkbox.** The
+  filter strip was built as a chain growing rightwards from the Name box,
+  while Search and Advanced were pinned at a fixed distance from the right
+  edge — with nothing joining the two halves. At any window width where the
+  chain reached the buttons, they simply drew on top of each other. The strip
+  is now built from both ends and the Name box takes up the slack, so they
+  cannot meet.
+- **Saved Searches and the Filter Builder no longer leave a tall empty gap.**
+  Both stopped wherever their content ran out and left bare window below.
+  Each content area sits in a bordered well running the full height of the
+  view, so the empty space reads as an empty list rather than as a hole.
+- **Saved Searches shows more rows on a taller window.** The count was a
+  hardcoded 12 regardless of how much room there was; it is measured at paint
+  time now, like every other list in the addon.
+- **Results / Saved / Builder show which one you are in.** All three drew
+  identically in every view, so they read as three unrelated actions rather
+  than as a tab strip. The active one takes the primary plate.
+
+### Changed
+- **Button borders are dark rather than warm.** The concept edges both plates
+  with near-black; 1.14.0 used a warm brown on the quiet plate and a bright
+  red on the primary one, which is what made the unskinned buttons read as
+  outlined-in-brown. They are not literally the concept's `#14120f`, because
+  the concept's panel is *lighter* than its buttons and ours is darker — an
+  exactly-black edge would disappear against our panel instead of defining
+  the plate.
+
+---
+
 ## [1.14.0]
 
 Every button in the addon is now drawn by Aegis rather than inherited from
@@ -1117,6 +1151,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.14.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.14.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.13.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.12.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

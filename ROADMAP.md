@@ -747,6 +747,41 @@ line-oriented, with a bounded window, and diff-audit every deletion; and note
 that the suite could not see this class of bug at all until 2n added a
 parentage check and a source lint for a Button constructed without a parent.
 
+### 2o — Post-1.14.0 cleanup — ✅ **DONE** (v1.14.1)
+
+From screenshots of the button conversion in-game.
+
+- **Fixed offsets into a resizable frame, a FOURTH time** (2k, 2l, 2m, now
+  here). The default filter strip chained left-to-right off the Name box
+  while Search and Advanced were pinned a fixed distance from the right
+  edge, and nothing joined the halves — so they overlapped, printing Search
+  through the "Usable" label. The strip is now built from BOTH ENDS with the
+  Name box absorbing the slack. **The rule, restated because writing it down
+  three times has not stopped it: exactly one widget in a row may stretch,
+  it anchors on two edges, and every fixed-width widget hangs off an end.**
+- **Empty space needs a container.** Saved Searches and the Builder both ran
+  out of content partway down and left bare window below. That is not a
+  layout bug — a top-aligned form is normal — it is a *missing well*: with
+  nothing drawn around it the leftover space reads as a hole in the window.
+  `ui.MakeWell` now factors out the pattern the category tree already used.
+- **A child frame draws above ALL of its parent's regions.** Putting a well
+  on the Builder frame buried every label on it, because those were font
+  strings of that same frame. The text moved to a content layer created
+  after the well. Worth remembering before adding a background to any frame
+  that already carries its own font strings.
+- **Lists ask their height at paint time.** Saved Searches was pinned at 12
+  rows however tall the window was. Note the floor passed to `ui.RowsFor`
+  must be a real row count, not 1: a two-edge-anchored frame reports height
+  0 until the client lays it out, and a floor of 1 paints a single row on
+  that first pass.
+- **The active view button is marked** by swapping it to the primary plate.
+  `LockHighlight` used to do this and silently stopped working at 1.14.0 —
+  it drives a template highlight texture our buttons do not have.
+- **Button borders went dark.** See the CHANGELOG for why they are not
+  literally the concept's `#14120f`: the concept's panel is lighter than its
+  buttons and ours is darker, so an exactly-black edge erases the outline
+  instead of defining it.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

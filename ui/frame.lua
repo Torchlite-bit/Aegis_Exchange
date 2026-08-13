@@ -113,12 +113,24 @@ end
 -- a button that stops responding while still looking clickable.
 -- ---------------------------------------------------------------------------
 
+-- Borders are DARK, not warm. The concept edges both plates with #14120f --
+-- near black -- and the first pass instead used a warm brown on quiet and a
+-- bright red on primary, which is what made the unskinned buttons read as
+-- outlined-in-brown rather than as flat plates. Under pfUI they already
+-- looked right, because pfUI supplies its own dark edge; that difference
+-- between the two skins was the tell.
+--
+-- Not literally #14120f though. The concept's panel behind these is #3c3a36,
+-- lighter than the buttons, so a near-black edge makes them pop. Our panel is
+-- #211F1A -- DARKER than the plates -- so the same edge would erase the
+-- outline entirely. These sit a little above it: dark enough to read as the
+-- concept's crisp edge, light enough to still separate a plate from the panel.
 local BTN_KIND = {
     primary = {
         bg     = { 0.35, 0.08, 0.08 },
         over   = { 0.46, 0.12, 0.12 },
         down   = { 0.24, 0.05, 0.05 },
-        border = { 0.55, 0.20, 0.16 },
+        border = { 0.16, 0.09, 0.08 },
         text   = { 0.94, 0.75, 0.25 },
         font   = "GameFontNormal",
     },
@@ -126,7 +138,7 @@ local BTN_KIND = {
         bg     = { 0.17, 0.16, 0.15 },
         over   = { 0.27, 0.25, 0.22 },
         down   = { 0.11, 0.10, 0.09 },
-        border = { 0.30, 0.26, 0.16 },
+        border = { 0.13, 0.12, 0.10 },
         text   = { 0.80, 0.71, 0.42 },
         font   = "GameFontNormalSmall",
     },
@@ -299,6 +311,31 @@ function ui.MakeButton(parent, kind, name)
     b:SetText("")
     RepaintButton(b)
     return b
+end
+
+-- A recessed content well: the dark inset panel a list or a form sits in.
+-- The concept uses one for every content area (.well), and it is what stops an
+-- area with little in it from reading as a hole in the window rather than as
+-- an empty list.
+--
+-- `inset` is how far the well is pushed OUT past the frame it wraps, since a
+-- well is drawn around its contents. Its backdrop border draws a few pixels
+-- outside the frame rect, so anything anchored just below one needs to allow
+-- for that -- see the 1.13.0 clipping fix.
+function ui.MakeWell(parent, around, inset)
+    inset = inset or 6
+    local w = CreateFrame("Frame", nil, parent)
+    w:SetPoint("TOPLEFT", around, "TOPLEFT", -inset, inset)
+    w:SetPoint("BOTTOMRIGHT", around, "BOTTOMRIGHT", inset, -inset)
+    w:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    w:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    w:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    return w
 end
 
 -- Set `text` on a FontString, shortened with an ellipsis if it would run wider
@@ -2444,44 +2481,29 @@ function ui.BuildBuyTab()
     nameLbl:SetText("Name")
     ui.buyNameLbl = nameLbl
 
+    -- The strip is built from BOTH ENDS and meets in the middle, and the Name
+    -- box absorbs whatever is left over.
+    --
+    -- It used to chain left-to-right -- Name, then levels, then quality, then
+    -- the Usable checkbox, each hung off the last -- while Search and Advanced
+    -- were pinned at a fixed offset from the RIGHT edge. Nothing connected the
+    -- two halves, so at any width where the growing chain reached the pinned
+    -- buttons they simply drew on top of each other: the reported "Usable"
+    -- label with Search stamped through it.
+    --
+    -- Fixed offsets into a resizable frame, for the third time (ROADMAP 2k,
+    -- 2l, and now here). The rule those entries keep arriving at: the elastic
+    -- widget anchors on TWO edges and every fixed-width widget hangs off an
+    -- end. Only ONE thing here can stretch, and it is the text field.
     local box = CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
         "InputBoxTemplate")
-    box:SetWidth(176); box:SetHeight(18)
+    box:SetHeight(18)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 10, -24)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
     box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
     ui.buyBox = box
-
-    local lvlLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    lvlLbl:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 190, 2)
-    lvlLbl:SetText("Level Range")
-    ui.buyLvlLbl = lvlLbl
-    ui.buyMinLevel = MakeNumBox(panel, 44)
-    ui.buyMinLevel:SetPoint("TOPLEFT", box, "TOPRIGHT", 12, 0)
-    local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 6, 0)
-    lvlDash:SetText("-")
-    ui.buyLvlDash = lvlDash
-    ui.buyMaxLevel = MakeNumBox(panel, 44)
-    ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 6, 0)
-
-    local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    qLbl:SetPoint("BOTTOMLEFT", ui.buyMaxLevel, "TOPRIGHT", 26, 2)
-    qLbl:SetText("Min Quality")
-    ui.buyQualLbl = qLbl
-    ui.buyQuality = MakeDropdown(panel, 96, function() end)
-    ui.buyQuality.button:SetPoint("TOPLEFT", ui.buyMaxLevel, "TOPRIGHT", 26, 1)
-
-    ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    ui.buyUsable:SetWidth(20); ui.buyUsable:SetHeight(20)
-    ui.buyUsable:SetPoint("LEFT", ui.buyQuality.button, "RIGHT", 10, 0)
-    local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    usableLbl:SetPoint("LEFT", ui.buyUsable, "RIGHT", 1, 0)
-    usableLbl:SetText("Usable")
-    usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
-    ui.buyUsableLbl = usableLbl
 
     local searchBtn = ui.MakeButton(panel, "primary",
         "AegisExchangeBuySearchButton")
@@ -2490,6 +2512,44 @@ function ui.BuildBuyTab()
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
     ui.buySearchBtn = searchBtn
+
+    -- Right-to-left from Search: Usable, Min Quality, max level, dash, min
+    -- level. Each keeps its natural width; the slack all lands on Name.
+    local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    usableLbl:SetPoint("RIGHT", searchBtn, "LEFT", -10, 0)
+    usableLbl:SetText("Usable")
+    usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.buyUsableLbl = usableLbl
+
+    ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    ui.buyUsable:SetWidth(20); ui.buyUsable:SetHeight(20)
+    ui.buyUsable:SetPoint("RIGHT", usableLbl, "LEFT", -1, 0)
+
+    ui.buyQuality = MakeDropdown(panel, 96, function() end)
+    ui.buyQuality.button:SetPoint("RIGHT", ui.buyUsable, "LEFT", -10, 0)
+    local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    qLbl:SetPoint("BOTTOMLEFT", ui.buyQuality.button, "TOPLEFT", 0, 3)
+    qLbl:SetText("Min Quality")
+    ui.buyQualLbl = qLbl
+
+    ui.buyMaxLevel = MakeNumBox(panel, 44)
+    ui.buyMaxLevel:SetPoint("RIGHT", ui.buyQuality.button, "LEFT", -26, 0)
+    local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    lvlDash:SetPoint("RIGHT", ui.buyMaxLevel, "LEFT", -6, 0)
+    lvlDash:SetText("-")
+    ui.buyLvlDash = lvlDash
+    ui.buyMinLevel = MakeNumBox(panel, 44)
+    ui.buyMinLevel:SetPoint("RIGHT", lvlDash, "LEFT", -6, 0)
+
+    local lvlLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    lvlLbl:SetPoint("BOTTOMLEFT", ui.buyMinLevel, "TOPLEFT", 0, 3)
+    lvlLbl:SetText("Level Range")
+    ui.buyLvlLbl = lvlLbl
+
+    -- ...and here is the join the old strip never had. Name runs from its own
+    -- left edge to the first fixed-width control, so the two halves cannot
+    -- overlap at any window width.
+    box:SetPoint("RIGHT", ui.buyMinLevel, "LEFT", -14, 0)
 
     -- The one addition to the stock layout, in the slot where Blizzard's
     -- "Display on Character" sat.
@@ -2734,6 +2794,19 @@ function ui.SetBuyView(name)
     if ui.buyBidBox then
         if overlay then ui.buyBidBox:Hide() else ui.buyBidBox:Show() end
     end
+    -- Mark which view you are actually in. All three buttons drew identically
+    -- whatever was on screen, so Results / Saved / Builder read as three
+    -- unrelated actions rather than as the tab strip they are. The active one
+    -- takes the primary plate -- the same thing the sub-tabs above do with
+    -- their gold label.
+    local vi2 = 1
+    while vi2 <= table.getn(ui.buyViewBtns or {}) do
+        local b = ui.buyViewBtns[vi2]
+        if b then
+            ui.SetButtonKind(b, (b.view == name) and "primary" or "quiet")
+        end
+        vi2 = vi2 + 1
+    end
     if saved then ui.RefreshSavedSearches() end
     -- Everything belonging to the results view hides together. buyStatus is
     -- in the list because it paints at the same height as the form's first
@@ -2758,14 +2831,10 @@ function ui.SetBuyView(name)
         if overlay then ui.buyRows[ri]:Hide() end
         ri = ri + 1
     end
-    if ui.buyViewBtns then
-        local bi = 1
-        while bi <= table.getn(ui.buyViewBtns) do
-            local b = ui.buyViewBtns[bi]
-            if b.view == name then b:LockHighlight() else b:UnlockHighlight() end
-            bi = bi + 1
-        end
-    end
+    -- (The active view is marked further up, by swapping its button to the
+    -- primary plate. LockHighlight used to do this job and no longer can --
+    -- it drives a template highlight texture these buttons do not have, so it
+    -- was silently doing nothing.)
     if not overlay then ui.UpdateBuyList() end
 end
 
@@ -2782,7 +2851,11 @@ end
 --                     on a favorite-> Move Up / Move Down / Delete menu
 -- ---------------------------------------------------------------------------
 
-local SAVED_ROWS, SAVED_ROW_H = 12, 17
+-- SAVED_ROWS is the CEILING, not the count. The visible number comes from the
+-- column's height at paint time (ui.RowsFor), the way every other list in the
+-- window works -- a fixed 12 was what left the tall void under the lists.
+local SAVED_ROWS, SAVED_ROW_H = 30, 17
+local SAVED_HEAD_H = 30       -- headers above the first row
 
 function ui.BuildSavedSearches(panel, rowLeft)
     if ui.buySaved then return end
@@ -2805,6 +2878,11 @@ function ui.BuildSavedSearches(panel, rowLeft)
     colR:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     ui.savedColL, ui.savedColR = colL, colR
 
+    -- Each column's rows live in a WELL that runs to the bottom of the view.
+    -- Without one the rows just stopped wherever the content ran out and the
+    -- remaining two-thirds of the panel was bare window -- the reported gap.
+    -- A well makes the same emptiness read as an empty list, which is what the
+    -- concept does with every content area.
     local function column(parentCol, title, hint)
         local h = parentCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         h:SetPoint("TOPLEFT", parentCol, "TOPLEFT", 0, 0)
@@ -2813,10 +2891,17 @@ function ui.BuildSavedSearches(panel, rowLeft)
         local sub = parentCol:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         sub:SetPoint("TOPLEFT", parentCol, "TOPLEFT", 0, -14)
         sub:SetText(hint)
-        return h
+
+        -- The area the rows sit in: from just under the headers to the
+        -- column's bottom edge, so it stretches with the window.
+        local area = CreateFrame("Frame", nil, parentCol)
+        area:SetPoint("TOPLEFT", parentCol, "TOPLEFT", 0, -SAVED_HEAD_H)
+        area:SetPoint("BOTTOMRIGHT", parentCol, "BOTTOMRIGHT", 0, 0)
+        ui.MakeWell(parentCol, area, 4)
+        return area
     end
-    column(colL, "RECENT", "right-click to save")
-    column(colR, "FAVORITES", "right-click for options")
+    ui.savedAreaL = column(colL, "RECENT", "right-click to save")
+    ui.savedAreaR = column(colR, "FAVORITES", "right-click for options")
 
     -- One row builder for both columns; `which` tags the row so the click
     -- handlers know which list they are looking at.
@@ -2826,8 +2911,11 @@ function ui.BuildSavedSearches(panel, rowLeft)
             local r = CreateFrame("Button", nil, col)
             r:SetHeight(SAVED_ROW_H)
             -- Both edges anchored, so a row fills its column at any width.
-            r:SetPoint("TOPLEFT", col, "TOPLEFT", 0, -30 - (i - 1) * SAVED_ROW_H)
-            r:SetPoint("TOPRIGHT", col, "TOPRIGHT", 0, -30 - (i - 1) * SAVED_ROW_H)
+            -- Offsets are inside the well, so they start a little in.
+            r:SetPoint("TOPLEFT", col, "TOPLEFT", 4,
+                -SAVED_HEAD_H - 2 - (i - 1) * SAVED_ROW_H)
+            r:SetPoint("TOPRIGHT", col, "TOPRIGHT", -4,
+                -SAVED_HEAD_H - 2 - (i - 1) * SAVED_ROW_H)
             r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fs:SetPoint("LEFT", r, "LEFT", 2, 0)
@@ -2948,11 +3036,23 @@ end
 
 function ui.RefreshSavedSearches()
     if not ui.buySaved then return end
+    -- How many rows the column can actually show at the window's CURRENT
+    -- height. Asked at paint time, like every other list here, so dragging the
+    -- window taller shows more saved searches instead of more empty well.
+    -- The floor is the old fixed count, NOT 1. A two-edge-anchored frame
+    -- reports height 0 until the client has laid it out, so a floor of 1
+    -- would paint a single row on the first pass -- and permanently, in any
+    -- environment that never lays out at all.
+    local fit = SAVED_ROWS
+    if ui.savedAreaL then
+        fit = ui.RowsFor(ui.savedAreaL, SAVED_ROW_H, 12, SAVED_ROWS)
+    end
     local function paint(rows, list, which)
         local i = 1
         while i <= table.getn(rows) do
             local r = rows[i]
             local q = list[i]
+            if i > fit then q = nil end
             if q then
                 r.full = q
                 r.listIndex = i
@@ -2983,15 +3083,32 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     f:Hide()
     ui.buyBuilder = f
 
+    -- The form sits in a well that runs the full height of the view.
+    --
+    -- Without one, a form whose controls stop two-thirds of the way down
+    -- leaves bare window below them, which is what got reported as a huge
+    -- gap. A form being top-aligned is normal; a form with nothing around it
+    -- is what makes the space below read as a hole rather than as the edge of
+    -- the form. Created FIRST so it is behind everything.
+    ui.MakeWell(f, f, 0)
+
+    -- ...and everything textual is drawn on this, not on `f` directly. A
+    -- child frame draws above ALL of its parent's regions, so font strings
+    -- created on `f` would sit behind the well whatever order they were made
+    -- in. The controls are child frames created after this one, so they layer
+    -- above it without any explicit level juggling.
+    local content = CreateFrame("Frame", nil, f)
+    content:SetAllPoints(f)
+
     local function header(text, x, y)
-        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        local fs = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         fs:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
         fs:SetText(text)
         fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         return fs
     end
     local function label(text, x, y)
-        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local fs = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         fs:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
         fs:SetWidth(58)
         fs:SetJustifyH("RIGHT")
@@ -3037,7 +3154,7 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     label("Level", LX, -70)
     ui.fbMinLevel = MakeNumBox(f, 84, function() ui.RefreshBuilder() end)
     ui.fbMinLevel:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -67)
-    local dash = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local dash = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 7, 0)
     dash:SetText("\226\128\147")
     dash:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
@@ -3076,7 +3193,7 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     -- to override that, not to be typed for the common case.
     header("POST FILTER", RXX, 0)
 
-    local compLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local compLbl = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     compLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -22)
     compLbl:SetText("Component")
     compLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
@@ -3097,7 +3214,7 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     cvBox:SetScript("OnEnterPressed", function() ui.BuilderAddComponent() end)
     ui.fbCompValue = cvBox
 
-    local pfLbl = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local pfLbl = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     pfLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -46)
     pfLbl:SetText("Post Filter:")
 
@@ -3121,13 +3238,13 @@ function ui.BuildFilterBuilder(panel, rowLeft)
         pi = pi + 1
     end
 
-    ui.fbPostHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.fbPostHint = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ui.fbPostHint:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2,
         -64 - FB_POST_ROWS * 15)
     ui.fbPostHint:SetJustifyH("LEFT")
 
     -- ---- Preview + actions ---------------------------------------------
-    ui.fbNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.fbNote = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ui.fbNote:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -234)
     ui.fbNote:SetJustifyH("LEFT")
 
