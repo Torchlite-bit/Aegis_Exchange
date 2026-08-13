@@ -12,6 +12,55 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.15.1]
+
+Buy tab default view, second pass against the mockup. `/reload`.
+
+### Fixed
+- **The results table no longer draws over the bottom of the window.** Rows
+  were spilling past the table and covering the match count, the pager, the
+  bid boxes and the Bid / Buyout / Close buttons.
+
+  `ui.RowsFor` treated its `minRows` argument as a floor on a *measured* fit,
+  so when rows grew from 20px to 26px in 1.15.0 it kept insisting on eleven
+  rows in a space that now held eight. Rows anchor to each other and are not
+  the scroll frame's scroll-child, so nothing clipped the surplus. `minRows`
+  now means only "the answer when the frame has no measurable height yet";
+  a real measurement always wins. **Every list in the addon shares that
+  function, so every list is fixed.**
+- **The scrollbar no longer sits on top of the last column.** The table's box
+  now stops exactly where the scroll frame ends, and the scrollbar hangs
+  outside it.
+
+### Changed
+- **The Seller column is gone**, deliberately and against the mockup.
+  `owner` is nil until the client resolves the name, so the column was blank
+  on nearly every row — worse than not having it. The field is still read: it
+  is what marks your own auctions, dims them and blocks them from a buyout
+  batch. The freed width went to the gap between Lvl and Time Left, which
+  were close enough to run together.
+- **One box around the table, headings included.** The box used to wrap only
+  the rows, leaving the column headings floating above it and the rule that
+  belongs under them stranded on the box's top edge. Rows have hairline
+  separators, the header cells have dividers, and a rule separates the action
+  bar from the table.
+- **Text fields are flat dark rectangles.** vanilla's `InputBoxTemplate` draws
+  a left cap, a right cap and a tiling middle, which reads as a rounded
+  trough at text-field width and as two brackets with a gap at the width of a
+  level box — the reported `( )` shapes. The template is kept for its cursor
+  and selection behaviour; only what it draws is replaced.
+- **No box around the category list.** The mockup boxes the results table and
+  nothing else, and a trough here fought with the plated rows inside it. A
+  selected subcategory is bright text rather than a highlight bar; the bar
+  stays on top-level rows, where it marks the whole category.
+- **Fold glyphs are back on expanded categories**, reversing ROADMAP 2l. That
+  entry argued the stock 1.12 list shows expansion by highlighting the parent,
+  which works for one level; this tree nests three (Armor > Leather > Chest)
+  and highlighting alone cannot say which of two open levels you are in.
+  Collapsed rows carry no glyph — a `+` on everything closed is noise.
+
+---
+
 ## [1.15.0]
 
 The Buy tab's default view rebuilt to the design mockup, plus multi-buyout.
@@ -1214,6 +1263,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.15.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.15.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.14.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.14.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

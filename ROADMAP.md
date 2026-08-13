@@ -620,6 +620,11 @@ component that quietly did nothing was not an option.
 
 ### 2l — Concept-parity polish — ✅ **DONE** (v1.12.0)
 
+> **⚠️ TWO decisions below were later reversed.** The button colour, in
+> v1.14.0 (see 2n) and again in v1.15.0 (see 2p). The removal of the +/- fold
+> glyphs, in v1.15.1 (see 2q) — that argument held for a one-level list and
+> this tree turned out to nest three.
+>
 > **⚠️ The button-colour decision below was REVERSED in v1.14.0 — see 2n.**
 > The analysis still holds (the plates really were vanilla's own art, and
 > matching the concept really did mean drawing every button ourselves); the
@@ -830,6 +835,45 @@ removes that auction and re-sends the page, shifting every later index. So:
   the batch and reports what completed. Substitution is never acceptable.
 - **Gold is re-checked before every purchase**, not only at the start, because
   mail/repairs/vendors move money while the AH is open.
+
+### 2q — Mockup second pass — ✅ **DONE** (v1.15.1)
+
+- **`ui.RowsFor`'s `minRows` was two different ideas wearing one name**, and
+  the collision produced a table that drew over the bottom of the window. It
+  meant both "the answer when the frame has not been laid out" (correct, and
+  what 1.14.1 raised from 1 to 12 for Saved Searches) and "never paint fewer
+  than this" (wrong, and what forced eleven 26px rows into space for eight).
+  A measured fit now always wins; `minRows` applies only when the height is
+  0. Every list in the addon shares the function, so this was one edit.
+  **When a parameter has to be explained with "except when", it is two
+  parameters.**
+- **NO SELLER COLUMN**, deliberately and against the mockup. `owner` is nil
+  until the client resolves the name, so it was blank on nearly every row.
+  The FIELD is still read — it sets `r.mine`, which dims your own rows and
+  keeps them out of a buyout batch — so do not delete it as dead code when
+  the column is gone. Freed width went to the Lvl / Time Left gap.
+- **`ui.ColumnsFitAt(w)`** joins `ui.StripFitsAt(w)`. Removing a column moved
+  every offset after it, and the failure mode is the last column drawn under
+  the scrollbar. Both are asserted to have teeth: they must REJECT a width
+  that genuinely does not fit, or they are decoration.
+- **The table's box encloses the headings.** It wrapped the scroll frame
+  alone, so the headings floated above it. Its right edge is flush with the
+  scroll frame's, because FauxScrollFrameTemplate hangs the scrollbar outward
+  from exactly that line — a positive offset there puts the box back under
+  the scrollbar.
+- **`ui.FlattenEditBox`** strips `InputBoxTemplate`'s three textures and
+  applies our own plate. The template stays for its cursor, selection and
+  focus behaviour; only what it DRAWS is replaced. Textures are found via
+  `GetRegions()`, not `$parentLeft` etc., because most of these boxes have no
+  name for `getglobal` to resolve.
+- **Fold glyphs restored, reversing 2l.** 2l reasoned from the stock 1.12
+  filter list, which is one level deep; ours is three (Armor > Leather >
+  Chest), and highlight-the-parent cannot express which of two open levels
+  you are in. Only EXPANDED rows are marked — a `+` on every collapsed row is
+  noise the mockup does not draw either.
+- **No box around the category tree**, and a selected leaf is bright text
+  rather than a highlight bar. The mockup boxes the results table and nothing
+  else.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

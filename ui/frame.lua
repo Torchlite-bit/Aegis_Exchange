@@ -400,6 +400,41 @@ function ui.MakeWell(parent, around, inset)
     return w
 end
 
+-- Give an InputBoxTemplate edit box the mockup's flat field instead of
+-- vanilla's art.
+--
+-- The template draws three textures -- a left cap, a right cap and a tiling
+-- middle, all from Common-Input-Border. At a text field's width that reads as
+-- a long rounded trough; at the width of a level-range box it reads as two
+-- brackets with a gap, which is what got reported as "( )" shapes. Neither is
+-- the mockup's flat dark rectangle with a thin border.
+--
+-- We keep the template -- it carries the cursor, selection and focus
+-- behaviour, none of which is worth reimplementing -- and only replace what
+-- it DRAWS. The textures are found through GetRegions() rather than by
+-- $parentLeft/$parentMiddle/$parentRight, because most of these boxes are
+-- created without a name and getglobal has nothing to look up.
+function ui.FlattenEditBox(e)
+    if not e then return e end
+    local regions = { e:GetRegions() }
+    local i = 1
+    while i <= table.getn(regions) do
+        local r = regions[i]
+        local ok, t = pcall(function() return r:GetObjectType() end)
+        if ok and t == "Texture" then pcall(function() r:Hide() end) end
+        i = i + 1
+    end
+    e:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    e:SetBackdropColor(0.06, 0.05, 0.04, 1)
+    e:SetBackdropBorderColor(0.42, 0.35, 0.20)
+    return e
+end
+
 -- Set `text` on a FontString, shortened with an ellipsis if it would run wider
 -- than `maxWidth` pixels.
 --
@@ -522,15 +557,33 @@ function ui.SkinNewRows(pool)
     end
 end
 
--- How many rows of `rowH` actually fit in `scroll` at its current height,
--- clamped to [minRows, maxRows]. This is what makes a taller window show more
--- listings instead of more blank space: every list asks at paint time rather
--- than trusting the count it was built with.
+-- How many rows of `rowH` actually fit in `scroll` at its current height.
+-- This is what makes a taller window show more listings instead of more blank
+-- space: every list asks at paint time rather than trusting the count it was
+-- built with.
+--
+-- `minRows` is the answer when the frame has NO measurable height -- it has
+-- not been laid out yet, or there is no frame at all. It is NOT a floor on a
+-- real measurement, and the difference is the whole bug this signature had.
+--
+-- When rows grew from 20px to 26px, a floor of 11 kept insisting on 11 rows
+-- in a space that now held eight. Rows anchor to each other and are not the
+-- scroll frame's scroll-child, so nothing clips them: the surplus three drew
+-- straight down over the match count, the pager, the bid boxes and the action
+-- bar. A measured fit must win over any expectation of how many "should" fit,
+-- because the measurement is the only thing that knows about the space.
+--
+-- (1.14.1 raised a floor from 1 to 12 for the Saved Searches list, which is
+-- the OTHER case: a two-edge-anchored frame reports 0 until the client lays
+-- it out, and painting one row on that pass was wrong. Both behaviours are
+-- correct; they are just not the same parameter, and conflating them is what
+-- produced an overflowing table.)
 function ui.RowsFor(scroll, rowH, minRows, maxRows)
     if not scroll then return minRows end
     local h = scroll:GetHeight() or 0
+    if h <= 0 then return minRows end     -- never laid out; use the fallback
     local n = math.floor(h / rowH)
-    if n < minRows then n = minRows end
+    if n < 1 then n = 1 end
     if n > maxRows then n = maxRows end
     return n
 end
@@ -1785,7 +1838,8 @@ MakeMoneyGSC = function(parent, onChange)
     -- invisible rather than wrong.
     local COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
     local function mk(w, coin)
-        local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        local e = ui.FlattenEditBox(
+            CreateFrame("EditBox", nil, parent, "InputBoxTemplate"))
         e:SetWidth(w)
         e:SetHeight(18)
         e:SetAutoFocus(false)
@@ -2083,7 +2137,8 @@ end
 
 -- A small numeric entry box (stack size / number of stacks).
 local function MakeNumBox(parent, width, onChanged)
-    local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+    local e = ui.FlattenEditBox(
+        CreateFrame("EditBox", nil, parent, "InputBoxTemplate"))
     e:SetWidth(width)
     e:SetHeight(18)
     e:SetAutoFocus(false)
@@ -2139,14 +2194,24 @@ ui.PctColorSell = PctColorSell
 -- and Bid buttons. It is a different question ("what can I make and what does
 -- it cost"), it has no room for a seller or a time left, and changing it was
 -- not asked for.
+-- NO SELLER COLUMN. The mockup has one; we deliberately do not -- see
+-- ROADMAP 2q. `owner` is still read by the scanner, because it is what marks
+-- your own auctions; only the column is gone.
+--
+-- The 92px that freed goes first to the gap between Lvl and Time Left, which
+-- were close enough to touch ("43 Very Long" ran together), and then to the
+-- three money columns.
 local RCX_BUY = {
-    check = 2, icon = 22, name = 42, lvl = 286, left = 320, seller = 384,
-    bid = 476, stack = 558, unit = 640, pct = 706,
+    check = 2, icon = 22, name = 44, lvl = 288, left = 336,
+    bid = 420, stack = 512, unit = 604, pct = 678,
 }
 local RCW_BUY = {
-    name = 240, lvl = 30, left = 60, seller = 88,
-    bid = 78, stack = 78, unit = 62, pct = 44,
+    name = 236, lvl = 30, left = 78,
+    bid = 84, stack = 84, unit = 66, pct = 44,
 }
+-- Where the rightmost column ends. Asked for rather than re-added by hand, so
+-- a column edit cannot silently push the table under the scrollbar.
+local BUY_COLS_END = 678 + 44
 local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
               buy = 436, bid = 490 }
 local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
@@ -2202,6 +2267,16 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         end)
         row.check = cb
 
+        -- Hairline between rows, as the mockup has. BACKGROUND layer so the
+        -- selection tint (also BACKGROUND, drawn after) covers it on the
+        -- selected row rather than showing through as a scar.
+        local sep = row:CreateTexture(nil, "BACKGROUND")
+        sep:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        sep:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        sep:SetHeight(1)
+        sep:SetTexture(0.28, 0.24, 0.15, 0.55)
+        row.sep = sep
+
         local icon = row:CreateTexture(nil, "ARTWORK")
         icon:SetWidth(16); icon:SetHeight(16)
         icon:SetPoint("LEFT", row, "LEFT", X.icon, 0)
@@ -2209,7 +2284,6 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         row.name   = mkCell(X.name,   W.name)
         row.lvl    = mkCell(X.lvl,    W.lvl,    "RIGHT")
         row.left   = mkCell(X.left,   W.left)
-        row.seller = mkCell(X.seller, W.seller)
         row.bid    = mkCell(X.bid,    W.bid,    "RIGHT")
         row.stack  = mkCell(X.stack,  W.stack,  "RIGHT")
         row.unit   = mkCell(X.unit,   W.unit,   "RIGHT")
@@ -2378,11 +2452,6 @@ function ui.FillResultRow(row, r)
             tl = getglobal("AUCTION_TIME_LEFT" .. r.timeLeft) or ""
         end
         row.left:SetText(tl)
-        -- owner is the one field GetAuctionItemInfo can hand back nil for,
-        -- until the name resolves. Leave the cell blank rather than blanking
-        -- the row -- the auction is real, we just do not know the seller yet.
-        row.seller:SetText(r.mine and "You" or (r.owner or ""))
-
         local bidNow = (r.bidAmount and r.bidAmount > 0) and r.bidAmount
                        or (r.minBid or 0)
         row.bid:SetText(bidNow > 0 and util.FormatMoneyGold(bidNow) or DASH)
@@ -2415,7 +2484,7 @@ function ui.FillResultRow(row, r)
             row.name:SetText(row.name:GetText() .. " |cff808080(yours)|r")
         end
         local a = r.mine and 0.45 or 1.0
-        local dim = { row.lvl, row.left, row.seller, row.bid, row.stack,
+        local dim = { row.lvl, row.left, row.bid, row.stack,
                       row.unit, row.pct }
         local di = 1
         while di <= table.getn(dim) do
@@ -2465,20 +2534,6 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
     if sortKey == "name" then
         table.sort(rows, function(a, b)
             local an, bn = string.lower(a.name or ""), string.lower(b.name or "")
-            if an == bn then return false end
-            if dir == "desc" then return an > bn end
-            return an < bn
-        end)
-        return rows
-    end
-
-    -- Seller is text, like Item -- sorted alphabetically rather than falling
-    -- through to the numeric path, where every row would key nil and the sort
-    -- would be a no-op that looked like a dead header.
-    if sortKey == "seller" then
-        table.sort(rows, function(a, b)
-            local an = string.lower(a.owner or "\255")   -- unknown sellers last
-            local bn = string.lower(b.owner or "\255")
             if an == bn then return false end
             if dir == "desc" then return an > bn end
             return an < bn
@@ -2592,6 +2647,30 @@ end
 -- CSS pixel in a 2000px-wide render, and translating it straight across would
 -- give five visible rows.
 local BUY_ROWS,  BUY_ROW_H  = 11, 26
+-- Table geometry, named because three things have to agree about it: the well
+-- that draws the box, the headers inside it, and the scroll frame the rows
+-- live in. When these were three loose numbers at three call sites the well
+-- ended up enclosing the rows but not the headings.
+local BUY_HDR_TOP  = 76     -- headings sit here, below the control strip
+local BUY_HDR_H    = 22     -- headings band inside the well
+local BUY_ROWS_TOP = 100    -- ...so the first row starts here
+-- Gutter on the right of the table. FauxScrollFrameTemplate hangs its
+-- scrollbar OUTWARD from the scroll frame's right edge, so this is what keeps
+-- it off the last column instead of drawn across the percentages.
+local BUY_GUTTER_W = 26
+
+-- Do the result columns fit the row width at a window `w` wide?
+--
+-- Same reasoning as StripFitsAt below: with fixed column offsets nothing in
+-- the anchoring stops the last column running under the scrollbar, so the
+-- constraint is arithmetic and belongs somewhere it can be checked. Removing
+-- the Seller column changed every offset after it; this is what says whether
+-- the new numbers still fit rather than someone re-adding them by hand.
+function ui.ColumnsFitAt(w)
+    local rowLeft = 158 + 48 + 4          -- SIDE_W + gutter + row inset
+    local rowW = (w - 22) - rowLeft - BUY_GUTTER_W
+    return BUY_COLS_END <= rowW
+end
 local BUY_ROWS_MAX  = 34
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
 -- Post Filter clause rows in the Filter Builder.
@@ -2631,19 +2710,15 @@ function ui.BuildBuyTab()
     catScroll:Hide()
     ui.buyCatScroll = catScroll
 
-    -- The bordered well the stock filter list sits in. Parented to the panel
-    -- and raised/lowered with the tree, so it cannot linger in Advanced.
+    -- The mockup draws NO box around the category list -- just the BROWSE
+    -- heading and the plates below it, directly on the panel. This frame is
+    -- kept because BitsFor and the mode switch both raise and lower it with
+    -- the tree, but it draws nothing: a bordered trough fought with the
+    -- plated rows inside it, and the results table is the only thing on this
+    -- tab the mockup puts in a box.
     local catWell = CreateFrame("Frame", nil, panel)
     catWell:SetPoint("TOPLEFT", catScroll, "TOPLEFT", -6, 6)
     catWell:SetPoint("BOTTOMRIGHT", catScroll, "BOTTOMRIGHT", 24, -6)
-    catWell:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    catWell:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
-    catWell:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
     catWell:SetFrameLevel(panel:GetFrameLevel())
     catWell:Hide()
     ui.buyCatWell = catWell
@@ -2732,8 +2807,9 @@ function ui.BuildBuyTab()
     -- instead of by an anchor: STRIP_MIN_W below is the cluster's total width,
     -- and MIN_W is large enough to fit it plus the buttons. See the note on
     -- MIN_W -- eight result columns do not fit in the old 832 either.
-    local box = CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
-        "InputBoxTemplate")
+    local box = ui.FlattenEditBox(
+        CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
+            "InputBoxTemplate"))
     box:SetWidth(BUY_NAME_W); box:SetHeight(18)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 10, -24)
     box:SetAutoFocus(false)
@@ -2845,7 +2921,7 @@ function ui.BuildBuyTab()
     -- where the stray "< >" over that button came from.
     local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
-    nextBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 36)
+    nextBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -BUY_GUTTER_W, 40)
     nextBtn:SetText(">")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
@@ -2868,6 +2944,8 @@ function ui.BuildBuyTab()
     -- pager. It hung off the Search button before, which dragged it to the
     -- top right when Search moved.
     ui.buyStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    -- Same baseline as the pager opposite it. They sat 4px apart, which is
+    -- the kind of gap that reads as a mistake rather than as a choice.
     ui.buyStatus:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RX + 6, 40)
     ui.buyStatus:SetJustifyH("LEFT")
     ui.buyStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -2882,13 +2960,13 @@ function ui.BuildBuyTab()
     -- EVERY column sorts. Headers are bare clickable text (aegisNoSkin),
     -- never skinned into boxes -- pfUI's SkinButton would give each one a
     -- backdrop and they'd visibly overlap.
-    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, RCX_BUY, RCW_BUY,
+    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -BUY_HDR_TOP,
+        RCX_BUY, RCW_BUY,
         function(key) ui.SetBuySort(key) end,
         {
             { key = "name",   text = "Item" },
             { key = "lvl",    text = "Lvl",         just = "RIGHT" },
             { key = "left",   text = "Time Left" },
-            { key = "seller", text = "Seller" },
             { key = "bid",    text = "Current Bid", just = "RIGHT" },
             { key = "stack",  text = "Buyout",      just = "RIGHT" },
             { key = "unit",   text = "Unit",        just = "RIGHT" },
@@ -2897,19 +2975,60 @@ function ui.BuildBuyTab()
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -BUY_ROWS_TOP)
     -- Headroom for the status/pager row AND the action bar beneath it.
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 62)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -BUY_GUTTER_W, 62)
 
-    -- The table sits in a well, with a rule under the header row -- the
-    -- mockup's boxed table rather than rows floating on the panel.
-    ui.buyListWell = ui.MakeWell(panel, scroll, 6)
+    -- ONE box around the headers AND the rows, which is what the mockup
+    -- shows. The well used to wrap the scroll frame alone, so the column
+    -- headings floated on the panel above the box and the rule that should
+    -- have sat under them landed on the box's top edge instead.
+    --
+    -- Anchored explicitly rather than via ui.MakeWell(scroll): the well has
+    -- to reach UP past the scroll frame to enclose the header row, and its
+    -- right edge has to stop AT the scroll frame's, so that the scrollbar --
+    -- which FauxScrollFrameTemplate anchors outward from that edge -- ends up
+    -- outside the box rather than drawn across the last column.
+    local well = CreateFrame("Frame", nil, panel)
+    well:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft - 6, -(BUY_HDR_TOP - 4))
+    -- Right edge flush with the scroll frame's, NOT past it: the scrollbar
+    -- hangs outward from exactly that line, so any positive offset here puts
+    -- the box under the scrollbar again.
+    well:SetPoint("BOTTOMRIGHT", scroll, "BOTTOMRIGHT", 0, -6)
+    well:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    well:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    well:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    ui.buyListWell = well
+
+    -- The rule goes UNDER the headings, not at the top of the box.
     local hdrRule = panel:CreateTexture(nil, "ARTWORK")
-    hdrRule:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 4)
-    hdrRule:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 4)
+    hdrRule:SetPoint("TOPLEFT", well, "TOPLEFT", 6, -(BUY_HDR_H))
+    hdrRule:SetPoint("TOPRIGHT", well, "TOPRIGHT", -6, -(BUY_HDR_H))
     hdrRule:SetHeight(1)
-    hdrRule:SetTexture(0.45, 0.38, 0.22, 0.8)
+    hdrRule:SetTexture(0.45, 0.38, 0.22, 0.85)
     ui.buyHdrRule = hdrRule
+
+    -- Thin separators between the header cells, as the mockup has.
+    ui.buyHdrTicks = {}
+    local tickKeys = { "lvl", "left", "bid", "stack", "unit", "pct" }
+    local ti = 1
+    while ti <= table.getn(tickKeys) do
+        local tk = panel:CreateTexture(nil, "ARTWORK")
+        tk:SetWidth(1)
+        tk:SetPoint("TOPLEFT", well, "TOPLEFT",
+            6 + RCX_BUY[tickKeys[ti]] - 8, -6)
+        tk:SetPoint("BOTTOMLEFT", well, "TOPLEFT",
+            6 + RCX_BUY[tickKeys[ti]] - 8, -(BUY_HDR_H))
+        tk:SetTexture(0.35, 0.30, 0.18, 0.7)
+        ui.buyHdrTicks[ti] = tk
+        ti = ti + 1
+    end
+
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BUY_ROW_H, ui.UpdateBuyList)
     end)
@@ -2955,6 +3074,16 @@ ui.GrowBuyRows = function(n)
         end
     end)
     ui.buyBuyoutBtn = buyoutBtn
+
+    -- The mockup rules off the action bar from the table above it. Full
+    -- panel width, so it reads as the window's own division rather than as
+    -- part of the results column.
+    local barRule = panel:CreateTexture(nil, "ARTWORK")
+    barRule:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 34)
+    barRule:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 34)
+    barRule:SetHeight(1)
+    barRule:SetTexture(0.35, 0.30, 0.18, 0.6)
+    ui.buyBarRule = barRule
 
     -- What the ticked rows come to, beside the action bar. Doubles as the
     -- progress line while a batch runs.
@@ -4240,17 +4369,28 @@ function ui.UpdateCatTree()
         local e = (i <= vis) and flat[i + offset] or nil
         if e then
             row.entry = e
-            -- Blizzard's shape: TOP-LEVEL rows get a plate, children are bare
-            -- indented text, and NO +/- glyph anywhere -- a category being
-            -- expanded is shown by it being highlighted with its children
-            -- visible beneath it, which is what the stock list does.
+            -- TOP-LEVEL rows get a plate, children are bare indented text,
+            -- and an EXPANDED row carries a minus glyph.
+            --
+            -- The glyphs were removed in ROADMAP 2l on the grounds that the
+            -- stock 1.12 list signals expansion by highlighting the parent
+            -- and showing its children. That works for ONE level. This tree
+            -- has three -- Armor > Leather > Chest -- and highlight-alone
+            -- cannot say which of two open levels you are in, or that Leather
+            -- is open at all while Chest is the selected leaf. 2l is reversed
+            -- here; see 2q.
+            --
+            -- Only EXPANDED rows are marked. A "+" on every collapsed row is
+            -- noise, and the mockup does not draw one.
             local text, plated
             if e.kind == "all" then
                 text, plated = e.name, true
             elseif e.kind == "class" then
                 text, plated = e.name, true
+                if e.expanded then text = "- " .. e.name end
             elseif e.kind == "sub" then
                 text, plated = "    " .. e.name, false
+                if e.expanded then text = "  - " .. e.name end
             else
                 text, plated = "         " .. e.name, false
             end
@@ -4264,8 +4404,12 @@ function ui.UpdateCatTree()
             if not selected and e.kind == "class" and e.expanded then
                 selected = (ui.buyCatClass == e.class)
             end
+            -- A selected LEAF is plain bright text with no bar, which is what
+            -- the mockup shows for "Chest". The bar stays on plated rows,
+            -- where it reads as "this whole category is what you are
+            -- browsing" rather than as a highlight smeared across a word.
             if selected then
-                row.selTex:Show()
+                if plated then row.selTex:Show() else row.selTex:Hide() end
                 row.label:SetTextColor(1, 1, 1)
             else
                 row.selTex:Hide()
