@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.11.0)
+# Aegis: Exchange (v1.12.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -141,7 +141,8 @@ max-unit-buy: 5g
 under 5g, and you didn't type a single operator to say so. Put **`or`**
 between two clauses to widen instead, or **`not`** before one to exclude it.
 Click any line to remove it. **Search** runs it, **Build** pushes it into the
-search box, **+ OR** appends it as another `;` term.
+search box, **+ OR** appends it as another `;` term, **Import** pulls whatever
+is in the search box back into the form, and **Clear** empties both.
 
 **Stat names work either way round.** Type `agi` or `Agility`, `stam` or
 `Stamina`, `str`, `int`, `spi` — Aegis looks for both spellings, and the
@@ -353,7 +354,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.11.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.12.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

@@ -618,6 +618,47 @@ component that quietly did nothing was not an option.
 > button" instruction. `ui.BuilderImport` went with the button. One line to
 > put back if the concept is the intent.
 
+### 2l — Concept-parity polish — ✅ **DONE** (v1.12.0)
+
+**Settled: the button colour was never a bug.** The warm red-brown plates are
+vanilla's own `UIPanelButtonTemplate` art, which is what every stock button
+looks like unskinned. The concept's flat dark plates with thin gold borders
+were CSS in an HTML mockup; no vanilla template produces them, and matching
+them would mean backdrop-drawing every button in the addon, not just the Buy
+tab's. **Decision: keep the stock art**, since "the default view looks like
+the stock auction house" is the whole premise of 2g, with a subtle accent tint
+on Advanced and Build only so the two non-stock actions read as different.
+Recorded here because it will look like an unfixed bug to anyone comparing
+the concept PNGs to a screenshot.
+
+Everything else in the pass:
+
+- **Bid entry reuses the Sell tab's g/s/c control** rather than a second
+  implementation. That widget emulates the plain box's GetText/SetText, so
+  `SetMoneyBox` and every existing caller worked against it untouched.
+- **The Browse tree follows Blizzard's shape**: plates on top-level rows,
+  bare indented children, a bordered well, blue selection bar, and **no +/-
+  fold glyphs** — the stock list signals expansion by highlighting the parent
+  and showing its children.
+- **`MakeDropdown` gained a `noAll` flag.** Component opts out; Class /
+  Subclass / Slot / Quality keep the row, because "no filter" is a real
+  choice there and "all components" is not.
+- **One function owns component colour** (`ui.ComponentColor`), read by both
+  the dropdown's selected text and the Post Filter line, so the two cannot
+  drift.
+- **Clear empties the search bar too.** Leaving the query behind meant the
+  next Search ran something the form no longer described.
+- **Import came back**, reversing the removal in 2g. The reasoning changed
+  with the feature set: the Builder used to be somewhere you only LEFT from,
+  and 2j's shift-click made it somewhere you LAND, at which point a
+  hand-typed query had no route into the form.
+- **Anchors, again.** The component value box had a fixed width that ran off
+  the frame; the Saved columns sat at fixed offsets. Both are anchored on two
+  edges now and stretch with the window. That is the same class of bug as
+  2k's off-screen tabs — **fixed offsets into a resizable frame keep
+  producing it**, so prefer two-edge anchors for anything that should fill
+  its space.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

@@ -1519,10 +1519,15 @@ end
 -- The popup is parented to the WINDOW, not to the row, so it draws above
 -- everything and is not clipped by whatever panel the dropdown sits in.
 local openDropdown
-local function MakeDropdown(parent, width, onSelect)
+-- `noAll` suppresses the implicit "All" row. Class / Subclass / Slot /
+-- Quality all want it -- "no filter" is a real choice there. Component does
+-- not: there is no such thing as "all components", and the row only offered
+-- a way to pick nothing.
+local function MakeDropdown(parent, width, onSelect, noAll)
     local dd = {}
     dd.options = {}
     dd.value = nil
+    dd.noAll = noAll and true or false
 
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetWidth(width)
@@ -1567,7 +1572,7 @@ local function MakeDropdown(parent, width, onSelect)
 
     -- Label for the currently selected value, or "All" when nothing is set.
     function dd:Repaint()
-        local text = "All"
+        local text = dd.noAll and "" or "All"
         local i = 1
         while i <= table.getn(dd.options) do
             if dd.options[i].value == dd.value then
@@ -1607,8 +1612,12 @@ local function MakeDropdown(parent, width, onSelect)
 
     function dd:Open()
         if openDropdown and openDropdown ~= dd then openDropdown:Close() end
-        -- "All" plus one row per option; All clears the filter.
-        local entries = { { text = "All", value = nil } }
+        -- "All" plus one row per option; All clears the filter -- unless
+        -- this dropdown opted out of it.
+        local entries = {}
+        if not dd.noAll then
+            table.insert(entries, { text = "All", value = nil })
+        end
         local i = 1
         while i <= table.getn(dd.options) do
             table.insert(entries, dd.options[i])
@@ -2094,6 +2103,23 @@ function ui.BuildBuyTab()
     catScroll:Hide()
     ui.buyCatScroll = catScroll
 
+    -- The bordered well the stock filter list sits in. Parented to the panel
+    -- and raised/lowered with the tree, so it cannot linger in Advanced.
+    local catWell = CreateFrame("Frame", nil, panel)
+    catWell:SetPoint("TOPLEFT", catScroll, "TOPLEFT", -6, 6)
+    catWell:SetPoint("BOTTOMRIGHT", catScroll, "BOTTOMRIGHT", 24, -6)
+    catWell:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    catWell:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    catWell:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    catWell:SetFrameLevel(panel:GetFrameLevel())
+    catWell:Hide()
+    ui.buyCatWell = catWell
+
     ui.buyCatRows = {}
     ui.buyCatExpanded = {}
     ui.GrowCatRows = function(n)
@@ -2108,11 +2134,30 @@ function ui.BuildBuyTab()
             else
                 row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
             end
+            -- Blizzard's filter list gives every TOP-LEVEL category a plate
+            -- of its own and leaves subcategories as bare indented text. The
+            -- plate is drawn per row and hidden on child rows by the paint,
+            -- so one row pool serves both.
+            local plate = row:CreateTexture(nil, "BACKGROUND")
+            plate:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            plate:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            plate:SetTexture(0.18, 0.15, 0.10, 0.85)
+            row.plate = plate
+            -- The selected category's blue bar, exactly what the stock list
+            -- uses to say "this is the one you are browsing".
+            local sel = row:CreateTexture(nil, "ARTWORK")
+            sel:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            sel:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+            sel:SetBlendMode("ADD")
+            sel:SetVertexColor(0.25, 0.45, 0.95)
+            sel:Hide()
+            row.selTex = sel
             local lbl = row:CreateFontString(nil, "OVERLAY",
                 "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
-            -- No width constraint; the paint clips (same rule as the
-            -- sidebar rows and for the same wrap-onto-the-next-row reason).
+            lbl:SetPoint("LEFT", row, "LEFT", 8, 0)
+            -- No width constraint; the paint clips (same wrap-onto-the-next-
+            -- row reason as everywhere else in this file).
             lbl:SetJustifyH("LEFT")
             row.label = lbl
             row:SetScript("OnClick", function() ui.OnCatClick(row.entry) end)
@@ -2149,14 +2194,14 @@ function ui.BuildBuyTab()
     lvlLbl:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 206, 2)
     lvlLbl:SetText("Level Range")
     ui.buyLvlLbl = lvlLbl
-    ui.buyMinLevel = MakeNumBox(panel, 34)
+    ui.buyMinLevel = MakeNumBox(panel, 44)
     ui.buyMinLevel:SetPoint("TOPLEFT", box, "TOPRIGHT", 12, 0)
     local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 4, 0)
+    lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 6, 0)
     lvlDash:SetText("-")
     ui.buyLvlDash = lvlDash
-    ui.buyMaxLevel = MakeNumBox(panel, 34)
-    ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 4, 0)
+    ui.buyMaxLevel = MakeNumBox(panel, 44)
+    ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 6, 0)
 
     local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     qLbl:SetPoint("BOTTOMLEFT", ui.buyMaxLevel, "TOPRIGHT", 12, 2)
@@ -2352,15 +2397,16 @@ ui.GrowBuyRows = function(n)
     end)
     ui.buyBidBtn = bidBtn
 
-    ui.buyBidBox = MakeMoneyBox(panel, 104)
-    ui.buyBidBox:SetPoint("RIGHT", bidBtn, "LEFT", -8, 0)
-    -- MakeMoneyBox wires OnTextChanged to the SELL tab's refresh; this box is
-    -- on the Buy tab, so drop that or every keystroke repaints Sell.
-    ui.buyBidBox:SetScript("OnTextChanged", nil)
+    -- The same g/s/c triplet the Sell tab uses, coin art and all, rather than
+    -- one plain box: a price should read the same everywhere in the window.
+    -- MakeMoneyGSC emulates GetText/SetText/ClearFocus, so SetMoneyBox and
+    -- every existing caller keep working against it untouched.
     local bidEntryLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    bidEntryLbl:SetPoint("RIGHT", ui.buyBidBox, "LEFT", -5, 0)
+    bidEntryLbl:SetPoint("RIGHT", bidBtn, "LEFT", -(PRICE_GSC_W + 4), 0)
     bidEntryLbl:SetText("Bid")
     ui.buyBidEntryLbl = bidEntryLbl
+    ui.buyBidBox = MakeMoneyGSC(panel, nil)
+    ui.buyBidBox:Attach(bidEntryLbl, 6, 0)
 
     -- Your money. Repainted on PLAYER_MONEY and whenever the tab is shown.
     ui.buyMoney = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2473,27 +2519,41 @@ function ui.BuildSavedSearches(panel, rowLeft)
     f:Hide()
     ui.buySaved = f
 
-    local function column(title, x, hint)
-        local h = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        h:SetPoint("TOPLEFT", f, "TOPLEFT", x, 0)
+    -- Two columns that SPLIT the frame rather than sitting at fixed offsets:
+    -- left half and right half, each stretching with the window. The old
+    -- fixed 0 / 262 left a dead gap on a wide window and overlapped on a
+    -- narrow one.
+    local colL = CreateFrame("Frame", nil, f)
+    colL:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
+    colL:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -8, 0)
+    local colR = CreateFrame("Frame", nil, f)
+    colR:SetPoint("TOPLEFT", f, "TOP", 8, 0)
+    colR:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    ui.savedColL, ui.savedColR = colL, colR
+
+    local function column(parentCol, title, hint)
+        local h = parentCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        h:SetPoint("TOPLEFT", parentCol, "TOPLEFT", 0, 0)
         h:SetText(title)
         h:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-        local sub = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        sub:SetPoint("TOPLEFT", f, "TOPLEFT", x, -14)
+        local sub = parentCol:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        sub:SetPoint("TOPLEFT", parentCol, "TOPLEFT", 0, -14)
         sub:SetText(hint)
         return h
     end
-    column("RECENT", 0, "right-click to save")
-    column("FAVORITES", 262, "right-click for options")
+    column(colL, "RECENT", "right-click to save")
+    column(colR, "FAVORITES", "right-click for options")
 
     -- One row builder for both columns; `which` tags the row so the click
     -- handlers know which list they are looking at.
-    local function makeRows(store, x, which)
+    local function makeRows(store, col, which)
         local i = 1
         while i <= SAVED_ROWS do
-            local r = CreateFrame("Button", nil, f)
-            r:SetWidth(250); r:SetHeight(SAVED_ROW_H)
-            r:SetPoint("TOPLEFT", f, "TOPLEFT", x, -30 - (i - 1) * SAVED_ROW_H)
+            local r = CreateFrame("Button", nil, col)
+            r:SetHeight(SAVED_ROW_H)
+            -- Both edges anchored, so a row fills its column at any width.
+            r:SetPoint("TOPLEFT", col, "TOPLEFT", 0, -30 - (i - 1) * SAVED_ROW_H)
+            r:SetPoint("TOPRIGHT", col, "TOPRIGHT", 0, -30 - (i - 1) * SAVED_ROW_H)
             r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fs:SetPoint("LEFT", r, "LEFT", 2, 0)
@@ -2519,8 +2579,8 @@ function ui.BuildSavedSearches(panel, rowLeft)
     end
     ui.savedRecentRows = {}
     ui.savedFavRows = {}
-    makeRows(ui.savedRecentRows, 0, "recent")
-    makeRows(ui.savedFavRows, 262, "fav")
+    makeRows(ui.savedRecentRows, colL, "recent")
+    makeRows(ui.savedFavRows, colR, "fav")
 
     -- The favorite context menu. One frame, repositioned onto whichever row
     -- was right-clicked -- three buttons is not worth a pool.
@@ -2591,7 +2651,9 @@ function ui.OnSavedClick(row, button)
         else
             ui.savedMenuIndex = row.listIndex
             ui.savedMenu:ClearAllPoints()
-            ui.savedMenu:SetPoint("TOPLEFT", row, "TOPRIGHT", -40, 4)
+            -- Opens to the row's LEFT so it never covers the query it is
+            -- acting on -- it used to overlap the favourites text.
+            ui.savedMenu:SetPoint("TOPRIGHT", row, "TOPLEFT", -4, 4)
             ui.savedMenu:Show()
         end
         return
@@ -2677,8 +2739,8 @@ function ui.BuildFilterBuilder(panel, rowLeft)
         return c
     end
 
-    local LX, RXX = 0, 250        -- the form's two columns
-    local DDW = 116
+    local LX, RXX = 0, 330        -- the form's two columns
+    local DDW = 190               -- form control width (concept proportions)
 
     -- ---- Blizzard-side filters ----------------------------------------
     header("AUCTION HOUSE FILTER", LX, 0)
@@ -2698,14 +2760,14 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     ui.fbExact = check("Exact match", LX + 62, -42)
 
     label("Level", LX, -70)
-    ui.fbMinLevel = MakeNumBox(f, 32, function() ui.RefreshBuilder() end)
+    ui.fbMinLevel = MakeNumBox(f, 84, function() ui.RefreshBuilder() end)
     ui.fbMinLevel:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -67)
     local dash = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 4, 0)
+    dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 7, 0)
     dash:SetText("\226\128\147")
     dash:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.fbMaxLevel = MakeNumBox(f, 32, function() ui.RefreshBuilder() end)
-    ui.fbMaxLevel:SetPoint("LEFT", dash, "RIGHT", 4, 0)
+    ui.fbMaxLevel = MakeNumBox(f, 84, function() ui.RefreshBuilder() end)
+    ui.fbMaxLevel:SetPoint("LEFT", dash, "RIGHT", 7, 0)
 
     label("Class", LX, -94)
     ui.fbClass = MakeDropdown(f, DDW, function()
@@ -2744,12 +2806,17 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     compLbl:SetText("Component")
     compLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    ui.fbComponent = MakeDropdown(f, 116, function() ui.RefreshBuilder() end)
+    ui.fbComponent = MakeDropdown(f, 116, function() ui.RefreshBuilder() end,
+        true)   -- no "All" row: there is no such thing as all components
     ui.fbComponent.button:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 74, -19)
+    ui.fbComponent.button:SetWidth(126)
 
     local cvBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    cvBox:SetWidth(210); cvBox:SetHeight(18)
+    cvBox:SetHeight(18)
+    -- BOTH edges anchored: a fixed width ran off the frame and the box was
+    -- clipped to a pair of brackets at the right edge.
     cvBox:SetPoint("TOPLEFT", ui.fbComponent.button, "TOPRIGHT", 10, -1)
+    cvBox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -20)
     cvBox:SetAutoFocus(false)
     cvBox:SetScript("OnEscapePressed", function() cvBox:ClearFocus() end)
     cvBox:SetScript("OnEnterPressed", function() ui.BuilderAddComponent() end)
@@ -2805,22 +2872,26 @@ function ui.BuildFilterBuilder(panel, rowLeft)
         b:Hide()
         return b
     end
-    -- Right to left: Clear, + OR, Build, Search -- so on screen they read
-    -- Search | Build | + OR | Clear, then the window's Bid / Buyout / Close.
+    -- Right to left: Clear, Import, Build, Search -- so on screen they read
+    -- Search | Build > | Import | Clear, then the window's Bid / Buyout /
+    -- Close.
     --
-    -- Import is deliberately absent: it was removed at the owner's explicit
-    -- request in the previous pass, along with ui.BuilderImport. The button
-    -- still appears in the concept PNG, which predates that decision.
+    -- Import is back. It was dropped when the Builder was somewhere you only
+    -- ever LEFT from; now that a shift-click in Saved Searches lands you in
+    -- it, a query typed by hand has no other route into the form.
     local bClear = action("Clear", 54, ui.buyBidEntryLbl,
         function() ui.BuilderClear() end)
-    local bOr = action("+ OR", 52, bClear, function() ui.BuilderExport(true) end)
+    local bImport = action("Import", 60, bClear,
+        function() ui.BuilderImport() end)
+    local bOr = action("+ OR", 52, bImport, function() ui.BuilderExport(true) end)
     local bBuild = action("Build >", 66, bOr, function() ui.BuilderExport() end)
     local bSearch = action("Search", 62, bBuild, function() ui.BuilderSearch() end)
     ui.TintButton(bBuild, 0.62, 0.44, 0.86)
     ui.fbSearchBtn = bSearch
     ui.fbBuildBtn = bBuild
+    ui.fbImportBtn = bImport
     -- Raised and lowered with the Builder view by SetBuyView.
-    ui.fbActionBtns = { bSearch, bBuild, bOr, bClear }
+    ui.fbActionBtns = { bSearch, bBuild, bOr, bImport, bClear }
 
     ui.BuilderClear()
 end
@@ -2896,10 +2967,36 @@ function ui.BuilderSetTerm(t)
     ui.RefreshBuilder()
 end
 
+-- Load the search bar back into the form.
+--
+-- The form edits ONE term, so a multi-term query loads its FIRST and SAYS so.
+-- Quietly loading term 1 would be the worst option: you would edit what
+-- looked like your whole query and Build something narrower.
+function ui.BuilderImport()
+    if not ui.buyQueryBox then return end
+    local text = util.Trim(ui.buyQueryBox:GetText() or "")
+    local terms = A.buy.ParseQuery(text)
+    ui.BuilderSetTerm(terms[1])
+    local n = table.getn(terms)
+    if n > 1 then
+        ui.fbNote:SetText("Loaded term 1 of " .. n
+            .. " \226\128\148 the other " .. (n - 1)
+            .. " are not shown here, and Build will replace them.")
+        ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+    else
+        ui.fbNote:SetText("Loaded from the search box.")
+        ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+end
+
 function ui.BuilderClear()
     ui.BuilderSetTerm(nil)
     if ui.fbNote then ui.fbNote:SetText("") end
     if ui.fbCompValue then ui.fbCompValue:SetText("") end
+    -- Clear the SEARCH BAR too. Leaving the query behind after emptying the
+    -- form is the worst of both: the next Search runs the old query while the
+    -- form in front of you says something else entirely.
+    if ui.buyQueryBox then ui.buyQueryBox:SetText("") end
 end
 
 -- ---- the component / post-filter system ---------------------------------
@@ -2914,6 +3011,22 @@ end
 -- and drawn as inert. A component that silently did nothing would be
 -- indistinguishable from a broken filter, which is the exact failure this
 -- addon keeps having to fix.
+-- A component's colour, used BOTH by the dropdown's selected text and by its
+-- line in the Post Filter list. One source, so the two can never disagree
+-- about what a tooltip clause looks like.
+function ui.ComponentColor(kind)
+    if kind == "and" or kind == "or" or kind == "not" then
+        return 1.00, 0.48, 0.48          -- combinators: red
+    elseif kind == "tooltip" then
+        return 0.79, 0.63, 1.00          -- tooltip: violet
+    elseif kind == "max-unit-buy" or kind == "min-unit-buy" then
+        return 0.50, 0.82, 1.00          -- price bounds: blue
+    elseif ui.PENDING_COMPONENTS and ui.PENDING_COMPONENTS[kind] then
+        return 0.37, 0.33, 0.25          -- not wired up yet: dim
+    end
+    return C.text[1], C.text[2], C.text[3]
+end
+
 ui.PENDING_COMPONENTS = {
     ["item"]              = true,
     ["min-level"]         = true,
@@ -3008,11 +3121,14 @@ local function PaintPostFilter()
         local e = list[i]
         if e then
             local text, note
+            local cr, cg, cb = ui.ComponentColor(e.kind)
+            local hex = string.format("|cff%02x%02x%02x",
+                math.floor(cr * 255), math.floor(cg * 255), math.floor(cb * 255))
             if e.kind == "and" or e.kind == "or" or e.kind == "not" then
-                text = "|cffff7a7a" .. e.kind .. "|r"
+                text = hex .. e.kind .. "|r"
                 note = ""
             elseif e.kind == "tooltip" then
-                text = "|cffc9a0ff" .. e.kind .. ":|r " .. tostring(e.value)
+                text = hex .. e.kind .. ":|r " .. tostring(e.value)
                 local needles = A.buy.TooltipNeedles(e.value)
                 if table.getn(needles) > 1 then
                     note = "  |cff8d7d5c\226\134\146 or \226\128\156"
@@ -3022,10 +3138,10 @@ local function PaintPostFilter()
                 end
             elseif ui.PENDING_COMPONENTS[e.kind] then
                 -- Drawn dim and labelled, because it does not filter yet.
-                text = "|cff5f5340" .. e.kind .. ": " .. tostring(e.value) .. "|r"
+                text = hex .. e.kind .. ": " .. tostring(e.value) .. "|r"
                 note = "  |cffd08050not wired up yet \226\128\148 ignored|r"
             else
-                text = "|cff7fd0ff" .. e.kind .. ":|r "
+                text = hex .. e.kind .. ":|r "
                     .. util.FormatMoney(e.value, true)
                 note = "  |cff8d7d5cper item|r"
             end
@@ -3074,11 +3190,16 @@ function ui.RefreshBuilder()
     -- DIM, not disable: EditBox has no SetEnabled on 1.12 (that is a Button
     -- method), and calling one would error the moment a combinator was
     -- picked. SetTextColor comes from FontInstance and is safe here.
-    if ComponentTakesValue(ui.fbComponent:GetValue()) then
+    local compKind = ui.fbComponent:GetValue()
+    if ComponentTakesValue(compKind) then
         ui.fbCompValue:SetTextColor(C.text[1], C.text[2], C.text[3])
     else
         ui.fbCompValue:SetTextColor(0.42, 0.38, 0.30)
     end
+    -- The dropdown's selected text takes the component's own colour, so what
+    -- you are about to add is identifiable before you add it.
+    local cfs = ui.fbComponent.button and ui.fbComponent.button:GetFontString()
+    if cfs then cfs:SetTextColor(ui.ComponentColor(compKind)) end
     PaintPostFilter()
 
     local term = ui.BuilderTerm()
@@ -3146,7 +3267,8 @@ local function BitsFor(mode)
     return { ui.buyNameLbl, ui.buyBox, ui.buyLvlLbl, ui.buyMinLevel,
              ui.buyLvlDash, ui.buyMaxLevel, ui.buyQualLbl,
              ui.buyQuality and ui.buyQuality.button, ui.buyUsable,
-             ui.buyUsableLbl, ui.buyAdvBtn, ui.buyBrowseHdr, ui.buyCatScroll }
+             ui.buyUsableLbl, ui.buyAdvBtn, ui.buyBrowseHdr,
+             ui.buyCatWell, ui.buyCatScroll }
 end
 
 local function ShowBits(list, on)
@@ -3382,28 +3504,41 @@ function ui.UpdateCatTree()
         local e = (i <= vis) and flat[i + offset] or nil
         if e then
             row.entry = e
-            -- The +/- fold glyph and the depth indent live in the label
-            -- text itself: one FontString per row keeps the rows cheap.
-            local text
+            -- Blizzard's shape: TOP-LEVEL rows get a plate, children are bare
+            -- indented text, and NO +/- glyph anywhere -- a category being
+            -- expanded is shown by it being highlighted with its children
+            -- visible beneath it, which is what the stock list does.
+            local text, plated
             if e.kind == "all" then
-                text = e.name
+                text, plated = e.name, true
             elseif e.kind == "class" then
-                text = (e.expanded and "- " or "+ ") .. e.name
+                text, plated = e.name, true
             elseif e.kind == "sub" then
-                if e.expandable then
-                    text = "   " .. (e.expanded and "- " or "+ ") .. e.name
-                else
-                    text = "   " .. e.name
-                end
+                text, plated = "    " .. e.name, false
             else
-                text = "      " .. e.name
+                text, plated = "         " .. e.name, false
             end
-            ui.SetTextClipped(row.label, text, SIDE_W - 8)
+            if plated then row.plate:Show() else row.plate:Hide() end
+            ui.SetTextClipped(row.label, text, SIDE_W - 14)
+
             local key = ui.CatKey(e)
-            if key == ui.buyCatSel then
-                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            local selected = (key == ui.buyCatSel)
+            -- A parent also lights up while you are inside it, so the path
+            -- you are browsing reads at a glance rather than only the leaf.
+            if not selected and e.kind == "class" and e.expanded then
+                selected = (ui.buyCatClass == e.class)
+            end
+            if selected then
+                row.selTex:Show()
+                row.label:SetTextColor(1, 1, 1)
             else
-                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                row.selTex:Hide()
+                if plated then
+                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                else
+                    row.label:SetTextColor(C.goldDim[1], C.goldDim[2],
+                        C.goldDim[3])
+                end
             end
             row:Show()
         else

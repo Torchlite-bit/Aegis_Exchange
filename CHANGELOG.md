@@ -12,6 +12,60 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.12.0]
+
+Concept-parity polish across the Buy tab. `/reload`.
+
+### Changed
+- **The Bid entry is the Sell tab's gold / silver / copper control**, coin
+  art and all, instead of one plain box that rendered as two stray brackets.
+  A price now reads the same everywhere in the window. The Sell widget is
+  reused rather than reimplemented, and it emulates the plain box's
+  interface, so every existing caller works against it untouched.
+- **The Browse tree looks like Blizzard's filter list.** Top-level categories
+  get a plate; subcategories are bare indented text beneath the expanded
+  parent; the whole list sits in a bordered well; the category you are
+  browsing carries the blue selection bar. **The `+` / `-` fold glyphs are
+  gone** — the stock list shows expansion by highlighting the parent and
+  showing its children, and so does this now.
+- **The Component dropdown no longer offers "All".** There is no such thing
+  as all components; the row only offered a way to pick nothing. Class,
+  Subclass, Slot and Quality keep it, where "no filter" is a real choice.
+- **The selected component's text takes that component's colour**, matching
+  its line in the Post Filter list. Both read the colour from one function,
+  so the dropdown and the list cannot disagree about what a tooltip clause
+  looks like.
+- **Clear empties the search bar too**, not just the form and the clause
+  list. Leaving the query behind meant the next Search ran something the form
+  in front of you no longer described.
+- **Import is back**, and the action row is **Search / Build > / + OR /
+  Import / Clear**, right-aligned on the window's action bar beside Bid /
+  Buyout / Close. It was dropped when the Builder was somewhere you only ever
+  left from; now that a shift-click in Saved Searches lands you in it, a
+  hand-typed query had no route into the form. A multi-term query loads its
+  first term and says so.
+
+### Fixed
+- **The component value box was clipped to a pair of brackets** at the right
+  edge — it had a fixed width that ran off the frame. Both edges are anchored
+  now, so it fills the space it is given at any window width.
+- **Saved Searches columns are equal halves that stretch with the window.**
+  They sat at fixed offsets, leaving a dead gap on a wide window. Rows fill
+  their column.
+- **The favourite context menu opened over the query it was acting on.** It
+  opens to the row's left now.
+- **Level Range boxes** in both the default strip and the Builder were tiny
+  stubs sitting badly against their dash; both are sized to the concept.
+
+### Note on button colour
+The warm red-brown plates are vanilla's own `UIPanelButtonTemplate` art —
+what every stock button looks like without a skin — not a bug or a stray
+tint. The concept's flat dark plates were CSS in an HTML mockup and no
+vanilla template produces them. Deliberate choice: **keep the stock art**,
+since the default view's whole premise is looking like the stock auction
+house, with a subtle accent only on **Advanced** and **Build >** so the two
+non-stock actions read as different.
+
 ## [1.11.0]
 
 Layout pass over the Buy tab, against the approved concept. `/reload`.
@@ -985,6 +1039,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.12.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.11.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.10.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.9.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
