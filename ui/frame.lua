@@ -2040,6 +2040,8 @@ end
 local BUY_ROWS,  BUY_ROW_H  = 11, 20
 local BUY_ROWS_MAX  = 34
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
+-- Post Filter clause rows in the Filter Builder.
+local FB_POST_ROWS = 9
 local SIDE_ROWS_MAX = 38
 local SIDE_W = 158    -- sidebar width
 
@@ -2304,7 +2306,8 @@ ui.GrowBuySideRows = function(n)
     -- Builder sharing this space rather than a fourth top-level sub-tab;
     -- Saved Searches is 2c and slots in here without rework.
     ui.buyViewBtns = {}
-    local views = { { "Results", "results" }, { "Builder", "builder" } }
+    local views = { { "Results", "results" }, { "Saved", "saved" },
+                    { "Builder", "builder" } }
     local prevView = nil
     local vi = 1
     while vi <= table.getn(views) do
@@ -2442,6 +2445,7 @@ ui.GrowBuyRows = function(n)
     ui.buyMoney:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     ui.BuildFilterBuilder(panel, rowLeft)
+    ui.BuildSavedSearches(panel, rowLeft)
     ui.SetBuyView("results")
 
     -- Mode: default (Blizzlike) unless this character last used Advanced.
@@ -2468,9 +2472,17 @@ end
 function ui.SetBuyView(name)
     ui.buyView = name
     local builder = (name == "builder")
+    local saved   = (name == "saved")
+    -- Anything that is not the results table takes the same space, so both
+    -- overlay panels hide the results furniture below.
+    local overlay = builder or saved
     if ui.buyBuilder then
         if builder then ui.buyBuilder:Show() else ui.buyBuilder:Hide() end
     end
+    if ui.buySaved then
+        if saved then ui.buySaved:Show() else ui.buySaved:Hide() end
+    end
+    if saved then ui.RefreshSavedSearches() end
     -- Everything belonging to the results view hides together. buyStatus is
     -- in the list because it paints at the same height as the form's first
     -- header -- "7 match(es) ..." showing through "AUCTION HOUSE FILTER" was
@@ -2481,17 +2493,17 @@ function ui.SetBuyView(name)
     local i = 1
     while i <= table.getn(resultsBits) do
         local w = resultsBits[i]
-        if w then if builder then w:Hide() else w:Show() end end
+        if w then if overlay then w:Hide() else w:Show() end end
         i = i + 1
     end
     if ui.buyHeaders then
         for _, h in pairs(ui.buyHeaders) do
-            if builder then h:Hide() else h:Show() end
+            if overlay then h:Hide() else h:Show() end
         end
     end
     local ri = 1
     while ri <= table.getn(ui.buyRows or {}) do
-        if builder then ui.buyRows[ri]:Hide() end
+        if overlay then ui.buyRows[ri]:Hide() end
         ri = ri + 1
     end
     if ui.buyViewBtns then
@@ -2502,7 +2514,195 @@ function ui.SetBuyView(name)
             bi = bi + 1
         end
     end
-    if not builder then ui.UpdateBuyList() end
+    if not overlay then ui.UpdateBuyList() end
+end
+
+-- ---------------------------------------------------------------------------
+-- Saved Searches (ROADMAP 2j): Recent | Favorites
+--
+-- Two columns sharing the results area. Recent is fed by every search you
+-- run; Favorites is what you promoted out of it and ordered yourself.
+--
+-- Mouse language, matching the spec:
+--   left-click        run it
+--   shift-left-click  load it into the Filter Builder instead of running
+--   right-click       on a recent  -> promote straight to Favorites
+--                     on a favorite-> Move Up / Move Down / Delete menu
+-- ---------------------------------------------------------------------------
+
+local SAVED_ROWS, SAVED_ROW_H = 12, 17
+
+function ui.BuildSavedSearches(panel, rowLeft)
+    if ui.buySaved then return end
+
+    local f = CreateFrame("Frame", "AegisExchangeSavedSearches", panel)
+    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
+    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 40)
+    f:Hide()
+    ui.buySaved = f
+
+    local function column(title, x, hint)
+        local h = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        h:SetPoint("TOPLEFT", f, "TOPLEFT", x, 0)
+        h:SetText(title)
+        h:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        local sub = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        sub:SetPoint("TOPLEFT", f, "TOPLEFT", x, -14)
+        sub:SetText(hint)
+        return h
+    end
+    column("RECENT", 0, "right-click to save")
+    column("FAVORITES", 262, "right-click for options")
+
+    -- One row builder for both columns; `which` tags the row so the click
+    -- handlers know which list they are looking at.
+    local function makeRows(store, x, which)
+        local i = 1
+        while i <= SAVED_ROWS do
+            local r = CreateFrame("Button", nil, f)
+            r:SetWidth(250); r:SetHeight(SAVED_ROW_H)
+            r:SetPoint("TOPLEFT", f, "TOPLEFT", x, -30 - (i - 1) * SAVED_ROW_H)
+            r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", r, "LEFT", 2, 0)
+            fs:SetJustifyH("LEFT")
+            r.label = fs
+            r.which = which
+            r.idx = i
+            r:SetScript("OnClick", function()
+                ui.OnSavedClick(r, arg1)
+            end)
+            r:SetScript("OnEnter", function()
+                if r.full then
+                    GameTooltip:SetOwner(r, "ANCHOR_RIGHT")
+                    GameTooltip:SetText(r.full, 1, 1, 1, 1, 1)
+                    GameTooltip:Show()
+                end
+            end)
+            r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            r:Hide()
+            store[i] = r
+            i = i + 1
+        end
+    end
+    ui.savedRecentRows = {}
+    ui.savedFavRows = {}
+    makeRows(ui.savedRecentRows, 0, "recent")
+    makeRows(ui.savedFavRows, 262, "fav")
+
+    -- The favorite context menu. One frame, repositioned onto whichever row
+    -- was right-clicked -- three buttons is not worth a pool.
+    local menu = CreateFrame("Frame", "AegisExchangeSavedMenu", ui.frame)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetWidth(104); menu:SetHeight(58)
+    menu:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    menu:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    menu:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    menu:EnableMouse(true)
+    menu:Hide()
+    ui.savedMenu = menu
+
+    local function menuItem(text, order, fn)
+        local b = CreateFrame("Button", nil, menu)
+        b:SetHeight(16)
+        b:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4 - (order - 1) * 16)
+        b:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -4, -4 - (order - 1) * 16)
+        b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        b.aegisNoSkin = true
+        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", b, "LEFT", 4, 0)
+        fs:SetText(text)
+        b.label = fs
+        b:SetScript("OnClick", function() fn(); ui.HideSavedMenu() end)
+        return b
+    end
+    menuItem("Move Up", 1, function()
+        if ui.savedMenuIndex then
+            A.buy.MoveFavorite(ui.savedMenuIndex, -1)
+            ui.RefreshSavedSearches()
+        end
+    end)
+    menuItem("Move Down", 2, function()
+        if ui.savedMenuIndex then
+            A.buy.MoveFavorite(ui.savedMenuIndex, 1)
+            ui.RefreshSavedSearches()
+        end
+    end)
+    local del = menuItem("Delete", 3, function()
+        if ui.savedMenuIndex then
+            A.buy.RemoveFavorite(ui.savedMenuIndex)
+            ui.RefreshSavedSearches()
+        end
+    end)
+    del.label:SetTextColor(0.90, 0.39, 0.39)
+end
+
+function ui.HideSavedMenu()
+    if ui.savedMenu then ui.savedMenu:Hide() end
+    ui.savedMenuIndex = nil
+end
+
+-- Left-click runs, shift-left-click loads into the builder, right-click
+-- either promotes (recent) or opens the reorder menu (favorite).
+function ui.OnSavedClick(row, button)
+    if not row.full then return end
+    if button == "RightButton" then
+        if row.which == "recent" then
+            if A.buy.AddFavorite(row.full) then
+                ui.RefreshSavedSearches()
+            end
+        else
+            ui.savedMenuIndex = row.listIndex
+            ui.savedMenu:ClearAllPoints()
+            ui.savedMenu:SetPoint("TOPLEFT", row, "TOPRIGHT", -40, 4)
+            ui.savedMenu:Show()
+        end
+        return
+    end
+    ui.HideSavedMenu()
+    if IsShiftKeyDown and IsShiftKeyDown() then
+        -- Load it for editing rather than running it: the whole point of a
+        -- saved search you want to tweak.
+        ui.BuilderSetTerm(A.buy.ParseQuery(row.full)[1])
+        ui.SetBuyView("builder")
+        return
+    end
+    if ui.buyQueryBox then ui.buyQueryBox:SetText(row.full) end
+    ui.SetBuyView("results")
+    ui.DoBuySearch()
+end
+
+function ui.RefreshSavedSearches()
+    if not ui.buySaved then return end
+    local function paint(rows, list, which)
+        local i = 1
+        while i <= table.getn(rows) do
+            local r = rows[i]
+            local q = list[i]
+            if q then
+                r.full = q
+                r.listIndex = i
+                local prefix = (which == "fav") and "|cffffcc00*|r " or ""
+                -- Clip, never wrap -- these rows are 17px and a query is
+                -- long. The full text is on the hover tooltip.
+                ui.SetTextClipped(r.label, prefix .. q, 244)
+                r:Show()
+            else
+                r.full = nil
+                r.listIndex = nil
+                r:Hide()
+            end
+            i = i + 1
+        end
+    end
+    paint(ui.savedRecentRows, A.buy.Recent(), "recent")
+    paint(ui.savedFavRows, A.buy.Favorites(), "fav")
+    ui.HideSavedMenu()
 end
 
 function ui.BuildFilterBuilder(panel, rowLeft)
@@ -2601,36 +2801,75 @@ function ui.BuildFilterBuilder(panel, rowLeft)
 
     ui.fbUsable = check("Usable by me", LX + 62, -186)
 
-    -- ---- Post-filters --------------------------------------------------
-    header("EXTRA FILTERS", RXX, 0)
-
-    ui.fbBuyout = check("Buyout only", RXX, -20)
-    ui.fbStack  = check("Full stacks only", RXX, -42)
-
+    -- Term FLAGS stay on this side with the rest of the form: they are
+    -- one-of-a-kind switches, not repeatable clauses.
+    ui.fbBuyout = check("Buyout only", LX + 62, -206)
+    ui.fbStack  = check("Full stacks only", LX + 62, -226)
     local ssLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ssLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -70)
+    ssLbl:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 6, -250)
     ssLbl:SetText("Stack size")
     ssLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.fbStackSize = MakeNumBox(f, 34, function() ui.RefreshBuilder() end)
     ui.fbStackSize:SetPoint("LEFT", ssLbl, "RIGHT", 6, 0)
-    local ssNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ssNote:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -88)
-    ssNote:SetText("exact size; beats 'full stacks'")
 
-    local ttLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ttLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -114)
-    ttLbl:SetText("Tooltip contains")
-    ttLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    local ttBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    ttBox:SetWidth(DDW); ttBox:SetHeight(18)
-    ttBox:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 4, -132)
-    ttBox:SetAutoFocus(false)
-    ttBox:SetScript("OnEscapePressed", function() ttBox:ClearFocus() end)
-    ttBox:SetScript("OnEnterPressed", function()
-        ttBox:ClearFocus(); ui.RefreshBuilder()
-    end)
-    ttBox:SetScript("OnTextChanged", function() ui.RefreshBuilder() end)
-    ui.fbTooltip = ttBox
+    -- ---- Component / post-filter system --------------------------------
+    -- Pick a component, type a value, press Enter: the clause is appended to
+    -- the list below. Stacked clauses are ANDed; `and`/`or`/`not` are there
+    -- to override that, not to be typed for the common case.
+    header("POST FILTER", RXX, 0)
+
+    local compLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    compLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -22)
+    compLbl:SetText("Component")
+    compLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.fbComponent = MakeDropdown(f, 116, function() ui.RefreshBuilder() end)
+    ui.fbComponent.button:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 74, -19)
+
+    local cvBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+    cvBox:SetWidth(150); cvBox:SetHeight(18)
+    cvBox:SetPoint("TOPLEFT", ui.fbComponent.button, "TOPRIGHT", 10, -1)
+    cvBox:SetAutoFocus(false)
+    cvBox:SetScript("OnEscapePressed", function() cvBox:ClearFocus() end)
+    cvBox:SetScript("OnEnterPressed", function() ui.BuilderAddComponent() end)
+    ui.fbCompValue = cvBox
+
+    local addBtn = CreateFrame("Button", "AegisExchangeBuilderAddComponent",
+        f, "UIPanelButtonTemplate")
+    addBtn:SetWidth(46); addBtn:SetHeight(18)
+    addBtn:SetPoint("LEFT", cvBox, "RIGHT", 8, 0)
+    addBtn:SetText("Add")
+    addBtn:SetScript("OnClick", function() ui.BuilderAddComponent() end)
+    ui.fbAddCompBtn = addBtn
+
+    local pfLbl = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    pfLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -46)
+    pfLbl:SetText("Post Filter:")
+
+    -- One clickable row per clause. Clicking removes it, which is the only
+    -- edit the list needs: order is assembled front-to-back anyway.
+    ui.fbPostRows = {}
+    local pi = 1
+    while pi <= FB_POST_ROWS do
+        local r = CreateFrame("Button", nil, f)
+        r:SetHeight(15)
+        r:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 8, -60 - (pi - 1) * 15)
+        r:SetWidth(300)
+        local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", r, "LEFT", 0, 0)
+        fs:SetJustifyH("LEFT")
+        r.label = fs
+        r.idx = pi
+        r:SetScript("OnClick", function() ui.BuilderRemoveComponent(r.idx) end)
+        r:Hide()
+        ui.fbPostRows[pi] = r
+        pi = pi + 1
+    end
+
+    ui.fbPostHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.fbPostHint:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2,
+        -64 - FB_POST_ROWS * 15)
+    ui.fbPostHint:SetJustifyH("LEFT")
 
     -- ---- Preview + actions ---------------------------------------------
     local pvLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -2700,7 +2939,6 @@ function ui.BuilderTerm()
     if minL and not maxL then maxL = minL end
     if maxL and not minL then minL = maxL end
 
-    local tip = util.Trim(ui.fbTooltip:GetText() or "")
     return {
         name       = util.Trim(ui.fbName:GetText() or ""),
         exact      = ui.fbExact:GetChecked() and true or false,
@@ -2714,7 +2952,10 @@ function ui.BuilderTerm()
         class      = ui.fbClass:GetValue(),
         subclass   = ui.fbSubclass:GetValue(),
         slot       = ui.fbSlot:GetValue(),
-        tooltipText = (tip ~= "") and tip or nil,
+        -- Copied, not referenced: BuilderTerm's result is handed to
+        -- TermToQuery and TermsEqual, and a shared table would let either
+        -- mutate the builder's live list.
+        post       = util.CopyList(ui.builderPost),
     }
 end
 
@@ -2731,7 +2972,7 @@ function ui.BuilderSetTerm(t)
     ui.fbStackSize:SetText(t.stackSize and tostring(t.stackSize) or "")
     ui.fbMinLevel:SetText(t.minLevel and tostring(t.minLevel) or "")
     ui.fbMaxLevel:SetText(t.maxLevel and tostring(t.maxLevel) or "")
-    ui.fbTooltip:SetText(t.tooltipText or "")
+    ui.builderPost = util.CopyList(t.post)
 
     ui.fbClass:SetOptions(A.buy.ClassOptions())
     ui.fbClass:SetValue(t.class, true)
@@ -2748,6 +2989,124 @@ end
 function ui.BuilderClear()
     ui.BuilderSetTerm(nil)
     if ui.fbNote then ui.fbNote:SetText("") end
+    if ui.fbCompValue then ui.fbCompValue:SetText("") end
+end
+
+-- ---- the component / post-filter system ---------------------------------
+
+-- What the Component dropdown offers. Only what the engine can actually
+-- honour: an option that silently does nothing is worse than an absent one.
+-- The combinators come first because they are the ones you reach for to
+-- CHANGE the default, and the default (stacking = AND) needs no component.
+local function BuilderComponentOptions()
+    return {
+        { value = "tooltip",      text = "tooltip" },
+        { value = "max-unit-buy", text = "max-unit-buy" },
+        { value = "min-unit-buy", text = "min-unit-buy" },
+        { value = "and",          text = "and" },
+        { value = "or",           text = "or" },
+        { value = "not",          text = "not" },
+    }
+end
+
+-- Does this component need a typed value?
+local function ComponentTakesValue(kind)
+    return kind == "tooltip" or kind == "max-unit-buy"
+        or kind == "min-unit-buy"
+end
+
+-- Append the chosen component to the Post Filter list. This is the Enter key
+-- in the workflow: pick, type, Enter.
+function ui.BuilderAddComponent()
+    if not ui.fbComponent then return end
+    local kind = ui.fbComponent:GetValue()
+    if not kind then
+        ui.fbNote:SetText("Pick a component first.")
+        ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+        return
+    end
+    local raw = util.Trim(ui.fbCompValue:GetText() or "")
+    local value = nil
+    if ComponentTakesValue(kind) then
+        if raw == "" then
+            ui.fbNote:SetText("'" .. kind .. "' needs a value.")
+            ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+            return
+        end
+        if kind == "tooltip" then
+            value = raw
+        else
+            value = util.ParseMoney(raw)
+            if not value or value <= 0 then
+                ui.fbNote:SetText("'" .. kind
+                    .. "' needs a price, like 5g or 50s.")
+                ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+                return
+            end
+        end
+    end
+    ui.builderPost = ui.builderPost or {}
+    table.insert(ui.builderPost, { kind = kind, value = value })
+    ui.fbCompValue:SetText("")
+    ui.fbNote:SetText("")
+    ui.RefreshBuilder()
+end
+
+function ui.BuilderRemoveComponent(i)
+    if not ui.builderPost or not ui.builderPost[i] then return end
+    table.remove(ui.builderPost, i)
+    ui.RefreshBuilder()
+end
+
+-- Paint the Post Filter list, with the live parser feedback beside each
+-- clause. That feedback is the point of the panel: it is where abbreviation
+-- expansion becomes visible, so you can see that "agi" really did become
+-- Agility before you spend a scan on it.
+local function PaintPostFilter()
+    local list = ui.builderPost or {}
+    local i = 1
+    while i <= table.getn(ui.fbPostRows) do
+        local row = ui.fbPostRows[i]
+        local e = list[i]
+        if e then
+            local text, note
+            if e.kind == "and" or e.kind == "or" or e.kind == "not" then
+                text = "|cffff7a7a" .. e.kind .. "|r"
+                note = ""
+            elseif e.kind == "tooltip" then
+                text = "|cffc9a0ff" .. e.kind .. ":|r " .. tostring(e.value)
+                local needles = A.buy.TooltipNeedles(e.value)
+                if table.getn(needles) > 1 then
+                    note = "  |cff8d7d5c\226\134\146 or \226\128\156"
+                        .. needles[2] .. "\226\128\157|r"
+                else
+                    note = ""
+                end
+            else
+                text = "|cff7fd0ff" .. e.kind .. ":|r "
+                    .. util.FormatMoney(e.value, true)
+                note = "  |cff8d7d5cper item|r"
+            end
+            row.label:SetText(text .. note)
+            row:Show()
+        else
+            row:Hide()
+        end
+        i = i + 1
+    end
+    if ui.fbPostHint then
+        local n = table.getn(list)
+        if n == 0 then
+            ui.fbPostHint:SetText("Pick a component, type a value, press Enter.")
+        elseif n == 1 then
+            ui.fbPostHint:SetText("Click a line to remove it.")
+        else
+            -- Say the rule out loud rather than making people infer it.
+            ui.fbPostHint:SetText(
+                "Stacked lines must ALL hold \226\128\148 add 'or' between "
+                .. "two to widen.  Click a line to remove it.")
+        end
+    end
 end
 
 -- Re-apply the class -> subclass -> slot gating, then repaint the preview.
@@ -2764,6 +3123,22 @@ function ui.RefreshBuilder()
     ui.fbSlot:SetEnabled(class ~= nil
         and table.getn(A.buy.SlotOptions(class, subclass)) > 0)
 
+    if table.getn(ui.fbComponent.options or {}) == 0 then
+        ui.fbComponent:SetOptions(BuilderComponentOptions())
+        ui.fbComponent:SetValue("tooltip", true)
+    end
+    -- A combinator takes no value, so dim the box to say so.
+    --
+    -- DIM, not disable: EditBox has no SetEnabled on 1.12 (that is a Button
+    -- method), and calling one would error the moment a combinator was
+    -- picked. SetTextColor comes from FontInstance and is safe here.
+    if ComponentTakesValue(ui.fbComponent:GetValue()) then
+        ui.fbCompValue:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        ui.fbCompValue:SetTextColor(0.42, 0.38, 0.30)
+    end
+    PaintPostFilter()
+
     local term = ui.BuilderTerm()
     local q = A.buy.TermToQuery(term)
     ui.fbPreview:SetText(q ~= "" and q or "(everything)")
@@ -2774,6 +3149,12 @@ end
 
 function ui.BuilderSearch()
     local q = A.buy.TermToQuery(ui.BuilderTerm())
+    -- Force ADVANCED before searching. The builder writes into the query box,
+    -- and only Advanced mode READS that box -- in default mode DoBuySearch
+    -- composes the term from the Name field instead and would silently run a
+    -- different search than the one on screen. The builder is only reachable
+    -- from Advanced in practice, but the two must not be able to disagree.
+    if ui.buyMode ~= "advanced" then ui.SetBuyMode("advanced") end
     if ui.buyQueryBox then ui.buyQueryBox:SetText(q) end
     ui.SetBuyView("results")
     ui.DoBuySearch()
@@ -2938,7 +3319,8 @@ local function BitsFor(mode)
                  ui.buyAddToListBtn, ui.buySideScroll, ui.buyAddBtn,
                  ui.buyRenBtn, ui.buyDelBtn, ui.buyListSearchBtn,
                  ui.buyViewBtns and ui.buyViewBtns[1],
-                 ui.buyViewBtns and ui.buyViewBtns[2] }
+                 ui.buyViewBtns and ui.buyViewBtns[2],
+                 ui.buyViewBtns and ui.buyViewBtns[3] }
     end
     return { ui.buyNameLbl, ui.buyBox, ui.buyLvlLbl, ui.buyMinLevel,
              ui.buyLvlDash, ui.buyMaxLevel, ui.buyQualLbl,
@@ -3067,7 +3449,7 @@ function ui.DefaultSetTerm(t)
         class = t.class, subclass = t.subclass, slot = t.slot,
     } or nil)
 
-    local dropped = (t.tooltipText and t.tooltipText ~= "") or t.exact
+    local dropped = table.getn(t.post or {}) > 0 or t.exact
         or t.buyoutOnly or t.stackOnly or t.stackSize
     if dropped and ui.buyStatus then
         ui.buyStatus:SetText("Extra filters stay in Advanced \226\128\148 "

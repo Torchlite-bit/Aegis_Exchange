@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.9.0)
+# Aegis: Exchange (v1.10.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -75,6 +75,10 @@ changes. But the same box now takes a query language when you want one:
 | `mageweave/stack 20` | stacks of exactly 20 |
 | `mageweave/stack` | the biggest stacks |
 | `container/bag/tooltip/8` | bags whose tooltip mentions **8** |
+| `wristbands/tooltip/+3 stam/tooltip/+3 agi` | BOTH stats on one item |
+| `wristbands/tooltip/+3 stam/or/tooltip/+3 agi` | either stat |
+| `boots/not/tooltip/soulbound` | excludes what the clause matches |
+| `silk cloth/max-unit-buy/5g` | at or under 5g **per item** |
 | `linen;wool;silk` | all three, browsed as one list |
 
 **Categories are the game's own names** — whatever the auction house's own
@@ -115,11 +119,35 @@ so a stack of 20 is comparable to a stack of 1) and **% Mkt** (how this price
 compares to market value — green under, red over).
 
 The one addition to that layout is **Advanced**, top right. It swaps in the
-full query box, your shopping lists and recent searches, and the **Filter
-Builder** — a form for name, level range, class, subclass, slot, quality and
-the extra filters, with the query it builds shown live underneath. **Search**
-runs it, **Build** pushes it into the search box, and **+ OR** appends it to
-what's already there. **< Back** returns to the simple view.
+full query box and three views — **Results**, **Saved**, and **Builder**.
+**< Back** returns to the simple view.
+
+**Saved** is two columns. *Recent* is every search you've run; **right-click**
+one and it jumps straight into *Favorites*. Right-click a favorite for **Move
+Up / Move Down / Delete** — the order is yours and nothing re-sorts it.
+Left-click either column to run it; **shift**-left-click loads it into the
+Builder instead so you can adjust it first.
+
+**Builder** is the form: name, level range, class, subclass, slot, quality on
+the left, and the **Post Filter** on the right. Pick a component, type a
+value, press **Enter**, and the clause is added to the list:
+
+```
+tooltip: +3 stamina
+tooltip: +3 agi
+max-unit-buy: 5g
+```
+
+**Stacked clauses all have to hold** — that's one item carrying both stats,
+under 5g, and you didn't type a single operator to say so. Put **`or`**
+between two clauses to widen instead, or **`not`** before one to exclude it.
+Click any line to remove it. **Search** runs it, **Build** pushes it into the
+search box, **+ OR** appends it as another `;` term.
+
+**Stat names work either way round.** Type `agi` or `Agility`, `stam` or
+`Stamina`, `str`, `int`, `spi` — Aegis looks for both spellings, and the
+Post Filter shows you which other form it will match so you can see it landed
+before spending a scan on it.
 
 Switching carries your search with you in both directions, so you can start
 simple, hit Advanced to add something the plain view can't express, and come
@@ -326,7 +354,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.9.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.10.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

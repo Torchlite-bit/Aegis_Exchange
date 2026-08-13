@@ -438,13 +438,19 @@ the vanilla-vs-later 9/10-value shift can't bite again. `sell.ScanBags` and
 `buy.StackCountFromItemInfo` both route through it; **no caller indexes
 `GetItemInfo` positionally any more**, and the suite runs under both layouts.
 
-### 2c — Saved Searches tab
+### 2c — Saved Searches tab — ✅ **DONE** (v1.10.0, as 2j)
 Favorites and Recent, styled after aux's split-column layout. Hover for a
 formatted tooltip, left-click to run, right-click for a context menu,
 shift-click to copy the query into the search box, shift-right-click to
 append to whatever's already there. No Auto Buy toggle (decided above).
 
-### 2d — Full primitive set + boolean combinators
+### 2d — Full primitive set + boolean combinators — partly **DONE** (v1.10.0)
+`and` / `or` / `not` shipped with the post-filter system in 2i, over the
+clause list rather than as prefix polish notation. What remains here is the
+rest of aux's primitive set (`percent`, `vendor-profit`, `seller`, `left`,
+stat-suffix matching) — the combinator work itself is done.
+
+### 2d (original scope) — Full primitive set + boolean combinators
 Everything from 2a's primitive set generalized under full `and`/`or`/`not`
 prefix-notation combination, plus stat-suffix matching (the
 `+3 stamina/+3 agility` wristband-suffix case) and any remaining aux
@@ -534,6 +540,47 @@ menu, and the component/post-filter builder (stacked entries are ANDed;
 abbreviation expansion. Both need the one parser change already identified:
 `tooltip` must take a single token instead of swallowing the rest of the
 term, so several tooltip clauses can coexist.
+
+### 2i — Post-filter clauses + combinators — ✅ **DONE** (v1.10.0)
+
+The parser change 2g flagged, plus the semantics the owner specified.
+
+- **`tooltip` takes ONE token**, like `quality` and `level`, instead of
+  switching into a sticky mode that swallowed the rest of the term. That is
+  what makes a second tooltip clause possible at all. Tokens split on `/`
+  only, so multi-word values still work and `container/bag/tooltip/8` is
+  untouched. It also retires the "tooltip must be emitted last" rule in
+  `TermToQuery`.
+- **The term carries an ordered `post` list** of clauses and combinators.
+  `buy.CompilePost` folds it **left to right with no precedence**:
+  consecutive clauses AND, an explicit `or`/`and` overrides, `not` is unary
+  over the clause that follows. No precedence table means nothing to
+  memorise, and the builder lists the clauses in the order they apply.
+- **Compiled once per search, not per row.** `TooltipContainsAt` is the
+  expensive call in this addon and a page holds 50 rows, so the expression is
+  built in `CompilePost` and only evaluated in the closure — with
+  short-circuiting, so an `or` that is already satisfied skips a tooltip scan
+  it does not need.
+
+**The correction worth recording:** the original Phase 4 spec asked for
+`stam/agi` inside ONE tooltip value to mean AND. That collided head-on with
+`/` being the term separator. The owner's clarification removed the conflict
+entirely — two stats are two clauses, and stacking already means AND. No
+change to what `/` means, and no existing query changed meaning. Worth
+remembering that the cheapest fix for a syntax collision was to not need the
+syntax.
+
+### 2j — Saved Searches — ✅ **DONE** (v1.10.0)
+
+Recent | Favorites, sharing the results area as a third view. Right-click a
+recent to promote it; right-click a favorite for Move Up / Move Down /
+Delete; left-click runs, shift-left-click loads into the Builder.
+
+Favorites are an **ordered array** in SavedVariables, and every mutator
+preserves that order: promoting appends rather than sorting, re-promoting an
+existing entry is a no-op rather than a jump to the bottom, and the ends of
+the list are walls rather than wrap-arounds. The order is the user's, so
+nothing is allowed to quietly rearrange it.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

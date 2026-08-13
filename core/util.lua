@@ -168,6 +168,29 @@ function util.CopyTable(t)
     return out
 end
 
+-- Copy an ARRAY of small record tables one level deeper than CopyTable: the
+-- array is new AND each element is a new table, so the copy can be edited
+-- without writing through to the original's records.
+--
+-- Used for post-filter clause lists, which are handed between the builder's
+-- live state and parsed terms; sharing them let an edit in one show up in the
+-- other. nil in, empty out -- callers treat "no clauses" and "{}" alike.
+function util.CopyList(t)
+    local out = {}
+    if not t then return out end
+    local i = 1
+    while i <= table.getn(t) do
+        local e = t[i]
+        if type(e) == "table" then
+            out[i] = util.CopyTable(e)
+        else
+            out[i] = e
+        end
+        i = i + 1
+    end
+    return out
+end
+
 -- Look for `value` in array `t`. Returns (true, index) or (false, nil).
 function util.ArrayContains(t, value)
     local n = table.getn(t)

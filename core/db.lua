@@ -108,6 +108,10 @@ local function DefaultAccountDB()
         shopping = {
             lists  = {},   -- array of { name = "...", items = { "Silk Cloth", ... } }
             recent = {},   -- recent search terms, most-recent first (capped)
+            -- Saved Searches: queries you promoted out of `recent`. An ORDERED
+            -- array, not a set -- the order is the user's, maintained by the
+            -- favorite's Move Up / Move Down menu, so it must survive a save.
+            favorites = {},
         },
         -- Crafting (Crafting tab): recipes captured from the profession window,
         -- each with its reagents, so you can shop the mats at the AH.

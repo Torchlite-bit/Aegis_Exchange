@@ -12,6 +12,53 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.10.0]
+
+Builds out the **Advanced** side: saved searches, and a post-filter system
+that can hold more than one clause. `/reload`.
+
+### Added
+- **Saved Searches**, a third view beside Results and Builder. *Recent* and
+  *Favorites*, side by side. **Right-click a recent** and it goes straight
+  into Favorites — no dialog. **Right-click a favorite** for **Move Up /
+  Move Down / Delete**. Left-click either to run it; **shift**-left-click
+  loads it into the Builder instead so you can edit before searching.
+
+  Favorites are yours to order, so nothing re-sorts them, promoting the same
+  query twice is a no-op rather than a reshuffle, and the order persists.
+- **A component / post-filter system in the Builder.** Pick a component, type
+  a value, press Enter, and the clause joins a list:
+
+  ```
+  tooltip: +3 stamina
+  tooltip: +3 agi
+  max-unit-buy: 5g
+  ```
+
+  **Stacked clauses must all hold** — that is one item carrying both stats,
+  under 5g, without typing a single operator. `or` between two clauses widens
+  instead; `not` before one excludes it. Evaluation is strictly left to right
+  with no precedence, so `A or B and C` is `(A or B) and C` and there is no
+  table to memorise. Click any line to remove it.
+- **`max-unit-buy` / `min-unit-buy`** as query components — a bound on the
+  price **per item**, so a stack of 20 compares honestly against a stack of 1.
+- **Stat abbreviations match either way round.** `agi` finds "Agility",
+  `Stamina` finds "stam", and the same for `str`, `int`, `spi`. The Post
+  Filter shows which other spelling it will look for, so you can see the
+  expansion landed before spending a scan on it.
+
+### Changed
+- **`tooltip` now takes exactly one token**, like `quality` and `level`,
+  instead of swallowing everything after it. That is what makes a second
+  tooltip clause possible at all — `tooltip/+3 stam/tooltip/+3 agi` used to
+  collapse into the single nonsense string `"+3 stam tooltip +3 agi"` and
+  match nothing.
+
+  Nothing else changes: tokens split on `/` only, so a multi-word value like
+  `tooltip/+3 stamina` is still one token, and `container/bag/tooltip/8`
+  behaves exactly as before. It also retires the old "tooltip must be emitted
+  last" rule in the query generator, since nothing can be swallowed any more.
+
 ## [1.9.0]
 
 Redesigns the Buy tab around a **Blizzlike default view**, with everything
@@ -887,6 +934,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.10.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.9.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.8.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.7.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
