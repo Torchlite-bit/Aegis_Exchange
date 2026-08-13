@@ -1424,6 +1424,59 @@ local function MakeMoneyBox(parent, width)
     return e
 end
 
+-- A read-only money READOUT: "6 (gold) 75 (silver) 43 (copper)", the way the
+-- stock money frame prints it, rather than the "6g 75s 43c" text shorthand.
+--
+-- Laid out right-to-left from an anchor so the copper coin lands on a fixed
+-- point and the gold figure grows leftwards -- a total that gains a digit
+-- must not shove the rest of the bar sideways.
+local MONEY_COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
+local function MakeMoneyDisplay(parent)
+    local m = {}
+    local function part(coin, rightOf)
+        local tex = parent:CreateTexture(nil, "OVERLAY")
+        tex:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
+        local u = MONEY_COIN_U[coin]
+        tex:SetTexCoord(u, u + 0.25, 0, 1)
+        tex:SetWidth(13); tex:SetHeight(13)
+        if rightOf then
+            tex:SetPoint("RIGHT", rightOf, "LEFT", -5, 0)
+        end
+        local fs = parent:CreateFontString(nil, "OVERLAY",
+            "GameFontHighlightSmall")
+        fs:SetPoint("RIGHT", tex, "LEFT", -2, 0)
+        fs:SetJustifyH("RIGHT")
+        fs:SetTextColor(1, 1, 1)
+        return { tex = tex, fs = fs }
+    end
+    m.copper = part("copper", nil)
+    m.silver = part("silver", m.copper.fs)
+    m.gold   = part("gold",   m.silver.fs)
+
+    m.Anchor = function(self, ...)
+        self.copper.tex:SetPoint(unpack(arg))
+    end
+    m.SetMoney = function(self, copper)
+        local g, sv, c = util.MoneyParts(copper or 0)
+        self.gold.fs:SetText(tostring(g))
+        self.silver.fs:SetText(tostring(sv))
+        self.copper.fs:SetText(tostring(c))
+        -- Blizzard hides denominations above the value: 43c shows as "43c",
+        -- not "0g 0s 43c".
+        local showG = g > 0
+        local showS = showG or sv > 0
+        if showG then self.gold.tex:Show(); self.gold.fs:Show()
+        else self.gold.tex:Hide(); self.gold.fs:Hide() end
+        if showS then self.silver.tex:Show(); self.silver.fs:Show()
+        else self.silver.tex:Hide(); self.silver.fs:Hide() end
+    end
+    m.Show = function(self)
+        self.copper.tex:Show(); self.copper.fs:Show()
+        -- gold/silver visibility is SetMoney's call, not ours.
+    end
+    return m
+end
+
 -- A gold / silver / copper triplet, the way the stock AH and aux present a
 -- price. Three small numeric boxes with coloured suffixes.
 --
@@ -1499,6 +1552,18 @@ MakeMoneyGSC = function(parent, onChange)
     grp.ClearFocus = function(self)
         self.g:ClearFocus(); self.s:ClearFocus(); self.c:ClearFocus()
     end
+    -- Raise/lower the whole group. The coin textures are parented to the
+    -- PANEL (they anchor off the boxes but are not children of them), so
+    -- hiding the boxes alone would leave three coins floating on the bar.
+    grp.Show = function(self)
+        self.g:Show(); self.s:Show(); self.c:Show()
+        self.g.tag:Show(); self.s.tag:Show(); self.c.tag:Show()
+    end
+    grp.Hide = function(self)
+        self.g:Hide(); self.s:Hide(); self.c:Hide()
+        self.g.tag:Hide(); self.s.tag:Hide(); self.c.tag:Hide()
+    end
+
     -- Anchor the whole triplet off one widget.
     grp.Attach = function(self, anchor, dx, dy)
         self.g:SetPoint("LEFT", anchor, "RIGHT", dx or 6, dy or 0)
@@ -2095,7 +2160,10 @@ function ui.BuildBuyTab()
     local catScroll = CreateFrame("ScrollFrame", "AegisExchangeBuyCatScroll",
         panel, "FauxScrollFrameTemplate")
     catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
+    -- 46, not 20: the well is drawn 6px BELOW this, and the gold total sits
+    -- on the action bar at 13. At 20 the well's bottom edge cut straight
+    -- through the gold.
+    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 46)
     catScroll:SetWidth(SIDE_W)
     catScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateCatTree)
@@ -2169,7 +2237,10 @@ function ui.BuildBuyTab()
     ui.GrowCatRows(SIDE_ROWS)
 
     -- ===== Right: filter row + results ==================================
-    local RX = SIDE_W + 24    -- right-column origin
+    -- The well runs to catScroll's right + 24 (it covers the scrollbar), so
+    -- the right column has to start beyond that or the well clips the Item
+    -- column and the match-count line beneath it.
+    local RX = SIDE_W + 48    -- right-column origin
 
     -- ---- DEFAULT-mode control strip (Blizzlike) ------------------------
     -- Field order is the stock auction house's: Name, Level Range, Min
@@ -2191,7 +2262,7 @@ function ui.BuildBuyTab()
     ui.buyBox = box
 
     local lvlLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    lvlLbl:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 206, 2)
+    lvlLbl:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 190, 2)
     lvlLbl:SetText("Level Range")
     ui.buyLvlLbl = lvlLbl
     ui.buyMinLevel = MakeNumBox(panel, 44)
@@ -2204,11 +2275,11 @@ function ui.BuildBuyTab()
     ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 6, 0)
 
     local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    qLbl:SetPoint("BOTTOMLEFT", ui.buyMaxLevel, "TOPRIGHT", 12, 2)
+    qLbl:SetPoint("BOTTOMLEFT", ui.buyMaxLevel, "TOPRIGHT", 26, 2)
     qLbl:SetText("Min Quality")
     ui.buyQualLbl = qLbl
     ui.buyQuality = MakeDropdown(panel, 96, function() end)
-    ui.buyQuality.button:SetPoint("TOPLEFT", ui.buyMaxLevel, "TOPRIGHT", 12, 1)
+    ui.buyQuality.button:SetPoint("TOPLEFT", ui.buyMaxLevel, "TOPRIGHT", 26, 1)
 
     ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
     ui.buyUsable:SetWidth(20); ui.buyUsable:SetHeight(20)
@@ -2408,11 +2479,11 @@ ui.GrowBuyRows = function(n)
     ui.buyBidBox = MakeMoneyGSC(panel, nil)
     ui.buyBidBox:Attach(bidEntryLbl, 6, 0)
 
-    -- Your money. Repainted on PLAYER_MONEY and whenever the tab is shown.
-    ui.buyMoney = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.buyMoney:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 13)
-    ui.buyMoney:SetJustifyH("LEFT")
-    ui.buyMoney:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    -- Your money, with the game's own coin art rather than "6g 75s 43c"
+    -- text. Anchored by its COPPER coin, so the figure grows leftwards and a
+    -- total that gains a digit does not shove the bar about.
+    ui.buyMoney = MakeMoneyDisplay(panel)
+    ui.buyMoney:Anchor("BOTTOMLEFT", panel, "BOTTOMLEFT", 128, 13)
 
     ui.BuildFilterBuilder(panel, rowLeft)
     ui.BuildSavedSearches(panel, rowLeft)
@@ -2459,6 +2530,19 @@ function ui.SetBuyView(name)
         if builder then ui.fbActionBtns[ai]:Show()
         else ui.fbActionBtns[ai]:Hide() end
         ai = ai + 1
+    end
+    -- Bid / Buyout and the bid entry act on a SELECTED AUCTION, and neither
+    -- Builder nor Saved has one. Showing them there offers an action that
+    -- cannot do anything. Close and the gold total stay everywhere.
+    local bidBits = { ui.buyBidBtn, ui.buyBuyoutBtn, ui.buyBidEntryLbl }
+    local bi = 1
+    while bi <= table.getn(bidBits) do
+        local w = bidBits[bi]
+        if w then if overlay then w:Hide() else w:Show() end end
+        bi = bi + 1
+    end
+    if ui.buyBidBox then
+        if overlay then ui.buyBidBox:Hide() else ui.buyBidBox:Show() end
     end
     if saved then ui.RefreshSavedSearches() end
     -- Everything belonging to the results view hides together. buyStatus is
@@ -2651,9 +2735,10 @@ function ui.OnSavedClick(row, button)
         else
             ui.savedMenuIndex = row.listIndex
             ui.savedMenu:ClearAllPoints()
-            -- Opens to the row's LEFT so it never covers the query it is
-            -- acting on -- it used to overlap the favourites text.
-            ui.savedMenu:SetPoint("TOPRIGHT", row, "TOPLEFT", -4, 4)
+            -- Drops BELOW the row and stays inside the favourites column.
+            -- Opening to the left cleared the row it acts on but landed on
+            -- the Recent column instead; below-right clears both.
+            ui.savedMenu:SetPoint("TOPRIGHT", row, "BOTTOMRIGHT", 0, 0)
             ui.savedMenu:Show()
         end
         return
@@ -2879,19 +2964,21 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     -- Import is back. It was dropped when the Builder was somewhere you only
     -- ever LEFT from; now that a shift-click in Saved Searches lands you in
     -- it, a query typed by hand has no other route into the form.
-    local bClear = action("Clear", 54, ui.buyBidEntryLbl,
+    local bClear = action("Clear", 54, ui.buyCloseBtn,
         function() ui.BuilderClear() end)
     local bImport = action("Import", 60, bClear,
         function() ui.BuilderImport() end)
-    local bOr = action("+ OR", 52, bImport, function() ui.BuilderExport(true) end)
-    local bBuild = action("Build >", 66, bOr, function() ui.BuilderExport() end)
+    -- No "+ OR": a `;` term is still typeable in the search box and `or` is
+    -- still a component, so the button bought nothing for the space.
+    local bBuild = action("Build >", 66, bImport,
+        function() ui.BuilderExport() end)
     local bSearch = action("Search", 62, bBuild, function() ui.BuilderSearch() end)
     ui.TintButton(bBuild, 0.62, 0.44, 0.86)
     ui.fbSearchBtn = bSearch
     ui.fbBuildBtn = bBuild
     ui.fbImportBtn = bImport
     -- Raised and lowered with the Builder view by SetBuyView.
-    ui.fbActionBtns = { bSearch, bBuild, bOr, bImport, bClear }
+    ui.fbActionBtns = { bSearch, bBuild, bImport, bClear }
 
     ui.BuilderClear()
 end
@@ -3438,8 +3525,7 @@ end
 
 function ui.RefreshBuyMoney()
     if not ui.buyMoney then return end
-    local m = GetMoney and GetMoney() or 0
-    ui.buyMoney:SetText(util.FormatMoney(m, true))
+    ui.buyMoney:SetMoney(GetMoney and GetMoney() or 0)
 end
 
 -- Flatten the class > subclass > slot hierarchy into visible rows, honouring
@@ -3633,7 +3719,7 @@ function ui.DoBuySearch()
     sb:ClearFocus()
     -- Any search shows its results. Running one while the form is up and
     -- leaving the form covering the answer would be its own small bug.
-    if ui.buyView == "builder" then ui.SetBuyView("results") end
+    if ui.buyView ~= "results" then ui.SetBuyView("results") end
     if not A.buy then
         ui.buyStatus:SetText("Buy engine not loaded \226\128\148 fully restart WoW.")
         return
@@ -3663,6 +3749,7 @@ end
 
 function ui.RefreshBuyStatus()
     if not ui.buyStatus or not A.buy then return end
+    if ui.buyView == "saved" or ui.buyView == "builder" then return end
     local phase = A.buy.state.phase
     if phase == "wait_query" or phase == "wait_results" then
         ui.buyStatus:SetText("Searching...")
@@ -3686,6 +3773,13 @@ end
 
 function ui.UpdateBuyList()
     if not ui.buyScroll then return end
+    -- The results table only ever paints while the RESULTS view owns the
+    -- space. Guarding the view SWITCH is not enough: a search fires
+    -- onResults/onState asynchronously, so rows arriving while Saved or
+    -- Builder is up would Show() straight through them -- two views'
+    -- rows interleaved on screen. Third time this shape has bitten (the
+    -- shopping sidebar, then the pager), so the guard lives in the paint.
+    if ui.buyView == "saved" or ui.buyView == "builder" then return end
     local all = ui.buyResults or {}
 
     -- Working copy (so sorting doesn't disturb the engine's row order), with

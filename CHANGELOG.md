@@ -12,6 +12,41 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.13.0]
+
+Buy tab fixes and layout, following the 1.12.0 polish pass. `/reload`.
+
+### Fixed
+- **A finishing scan painted the results list over Saved Searches and the
+  Filter Builder.** Switching away while a scan was in flight left the paint
+  guarded at the *switch*, not at the paint — so the reply, arriving a
+  moment later, drew rows straight through whichever overlay was open. Both
+  the list repaint and the status line now refuse to draw unless Results is
+  the visible view, which is the only place that cannot be wrong.
+- **Running a search from Saved Searches now brings Results forward.** It
+  only did so from the Builder, so a saved query appeared to do nothing.
+- **The default view was clipped at the bottom and along the right edge.**
+  The category well drew below its scroll frame and cut through the gold
+  total; the results column started inside the well's border. Both have room
+  now, and the Min Quality and Level Range labels no longer crowd their
+  controls.
+
+### Changed
+- **Your gold is shown in coins**, not the letters `g` / `s` / `c`. The
+  readout is anchored by its copper coin so the figure grows leftwards as it
+  gets larger, and denominations above the value are hidden — 43 copper
+  shows one coin, not three.
+- **`+ OR` is gone from the action row.** It wrote a bare combinator into the
+  clause list with nothing decided about what it joined; `and` / `or` /
+  `not` are chosen in the Component dropdown, next to the clause they apply
+  to. The row is now **Search / Build > / Import / Clear**.
+- **Bid, Buyout and the bid entry are hidden outside Results.** They act on a
+  selected auction, and there are no auctions on screen in Saved Searches or
+  the Builder. Clear takes the freed space, so the Builder's own actions sit
+  where the eye already is.
+- **The favourite context menu opens below its row**, inside the favourites
+  column — clear of both the row it acts on and the Recent list beside it.
+
 ## [1.12.0]
 
 Concept-parity polish across the Buy tab. `/reload`.
@@ -1039,6 +1074,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.13.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.12.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.11.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.10.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

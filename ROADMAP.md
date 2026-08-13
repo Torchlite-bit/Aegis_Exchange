@@ -659,6 +659,42 @@ Everything else in the pass:
   producing it**, so prefer two-edge anchors for anything that should fill
   its space.
 
+### 2m — Buy tab fixes & layout — ✅ **DONE** (v1.13.0)
+
+- **The paint guard belongs in the paint function, not at the switch.** A scan
+  finishing after you left Results repainted the list straight through Saved
+  Searches or the Builder, because the guard sat where the view was changed
+  and the reply arrived later. `ui.UpdateBuyList` and `ui.RefreshBuyStatus`
+  now each check the visible view themselves and return early. **This is the
+  third time this exact shape has bitten** (sidebar rows, the pager, now the
+  results list). An async callback can fire in any view; only the paint
+  function knows which view is on screen when it actually runs, so that is
+  where the check has to live.
+- **`ui.DoBuySearch` switches on `~= "results"`**, not `== "builder"`. It only
+  ever left the Builder, so a query launched from Saved Searches ran with
+  nothing visible to show it.
+- **Clipping, again — the same 2k/2l class.** The category well's backdrop
+  draws ~6px outside its scroll frame, so a bottom offset that looked correct
+  cut through the gold total; the results column started at `SIDE_W + 24`,
+  inside that same border. Well and column now allow for the border.
+  **Backdrop borders extend past the frame rect** — budget for them when
+  anchoring anything against a bordered well.
+- **`MakeMoneyDisplay`** — read-only coin readout for the gold total, built on
+  `UI-MoneyIcons` with `SetTexCoord` (one sprite sheet, not three files).
+  It is anchored by its **copper** coin and grows leftwards, so the figure
+  never shifts the layout as your gold changes, and denominations above the
+  value are hidden.
+- **`+ OR` removed.** It appended a bare combinator with nothing decided about
+  its operands; the Component dropdown already carries `and` / `or` / `not`
+  next to the clause they apply to. `BuilderExport(true)`'s append mode stays
+  — that is a separate path and still covered.
+- **Bid / Buyout / bid entry hide outside Results.** `MakeMoneyGSC` needed
+  `Show`/`Hide` for this: its coin textures parent to the PANEL, not to the
+  boxes, so hiding the three edit boxes alone leaves three coins floating.
+- **The favourite menu opens below its row**, inside the favourites column.
+  1.12 has no menu-flip logic — placement is whatever you anchor, so anchor
+  it somewhere it cannot cover either column.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
