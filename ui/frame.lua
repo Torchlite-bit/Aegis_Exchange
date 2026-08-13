@@ -52,27 +52,29 @@ local MakeMoneyGSC, MakeHSlider, SetSliderRange
 -- Window size bounds. The minimum is the old fixed size -- below it the Sell
 -- tab's header rows start colliding -- and the maximum is generous enough for
 -- a big monitor without letting the window escape a small one.
--- MIN_W went 832 -> 1020 when the Buy tab grew to the mockup's eight result
--- columns and its fixed-width control strip. This is arithmetic, not taste:
--- the strip's left cluster is BUY_STRIP_W wide and the Search + Advanced pair
--- is another ~200, both fixed, and the sidebar takes SIDE_W + 48 before
--- either starts. Below ~1020 they collide -- which is precisely the overlap
--- bug the strip was rebuilt twice to eliminate, so the window must not be
--- allowed into that range at all.
+-- MIN_W is 1000, and what SETS it changed. It was the control strip: with
+-- the strip starting beyond the sidebar, the left cluster and the right-hand
+-- buttons collided below ~1000. Moving the strip to the panel's left edge
+-- gave it ~190px back and it now fits comfortably at 832.
 --
--- A saved width below the new minimum is clamped UP by RestoreWindowSize, so
--- an existing character just gets a wider window on first login rather than
--- a broken one.
+-- The RESULT COLUMNS are the binding constraint now. `ui.ColumnsFitAt` puts
+-- the true floor at ~970, so 1000 stands with a little slack rather than
+-- dropping to a number with none. It could only go lower by narrowing the
+-- table, which would move AWAY from the mockup -- its table is wide -- and
+-- the whole point of this pass is to match it.
+--
+-- A saved width below the minimum is clamped UP by RestoreWindowSize, so an
+-- existing character just gets a wider window on first login.
 local MIN_W, MIN_H = 1000, 492
 local MAX_W, MAX_H = 1400, 900
 
 -- Buy tab control-strip widths, from the mockup. Fixed, so the left cluster
 -- stays tight and the slack falls between it and the buttons.
-local BUY_NAME_W   = 176
-local BUY_LVL_W    = 44
-local BUY_QUAL_W   = 96
+local BUY_NAME_W   = 200
+local BUY_LVL_W    = 32
+local BUY_QUAL_W   = 116
 local BUY_SEARCH_W = 76
-local BUY_ADV_W    = 96
+local BUY_ADV_W    = 88
 -- What the cluster occupies end to end, including the gaps chained above.
 -- Anything that needs to know whether the strip fits asks this rather than
 -- re-adding the numbers and drifting.
@@ -90,8 +92,12 @@ local BUY_STRIP_W = BUY_NAME_W + 14 + BUY_LVL_W + 7 + 8 + 7 + BUY_LVL_W
 -- Layout: sidebar (SIDE_W + 48) | 10 | strip | GAP | Search + 10 + Advanced | 12
 function ui.StripFitsAt(w)
     local MIN_GAP = 24        -- the mockup's empty middle, at its narrowest
-    local left  = 158 + 48 + 10 + BUY_STRIP_W    -- SIDE_W is 158
-    local right = BUY_SEARCH_W + 10 + BUY_ADV_W + 12
+    -- The strip now starts at the PANEL's left edge, not beyond the sidebar,
+    -- so it no longer pays SIDE_W + gutter before it begins. That is ~190px
+    -- back, and it is why this is no longer what sets MIN_W -- the result
+    -- columns are (see ui.ColumnsFitAt).
+    local left  = 10 + BUY_STRIP_W
+    local right = BUY_SEARCH_W + 14 + BUY_ADV_W + 12
     -- The panel is inset from the window by roughly its border on each side.
     return (left + MIN_GAP + right) <= (w - 22)
 end
@@ -1780,15 +1786,18 @@ local function MakeMoneyDisplay(parent)
         tex:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
         local u = MONEY_COIN_U[coin]
         tex:SetTexCoord(u, u + 0.25, 0, 1)
-        tex:SetWidth(13); tex:SetHeight(13)
+        tex:SetWidth(15); tex:SetHeight(15)
         if rightOf then
             tex:SetPoint("RIGHT", rightOf, "LEFT", -5, 0)
         end
-        local fs = parent:CreateFontString(nil, "OVERLAY",
-            "GameFontHighlightSmall")
-        fs:SetPoint("RIGHT", tex, "LEFT", -2, 0)
+        -- Larger and GOLD, and set tight against its own coin -- the mockup
+        -- reads as three amounts, not six separate things. The gap belongs
+        -- BETWEEN denominations (the -5 above), not between a number and the
+        -- coin it labels.
+        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("RIGHT", tex, "LEFT", -1, 0)
         fs:SetJustifyH("RIGHT")
-        fs:SetTextColor(1, 1, 1)
+        fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         return { tex = tex, fs = fs }
     end
     m.copper = part("copper", nil)
@@ -1941,6 +1950,13 @@ local function MakeDropdown(parent, width, onSelect, noAll)
     btn:SetWidth(width)
     btn:SetHeight(20)
     btn:SetText("All")
+    -- The affordance that says "this opens". Without it a dropdown is
+    -- indistinguishable from a button that does something when clicked.
+    local caret = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    caret:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+    caret:SetText("\226\150\188")
+    caret:SetTextColor(0.80, 0.71, 0.42)
+    btn.caret = caret
     dd.button = btn
 
     local list = CreateFrame("Frame", nil, ui.frame)
@@ -2167,7 +2183,11 @@ local function PctColorBuy(pct)
     if pct < 100 then
         return 0.35, 0.85, 0.35   -- under 100%: green (a deal)
     elseif pct == 100 then
-        return 0.90, 0.82, 0.35   -- at 100%: yellow
+        -- NEUTRAL at exactly market, not yellow. Yellow reads as a warning,
+        -- and paying exactly market price is the unremarkable case -- the
+        -- mockup renders it in plain white for that reason. Green and red
+        -- mean something precisely because the middle does not.
+        return 0.88, 0.86, 0.80
     end
     return 0.90, 0.38, 0.38       -- over 100%: red (overpriced)
 end
@@ -2266,6 +2286,25 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
             if row.entry then ui.ToggleBuyCheck(row.entry) end
         end)
         row.check = cb
+
+        -- Zebra stripe. Created FIRST, so within the BACKGROUND layer it
+        -- draws beneath both the separator and the selection tint -- a
+        -- selected odd row must read as selected, not as striped-and-
+        -- selected.
+        --
+        -- Keyed to the row's POSITION in the pool, never to the auction, so
+        -- scrolling slides the data past a fixed banding instead of making
+        -- the stripes crawl. It is set once here and never touched by the
+        -- paint, which is what guarantees that.
+        local zebra = row:CreateTexture(nil, "BACKGROUND")
+        zebra:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        zebra:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        if math.mod(i, 2) == 0 then
+            zebra:SetTexture(1, 1, 1, 0.022)
+        else
+            zebra:SetTexture(0, 0, 0, 0)
+        end
+        row.zebra = zebra
 
         -- Hairline between rows, as the mockup has. BACKGROUND layer so the
         -- selection tint (also BACKGROUND, drawn after) covers it on the
@@ -2651,9 +2690,33 @@ local BUY_ROWS,  BUY_ROW_H  = 11, 26
 -- that draws the box, the headers inside it, and the scroll frame the rows
 -- live in. When these were three loose numbers at three call sites the well
 -- ended up enclosing the rows but not the headings.
-local BUY_HDR_TOP  = 76     -- headings sit here, below the control strip
+-- THE CONTROL STRIP SPANS THE FULL WIDTH AND BOTH COLUMNS SIT UNDER IT.
+--
+-- It used to start to the RIGHT of the sidebar, so the sidebar sat beside the
+-- strip rather than beneath it. That is the mockup's single biggest structural
+-- difference from what we shipped, and most of the "it doesn't look like the
+-- concept" feeling came from it: in the mockup the Name field, the BROWSE
+-- heading and the category plates all share one left edge.
+local BUY_STRIP_LBL_Y = 10   -- field labels
+local BUY_STRIP_CTL_Y = 26   -- the controls themselves
+local BUY_SIDE_X      = 10   -- shared left edge: strip, BROWSE, plates
+local BUY_GUT_W       = 8    -- sidebar -> table gutter (the mockup's is tight)
+
+local BUY_BROWSE_Y = 62     -- BROWSE heading, below the strip
+local BUY_SIDE_TOP = 82     -- ...and the first category row under it
+local BUY_SIDE_BOT = 40     -- the tree runs nearly to the action bar
+
+local BUY_WELL_TOP = 56     -- table box starts just above the headings
+local BUY_HDR_TOP  = 62     -- headings sit INSIDE the box
 local BUY_HDR_H    = 22     -- headings band inside the well
-local BUY_ROWS_TOP = 100    -- ...so the first row starts here
+local BUY_ROWS_TOP = 90     -- ...so the first row starts here
+-- The table is the SHORTER column: it stops well above the action bar and the
+-- count/pager sit directly beneath it, with empty panel below. The mockup
+-- ends it at ~64% of panel height; a fixed offset cannot hold a percentage
+-- across a resizable window, so this is tuned to land there at the sizes
+-- people actually use and to keep growing rows as the window grows, which is
+-- the better trade for a window you can drag.
+local BUY_TABLE_BOT = 150
 -- Gutter on the right of the table. FauxScrollFrameTemplate hangs its
 -- scrollbar OUTWARD from the scroll frame's right edge, so this is what keeps
 -- it off the last column instead of drawn across the percentages.
@@ -2667,16 +2730,22 @@ local BUY_GUTTER_W = 26
 -- the Seller column changed every offset after it; this is what says whether
 -- the new numbers still fit rather than someone re-adding them by hand.
 function ui.ColumnsFitAt(w)
-    local rowLeft = 158 + 48 + 4          -- SIDE_W + gutter + row inset
+    local rowLeft = BUY_SIDE_X + 176 + BUY_GUT_W + 6   -- SIDE_W is 176
     local rowW = (w - 22) - rowLeft - BUY_GUTTER_W
     return BUY_COLS_END <= rowW
 end
 local BUY_ROWS_MAX  = 34
-local SIDE_ROWS, SIDE_ROW_H = 13, 18
+-- Two row heights: the mockup's plates are noticeably taller than its bare
+-- subcategory rows (38px vs 27px at its scale). One height for both is what
+-- made our tree look cramped and evenly-spaced where the mockup has rhythm.
+local SIDE_ROWS, SIDE_ROW_H = 13, 22   -- SIDE_ROW_H is the PLATED height
+local SIDE_BARE_H = 17                 -- ...and bare rows are tighter
 -- Post Filter clause rows in the Filter Builder.
 local FB_POST_ROWS = 9
 local SIDE_ROWS_MAX = 38
-local SIDE_W = 158    -- sidebar width
+-- Sidebar width. The mockup's is 18.1% of the panel; ours was ~16%, and the
+-- gutter beside it was four times too wide.
+local SIDE_W = 176    -- sidebar width
 
 function ui.BuildBuyTab()
     local panel = ui.panels["Buy"]
@@ -2690,19 +2759,24 @@ function ui.BuildBuyTab()
     -- is what the approved concept shows and what stops the form's headings
     -- being clipped by a column that had no business being there.
     local browseHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    browseHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -10)
-    browseHdr:SetText("Browse")
+    browseHdr:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUY_SIDE_X, -BUY_BROWSE_Y)
+    -- Letter-spaced caps, as the mockup has it. 1.12 has no letter-spacing
+    -- property, so the spaces are in the string.
+    browseHdr:SetText("B R O W S E")
     browseHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.buyBrowseHdr = browseHdr
 
     -- ===== Left, mode 2: the category tree (ROADMAP 2e) =================
     local catScroll = CreateFrame("ScrollFrame", "AegisExchangeBuyCatScroll",
         panel, "FauxScrollFrameTemplate")
-    catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    -- 46, not 20: the well is drawn 6px BELOW this, and the gold total sits
-    -- on the action bar at 13. At 20 the well's bottom edge cut straight
-    -- through the gold.
-    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 46)
+    catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUY_SIDE_X, -BUY_SIDE_TOP)
+    -- The tree is the LONGER column in the mockup: it runs down past the
+    -- table's bottom edge to just above the action bar. It used to stop
+    -- halfway, leaving the lower half of the sidebar empty.
+    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        BUY_SIDE_X, BUY_SIDE_BOT)
     catScroll:SetWidth(SIDE_W)
     catScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateCatTree)
@@ -2737,11 +2811,11 @@ function ui.BuildBuyTab()
             -- so the skin must not replace it with a uniform button plate.
             -- aegisNoSkin is the existing opt-out for exactly this.
             row.aegisNoSkin = true
-            if i == 1 then
-                row:SetPoint("TOPLEFT", catScroll, "TOPLEFT", 0, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
-            end
+            -- Anchored at PAINT time, not here: plated and bare rows are
+            -- different heights in the mockup, so a row's position depends on
+            -- what is above it, which is not known until the tree is walked.
+            -- See ui.UpdateCatTree.
+            row:SetPoint("TOPLEFT", catScroll, "TOPLEFT", 0, 0)
             -- Blizzard's filter list gives every TOP-LEVEL category a plate
             -- of its own and leaves subcategories as bare indented text. The
             -- plate is drawn per row and hidden on child rows by the paint,
@@ -2753,14 +2827,40 @@ function ui.BuildBuyTab()
             row.plate = plate
             -- The selected category's blue bar, exactly what the stock list
             -- uses to say "this is the one you are browsing".
+            -- The mockup marks the browsed category with a LIGHTER plate and
+            -- a gold border, not with a coloured highlight bar. The old
+            -- blue/green gradient appears nowhere in the reference.
             local sel = row:CreateTexture(nil, "ARTWORK")
             sel:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
             sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
-            sel:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-            sel:SetBlendMode("ADD")
-            sel:SetVertexColor(0.25, 0.45, 0.95)
+            sel:SetTexture(0.30, 0.25, 0.15, 1)
             sel:Hide()
             row.selTex = sel
+
+            -- Gold edge on the selected plate, four hairlines rather than a
+            -- backdrop: this is a texture-only row and a backdrop here would
+            -- draw over the label.
+            row.selEdge = {}
+            local ei = 1
+            while ei <= 4 do
+                local ln = row:CreateTexture(nil, "OVERLAY")
+                ln:SetTexture(C.border[1], C.border[2], C.border[3], 0.9)
+                ln:Hide()
+                row.selEdge[ei] = ln
+                ei = ei + 1
+            end
+            row.selEdge[1]:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            row.selEdge[1]:SetPoint("TOPRIGHT", row, "TOPRIGHT", -1, -1)
+            row.selEdge[1]:SetHeight(1)
+            row.selEdge[2]:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 1)
+            row.selEdge[2]:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            row.selEdge[2]:SetHeight(1)
+            row.selEdge[3]:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            row.selEdge[3]:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 1)
+            row.selEdge[3]:SetWidth(1)
+            row.selEdge[4]:SetPoint("TOPRIGHT", row, "TOPRIGHT", -1, -1)
+            row.selEdge[4]:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            row.selEdge[4]:SetWidth(1)
             local lbl = row:CreateFontString(nil, "OVERLAY",
                 "GameFontHighlightSmall")
             lbl:SetPoint("LEFT", row, "LEFT", 8, 0)
@@ -2780,14 +2880,17 @@ function ui.BuildBuyTab()
     -- The well runs to catScroll's right + 24 (it covers the scrollbar), so
     -- the right column has to start beyond that or the well clips the Item
     -- column and the match-count line beneath it.
-    local RX = SIDE_W + 48    -- right-column origin
+    -- Results column origin. The sidebar plus one tight gutter -- the
+    -- mockup's gap here is about a quarter of what we had.
+    local RX = BUY_SIDE_X + SIDE_W + BUY_GUT_W
 
     -- ---- DEFAULT-mode control strip (Blizzlike) ------------------------
     -- Field order is the stock auction house's: Name, Level Range, Min
     -- Quality, Usable, Search. Everything here composes into ONE term
     -- alongside whatever the category tree has selected -- see ui.DefaultTerm.
     local nameLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    nameLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -10)
+    nameLbl:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUY_SIDE_X, -BUY_STRIP_LBL_Y)
     nameLbl:SetText("Name")
     ui.buyNameLbl = nameLbl
 
@@ -2811,7 +2914,8 @@ function ui.BuildBuyTab()
         CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
             "InputBoxTemplate"))
     box:SetWidth(BUY_NAME_W); box:SetHeight(18)
-    box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 10, -24)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUY_SIDE_X, -BUY_STRIP_CTL_Y)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
@@ -2862,7 +2966,9 @@ function ui.BuildBuyTab()
     local searchBtn = ui.MakeButton(panel, "primary",
         "AegisExchangeBuySearchButton")
     searchBtn:SetWidth(BUY_SEARCH_W); searchBtn:SetHeight(20)
-    searchBtn:SetPoint("RIGHT", advBtn, "LEFT", 10, 0)
+    -- A real gap. These were flush against each other, so they read as one
+    -- two-tone control rather than as two buttons.
+    searchBtn:SetPoint("RIGHT", advBtn, "LEFT", -14, 0)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
     ui.buySearchBtn = searchBtn
@@ -2921,8 +3027,11 @@ function ui.BuildBuyTab()
     -- where the stray "< >" over that button came from.
     local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
-    nextBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -BUY_GUTTER_W, 40)
-    nextBtn:SetText(">")
+    -- Anchored properly below, once the table's box exists. The count and
+    -- pager follow the TABLE's bottom edge in the mockup, sitting directly
+    -- under the box rather than pinned to the panel with a gap between.
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -BUY_GUTTER_W, -200)
+    nextBtn:SetText("\226\150\182")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
     ui.buyPageText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2933,7 +3042,7 @@ function ui.BuildBuyTab()
     local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyPrevButton")
     prevBtn:SetWidth(24); prevBtn:SetHeight(20)
     prevBtn:SetPoint("RIGHT", ui.buyPageText, "LEFT", -6, 0)
-    prevBtn:SetText("<")
+    prevBtn:SetText("\226\151\128")
     prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
     -- Kept on ui so SetBuyView can hide the pager with the rest of the
     -- results view -- paging results you cannot see still queries the server.
@@ -2946,9 +3055,11 @@ function ui.BuildBuyTab()
     ui.buyStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     -- Same baseline as the pager opposite it. They sat 4px apart, which is
     -- the kind of gap that reads as a mistake rather than as a choice.
-    ui.buyStatus:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RX + 6, 40)
+    ui.buyStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -200)
     ui.buyStatus:SetJustifyH("LEFT")
-    ui.buyStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    -- Muted, as the mockup has it. Gold made the least important line on
+    -- screen the loudest thing in the results column.
+    ui.buyStatus:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.buyStatus:SetText("Type an item name and Search.")
 
     -- Column layout (row-relative x, width). Sized so Buy+Bid finish well
@@ -2977,7 +3088,8 @@ function ui.BuildBuyTab()
         panel, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -BUY_ROWS_TOP)
     -- Headroom for the status/pager row AND the action bar beneath it.
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -BUY_GUTTER_W, 62)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -BUY_GUTTER_W, BUY_TABLE_BOT)
 
     -- ONE box around the headers AND the rows, which is what the mockup
     -- shows. The well used to wrap the scroll frame alone, so the column
@@ -2990,7 +3102,7 @@ function ui.BuildBuyTab()
     -- which FauxScrollFrameTemplate anchors outward from that edge -- ends up
     -- outside the box rather than drawn across the last column.
     local well = CreateFrame("Frame", nil, panel)
-    well:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft - 6, -(BUY_HDR_TOP - 4))
+    well:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft - 6, -BUY_WELL_TOP)
     -- Right edge flush with the scroll frame's, NOT past it: the scrollbar
     -- hangs outward from exactly that line, so any positive offset here puts
     -- the box under the scrollbar again.
@@ -3004,6 +3116,17 @@ function ui.BuildBuyTab()
     well:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
     well:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
     ui.buyListWell = well
+
+    -- NOW the count and the pager can hang off the table, which is what the
+    -- mockup does. They are also CENTRED on each other rather than sharing a
+    -- bottom offset: the pager is a 20px button and the count is a ~12px
+    -- font string, so an equal offset left their text baselines ~9px apart.
+    nextBtn:ClearAllPoints()
+    nextBtn:SetPoint("TOPRIGHT", well, "BOTTOMRIGHT", 0, -8)
+    ui.buyStatus:ClearAllPoints()
+    ui.buyStatus:SetPoint("LEFT", well, "BOTTOMLEFT", 6, 0)
+    ui.buyStatus:SetPoint("TOP", nextBtn, "TOP", 0, 0)
+    ui.buyStatus:SetPoint("BOTTOM", nextBtn, "BOTTOM", 0, 0)
 
     -- The rule goes UNDER the headings, not at the top of the box.
     local hdrRule = panel:CreateTexture(nil, "ARTWORK")
@@ -4358,11 +4481,30 @@ end
 function ui.UpdateCatTree()
     if not ui.buyCatScroll or ui.buyMode == "advanced" then return end
     local flat = ui.buyCatFlat or {}
-    local vis = ui.RowsFor(ui.buyCatScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
+    -- How many rows fit is not a division any more: plated and bare rows are
+    -- different heights, so it depends on WHICH rows are about to be shown.
+    -- The scroll offset is still counted in ROWS, which is what lets the
+    -- FauxScrollFrame maths keep working with a ragged list.
+    local avail = ui.buyCatScroll:GetHeight() or 0
+    if avail <= 0 then avail = SIDE_ROWS * SIDE_ROW_H end
+    local offset = FauxScrollFrame_GetOffset(ui.buyCatScroll) or 0
+    local function HeightOf(e)
+        if e and (e.kind == "sub" or e.kind == "slot") then return SIDE_BARE_H end
+        return SIDE_ROW_H
+    end
+    local vis, used = 0, 0
+    while vis < SIDE_ROWS_MAX do
+        local e = flat[vis + 1 + offset]
+        if not e then break end
+        local h = HeightOf(e)
+        if used + h > avail then break end
+        used = used + h
+        vis = vis + 1
+    end
+    if vis < 1 then vis = 1 end
     ui.GrowCatRows(vis)
     ui.SkinNewRows(ui.buyCatRows)
     FauxScrollFrame_Update(ui.buyCatScroll, table.getn(flat), vis, SIDE_ROW_H)
-    local offset = FauxScrollFrame_GetOffset(ui.buyCatScroll)
     local i = 1
     while i <= table.getn(ui.buyCatRows) do
         local row = ui.buyCatRows[i]
@@ -4395,6 +4537,17 @@ function ui.UpdateCatTree()
                 text, plated = "         " .. e.name, false
             end
             if plated then row.plate:Show() else row.plate:Hide() end
+
+            -- Height and position, both decided here because both depend on
+            -- what kind of row this is and what is above it.
+            row:SetHeight(HeightOf(e))
+            row:ClearAllPoints()
+            if i == 1 then
+                row:SetPoint("TOPLEFT", ui.buyCatScroll, "TOPLEFT", 0, 0)
+            else
+                row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
+            end
+
             ui.SetTextClipped(row.label, text, SIDE_W - 14)
 
             local key = ui.CatKey(e)
@@ -4408,16 +4561,31 @@ function ui.UpdateCatTree()
             -- the mockup shows for "Chest". The bar stays on plated rows,
             -- where it reads as "this whole category is what you are
             -- browsing" rather than as a highlight smeared across a word.
+            local function edges(on)
+                if not row.selEdge then return end
+                local k = 1
+                while k <= 4 do
+                    if on then row.selEdge[k]:Show() else row.selEdge[k]:Hide() end
+                    k = k + 1
+                end
+            end
             if selected then
                 if plated then row.selTex:Show() else row.selTex:Hide() end
+                edges(selected and plated)
                 row.label:SetTextColor(1, 1, 1)
             else
                 row.selTex:Hide()
+                edges(false)
+                -- Three dimming steps, as the mockup has: a plated top-level
+                -- row is warm off-white, a subcategory is dimmer, and a third
+                -- level (Head / Chest / Legs) dimmer still. One colour for
+                -- everything unplated flattened two levels into one.
                 if plated then
                     row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                elseif e.kind == "sub" then
+                    row.label:SetTextColor(0.72, 0.66, 0.52)
                 else
-                    row.label:SetTextColor(C.goldDim[1], C.goldDim[2],
-                        C.goldDim[3])
+                    row.label:SetTextColor(0.55, 0.50, 0.40)
                 end
             end
             row:Show()

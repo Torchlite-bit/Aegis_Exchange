@@ -875,6 +875,43 @@ removes that auction and re-sends the page, shifting every later index. So:
   rather than a highlight bar. The mockup boxes the results table and nothing
   else.
 
+### 2r — Mockup structural parity — ✅ **DONE** (v1.16.0)
+
+**The strip's left edge was the whole problem.** Every previous pass treated
+the Buy tab as "sidebar on the left, everything else to its right" and tuned
+details inside that frame. The mockup is not built that way: the control strip
+spans the full panel width at its left edge, and BOTH columns hang below it,
+sharing that edge with the Name field. Once that moved, half the remaining
+differences stopped being differences.
+
+Worth remembering as a method point: four passes of detail work did not close
+a gap that one structural change did. **When repeated polish is not converging
+on a reference, check whether the two are built on the same skeleton before
+tuning anything else.**
+
+- **The columns are deliberately unequal lengths.** Table short, tree long.
+  Ours had them the wrong way round — the table nearly reached the action bar
+  while the tree stopped halfway down.
+- **`MIN_W`: the binding constraint MOVED.** It was the strip; it is now the
+  result columns. Moving the strip to the left edge gave it back ~190px and it
+  now fits 832. The columns' floor is ~970, so 1000 stands. Both fit functions
+  assert they still REJECT a too-narrow window, so neither is decoration.
+- **Variable row heights in the tree.** `FauxScrollFrame` assumes uniform rows,
+  and that is usually the end of the discussion — but its offset is counted in
+  ROWS, not pixels, so a ragged list works provided the visible count is
+  derived by ACCUMULATING heights rather than dividing by one. Plated rows are
+  taller than bare ones, which is what gives the mockup's list its rhythm.
+- **`% Mkt` at exactly 100% went from yellow to neutral.** Yellow is a warning
+  colour and market price is the unremarkable case. Green and red carry
+  meaning because the middle does not.
+- **Selection in the tree is a lighter plate plus a gold edge**, not a
+  blue-green highlight bar. The bar appears nowhere in the reference.
+
+**Known un-matchable, do not keep trying.** The mockup is HTML and uses Cinzel
+for headings and buttons; 1.12 offers only the game's font objects and cannot
+load a face. Weight and colour are matched; the typeface is not, and that is
+final unless someone ships a font with the addon.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

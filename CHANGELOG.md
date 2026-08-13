@@ -12,6 +12,61 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.16.0]
+
+Buy tab default view rebuilt to the mockup's structure. `/reload`.
+
+### Changed
+- **The control strip spans the full width, at the panel's left edge.** It
+  used to begin to the *right* of the category sidebar, so the sidebar sat
+  beside it rather than beneath it. In the mockup the Name field, the
+  "BROWSE" heading and every category plate share one left edge, and both
+  columns hang below the strip. This was the single biggest structural
+  difference between what we shipped and the reference, and most of the
+  "it doesn't look like the concept" feeling came from it.
+- **The two columns are different lengths now, as the mockup has them.** The
+  results table is the shorter one and stops well above the action bar, with
+  the match count and pager directly beneath it; the category tree is the
+  longer one and runs on down to the action bar. Previously the table ran
+  almost to the bottom and the tree stopped halfway, leaving its lower half
+  empty.
+- **Alternating row shading in the results.** Keyed to a row's position in
+  the list rather than to the auction, so scrolling slides the data past
+  fixed banding instead of making the stripes crawl, and drawn beneath both
+  the selection tint and the "(yours)" dimming.
+- **The category tree has the mockup's rhythm.** Plated top-level rows are
+  taller than bare subcategory rows — one height for both is what made the
+  list look evenly spaced where the reference has structure. Three dimming
+  steps instead of two, so a third-level entry reads as deeper than a
+  subcategory. The browsed category is marked with a lighter plate and a gold
+  edge rather than the blue-green highlight bar, which appears nowhere in the
+  reference. "BROWSE" is letter-spaced caps.
+- **Smaller things**: the Min Quality dropdown has a caret, so it reads as a
+  dropdown; the pager uses triangle glyphs instead of `<` and `>`; Search and
+  Advanced no longer touch; the gold readout is larger, gold-coloured and set
+  tight against its coins; the match count is muted rather than gold, and is
+  centred on the pager rather than merely sharing its offset.
+
+### Fixed
+- **`% Mkt` at exactly 100% is neutral, not yellow.** Yellow reads as a
+  warning, and paying exactly market price is the unremarkable case — green
+  and red mean something precisely because the middle does not. Below and
+  above market were already correct.
+
+### Internal
+- `ui.ColumnsFitAt` and `ui.StripFitsAt` both re-derived. **The result
+  columns, not the control strip, now set the minimum window width.** Moving
+  the strip to the left edge handed it back ~190px and it fits the old 832
+  comfortably; the columns' floor is ~970, so `MIN_W` stays at 1000. It could
+  only go lower by narrowing the table, which would move away from the
+  mockup.
+- The category tree paints with variable row heights. `FauxScrollFrame`
+  assumes uniform rows, but its offset is counted in ROWS rather than pixels,
+  so a ragged list works as long as the visible count is derived by
+  accumulating heights rather than by dividing.
+
+---
+
 ## [1.15.1]
 
 Buy tab default view, second pass against the mockup. `/reload`.
@@ -1263,6 +1318,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.16.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.15.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.15.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.14.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
