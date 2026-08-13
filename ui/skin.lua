@@ -121,8 +121,15 @@ local function SkinWidget(f)
     local ok, otype = pcall(function() return f:GetObjectType() end)
     if not ok then return false end
 
-    -- Widgets that opt out: bare-text sort headers and our row buttons that
-    -- must keep their own look. Marked with aegisNoSkin at creation.
+    -- Widgets that opt out: bare-text sort headers, and LIST ROWS that happen
+    -- to be Buttons because a row has to be clickable. The category tree is
+    -- the one that matters -- it says something with its row backgrounds
+    -- (top-level categories carry a plate, subcategories are bare indented
+    -- text) and pfUI's SkinButton gives every Button the same plate, which
+    -- erased the distinction and made the sidebar read as a stack of buttons.
+    -- Result rows were never affected: those are Frames, so the Button branch
+    -- below never reached them, which is why only the tree showed it.
+    -- Marked with aegisNoSkin at creation.
     if f.aegisNoSkin then
         f.aegisSkinned = true
         return false

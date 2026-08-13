@@ -56,6 +56,31 @@ function util.FormatMoney(copper, colored)
     return table.concat(parts, " ")
 end
 
+-- Money with the NUMBER in gold and the unit letter dimmed, e.g. "4g 20s"
+-- where 4 and 20 read bright and the g/s read quiet.
+--
+-- The mockup draws the unit letter SMALLER than the number. That is not
+-- reachable on 1.12: a FontString has one font, and the |c escape sets colour
+-- only -- there is no size or face markup. Dimming the suffix is the closest
+-- available approximation, and it carries the same reading order (value
+-- first, unit second) that the smaller glyph was doing in the mockup.
+--
+-- FormatMoney's per-denomination colouring (gold gold, silver grey, copper
+-- orange) stays as it is and is still what the rest of the addon uses; this
+-- is only for the Buy results table, where the mockup wants one colour for
+-- every figure so the column scans as a column.
+function util.FormatMoneyGold(copper)
+    local g, s, c = util.MoneyParts(copper)
+    local parts = {}
+    local NUM, UNIT = "|cffffd700", "|cff9d8b5a"
+    if g > 0 then table.insert(parts, NUM .. g .. "|r" .. UNIT .. "g|r") end
+    if s > 0 then table.insert(parts, NUM .. s .. "|r" .. UNIT .. "s|r") end
+    if c > 0 or table.getn(parts) == 0 then
+        table.insert(parts, NUM .. c .. "|r" .. UNIT .. "c|r")
+    end
+    return table.concat(parts, " ")
+end
+
 -- Parse a money string like "12g 34s 56c" (units case-insensitive, spaces
 -- optional) into total copper. Returns nil when nothing parseable is found.
 -- Uses string.gfind (Lua 5.0) with a captured pattern; NOT string.gmatch.

@@ -52,8 +52,49 @@ local MakeMoneyGSC, MakeHSlider, SetSliderRange
 -- Window size bounds. The minimum is the old fixed size -- below it the Sell
 -- tab's header rows start colliding -- and the maximum is generous enough for
 -- a big monitor without letting the window escape a small one.
-local MIN_W, MIN_H = 832, 492
+-- MIN_W went 832 -> 1020 when the Buy tab grew to the mockup's eight result
+-- columns and its fixed-width control strip. This is arithmetic, not taste:
+-- the strip's left cluster is BUY_STRIP_W wide and the Search + Advanced pair
+-- is another ~200, both fixed, and the sidebar takes SIDE_W + 48 before
+-- either starts. Below ~1020 they collide -- which is precisely the overlap
+-- bug the strip was rebuilt twice to eliminate, so the window must not be
+-- allowed into that range at all.
+--
+-- A saved width below the new minimum is clamped UP by RestoreWindowSize, so
+-- an existing character just gets a wider window on first login rather than
+-- a broken one.
+local MIN_W, MIN_H = 1000, 492
 local MAX_W, MAX_H = 1400, 900
+
+-- Buy tab control-strip widths, from the mockup. Fixed, so the left cluster
+-- stays tight and the slack falls between it and the buttons.
+local BUY_NAME_W   = 176
+local BUY_LVL_W    = 44
+local BUY_QUAL_W   = 96
+local BUY_SEARCH_W = 76
+local BUY_ADV_W    = 96
+-- What the cluster occupies end to end, including the gaps chained above.
+-- Anything that needs to know whether the strip fits asks this rather than
+-- re-adding the numbers and drifting.
+local BUY_STRIP_W = BUY_NAME_W + 14 + BUY_LVL_W + 7 + 8 + 7 + BUY_LVL_W
+                    + 16 + BUY_QUAL_W + 10 + 20 + 2 + 74
+
+-- Does the default control strip fit in a window `w` wide?
+--
+-- With fixed widths, nothing in the anchoring prevents the left cluster from
+-- reaching the right-hand buttons -- the guarantee has to come from the window
+-- never being narrow enough for that to happen. So the arithmetic lives here,
+-- where it can be checked, rather than as a number someone once did in their
+-- head and wrote into MIN_W.
+--
+-- Layout: sidebar (SIDE_W + 48) | 10 | strip | GAP | Search + 10 + Advanced | 12
+function ui.StripFitsAt(w)
+    local MIN_GAP = 24        -- the mockup's empty middle, at its narrowest
+    local left  = 158 + 48 + 10 + BUY_STRIP_W    -- SIDE_W is 158
+    local right = BUY_SEARCH_W + 10 + BUY_ADV_W + 12
+    -- The panel is inset from the window by roughly its border on each side.
+    return (left + MIN_GAP + right) <= (w - 22)
+end
 
 -- Sell tab control block, top to bottom: a header band carrying the item and
 -- the four money figures, a control grid, then the action bar. The bag list
@@ -125,13 +166,34 @@ end
 -- #211F1A -- DARKER than the plates -- so the same edge would erase the
 -- outline entirely. These sit a little above it: dark enough to read as the
 -- concept's crisp edge, light enough to still separate a plate from the panel.
+-- WHICH REFERENCE WINS, because the two disagree and this has now flipped
+-- once. `design/07-buy-tab.png` styles the primary button `#5a1414` -- deep
+-- red -- and 1.14.0 took its palette from there. The later "A - Default view"
+-- mockup (v1.9.0) draws Search and Buyout as a warm brown-gold plate and adds
+-- a PURPLE Advanced. **The mockup is newer and it wins.** Do not re-derive
+-- these from the older PNG.
 local BTN_KIND = {
     primary = {
-        bg     = { 0.35, 0.08, 0.08 },
-        over   = { 0.46, 0.12, 0.12 },
-        down   = { 0.24, 0.05, 0.05 },
-        border = { 0.16, 0.09, 0.08 },
-        text   = { 0.94, 0.75, 0.25 },
+        bg     = { 0.42, 0.31, 0.13 },
+        over   = { 0.52, 0.39, 0.17 },
+        down   = { 0.30, 0.22, 0.09 },
+        border = { 0.62, 0.49, 0.22 },
+        text   = { 1.00, 0.86, 0.48 },
+        font   = "GameFontNormal",
+    },
+    -- The Advanced button, and nothing else. It is the one control in the
+    -- default strip with no counterpart in the stock auction house, and the
+    -- mockup gives it its own colour to say so.
+    --
+    -- 1.14.0 removed a purple VERTEX TINT from this button, which is not the
+    -- same thing: a tint sat on top of another plate and read as a smudge.
+    -- This is a plate in its own right.
+    accent = {
+        bg     = { 0.36, 0.26, 0.56 },
+        over   = { 0.45, 0.33, 0.68 },
+        down   = { 0.26, 0.18, 0.40 },
+        border = { 0.58, 0.45, 0.80 },
+        text   = { 0.95, 0.92, 1.00 },
         font   = "GameFontNormal",
     },
     quiet = {
@@ -2065,7 +2127,26 @@ end
 ui.PctColorBuy = PctColorBuy     -- exposed for tests
 ui.PctColorSell = PctColorSell
 
--- Shared result-row column layout (Buy tab AND Crafting tab), row-relative.
+-- Result-row column layout, row-relative. TWO of them, because the two tabs
+-- that use BuildResultRow want different tables.
+--
+-- The Buy tab follows the mockup: a checkbox, the icon and name, then Lvl,
+-- Time Left, Seller, Current Bid, Buyout, Unit and % Mkt. The stack count is
+-- NOT a column -- it is appended to the name as "x3", which is what the
+-- mockup does and what frees the width for the four new columns.
+--
+-- The Crafting tab keeps the older five-column shape with its own per-row Buy
+-- and Bid buttons. It is a different question ("what can I make and what does
+-- it cost"), it has no room for a seller or a time left, and changing it was
+-- not asked for.
+local RCX_BUY = {
+    check = 2, icon = 22, name = 42, lvl = 286, left = 320, seller = 384,
+    bid = 476, stack = 558, unit = 640, pct = 706,
+}
+local RCW_BUY = {
+    name = 240, lvl = 30, left = 60, seller = 88,
+    bid = 78, stack = 78, unit = 62, pct = 44,
+}
 local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
               buy = 436, bid = 490 }
 local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
@@ -2092,16 +2173,59 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         fs:SetJustifyH(just or "LEFT")
         return fs
     end
-    -- Item icon, then the name shifted to its right.
-    local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetWidth(16); icon:SetHeight(16)
-    icon:SetPoint("LEFT", row, "LEFT", RCX.name, 0)
-    row.icon = icon
-    row.name  = mkCell(RCX.name + 20, RCW.name - 20)
-    row.ct    = mkCell(RCX.ct, RCW.ct, "RIGHT")
-    row.unit  = mkCell(RCX.unit, RCW.unit)
-    row.stack = mkCell(RCX.stack, RCW.stack)
-    row.pct   = mkCell(RCX.pct, RCW.pct)
+    if selectable then
+        -- ---- Buy tab: the mockup's eight columns ------------------------
+        local X, W = RCX_BUY, RCW_BUY
+
+        -- Tick box for the multi-buyout batch. Its own small CheckButton
+        -- rather than the 32px UICheckButtonTemplate, which does not fit a
+        -- listing row.
+        local cb = CreateFrame("CheckButton", nil, row)
+        cb:SetWidth(14); cb:SetHeight(14)
+        cb:SetPoint("LEFT", row, "LEFT", X.check, 0)
+        cb:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 8,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        cb:SetBackdropColor(0.08, 0.07, 0.06, 1)
+        cb:SetBackdropBorderColor(0.45, 0.38, 0.22)
+        local tick = cb:CreateTexture(nil, "OVERLAY")
+        tick:SetPoint("TOPLEFT", cb, "TOPLEFT", 3, -3)
+        tick:SetPoint("BOTTOMRIGHT", cb, "BOTTOMRIGHT", -3, 3)
+        tick:SetTexture(1.0, 0.82, 0.0, 1)
+        tick:Hide()
+        cb.tick = tick
+        cb:SetScript("OnClick", function()
+            if row.entry then ui.ToggleBuyCheck(row.entry) end
+        end)
+        row.check = cb
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", X.icon, 0)
+        row.icon   = icon
+        row.name   = mkCell(X.name,   W.name)
+        row.lvl    = mkCell(X.lvl,    W.lvl,    "RIGHT")
+        row.left   = mkCell(X.left,   W.left)
+        row.seller = mkCell(X.seller, W.seller)
+        row.bid    = mkCell(X.bid,    W.bid,    "RIGHT")
+        row.stack  = mkCell(X.stack,  W.stack,  "RIGHT")
+        row.unit   = mkCell(X.unit,   W.unit,   "RIGHT")
+        row.pct    = mkCell(X.pct,    W.pct,    "RIGHT")
+    else
+        -- ---- Crafting tab: the older five-column shape ------------------
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", RCX.name, 0)
+        row.icon = icon
+        row.name  = mkCell(RCX.name + 20, RCW.name - 20)
+        row.ct    = mkCell(RCX.ct, RCW.ct, "RIGHT")
+        row.unit  = mkCell(RCX.unit, RCW.unit)
+        row.stack = mkCell(RCX.stack, RCW.stack)
+        row.pct   = mkCell(RCX.pct, RCW.pct)
+    end
     if selectable then
         -- Selection highlight, drawn UNDER the text (BACKGROUND layer) so it
         -- tints the row rather than covering the numbers.
@@ -2222,17 +2346,55 @@ function ui.FillResultRow(row, r)
             row.icon:SetVertexColor(1, 0.3, 0.3)
         end
     end
-    row.ct:SetText("x" .. r.count)
-    row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
-    if r.buyout and r.buyout > 0 then
-        row.stack:SetText(util.FormatMoney(r.buyout, true))
-    else
-        -- Bid-only auction: show the current/next bid instead of just "bid only".
-        local nb = r.nextBid or r.minBid or 0
-        if nb > 0 then
-            row.stack:SetText("bid " .. util.FormatMoney(nb, true))
+    local DASH = "\226\128\148"
+    if row.ct then
+        -- Crafting tab: the stack count is its own column.
+        row.ct:SetText("x" .. r.count)
+        row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or DASH)
+        if r.buyout and r.buyout > 0 then
+            row.stack:SetText(util.FormatMoney(r.buyout, true))
         else
-            row.stack:SetText("bid only")
+            local nb = r.nextBid or r.minBid or 0
+            if nb > 0 then
+                row.stack:SetText("bid " .. util.FormatMoney(nb, true))
+            else
+                row.stack:SetText("bid only")
+            end
+        end
+    else
+        -- Buy tab: the mockup's columns.
+        --
+        -- Stack count rides on the NAME ("Thick Leather Tunic x2") rather than
+        -- taking a column of its own -- that is what buys the width for Lvl,
+        -- Time Left, Seller and Current Bid.
+        if r.count and r.count > 1 then
+            row.name:SetText(r.name .. "  x" .. r.count)
+        end
+        row.lvl:SetText((r.level and r.level > 0) and r.level or "")
+        -- 1..4 -> Short / Medium / Long / Very Long, through the client's own
+        -- localized globals, so this reads correctly on a non-English client.
+        local tl = ""
+        if r.timeLeft then
+            tl = getglobal("AUCTION_TIME_LEFT" .. r.timeLeft) or ""
+        end
+        row.left:SetText(tl)
+        -- owner is the one field GetAuctionItemInfo can hand back nil for,
+        -- until the name resolves. Leave the cell blank rather than blanking
+        -- the row -- the auction is real, we just do not know the seller yet.
+        row.seller:SetText(r.mine and "You" or (r.owner or ""))
+
+        local bidNow = (r.bidAmount and r.bidAmount > 0) and r.bidAmount
+                       or (r.minBid or 0)
+        row.bid:SetText(bidNow > 0 and util.FormatMoneyGold(bidNow) or DASH)
+
+        if r.buyout and r.buyout > 0 then
+            row.stack:SetText(util.FormatMoneyGold(r.buyout))
+            row.unit:SetText(util.FormatMoneyGold(r.unit or r.buyout))
+        else
+            -- No buyout: an em-dash in the Buyout column and "bid only" under
+            -- Unit, exactly as the mockup's Dredgemire Leggings row reads.
+            row.stack:SetText(DASH)
+            row.unit:SetText("bid only")
         end
     end
     local market = r.itemId and A.db.MarketValue(r.itemId)
@@ -2241,8 +2403,35 @@ function ui.FillResultRow(row, r)
         row.pct:SetText(pct .. "%")
         row.pct:SetTextColor(PctColorBuy(pct))
     else
-        row.pct:SetText("\226\128\148")
+        row.pct:SetText(DASH)
         row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    -- A row you own is dimmed WHOLE and labelled, the way the mockup greys
+    -- its "Wild Leather Vest (yours)". Applied after every cell is written,
+    -- so nothing above can undo it.
+    if row.check then
+        if r.mine then
+            row.name:SetText(row.name:GetText() .. " |cff808080(yours)|r")
+        end
+        local a = r.mine and 0.45 or 1.0
+        local dim = { row.lvl, row.left, row.seller, row.bid, row.stack,
+                      row.unit, row.pct }
+        local di = 1
+        while di <= table.getn(dim) do
+            dim[di]:SetAlpha(a)
+            di = di + 1
+        end
+        row.name:SetAlpha(a)
+        if row.icon then row.icon:SetAlpha(a) end
+        -- ...and you cannot tick your own auction into a buyout batch.
+        if r.mine then
+            row.check:Hide()
+        else
+            row.check:Show()
+            local on = ui.IsBuyChecked(r)
+            if on then row.check.tick:Show() else row.check.tick:Hide() end
+        end
     end
     -- Per-row buttons exist only on the Crafting tab's rows now; the Buy tab
     -- is Blizzlike (select a row, act from the bottom bar), so its rows carry
@@ -2283,6 +2472,20 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
         return rows
     end
 
+    -- Seller is text, like Item -- sorted alphabetically rather than falling
+    -- through to the numeric path, where every row would key nil and the sort
+    -- would be a no-op that looked like a dead header.
+    if sortKey == "seller" then
+        table.sort(rows, function(a, b)
+            local an = string.lower(a.owner or "\255")   -- unknown sellers last
+            local bn = string.lower(b.owner or "\255")
+            if an == bn then return false end
+            if dir == "desc" then return an > bn end
+            return an < bn
+        end)
+        return rows
+    end
+
     local function keyOf(r)
         if sortKey == "stack" then
             return (r.buyout and r.buyout > 0) and r.buyout or nil
@@ -2292,6 +2495,14 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
             return nil
         elseif sortKey == "ct" then
             return r.count
+        elseif sortKey == "lvl" then
+            return r.level
+        elseif sortKey == "left" then
+            return r.timeLeft
+        elseif sortKey == "bid" then
+            local b = (r.bidAmount and r.bidAmount > 0) and r.bidAmount
+                      or r.minBid
+            return (b and b > 0) and b or nil
         end
         return r.unit
     end
@@ -2312,35 +2523,49 @@ end
 -- overlap. Each button is sized to its own label so hit areas never collide.
 -- `cols` maps key -> x offset, `widths` key -> column width. Returns the
 -- key -> button table for ui.PaintSortHeaders.
-function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick)
+-- Crafting's five columns. The Buy tab passes its own eight.
+local CRAFT_HEADER_DEFS = {
+    { key = "name",  text = "Item" },
+    { key = "ct",    text = "Ct" },
+    { key = "unit",  text = "Unit price" },
+    { key = "stack", text = "Stack buyout" },
+    { key = "pct",   text = "% mkt" },
+}
+
+function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
     local headers = {}
-    local defs = {
-        { key = "name",  text = "Item" },
-        { key = "ct",    text = "Ct" },
-        { key = "unit",  text = "Unit price" },
-        { key = "stack", text = "Stack buyout" },
-        { key = "pct",   text = "% mkt" },
-    }
+    defs = defs or CRAFT_HEADER_DEFS
     local i = 1
     while i <= table.getn(defs) do
         local d = defs[i]
         local cx = cols[d.key]
         if cx then
             local b = CreateFrame("Button", nil, panel)
-            b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
             b:SetHeight(16)
             b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
             local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-            fs:SetPoint("LEFT", b, "LEFT", 0, 0)
             fs:SetText(d.text)
-            -- Width: the label plus room for the sort arrow, but never wider
-            -- than the column, so adjacent headers can't overlap.
-            local w = fs:GetStringWidth() + 12
-            local maxw = (widths[d.key] or 40) + 12
-            if w > maxw then w = maxw end
-            b:SetWidth(w)
             b.label = fs
             b.baseText = d.text
+            if d.just == "RIGHT" then
+                -- A numeric column's header sits over the RIGHT edge of its
+                -- cells, because the cells are right-justified. Left-aligning
+                -- the header of a right-aligned column is the thing that makes
+                -- a table look like it was assembled rather than designed.
+                b:SetWidth(widths[d.key] or 40)
+                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
+                fs:SetPoint("RIGHT", b, "RIGHT", 0, 0)
+                fs:SetJustifyH("RIGHT")
+            else
+                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
+                fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+                -- Width: the label plus room for the sort arrow, but never
+                -- wider than the column, so adjacent headers can't overlap.
+                local w = fs:GetStringWidth() + 12
+                local maxw = (widths[d.key] or 40) + 12
+                if w > maxw then w = maxw end
+                b:SetWidth(w)
+            end
             b:SetScript("OnClick", function() onClick(d.key) end)
             headers[d.key] = b
         end
@@ -2361,7 +2586,12 @@ function ui.PaintSortHeaders(headers, sortKey, dir)
     end
 end
 
-local BUY_ROWS,  BUY_ROW_H  = 11, 20
+-- Row height 26, up from 20. The mockup's rows are noticeably taller than a
+-- packed list -- eight columns need the breathing room to stay readable, and
+-- a tick box needs somewhere to sit. Not the mockup's literal 43: that is a
+-- CSS pixel in a 2000px-wide render, and translating it straight across would
+-- give five visible rows.
+local BUY_ROWS,  BUY_ROW_H  = 11, 26
 local BUY_ROWS_MAX  = 34
 local SIDE_ROWS, SIDE_ROW_H = 13, 18
 -- Post Filter clause rows in the Filter Builder.
@@ -2427,6 +2657,11 @@ function ui.BuildBuyTab()
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(SIDE_ROW_H)
             row:SetWidth(SIDE_W)
+            -- Clickable, but a LIST ROW, not a button: the plate below is
+            -- the tree's own and says whether this is a top-level category,
+            -- so the skin must not replace it with a uniform button plate.
+            -- aegisNoSkin is the existing opt-out for exactly this.
+            row.aegisNoSkin = true
             if i == 1 then
                 row:SetPoint("TOPLEFT", catScroll, "TOPLEFT", 0, 0)
             else
@@ -2481,23 +2716,25 @@ function ui.BuildBuyTab()
     nameLbl:SetText("Name")
     ui.buyNameLbl = nameLbl
 
-    -- The strip is built from BOTH ENDS and meets in the middle, and the Name
-    -- box absorbs whatever is left over.
+    -- The strip is a FIXED-WIDTH cluster on the left, two buttons pinned
+    -- right, and the slack left as empty space between them -- the mockup's
+    -- arrangement.
     --
-    -- It used to chain left-to-right -- Name, then levels, then quality, then
-    -- the Usable checkbox, each hung off the last -- while Search and Advanced
-    -- were pinned at a fixed offset from the RIGHT edge. Nothing connected the
-    -- two halves, so at any width where the growing chain reached the pinned
-    -- buttons they simply drew on top of each other: the reported "Usable"
-    -- label with Search stamped through it.
+    -- Two earlier versions of this both failed, in opposite directions.
+    -- Originally everything chained left-to-right off the Name box while
+    -- Search and Advanced were pinned a fixed distance from the right edge,
+    -- with nothing joining the halves: they overlapped, printing Search
+    -- through the "Usable" label. 1.14.1 fixed that by letting Name stretch
+    -- to fill the gap -- which made overlap impossible but pushed Level Range
+    -- and Min Quality into the middle of the strip, away from Name.
     --
-    -- Fixed offsets into a resizable frame, for the third time (ROADMAP 2k,
-    -- 2l, and now here). The rule those entries keep arriving at: the elastic
-    -- widget anchors on TWO edges and every fixed-width widget hangs off an
-    -- end. Only ONE thing here can stretch, and it is the text field.
+    -- Fixed widths bring the overlap risk back, so it is bounded arithmetically
+    -- instead of by an anchor: STRIP_MIN_W below is the cluster's total width,
+    -- and MIN_W is large enough to fit it plus the buttons. See the note on
+    -- MIN_W -- eight result columns do not fit in the old 832 either.
     local box = CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
         "InputBoxTemplate")
-    box:SetHeight(18)
+    box:SetWidth(BUY_NAME_W); box:SetHeight(18)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 10, -24)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
@@ -2505,67 +2742,54 @@ function ui.BuildBuyTab()
     box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
     ui.buyBox = box
 
-    local searchBtn = ui.MakeButton(panel, "primary",
-        "AegisExchangeBuySearchButton")
-    searchBtn:SetWidth(70); searchBtn:SetHeight(20)
-    searchBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -112, -22)
-    searchBtn:SetText("Search")
-    searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
-    ui.buySearchBtn = searchBtn
-
-    -- Right-to-left from Search: Usable, Min Quality, max level, dash, min
-    -- level. Each keeps its natural width; the slack all lands on Name.
-    local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    usableLbl:SetPoint("RIGHT", searchBtn, "LEFT", -10, 0)
-    usableLbl:SetText("Usable")
-    usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
-    ui.buyUsableLbl = usableLbl
-
-    ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    ui.buyUsable:SetWidth(20); ui.buyUsable:SetHeight(20)
-    ui.buyUsable:SetPoint("RIGHT", usableLbl, "LEFT", -1, 0)
-
-    ui.buyQuality = MakeDropdown(panel, 96, function() end)
-    ui.buyQuality.button:SetPoint("RIGHT", ui.buyUsable, "LEFT", -10, 0)
-    local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    qLbl:SetPoint("BOTTOMLEFT", ui.buyQuality.button, "TOPLEFT", 0, 3)
-    qLbl:SetText("Min Quality")
-    ui.buyQualLbl = qLbl
-
-    ui.buyMaxLevel = MakeNumBox(panel, 44)
-    ui.buyMaxLevel:SetPoint("RIGHT", ui.buyQuality.button, "LEFT", -26, 0)
+    -- Left cluster, chained left-to-right off Name at fixed widths.
+    ui.buyMinLevel = MakeNumBox(panel, BUY_LVL_W)
+    ui.buyMinLevel:SetPoint("LEFT", box, "RIGHT", 14, 0)
     local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    lvlDash:SetPoint("RIGHT", ui.buyMaxLevel, "LEFT", -6, 0)
+    lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 7, 0)
     lvlDash:SetText("-")
     ui.buyLvlDash = lvlDash
-    ui.buyMinLevel = MakeNumBox(panel, 44)
-    ui.buyMinLevel:SetPoint("RIGHT", lvlDash, "LEFT", -6, 0)
+    ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W)
+    ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 7, 0)
 
     local lvlLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     lvlLbl:SetPoint("BOTTOMLEFT", ui.buyMinLevel, "TOPLEFT", 0, 3)
     lvlLbl:SetText("Level Range")
     ui.buyLvlLbl = lvlLbl
 
-    -- ...and here is the join the old strip never had. Name runs from its own
-    -- left edge to the first fixed-width control, so the two halves cannot
-    -- overlap at any window width.
-    box:SetPoint("RIGHT", ui.buyMinLevel, "LEFT", -14, 0)
+    ui.buyQuality = MakeDropdown(panel, BUY_QUAL_W, function() end)
+    ui.buyQuality.button:SetPoint("LEFT", ui.buyMaxLevel, "RIGHT", 16, 0)
+    local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    qLbl:SetPoint("BOTTOMLEFT", ui.buyQuality.button, "TOPLEFT", 0, 3)
+    qLbl:SetText("Min Quality")
+    ui.buyQualLbl = qLbl
 
-    -- The one addition to the stock layout, in the slot where Blizzard's
-    -- "Display on Character" sat.
-    --
-    -- It used to carry a purple vertex tint, on the reasoning that the one
-    -- addition to an otherwise Blizzlike strip should read as the odd one
-    -- out. That reasoning is spent: the strip is no longer Blizzlike, it is
-    -- concept art, so a third colour on top of it just read as a smudge over
-    -- the button -- which is exactly how it was reported. Quiet plate.
-    local advBtn = ui.MakeButton(panel, "quiet",
+    ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    ui.buyUsable:SetWidth(20); ui.buyUsable:SetHeight(20)
+    ui.buyUsable:SetPoint("LEFT", ui.buyQuality.button, "RIGHT", 10, 0)
+    local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    usableLbl:SetPoint("LEFT", ui.buyUsable, "RIGHT", 2, 0)
+    usableLbl:SetText("Usable items")
+    usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.buyUsableLbl = usableLbl
+
+    -- Right pair. Advanced is the outermost, so it lands where the stock UI
+    -- put "Display on Character".
+    local advBtn = ui.MakeButton(panel, "accent",
         "AegisExchangeBuyAdvancedButton")
-    advBtn:SetWidth(96); advBtn:SetHeight(20)
-    advBtn:SetPoint("LEFT", searchBtn, "RIGHT", 8, 0)
+    advBtn:SetWidth(BUY_ADV_W); advBtn:SetHeight(20)
+    advBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -22)
     advBtn:SetText("Advanced >")
     advBtn:SetScript("OnClick", function() ui.SetBuyMode("advanced") end)
     ui.buyAdvBtn = advBtn
+
+    local searchBtn = ui.MakeButton(panel, "primary",
+        "AegisExchangeBuySearchButton")
+    searchBtn:SetWidth(BUY_SEARCH_W); searchBtn:SetHeight(20)
+    searchBtn:SetPoint("RIGHT", advBtn, "LEFT", 10, 0)
+    searchBtn:SetText("Search")
+    searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
+    ui.buySearchBtn = searchBtn
 
     -- ---- ADVANCED-mode strip -------------------------------------------
     local backBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBackButton")
@@ -2654,22 +2878,38 @@ function ui.BuildBuyTab()
     ui.buySortKey = "unit"
     ui.buySortDir = "asc"
     local rowLeft = RX + 4
-    local CX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
-                 buy = 436, bid = 490 }
-    local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 
-    -- EVERY column sorts, including Item and Ct. Headers are bare clickable
-    -- text (aegisNoSkin), never skinned into boxes -- pfUI's SkinButton would
-    -- give each one a backdrop and they'd visibly overlap.
-    ui.buyHeaders = {}
-    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, CX, CW,
-        function(key) ui.SetBuySort(key) end)
+    -- EVERY column sorts. Headers are bare clickable text (aegisNoSkin),
+    -- never skinned into boxes -- pfUI's SkinButton would give each one a
+    -- backdrop and they'd visibly overlap.
+    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, RCX_BUY, RCW_BUY,
+        function(key) ui.SetBuySort(key) end,
+        {
+            { key = "name",   text = "Item" },
+            { key = "lvl",    text = "Lvl",         just = "RIGHT" },
+            { key = "left",   text = "Time Left" },
+            { key = "seller", text = "Seller" },
+            { key = "bid",    text = "Current Bid", just = "RIGHT" },
+            { key = "stack",  text = "Buyout",      just = "RIGHT" },
+            { key = "unit",   text = "Unit",        just = "RIGHT" },
+            { key = "pct",    text = "% Mkt",       just = "RIGHT" },
+        })
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
     -- Headroom for the status/pager row AND the action bar beneath it.
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 62)
+
+    -- The table sits in a well, with a rule under the header row -- the
+    -- mockup's boxed table rather than rows floating on the panel.
+    ui.buyListWell = ui.MakeWell(panel, scroll, 6)
+    local hdrRule = panel:CreateTexture(nil, "ARTWORK")
+    hdrRule:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 4)
+    hdrRule:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 4)
+    hdrRule:SetHeight(1)
+    hdrRule:SetTexture(0.45, 0.38, 0.22, 0.8)
+    ui.buyHdrRule = hdrRule
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BUY_ROW_H, ui.UpdateBuyList)
     end)
@@ -2705,9 +2945,25 @@ ui.GrowBuyRows = function(n)
     buyoutBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
     buyoutBtn:SetText("Buyout")
     buyoutBtn:SetScript("OnClick", function()
-        if ui.buySel then ui.ConfirmBuyout(ui.buySel) end
+        -- Ticked rows win over the single selection. You cannot have both
+        -- meanings on one button, and having ticked something is the more
+        -- deliberate act.
+        if table.getn(ui.buyChecked or {}) > 0 then
+            ui.ConfirmBatchBuyout()
+        elseif ui.buySel then
+            ui.ConfirmBuyout(ui.buySel)
+        end
     end)
     ui.buyBuyoutBtn = buyoutBtn
+
+    -- What the ticked rows come to, beside the action bar. Doubles as the
+    -- progress line while a batch runs.
+    ui.buyCheckTotal = panel:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlightSmall")
+    ui.buyCheckTotal:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RX + 6, 26)
+    ui.buyCheckTotal:SetJustifyH("LEFT")
+    ui.buyCheckTotal:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.buyCheckTotal:Hide()
 
     local bidBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBidButton")
     bidBtn:SetWidth(58); bidBtn:SetHeight(21)
@@ -2814,7 +3070,8 @@ function ui.SetBuyView(name)
     -- a reported bug. The pager goes with it: its buttons still worked while
     -- invisible results were underneath, so a stray click queried the server.
     local resultsBits = { ui.buyScroll, ui.buyPageText, ui.buyStatus,
-                          ui.buyPrevBtn, ui.buyNextBtn }
+                          ui.buyPrevBtn, ui.buyNextBtn,
+                          ui.buyListWell, ui.buyHdrRule }
     local i = 1
     while i <= table.getn(resultsBits) do
         local w = resultsBits[i]
@@ -3814,8 +4071,91 @@ function ui.IsBuySelected(entry)
     return s.index == entry.index and s.name == entry.name
 end
 
+-- ---------------------------------------------------------------------------
+-- Ticked rows (multi-buyout)
+--
+-- Held as an ordered LIST of entries rather than a set of indices. An index is
+-- only meaningful against the page the client is holding right now, and this
+-- selection has to survive a re-query, a sort and a page turn -- the same
+-- reason buy.StartBatch works from fingerprints instead of indices.
+-- ---------------------------------------------------------------------------
+
+ui.buyChecked = {}
+
+function ui.IsBuyChecked(entry)
+    if not entry then return false end
+    local i = 1
+    while i <= table.getn(ui.buyChecked) do
+        local c = ui.buyChecked[i]
+        if c.index == entry.index and c.name == entry.name
+           and c.buyout == entry.buyout then
+            return true
+        end
+        i = i + 1
+    end
+    return false
+end
+
+function ui.ToggleBuyCheck(entry)
+    if not entry or entry.mine then return end
+    local i = 1
+    while i <= table.getn(ui.buyChecked) do
+        local c = ui.buyChecked[i]
+        if c.index == entry.index and c.name == entry.name
+           and c.buyout == entry.buyout then
+            table.remove(ui.buyChecked, i)
+            ui.UpdateBuyList()
+            ui.RefreshBuyActionBar()
+            return
+        end
+        i = i + 1
+    end
+    table.insert(ui.buyChecked, entry)
+    ui.UpdateBuyList()
+    ui.RefreshBuyActionBar()
+end
+
+function ui.ClearBuyChecks()
+    ui.buyChecked = {}
+    ui.RefreshBuyActionBar()
+end
+
 function ui.RefreshBuyActionBar()
     if not ui.buyBidBtn then return end
+    local nChecked = table.getn(ui.buyChecked or {})
+
+    -- Ticked rows take over the Buyout button. Bid stays single-target --
+    -- bidding a batch means nothing, since each auction needs its own amount.
+    if nChecked > 0 then
+        local total = A.buy.BatchCost(ui.buyChecked)
+        local money = GetMoney and GetMoney() or 0
+        local afford = total <= money
+        ui.buyBuyoutBtn:SetText("Buyout (" .. nChecked .. ")")
+        if afford then
+            ui.buyBuyoutBtn:Enable()
+        else
+            ui.buyBuyoutBtn:Disable()
+        end
+        if ui.buyCheckTotal then
+            if afford then
+                ui.buyCheckTotal:SetText(nChecked .. " selected \226\128\148 "
+                    .. util.FormatMoneyGold(total))
+            else
+                -- Say WHY it is disabled. A greyed button with no reason is
+                -- the thing this addon has shipped twice and both times it
+                -- read as broken.
+                ui.buyCheckTotal:SetText("|cffff5555" .. nChecked
+                    .. " selected \226\128\148 need "
+                    .. util.FormatMoney(total - money, false) .. " more|r")
+            end
+            ui.buyCheckTotal:Show()
+        end
+        ui.buyBidBtn:Disable()
+        return
+    end
+
+    if ui.buyCheckTotal then ui.buyCheckTotal:Hide() end
+    ui.buyBuyoutBtn:SetText("Buyout")
     local s = ui.buySel
     if s and s.mine then
         -- Your own auction: the client refuses both, so say why by greying
@@ -4229,6 +4569,76 @@ StaticPopupDialogs["AEGIS_EXCHANGE_BID"] = {
     OnAccept = function() ui.DoBid() end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
+
+-- ONE dialog for the whole batch, not one per item. A per-item prompt for a
+-- twelve-auction buyout trains you to click through without reading, which
+-- defeats the point of confirming at all.
+StaticPopupDialogs["AEGIS_EXCHANGE_BUYOUT_BATCH"] = {
+    text = "Buy %s?\n%s",
+    button1 = "Buy all", button2 = "Cancel",
+    OnAccept = function() ui.DoBatchBuyout() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmBatchBuyout()
+    local sel = ui.buyChecked or {}
+    local n = table.getn(sel)
+    if n == 0 then return end
+    local total, buyable = A.buy.BatchCost(sel)
+    if buyable == 0 then
+        ChatMsg("Aegis: nothing selected has a buyout price.")
+        return
+    end
+    local money = GetMoney and GetMoney() or 0
+    if total > money then
+        ChatMsg("Aegis: that selection costs "
+            .. util.FormatMoney(total) .. " and you have "
+            .. util.FormatMoney(money) .. ".")
+        return
+    end
+    -- Spell out the warning rather than relying on the button label. This
+    -- spends real gold on several auctions at once and cannot be undone.
+    local detail = string.format(
+        "Total %s, leaving %s.\n\nThis buys all %d immediately and cannot be undone.",
+        util.FormatMoney(total), util.FormatMoney(money - total), buyable)
+    StaticPopup_Show("AEGIS_EXCHANGE_BUYOUT_BATCH",
+        buyable .. " auction(s)", detail)
+end
+
+function ui.DoBatchBuyout()
+    local sel = ui.buyChecked or {}
+    if table.getn(sel) == 0 then return end
+    local ok, err = A.buy.StartBatch(sel,
+        function(bought, want, spent, reason)
+            -- Record what ACTUALLY completed, item by item, so the History
+            -- tab and the ledger agree with the gold that left the bag even
+            -- when the batch stopped early.
+            ui.ClearBuyChecks()
+            if reason then
+                ChatMsg("Aegis: bought " .. bought .. " of " .. want
+                    .. " \226\128\148 " .. reason)
+            else
+                ChatMsg("Aegis: bought " .. bought .. " auction(s) for "
+                    .. util.FormatMoney(spent) .. ".")
+            end
+            ui.UpdateBuyList()
+            ui.RefreshBuyActionBar()
+            ui.RefreshBuyMoney()
+            if ui.selectedSubTab == "History" then ui.RefreshHistory() end
+        end,
+        function(bought, want, name, price)
+            -- Booked per purchase, not once at the end: a batch that aborts
+            -- halfway has still spent the gold on what it did buy, and the
+            -- ledger has to match the bag.
+            if name then A.db.RecordTxn("buy", name, price) end
+            if ui.buyCheckTotal then
+                ui.buyCheckTotal:SetText("Buying " .. bought .. " / " .. want
+                    .. " \226\128\166")
+                ui.buyCheckTotal:Show()
+            end
+        end)
+    if not ok then ChatMsg("Aegis: " .. (err or "buyout failed.")) end
+end
 
 function ui.ConfirmBuyout(row)
     if row.mine then ChatMsg("Aegis: that's your own auction."); return end

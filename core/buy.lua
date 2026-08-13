@@ -1279,6 +1279,20 @@ function buy.ReadPage()
                 nextBid = minBid or 0
             end
             local link = GetAuctionItemLink("list", i)
+            -- Time left is NOT one of GetAuctionItemInfo's 12 values; it has
+            -- its own call, which stock 1.12.1 FrameXML makes on the very next
+            -- line after GetAuctionItemInfo in AuctionFrameBrowse_Update.
+            -- Returns 1..4, rendered through AUCTION_TIME_LEFT1..4.
+            --
+            -- This is page data the client already holds, not an item-cache
+            -- lookup, so it adds no per-item query to a loop that is already
+            -- state-gated (HARD RULE 16). Guarded anyway: a server that does
+            -- not answer it should cost the column, not the scan.
+            local timeLeft
+            if GetAuctionItemTimeLeft then
+                local okT, v = pcall(GetAuctionItemTimeLeft, "list", i)
+                if okT then timeLeft = v end
+            end
             table.insert(rawRows, {
                 index   = i,
                 name    = name,
@@ -1287,6 +1301,7 @@ function buy.ReadPage()
                 quality = quality,
                 canUse  = canUse,
                 level   = level,
+                timeLeft = timeLeft,
                 buyout  = buyout or 0,
                 unit    = (buyout and buyout > 0) and math.floor(buyout / count)
                           or nil,
@@ -1365,6 +1380,14 @@ function buy.ReadPage()
         st.callbacks.onResults(rows)
     end
     Notify()
+
+    -- A batch buyout advances HERE, once the page the purchase invalidated has
+    -- been re-read -- never straight after PlaceAuctionBid. Stepping earlier
+    -- would pick an index out of the page we already know is stale, which is
+    -- the whole bug the batch exists to avoid.
+    if buy.batch and buy.batch.active then
+        buy.BatchStep()
+    end
 end
 
 -- The listing at `row.index` still matches what we displayed (guards against
@@ -1373,6 +1396,176 @@ function buy.Verify(row)
     local name, _, count, _, _, _, _, _, buyout = GetAuctionItemInfo("list", row.index)
     return name == row.name and count == row.count
         and (buyout or 0) == row.buyout
+end
+
+-- ---------------------------------------------------------------------------
+-- Batch buyout
+--
+-- THE PROBLEM. 1.12 has no bulk buy. Each buyout is PlaceAuctionBid against an
+-- INDEX into the page the client currently holds, and a successful purchase
+-- removes that auction and re-sends the page -- so every index after it shifts
+-- down by one. Walking a list of captured indices therefore buys the WRONG
+-- auctions from the second purchase onward. That is the worst bug this addon
+-- could have: it spends real gold on something nobody chose.
+--
+-- WHY MATCHING BY IDENTITY IS THE WRONG GOAL. There is no auction ID on 1.12.
+-- The obvious fix -- re-find "the same auction" after each purchase -- cannot
+-- be done, and chasing it leads to the trap in the live screenshot: eleven
+-- Linen Bandage auctions at 8c each are INDISTINGUISHABLE from one another.
+--
+-- WHAT IS ACTUALLY REQUIRED. The buyer does not care which of eleven identical
+-- 8c auctions they get. They care that they never pay for something they did
+-- not pick. So the safety property is not identity, it is:
+--
+--     every purchase matches the (name, count, buyout) of a ticked row,
+--     and no more than the ticked COUNT of each such fingerprint is bought.
+--
+-- That is satisfiable, and it is what this implements: the batch is a multiset
+-- of fingerprints with remaining counts. Each step re-reads the CURRENT page,
+-- finds any index whose fingerprint is still owed, buys exactly that index,
+-- decrements, and waits for the page to settle before the next step. Nothing
+-- is ever bought against a stale index -- the index is re-derived from the
+-- live page every single time.
+--
+-- Anything unexpected ABORTS rather than guessing: a fingerprint that is owed
+-- but no longer present (someone else bought it, or the page moved) stops the
+-- batch and reports what completed. Partial completion is fine and expected;
+-- silent substitution is not.
+-- ---------------------------------------------------------------------------
+
+-- A fingerprint identifies a KIND of auction, not an instance. Deliberately
+-- the same three fields buy.Verify compares, so a row that passes Verify at
+-- its own index also matches its own fingerprint.
+function buy.Fingerprint(row)
+    return (row.name or "") .. "\001" .. (row.count or 1)
+        .. "\001" .. (row.buyout or 0)
+end
+
+-- Scan the CURRENT page for an index whose fingerprint is `fp`. Returns the
+-- index, or nil. This is what replaces trusting a captured index.
+function buy.FindByFingerprint(fp)
+    local n = GetNumAuctionItems("list")
+    local i = 1
+    while i <= (n or 0) do
+        local name, _, count, _, _, _, _, _, buyout = GetAuctionItemInfo("list", i)
+        if name then
+            local here = name .. "\001" .. (count or 1) .. "\001" .. (buyout or 0)
+            if here == fp then return i end
+        end
+        i = i + 1
+    end
+    return nil
+end
+
+buy.batch = { active = false }
+
+-- Total cost of `rows`, and whether the player can cover it.
+function buy.BatchCost(rows)
+    local total, n = 0, 0
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 and not r.mine then
+            total = total + r.buyout
+            n = n + 1
+        end
+        i = i + 1
+    end
+    return total, n
+end
+
+-- Start a batch buyout of `rows`. Returns (true) or (false, reason).
+function buy.StartBatch(rows, onDone, onStep)
+    if buy.batch.active then return false, "A buyout is already running." end
+    if not rows or table.getn(rows) == 0 then
+        return false, "Nothing selected."
+    end
+    local total, n = buy.BatchCost(rows)
+    if n == 0 then return false, "Nothing selected has a buyout price." end
+    if GetMoney and total > (GetMoney() or 0) then
+        return false, "Not enough gold for the whole selection."
+    end
+    -- Collapse to a multiset: fingerprint -> how many of that kind to buy.
+    local owed, order = {}, {}
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 and not r.mine then
+            local fp = buy.Fingerprint(r)
+            if not owed[fp] then
+                owed[fp] = { count = 0, price = r.buyout, name = r.name }
+                table.insert(order, fp)
+            end
+            owed[fp].count = owed[fp].count + 1
+        end
+        i = i + 1
+    end
+    buy.batch = {
+        active = true, owed = owed, order = order,
+        bought = 0, spent = 0, want = n, total = total,
+        onDone = onDone, onStep = onStep,
+    }
+    return buy.BatchStep()
+end
+
+function buy.AbortBatch(reason)
+    local b = buy.batch
+    if not b.active then return end
+    b.active = false
+    if b.onDone then b.onDone(b.bought, b.want, b.spent, reason) end
+end
+
+-- One purchase. Called to start the batch and again each time the page
+-- settles after a buy.
+function buy.BatchStep()
+    local b = buy.batch
+    if not b.active then return false, "No batch running." end
+
+    -- Find the next fingerprint still owed that is actually ON the page now.
+    local fp, info, index
+    local oi = 1
+    while oi <= table.getn(b.order) do
+        local f = b.order[oi]
+        local rec = b.owed[f]
+        if rec and rec.count > 0 then
+            local at = buy.FindByFingerprint(f)
+            if at then fp, info, index = f, rec, at; break end
+            -- Owed but gone: someone else took it, or the page moved under
+            -- us. Stop -- do NOT fall through to a different auction.
+            buy.AbortBatch("A selected auction is no longer available.")
+            return false, "gone"
+        end
+        oi = oi + 1
+    end
+    if not fp then
+        b.active = false
+        if b.onDone then b.onDone(b.bought, b.want, b.spent, nil) end
+        return true
+    end
+
+    -- Gold is re-checked before EVERY purchase, not just at the start. The
+    -- opening check can be stale by now: mail, repairs and other windows all
+    -- move money while an auction house is open.
+    if GetMoney and info.price > (GetMoney() or 0) then
+        buy.AbortBatch("Ran out of gold partway through.")
+        return false, "gold"
+    end
+
+    info.count = info.count - 1
+    b.bought = b.bought + 1
+    b.spent = b.spent + info.price
+
+    local st = buy.state
+    st.phase   = "wait_results"
+    st.timeout = buy.TIMEOUT
+    buy.driver:Show()
+    PlaceAuctionBid("list", index, info.price)
+    -- Reported per PURCHASE, with what was bought, so the caller can book each
+    -- one as it happens. Booking the whole batch at the end would lose
+    -- everything bought before an abort -- and an abort is the case where an
+    -- accurate ledger matters most.
+    if b.onStep then b.onStep(b.bought, b.want, info.name, info.price) end
+    return true
 end
 
 -- Buy out `row`. Returns (true) or (false, reason). The refreshed page arrives

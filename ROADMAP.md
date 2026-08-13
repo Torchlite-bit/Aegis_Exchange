@@ -782,6 +782,55 @@ From screenshots of the button conversion in-game.
   buttons and ours is darker, so an exactly-black edge erases the outline
   instead of defining it.
 
+### 2p — Mockup parity + multi-buyout — ✅ **DONE** (v1.15.0)
+
+**Time Left IS available on 1.12 — this closes a long-open question.**
+`GetAuctionItemTimeLeft("list", i)` is called by stock 1.12.1 FrameXML on the
+line immediately after `GetAuctionItemInfo` in `AuctionFrameBrowse_Update`
+(verified against five independent 1.12.1 Interface mirrors). It returns 1..4,
+rendered through `AUCTION_TIME_LEFT1..4`. It is page data the client already
+holds, not an item-cache lookup, so it adds no per-item query to the scan and
+does not engage HARD RULE 16. **The `left` filter component is unblocked.**
+
+- **The mockup supersedes `design/07-buy-tab.png` where they disagree.** The
+  older PNG styles the primary button `#5a1414` (deep red); the "A - Default
+  view" mockup draws Search and Buyout warm brown-gold and adds a purple
+  Advanced. 1.14.0 took the red from the PNG. Written down because this has
+  now flipped once and the two files still both exist.
+- **Advanced is a third BTN_KIND, not a tint.** 1.14.0 removed a purple vertex
+  tint for reading as a smudge; that was correct, and is a different thing
+  from a plate of its own.
+- **MIN_W 832 -> 1000, from arithmetic rather than taste.** `ui.StripFitsAt(w)`
+  computes whether the sidebar, the fixed-width strip and the right-hand pair
+  fit; the first attempt at this pass set 1020 and the function immediately
+  showed it was ~14px short. **Make the constraint computable, not a number
+  someone did in their head** -- that is the only reason the overlap did not
+  ship a third time.
+- **Category rows opt out of the pfUI skin** via the existing `aegisNoSkin`,
+  not a new flag. They are Buttons (a row must be clickable), so pfUI's
+  SkinButton plated every one and erased the plated-parent / bare-child
+  distinction the tree uses. Result rows were never affected because they are
+  Frames. A first attempt added a second, redundant opt-out mechanism before
+  noticing `aegisNoSkin` already meant exactly this.
+
+**Batch buyout — the design, because the naive version spends real gold
+wrongly.** 1.12 has no bulk buy and no auction ID. Each buyout is
+`PlaceAuctionBid` against an INDEX into the currently-held page; the purchase
+removes that auction and re-sends the page, shifting every later index. So:
+
+- **Identity is unachievable and unnecessary.** Eleven identical Linen
+  Bandages at 8c cannot be told apart, and the buyer does not care which they
+  get. The property that matters is: *every purchase matches the (name, count,
+  buyout) of a ticked row, and no more than the ticked count of each.*
+- **The batch is a multiset of fingerprints**, and each step re-derives the
+  index from the LIVE page. Nothing is ever bought against a remembered index.
+- **It steps from `ReadPage`**, once the page invalidated by the purchase has
+  been re-read -- never straight after `PlaceAuctionBid`.
+- **Anything unexpected aborts**: a fingerprint that is owed but absent stops
+  the batch and reports what completed. Substitution is never acceptable.
+- **Gold is re-checked before every purchase**, not only at the start, because
+  mail/repairs/vendors move money while the AH is open.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

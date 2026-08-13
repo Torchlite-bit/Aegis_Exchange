@@ -12,6 +12,69 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.15.0]
+
+The Buy tab's default view rebuilt to the design mockup, plus multi-buyout.
+`/reload`.
+
+### Added
+- **Tick several auctions and buy them all at once.** Each result row has a
+  checkbox; Buyout then acts on everything ticked, after a single confirmation
+  showing the count, the total, and what you will be left with. The total is
+  checked against your gold before anything is bought, and again before each
+  individual purchase — mail, repairs and vendors all move money while the
+  auction house is open.
+
+  **On buying the right auctions.** 1.12 has no bulk buy: each buyout is a
+  separate call against an *index* into the page the client currently holds,
+  and a purchase removes that auction and re-sends the page, shifting every
+  index after it. Walking a list of captured indices therefore buys the wrong
+  things from the second purchase onward. There is also no auction ID, so "the
+  same auction" cannot be re-found — and eleven identical Linen Bandages at 8c
+  are genuinely indistinguishable anyway.
+
+  So the batch is a multiset of *fingerprints* — item, stack size, buyout
+  price — with a remaining count each. Every step re-reads the live page,
+  finds an index whose fingerprint is still owed, and buys that one. Nothing
+  is ever bought against a remembered index. If something ticked is no longer
+  there, the batch stops and reports what completed rather than substituting
+  whatever slid into that slot.
+- **Four columns the table was missing**: Lvl, Time Left, Seller and Current
+  Bid. Time Left needs its own API call (it is not among the twelve values
+  `GetAuctionItemInfo` returns) and renders through the client's own
+  localized strings, so it reads correctly on a non-English client.
+
+### Changed
+- **The results table follows the mockup.** Eight columns in a bordered well
+  with a rule under the headers, taller rows, numeric columns right-aligned
+  under right-aligned headers, and money figures in gold with the unit letter
+  dimmed. The stack count moved onto the item name (`Thick Leather Tunic x2`),
+  which is what freed the width for the new columns. A row you own is dimmed
+  whole and labelled `(yours)`; an auction with no buyout shows a dash there
+  and `bid only` under Unit.
+- **The control strip is a fixed-width cluster on the left with the buttons
+  hard right** and the slack between them, rather than a Name box stretching
+  to fill the width. `Usable` is `Usable items` again.
+- **Advanced is purple again**, as its own button kind rather than the tint
+  removed in 1.14.0 — that tint sat over another button's plate and read as a
+  smudge. Search and Buyout are the mockup's warm brown-gold rather than the
+  deep red taken from the older concept PNG; where the two references
+  disagree, the newer mockup wins.
+- **The minimum window width is 1000, up from 832.** Eight columns and a
+  fixed-width strip do not fit in 832, and letting the window get that narrow
+  reproduces the overlap fixed in 1.14.1. A saved width below the new minimum
+  is raised to it, so an existing character gets a wider window rather than a
+  broken one.
+
+### Fixed
+- **The category tree no longer renders as a stack of buttons under pfUI.**
+  Its rows are Buttons because a row has to be clickable, so pfUI's button
+  skinner gave every one an identical plate — erasing the distinction between
+  plated top-level categories and bare indented subcategories. They opt out
+  the same way the sort headers already did.
+
+---
+
 ## [1.14.1]
 
 Cleanup pass on 1.14.0, from screenshots. `/reload`.
@@ -1151,6 +1214,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.15.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.14.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.14.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.13.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
