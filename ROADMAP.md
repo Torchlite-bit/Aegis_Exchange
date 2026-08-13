@@ -476,13 +476,66 @@ recent searches); the choice persists per character, tree by default.
   search refreshes the recent list, and an unguarded sidebar repaint would
   `Show()` its rows straight over the tree. A test drives a search from the
   tree and asserts the sidebar stays down.
-- **"Advanced replaces the tree"** is interpreted as: Advanced shows the
-  Shopping Lists sidebar (which contains the saved/recent searches), while
-  the Results/Builder switch on the right stays available in BOTH modes.
-  When 2c ships a dedicated Saved Searches view it slots into the existing
-  right-hand view switcher, not the left column.
+- **"Advanced replaces the tree"** was first read as a left-column swap.
+  **Superseded by the 2g redesign below**, where Advanced replaces the whole
+  content area. The tree itself carried over unchanged and is now the default
+  view's left column, which is what it should always have been.
 
-### 2f — Session Purchase & Crafting Material Tracker
+### 2g — Blizzlike default view + Advanced (Phase 2 of the Buy redesign) — ✅ **DONE** (v1.9.0)
+
+Approved from a mockup before any code. The Buy tab now has two faces:
+
+- **DEFAULT** is the stock auction house: Name / Level Range / Min Quality /
+  Usable / Search, the category list on the left, and gold + Bid / Buyout /
+  Close along the bottom. Rows have no buttons — click to select, act from the
+  bottom bar. Two Aegis columns survive: **Unit** and **% Mkt**.
+- **ADVANCED** (one button, in the slot Blizzard used for "Display on
+  Character") swaps in the query box, the Shopping Lists sidebar and the
+  Filter Builder. **< Back** returns.
+
+**Settled while building it:**
+
+- **Everything on the strip composes into ONE term.** `ui.DefaultTerm()`
+  folds Name + level range + quality + usable together with the category the
+  tree has selected, and hands it to the same `buy.TermToQuery` /
+  `buy.CompileTerm` the typed language uses. That is what makes "the Name
+  field searches within the selected category" true with no special casing —
+  the category is just three more fields on the term. It is also why clicking
+  through categories no longer resets the rest of the strip.
+- **The category is STATE, not text.** 2e wrote picks into the search box;
+  that box is now Blizzard's Name field, so a pick would have overwritten what
+  the user typed. Held in `ui.buyCatClass/Subclass/Slot` instead and merged at
+  search time.
+- **The mode switch round-trips through the term**, both directions. Post-
+  filters the default view cannot express are dropped on the way back **and
+  said out loud** in the status line. A filter you cannot see but that still
+  narrows results is the failure mode this whole area keeps producing (see the
+  empty-page message in 1.8.0), so it gets an explicit test.
+- **Max moved to Advanced and is no longer READ in default mode.** Hiding the
+  box alone would have left a stale value silently filtering — the same class
+  of bug. Gated at the read, with a test that drives it both ways.
+- **Selection compares index AND name.** The page can be re-queried between
+  the click and the button press; matching on index alone would light up
+  whatever slid into that slot. A sabotage that only removed the name half
+  passed at first — the test was missing, not the code — so the stale-page
+  case is now covered directly.
+- **`BuildResultRow` grew a `selectable` flag** rather than being forked. The
+  Crafting tab shares it and keeps its per-row buttons; only Buy rows get the
+  selection tint.
+- **Import was removed** at the owner's request, and with it
+  `ui.BuilderImport` — an unreachable function is worse than a missing one.
+  The round-trip acceptance test now drives `ParseTerm` → `BuilderSetTerm`
+  directly, which is what Import called anyway once it had read the box.
+
+**Still to come in this redesign:** Phase 3 rebuilds the Advanced side to the
+approved mockup — Recent/Favorites with right-click promotion and a reorder
+menu, and the component/post-filter builder (stacked entries are ANDed;
+`and`/`or`/`not` only to override that). Phase 4 is the tooltip parser's
+abbreviation expansion. Both need the one parser change already identified:
+`tooltip` must take a single token instead of swallowing the rest of the
+term, so several tooltip clauses can coexist.
+
+### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
 

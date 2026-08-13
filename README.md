@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.8.0)
+# Aegis: Exchange (v1.9.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -102,19 +102,30 @@ Result names are **coloured by item quality**, the way their tooltips are, so
 a rare reads blue and an epic purple at a glance. An item you can't use gets a
 red-tinted icon.
 
-**Don't want to learn the syntax?** Two ways around it. The left side of the
-Buy tab is a **category tree**, just like the stock auction house: click
-**Weapons > Two-Handed Swords** or **Armor > Leather > Chest** and it
-searches, no typing needed — and anything already in the search box (a name,
-`quality/rare`, `stack 20`…) stays applied on top of the category you picked.
-The **Advanced** button swaps the tree back to your shopping lists and recent
-searches.
+**None of that is required.** The Buy tab opens looking and working like the
+auction house you already know: **Name**, **Level Range**, **Min Quality**,
+**Usable items**, **Search**, the category list down the left, and your gold
+with **Bid** / **Buyout** / **Close** along the bottom. Click a row to select
+it, then bid or buy from the bottom bar — same as the stock window. The
+category list expands the way Blizzard's does (**Armor › Leather › Chest**),
+and the Name field searches *within* whatever you've picked.
 
-Or hit **Builder** and fill in a form instead — name, level range, class,
-subclass, slot, quality, and the extra filters — with the query it builds
-shown live underneath. **Search** runs it, **To box** copies it out, **+ OR**
-appends it to what's already there, and **From box** loads a typed query back
-into the form so you can adjust it.
+Two extra columns are the reason to be here at all: **Unit** (price per item,
+so a stack of 20 is comparable to a stack of 1) and **% Mkt** (how this price
+compares to market value — green under, red over).
+
+The one addition to that layout is **Advanced**, top right. It swaps in the
+full query box, your shopping lists and recent searches, and the **Filter
+Builder** — a form for name, level range, class, subclass, slot, quality and
+the extra filters, with the query it builds shown live underneath. **Search**
+runs it, **Build** pushes it into the search box, and **+ OR** appends it to
+what's already there. **< Back** returns to the simple view.
+
+Switching carries your search with you in both directions, so you can start
+simple, hit Advanced to add something the plain view can't express, and come
+back. Anything that *only* exists in Advanced (a tooltip filter, say) is left
+behind on the way back — and the status line says so rather than quietly
+narrowing your results.
 
 **Shortcuts while the Buy tab is open:** **right-click** any bag item to search
 for it, or **shift-click** any item *anywhere* — bags, a chat link, a tooltip —
@@ -315,7 +326,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.8.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.9.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

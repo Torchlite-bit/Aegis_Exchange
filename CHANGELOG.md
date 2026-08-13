@@ -12,6 +12,49 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.9.0]
+
+Redesigns the Buy tab around a **Blizzlike default view**, with everything
+that was there before moved behind one **Advanced** button. `/reload`.
+
+### Added
+- **The Buy tab now opens looking like the stock auction house.** Name, Level
+  Range, Min Quality, Usable items, Search; the category list down the left;
+  your gold and **Bid / Buyout / Close** along the bottom. Click a row to
+  select it and act from the bottom bar, exactly as the stock window does.
+
+  Two columns are kept from Aegis: **Unit** (price per item) and **% Mkt**
+  (against market value, green under / red over).
+
+  The Name field searches *within* the selected category, so the tree and the
+  text box compose instead of fighting. So does everything else on the strip —
+  clicking through categories keeps your name, level range, quality and usable
+  settings applied rather than resetting them.
+- **An "Advanced" button**, in the slot Blizzard used for "Display on
+  Character". It swaps in the full query box, the shopping-list sidebar and
+  the Filter Builder; **< Back** returns.
+
+  The switch carries your search **both ways**: Advanced inherits whatever the
+  simple view had, and Back rebuilds the controls from the query. Filters only
+  Advanced can express (a tooltip clause, an exact-match, a stack size) are
+  dropped on the way back **and the status line says so** — an invisible
+  filter that keeps narrowing your results is the one outcome worth ruling out.
+- **Bid and Buyout gate themselves visibly.** Your own auction greys both; an
+  auction with no buyout greys Buyout only; nothing selected greys both. The
+  bid box prefills with what the selected auction actually needs next.
+
+### Changed
+- **"To box" is now "Build"**, and **Import is gone** — the builder is for
+  building a query, and reading one back was the least-used direction. Editing
+  the query box directly still does it.
+- **Per-row Buy/Bid buttons are gone from the Buy tab** in favour of the
+  Blizzlike select-then-act model. The Crafting tab keeps its own row buttons
+  and is unchanged.
+- **The Max price box belongs to Advanced now.** It is no longer read while
+  the default view is up, so a value left there cannot keep filtering results
+  after its box is off screen. Advanced also has `max-unit-buy` for the same
+  job inside a query.
+
 ## [1.8.0]
 
 ### Added
@@ -844,6 +887,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.9.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.8.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.7.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.6.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
