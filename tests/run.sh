@@ -47,6 +47,12 @@ step "Upvalue ceiling (32 -- the client REFUSES to load past this)"
 python3 tests/lint/upvalues.py || fail=1
 
 # ---------------------------------------------------------------------------
+step "Scoping (a file-scope local read above its declaration)"
+# Reads as a nil GLOBAL, which compiles cleanly and only fails at runtime.
+# This is what took the window out in 1.19.0.
+python3 tests/lint/scoping.py || fail=1
+
+# ---------------------------------------------------------------------------
 step "Top-level definitions still present"
 # Skipped when the tree is dirty against no useful ref, or outside a git repo.
 if git rev-parse --git-dir >/dev/null 2>&1; then

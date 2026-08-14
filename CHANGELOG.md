@@ -12,6 +12,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.19.1]
+
+Hotfix: 1.19.0 would not open the auction house window at all. `/reload`.
+
+### Fixed
+- **`ui.LayoutBuyTable` read `BUYL` before it was declared.** Lua scopes a
+  `local` from its declaration onward, so a function defined 500 lines above it
+  does not close over it — the name resolves to a nil GLOBAL instead. That is
+  legal Lua and compiles cleanly, so it surfaced only at runtime, as
+  `attempt to index global 'BUYL' (a nil value)` on the first frame of
+  `BuildBuyTab`, which took the whole window down with it.
+
+  The function has moved below `BUYL`. **`tests/lint/scoping.py` is new and
+  catches this class**: it disassembles each file with `luac -l` and reports any
+  name that is both declared as a file-scope local and read via `GETGLOBAL`.
+  Verified against the exact file that shipped as 1.19.0 — `luac5.1 -p` passes
+  it and the lint names `BUYL`.
+
+  This is the fourth time this trap has caught this file (`ColumnsFitAt`,
+  `BUY_ROWS_MAX`, `SIDE_ROW_H`, now `BUYL`) and the first time anything but a
+  person in-game has found it.
+
 ## [1.19.0]
 
 The Advanced view, brought to the approved concept: it reclaims the width the
@@ -1543,6 +1565,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.19.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.18.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.17.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

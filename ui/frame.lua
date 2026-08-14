@@ -2424,57 +2424,6 @@ local function ColX(key)
     return x + BUY_NAME_EXTRA
 end
 
--- Move the results table between its two origins, and give the width it gains
--- in Advanced to the Item column.
---
--- Only THREE things are re-anchored -- the well, the scroll frame and the
--- header buttons. The header rule, the column ticks, the count line and the
--- pager all hang off the well, and the rows off the scroll frame, so they
--- follow. That is why those anchors were written as relationships rather than
--- as repeated panel offsets.
-function ui.LayoutBuyTable()
-    local panel = ui.buyPanel
-    if not panel or not ui.buyListWell or not ui.buyScroll then return end
-    local left = ui.buyTableLeft
-    if ui.buyMode == "advanced" then left = ui.buyTableLeftAdv end
-    -- Surplus over the Blizzlike width, all of it to Item: it is the column
-    -- that actually runs out of room, and every numeric column is already
-    -- sized to its contents.
-    BUY_NAME_EXTRA = ui.buyTableLeft - left
-    if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
-
-    ui.buyScroll:ClearAllPoints()
-    ui.buyScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", left, -BUYL.rows_top)
-    ui.buyScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -BUYL.gutter_w, BUYL.table_bot)
-    ui.buyListWell:ClearAllPoints()
-    ui.buyListWell:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        left - 6, -BUYL.well_top)
-    ui.buyListWell:SetPoint("BOTTOMRIGHT", ui.buyScroll, "BOTTOMRIGHT", 0, -6)
-
-    for key, b in pairs(ui.buyHeaders or {}) do
-        b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT",
-            left + ColX(key), -BUYL.hdr_top)
-    end
-    local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
-    local ti = 1
-    while ti <= table.getn(ui.buyHdrTicks or {}) do
-        local t = ui.buyHdrTicks[ti]
-        t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", ui.buyListWell, "TOPLEFT",
-            6 + ColX(tk[ti]) - 8, -6)
-        t:SetPoint("BOTTOMLEFT", ui.buyListWell, "TOPLEFT",
-            6 + ColX(tk[ti]) - 8, -(BUYL.hdr_h))
-        ti = ti + 1
-    end
-    local ri = 1
-    while ri <= table.getn(ui.buyRows or {}) do
-        ui.LayoutBuyRow(ui.buyRows[ri])
-        ri = ri + 1
-    end
-end
-
 -- Re-place one result row's cells at the current width. Called for every row
 -- when the table's width changes, and for a row built after that point.
 function ui.LayoutBuyRow(row)
@@ -3027,6 +2976,63 @@ function ui.LayoutViewTabs()
     while i <= n do
         btns[i]:SetWidth(w)
         i = i + 1
+    end
+end
+
+-- NOTE ON PLACEMENT: this sits AFTER BUYL because it reads it.
+-- Lua scopes a local from its declaration onward, so at its previous
+-- home 500 lines earlier `BUYL` was not a local in scope -- it was a
+-- read of a nil GLOBAL, which compiles cleanly and only fails when the
+-- function runs. It shipped in 1.19.0 and the window would not open.
+-- tests/lint/scoping.py exists to catch the next one.
+-- Move the results table between its two origins, and give the width it gains
+-- in Advanced to the Item column.
+--
+-- Only THREE things are re-anchored -- the well, the scroll frame and the
+-- header buttons. The header rule, the column ticks, the count line and the
+-- pager all hang off the well, and the rows off the scroll frame, so they
+-- follow. That is why those anchors were written as relationships rather than
+-- as repeated panel offsets.
+function ui.LayoutBuyTable()
+    local panel = ui.buyPanel
+    if not panel or not ui.buyListWell or not ui.buyScroll then return end
+    local left = ui.buyTableLeft
+    if ui.buyMode == "advanced" then left = ui.buyTableLeftAdv end
+    -- Surplus over the Blizzlike width, all of it to Item: it is the column
+    -- that actually runs out of room, and every numeric column is already
+    -- sized to its contents.
+    BUY_NAME_EXTRA = ui.buyTableLeft - left
+    if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
+
+    ui.buyScroll:ClearAllPoints()
+    ui.buyScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", left, -BUYL.rows_top)
+    ui.buyScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -BUYL.gutter_w, BUYL.table_bot)
+    ui.buyListWell:ClearAllPoints()
+    ui.buyListWell:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        left - 6, -BUYL.well_top)
+    ui.buyListWell:SetPoint("BOTTOMRIGHT", ui.buyScroll, "BOTTOMRIGHT", 0, -6)
+
+    for key, b in pairs(ui.buyHeaders or {}) do
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT",
+            left + ColX(key), -BUYL.hdr_top)
+    end
+    local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
+    local ti = 1
+    while ti <= table.getn(ui.buyHdrTicks or {}) do
+        local t = ui.buyHdrTicks[ti]
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", ui.buyListWell, "TOPLEFT",
+            6 + ColX(tk[ti]) - 8, -6)
+        t:SetPoint("BOTTOMLEFT", ui.buyListWell, "TOPLEFT",
+            6 + ColX(tk[ti]) - 8, -(BUYL.hdr_h))
+        ti = ti + 1
+    end
+    local ri = 1
+    while ri <= table.getn(ui.buyRows or {}) do
+        ui.LayoutBuyRow(ui.buyRows[ri])
+        ri = ri + 1
     end
 end
 

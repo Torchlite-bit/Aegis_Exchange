@@ -374,6 +374,12 @@ the `.toc`, so it is never a **restart** release and never a version bump.
       (`python3 tests/lint/definitions.py`). Run this after ANY multi-line or
       scripted edit — the file still compiles when a function goes missing, so
       nothing else notices.
+- [ ] No file-scope local is read ABOVE its declaration
+      (`python3 tests/lint/scoping.py`). Lua scopes a `local` from its
+      declaration onward, so a function defined earlier reads a nil **global**
+      of the same name — legal Lua, compiles cleanly, fails only at runtime.
+      This has now caught `ColumnsFitAt`, `BUY_ROWS_MAX`, `SIDE_ROW_H` and
+      `BUYL`; the last one shipped and the window would not open.
 - [ ] AH reads match the 12-value `GetAuctionItemInfo` and 9-arg
       `QueryAuctionItems` signatures; queries gated on `CanSendAuctionQuery()`.
 - [ ] DB touched only after `ADDON_LOADED` for `"Aegis_Exchange"`.
