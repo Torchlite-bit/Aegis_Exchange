@@ -12,6 +12,85 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.19.0]
+
+The Advanced view, brought to the approved concept: it reclaims the width the
+hidden category tree was still occupying, stops leaking the results table's
+furniture onto the other views, and the Filter Builder gains three options the
+query language always understood. `/reload`.
+
+### Fixed
+- **Advanced was drawing in the right-hand two-thirds of the window.** Its
+  search strip, tab row, Saved lists and Builder all anchored to the *results
+  column* origin — which sits right of the category tree, and exists only
+  because the tree is to its left. Advanced hides the tree, so that left about
+  300px of empty panel down the left of everything. All four now start at the
+  panel margin.
+- **The results table's column separators drew across the Saved and Builder
+  views.** Six 1px textures that belonged to no show/hide list, so nothing
+  ever put them down — the row of stray ticks above both panels. The "N
+  selected" line and the rule under the Blizzlike control strip had the same
+  problem.
+- **Saved-search rows were plated under pfUI.** They are Buttons, because a
+  row has to be clickable, and pfUI skins every Button — the same bug already
+  fixed for the category tree. Unskinned they were always correct, which is
+  why it took a skinned screenshot to see.
+- **The Post Filter's value box rendered as a bare `( )`.** It was the only
+  edit box in the window still using a raw `InputBoxTemplate`, whose rounded
+  end-caps are all that draws when nothing fills the middle. This had
+  previously been read as the box being clipped and "fixed" by anchoring both
+  edges.
+- **The Builder silently dropped `buyout` and `stack` flags.** `ui.BuilderTerm`
+  never read them, so importing `linen/buyout/stack/20`, pressing Build, and
+  searching ran a *wider* search than the one you loaded — with nothing to say
+  a filter had gone.
+
+### Added
+- **Buyout only, Full stacks only, and Stack Size** in the Builder's
+  auction-house form. The query language has always understood all three;
+  until now the form was the only place you could not reach them. Full stacks
+  and an explicit size are mutually exclusive — the term holds one or the
+  other — so setting either clears the other rather than letting the form
+  express something the query cannot spell.
+- **The Advanced results table fills the width it gains** from the hidden
+  tree, and the surplus goes to the Item column, which is the one that
+  actually runs out of room.
+
+### Changed
+- **The three view tabs span the content width** and are named in full —
+  Search Results, Saved Searches, Filter Builder. At 112px each they occupied
+  under a quarter of a wide panel and read as three unrelated buttons rather
+  than as the tab strip they are.
+- **Back is purple**, matching the Advanced button it is the counterpart of,
+  and **Build → is purple** rather than a plain `Build >`.
+- **Search, Build, Import and Clear appear on Saved Searches too**, with Build
+  greyed. That view previously showed nothing but Close.
+- **Filter Builder labels are left-aligned on a shared margin** and named as
+  the concept names them (Level Range, Item Class, Item Subclass, Item Slot,
+  Min Quality). **Exact now sits on the Name row and Usable on the Level
+  Range row**, which is two rows of height back.
+- **Two wells instead of one**, so the auction-house filter and the post-filter
+  builder read as the two different things they are, with the clause list in
+  its own recessed box.
+- **The component dropdown leads with `and` / `or` / `not`**, coloured red as
+  combinators rather than filters. Components that are not wired up yet are
+  greyed with a tooltip saying so, instead of carrying "(soon)" in the label.
+
+  All nine pending ones stay greyed, which is a deliberate deviation from the
+  concept: it shows the finished list, and a component that looks live but
+  narrows nothing is worse than one that admits it.
+- **Saved Searches matches the concept**: headings and their hints on one line
+  inside the well, a gold ★ on favourites, separators under recent rows, a
+  highlight band that stays lit while a row's context menu is open, and
+  ▲ / ▼ / × glyphs on that menu.
+
+### Not done yet
+- **Query-string syntax highlighting.** A 1.12 `EditBox` does not render `|c`
+  escapes — it prints them literally — so the coloured query in the concept
+  needs an overlay FontString swapped out on focus. Deliberately deferred
+  until the rest is confirmed on a real client, since a coloured string that
+  can desync from the box is worse than a plain one that cannot.
+
 ## [1.18.0]
 
 Buy tab: the category tree stops searching on its own, the results table and
@@ -1464,6 +1543,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.19.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.18.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.17.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.16.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

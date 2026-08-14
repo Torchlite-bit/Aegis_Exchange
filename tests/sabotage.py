@@ -167,6 +167,59 @@ SABOTAGES = [
      """        return r.unit or 0
     end""",
      "sort_results"),
+
+    # ---- the Filter Builder's form <-> term round trip --------------------
+    # The bug that shipped: BuilderTerm never read these, so Build dropped
+    # them and the rebuilt query was quietly narrower than the one imported.
+    ("builder-drops-buyout-flag", "ui/frame.lua",
+     "        buyoutOnly = ui.fbBuyout:GetChecked() and true or false,",
+     "",
+     "builder.term"),
+
+    ("builder-drops-stack-size", "ui/frame.lua",
+     "        stackSize  = stackSize,",
+     "",
+     "builder.term"),
+
+    ("builder-drops-stack-only", "ui/frame.lua",
+     "        stackOnly  = stackOnly,",
+     "",
+     "builder.term"),
+
+    # The other direction: loading a query into the form.
+    ("builder-setterm-drops-buyout", "ui/frame.lua",
+     "    ui.fbBuyout:SetChecked(t.buyoutOnly and 1 or nil)",
+     "",
+     "builder.term"),
+
+    ("builder-setterm-drops-size", "ui/frame.lua",
+     '    ui.fbStackSize:SetText(t.stackSize and tostring(t.stackSize) or "")',
+     "",
+     "builder.term"),
+
+    # `stack/N` and bare `stack` are ALTERNATIVES. Letting the tick survive
+    # alongside an explicit size lets the form hold a state the query language
+    # cannot spell, and Build then drops one of them at random.
+    ("builder-stack-not-exclusive", "ui/frame.lua",
+     "    if stackSize then stackOnly = false end",
+     "",
+     "builder.term"),
+
+    # The typing gate, the half the user actually feels.
+    ("builder-stack-gate-inert", "ui/frame.lua",
+     """    local n = tonumber(util.Trim(ui.fbStackSize:GetText() or ""))
+    if n and n >= 1 then
+        ui.fbFullStack:SetChecked(nil)
+    end""",
+     "",
+     "builder.term"),
+
+    # Loading `stack/N` must NOT also tick full-stacks -- that is the same
+    # illegal pair arriving by the other door.
+    ("builder-setterm-ticks-both", "ui/frame.lua",
+     "    ui.fbFullStack:SetChecked((t.stackOnly and not t.stackSize) and 1 or nil)",
+     "    ui.fbFullStack:SetChecked(t.stackOnly and 1 or nil)",
+     "builder.term"),
 ]
 
 SUITES = {
@@ -176,6 +229,7 @@ SUITES = {
     "buy.term":    "tests/units/buy_term_test.lua",
     "buy.page":    "tests/units/buy_page_test.lua",
     "sort_results": "tests/units/sort_results_test.lua",
+    "builder.term": "tests/units/builder_term_test.lua",
 }
 
 

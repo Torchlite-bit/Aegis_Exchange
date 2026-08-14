@@ -1035,6 +1035,63 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
   it with a private registry made lookups of client constants come back nil —
   a difference from the real client that a test would have "proved" was fine.
 
+### 2v — Advanced view: concept parity — ✅ **DONE** (v1.19.0)
+
+- **Advanced anchored to the RESULTS column, not the panel.** `RX` is where the
+  results table starts *because the category tree sits to its left*. Advanced
+  hides the tree, so anchoring its content at `RX` left the tree's whole width
+  as dead window. `AX = BUYL.side_x` is the Advanced origin now, and
+  `ui.BuildFilterBuilder` / `ui.BuildSavedSearches` take it as `advLeft`.
+  **When one mode hides a column, the other mode's origin is not a constant it
+  can borrow.**
+- **`ui.buyHdrTicks` was in no show/hide list at all** and drew across every
+  view for several releases. It escaped because it is an ARRAY of textures
+  rather than a single widget, and the lists hold widgets. `tests/lint/
+  modebits.py` now enumerates every `ui.buy*` assigned in `BuildBuyTab` against
+  the union of the lists and fails on anything unaccounted for — with the
+  allowlist split into "not a widget" and "deliberately always shown", each
+  needing a reason. It reproduces the original bug when the hide loop is
+  removed.
+- **There is deliberately no "handled by a loop" allowlist in that lint.**
+  Widgets raised by a `while` are NAMED in it, so the scan finds them anyway;
+  exempting them would exempt exactly the names most likely to lose their loop
+  in a refactor, which is how the ticks went unhidden in the first place.
+- **The Builder dropped `buyout` / `stack` / `stack/N` on Build.**
+  `ui.BuilderTerm` never read them although `ParseTerm` and `TermToQuery` have
+  always handled them, so importing a query and rebuilding it ran a *wider*
+  search than the one loaded. Both directions are wired now and pinned by
+  `tests/units/builder_term_test.lua` with eight sabotages.
+- **`stack/N` and bare `stack` are ALTERNATIVES, not additions.** The form can
+  no longer hold both: the size box clears the tick as you type, and
+  `BuilderTerm` drops the tick if a size is set. A form that can express a
+  state the query language cannot spell will lose one of them at Build, and
+  which one is an implementation detail rather than a decision.
+- **The illegal pair needed a test that `ParseTerm` cannot produce.** The
+  sabotage for "SetTerm ticks both" passed at first, because `stack/20` never
+  sets `stackOnly` — the pair only arrives from a hand-built or restored term.
+  Worth remembering: a defensive guard needs a test that reaches it by the
+  door it actually defends.
+- **The Post Filter value box was the last raw `InputBoxTemplate`** in the
+  window and rendered as `( )` — the template's own end-caps with nothing
+  drawn between. The previous diagnosis (clipped by a fixed width) was wrong
+  and its comment said so; both are corrected.
+- **pfUI plates every Button, and saved-search rows are Buttons.** Same fix as
+  the category tree, `aegisNoSkin`. Unskinned they were always correct, which
+  is why only a skinned screenshot showed it.
+- **`ui.LayoutBuyTable` lives at FILE scope, reading `ui.buyPanel`.** Nested
+  inside `ui.BuildBuyTab` it cost two more upvalues and took that function to
+  27 of 32 — the ceiling it has already broken once. The lint's warn threshold
+  at 26 is what surfaced it.
+- **Layout that depends on WIDTH is recomputed, never fixed.**
+  `ui.LayoutViewTabs`, `ui.LayoutBuilderForm` and `ui.LayoutBuyTable` all run
+  from the deferred repaint and from the resize grip, because the window spans
+  1000–1400px and a constant that looks right at one end looks stranded at the
+  other.
+- **Syntax highlighting deferred, not dropped.** A 1.12 `EditBox` prints `|c`
+  escapes literally, so the concept's coloured query needs an overlay
+  FontString swapped on focus — and every path that writes the query has to go
+  through one rebuild or the overlay shows something the box does not contain.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
