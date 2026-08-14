@@ -12,6 +12,66 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.19.2]
+
+Clipping and proportion pass over the Advanced view. `/reload`.
+
+### Fixed
+- **The Search button and the query box drew on top of each other, on all three
+  Advanced views.** Search hung off the *Advanced* button — a default-mode
+  widget that Advanced hides but which still carries a position — so it
+  inherited a slot 10px below the Advanced strip's own baseline and 102px in
+  from the edge. The query box's right margin was a constant that had to agree
+  with three numbers it could not see, and did not: 172 against a button whose
+  left edge is at 196. Search is now placed per mode, and the box's right edge
+  hangs off the button itself.
+- **The tab strip and the Filter Builder's columns were sized from a stale
+  width.** Both measured a frame anchored by two edges, which reports the width
+  it was *last laid out at* — in practice the window's creation size. The tab
+  strip filled 69% of a resized panel and the builder's left column came out at
+  29% where 41% was asked for. Both now derive from the window's own width,
+  which is set explicitly, through the new `ui.PanelWidthAt` — the horizontal
+  twin of `ui.PanelHeightAt`, which exists for exactly this reason.
+- **"Exact" and "Usable" drew on top of the POST FILTER panel.** Every control
+  was stretched to fill the left column, leaving no room for the checkbox
+  anchored to the Name box's right edge, so it landed in the gutter. The
+  concept has two widths, not one: the Name box and the level pair stop short
+  with their checkbox beside them, while the four dropdowns run the full width
+  past where that checkbox sits. The reserve is measured from the label, not
+  guessed.
+- **Long post-filter clauses ran past the well's edge.** They are clipped now —
+  but the value is clipped *before* the colour codes are spliced on, because
+  cutting a `|cffRRGGBB` in half prints garbage and leaks the colour into every
+  line after it.
+- **The `↵` in "adds" was an invisible character.** U+21B5 is not in the 1.12
+  font, so the hint read as a blank followed by "adds". It says "Enter adds".
+- **The saved-search context menu straddled the well's border.** Inset by the
+  well's own padding.
+
+### Changed
+- **The three view tabs are centred**, as well as filling the content width.
+  Anchoring the row from the left meant every rounding shortfall pooled into
+  one gap on the right; from the centre it splits evenly.
+- **The Filter Builder's columns are 50/50**, up from 41/59. The form is the
+  side with six labelled rows plus three options, and the clause lines clip
+  rather than wrap.
+- **The post-filter hint belongs to the empty state only.** It used to change
+  with the clause count and stay on screen underneath them, so a populated list
+  carried a long centred sentence competing with the clauses. The stacking rule
+  moved to a tooltip on the clause well.
+
+### Not changed, and why
+- **The Results view keeps Bid / Buyout / Close and no action row.** The 1.19.0
+  spec said it should also carry Search / Build / Import / Clear; having seen
+  it, that is wrong — Search is redundant beside the strip's own Search button,
+  and Import / Clear are Builder verbs. Recorded rather than left contradicting
+  the spec.
+- **The results table keeps its scrollbar.** Its arrow buttons sit outside the
+  table's right edge, which is inherent to `FauxScrollFrameTemplate`. The
+  BROWSE tree's bar was hidden in 1.17.0 because that list is short and the
+  mockup has none; a fifty-row results page genuinely needs the affordance, and
+  it is identical in the Blizzlike view.
+
 ## [1.19.1]
 
 Hotfix: 1.19.0 would not open the auction house window at all. `/reload`.
@@ -1565,6 +1625,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.19.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.18.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

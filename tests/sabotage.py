@@ -214,6 +214,32 @@ SABOTAGES = [
      "",
      "builder.term"),
 
+    # ---- window geometry --------------------------------------------------
+    # The horizontal inset copy-pasted from the vertical one. Leaves the
+    # Advanced tab strip 68px short at every window size -- almost right, which
+    # is the hardest kind of wrong to see.
+    ("panel-h-inset-copied-from-v", "ui/frame.lua",
+     "local PANEL_H_INSET = 14 + 14 + 6 + 6",
+     "local PANEL_H_INSET = 80 + 16 + 6 + 6",
+     "geometry"),
+
+    # Forgetting the panel's own inset inside the content frame.
+    ("panel-h-inset-misses-panel", "ui/frame.lua",
+     "local PANEL_H_INSET = 14 + 14 + 6 + 6",
+     "local PANEL_H_INSET = 14 + 14",
+     "geometry"),
+
+    # Arithmetic on a nil window width, which is what happens while the window
+    # is still being built.
+    ("panel-width-unguarded-nil", "ui/frame.lua",
+     """function ui.PanelWidthAt(w)
+    return (w or 0) - PANEL_H_INSET
+end""",
+     """function ui.PanelWidthAt(w)
+    return w - PANEL_H_INSET
+end""",
+     "geometry"),
+
     # Loading `stack/N` must NOT also tick full-stacks -- that is the same
     # illegal pair arriving by the other door.
     ("builder-setterm-ticks-both", "ui/frame.lua",
@@ -230,6 +256,7 @@ SUITES = {
     "buy.page":    "tests/units/buy_page_test.lua",
     "sort_results": "tests/units/sort_results_test.lua",
     "builder.term": "tests/units/builder_term_test.lua",
+    "geometry": "tests/units/geometry_test.lua",
 }
 
 

@@ -1092,6 +1092,58 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
   FontString swapped on focus — and every path that writes the query has to go
   through one rebuild or the overlay shows something the box does not contain.
 
+### 2w — Advanced view: clipping and proportion — ✅ **DONE** (v1.19.2)
+
+- **The same measurement bug, in the other axis.** `ui.PanelHeightAt` exists
+  because `GetHeight()` on a two-edge-anchored frame reports the height it was
+  LAST LAID OUT at. 2v then added two width-driven layouts that measured a
+  frame — and got the window's creation width, giving a tab strip at 69% and a
+  builder column at 29% of a resized panel. `ui.PanelWidthAt` /
+  `ui.AdvContentWidth` are the horizontal twins. **Any layout that divides the
+  panel must come through them; measuring a child frame is the bug.**
+- **A widget hidden by mode still has a position.** The Search button hung off
+  the Advanced button in BOTH modes. Advanced hides that button, so Search
+  inherited a slot 10px low and 102px in from the edge — and the query box's
+  right margin was a constant (172) that had to agree with the button's real
+  left edge (196) and could not see it. `ui.AnchorSearchButton` places it per
+  mode and the box hangs off the button. **Anchoring to the widget you must
+  clear beats a constant computed to clear it.**
+- **Filling a column and putting something after it are contradictory.** Every
+  control was stretched to fill the left column, then Exact was anchored to the
+  Name box's right — so it landed past the column and drew on the next panel.
+  The concept had it right all along: TWO widths, a short Name box with its
+  checkbox beside it and full-width dropdowns running past. The reserve is
+  measured off the label rather than guessed.
+- **Clipping coloured text needs the clip BEFORE the colour.** Post-filter
+  clauses carry `|cffRRGGBB` escapes; `ui.SetTextClipped` binary-searches on
+  `string.sub`, so clipping the assembled string would eventually cut an escape
+  in half — literal garbage plus a colour that leaks into every later line. The
+  value is clipped first, then decorated.
+- **U+21B5 is not in the 1.12 font.** The concept's "↵ adds" rendered as a
+  blank followed by "adds". An invisible glyph reads as a layout fault, which
+  is worse than a longer label; it says "Enter adds".
+- **Centre-anchor a row that is meant to fill its space.** From the left, every
+  rounding shortfall pools into one gap on the right and reads as misalignment;
+  from the centre it splits evenly and reads as intentional.
+- **Geometry is now testable, and tested.** `tests/units/geometry_test.lua`
+  pins the insets, `PanelWidthAt`/`PanelHeightAt`, and the derived tab and
+  column widths at five window sizes from MIN_W to MAX_W — including that the
+  tabs fill without overflowing and that the Name box's checkbox lands inside
+  its column. Three sabotages, all caught. This is the part of layout that is
+  arithmetic rather than appearance, and it was the part that kept breaking.
+
+#### Decisions recorded rather than left implicit
+
+- **The Results view carries no action row** — Bid / Buyout / Close only. 2v's
+  spec said it should also have Search / Build / Import / Clear. Reversed after
+  seeing it: Search is redundant beside the strip's own Search button, and
+  Import / Clear are Builder verbs.
+- **The results table keeps its scrollbar**, arrows outside the well and all,
+  which is inherent to `FauxScrollFrameTemplate`. The BROWSE tree's was hidden
+  in 1.17.0 because that list is short and the mockup has none; a fifty-row
+  results page needs the affordance, and it is identical in the Blizzlike view
+  which is already signed off.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

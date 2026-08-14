@@ -2950,26 +2950,55 @@ local ADVL = {
     body_y    = 66,   -- Saved / Builder content starts here
     body_bot  = 36,   -- ...and stops above the action bar
     right_pad = 12,   -- content's right margin inside the panel
-    search_w  = 172,  -- room the Search button needs at the strip's right
+    strip_gap = 10,   -- query box -> Search button
 }
 
--- Spread the three view tabs across the panel so they fill its width.
+-- Put the Search button where the CURRENT mode wants it.
 --
--- Computed rather than fixed: at 112px each they occupied under a quarter of a
--- wide panel and read as three unrelated buttons rather than as the tab strip
--- they are. Recomputed on every resize by ui.QueueRepaint's caller, so the
--- strip stays full-width at any window size.
+-- It cannot simply hang off the Advanced button, which is what it did: that
+-- button belongs to the default strip, so in Advanced it is hidden but still
+-- positioned, and Search inherited a slot 10px below the Advanced strip's own
+-- baseline and inset by the Advanced button's width plus its gap. The query
+-- box then ran across it, because the box's right margin was a constant that
+-- had to agree with three numbers it could not see.
+--
+-- Both modes put Search at the right end of the strip; only the strip's
+-- baseline and what sits beside it differ.
+function ui.AnchorSearchButton()
+    local b = ui.buySearchBtn
+    if not b then return end
+    b:ClearAllPoints()
+    if ui.buyMode == "advanced" then
+        -- Nothing to its right in Advanced: the Advanced button is what took
+        -- that slot, and it is gone.
+        b:SetPoint("TOPRIGHT", b:GetParent(), "TOPRIGHT",
+            -ADVL.right_pad, -ADVL.strip_y)
+    else
+        -- A real gap. These were flush against each other, so they read as one
+        -- two-tone control rather than as two buttons.
+        b:SetPoint("RIGHT", ui.buyAdvBtn, "LEFT", -14, 0)
+    end
+end
+
+-- Spread the three view tabs across the panel so they fill its width, and
+-- CENTRE the group.
+--
+-- Two things went wrong here before. The widths came from `panel:GetWidth()` --
+-- a measured, two-edge-anchored frame, so they were computed at the window's
+-- creation size and the strip filled 69% of a resized panel. And the group was
+-- anchored from the LEFT, so all of that shortfall pooled into one gap on the
+-- right, which is what it looked like: three buttons shoved to one side.
+--
+-- Both are fixed by the same pair of changes: take the width from the WINDOW,
+-- which is set explicitly (ui.AdvContentWidth), and anchor the row by its
+-- centre so any rounding residue splits evenly instead of landing on one edge.
 function ui.LayoutViewTabs()
     local btns = ui.buyViewBtns
     if not btns or table.getn(btns) == 0 then return end
-    local panel = btns[1]:GetParent()
-    if not panel then return end
     local n = table.getn(btns)
-    -- BUYL.side_x, not a number of its own: Advanced shares the Blizzlike
-    -- strip's left margin, and two constants for one edge drift apart.
-    local avail = (panel:GetWidth() or 0) - BUYL.side_x - ADVL.right_pad
-    -- Before the first layout pass the panel can measure 0; fall back to the
-    -- old fixed width rather than collapsing every tab to nothing.
+    local avail = ui.AdvContentWidth()
+    -- Before the window has a size, fall back to the old fixed width rather
+    -- than collapsing every tab to nothing.
     local w = math.floor((avail - (n - 1) * ADVL.tab_gap) / n)
     if not w or w < 60 then w = 112 end
     local i = 1
@@ -2977,6 +3006,12 @@ function ui.LayoutViewTabs()
         btns[i]:SetWidth(w)
         i = i + 1
     end
+    -- Re-centre the row. Only the FIRST tab is anchored to the panel; the
+    -- other two chain off it, so this one point places all three.
+    local total = n * w + (n - 1) * ADVL.tab_gap
+    btns[1]:ClearAllPoints()
+    btns[1]:SetPoint("TOPLEFT", btns[1]:GetParent(), "TOP",
+        -math.floor(total / 2), -ADVL.tabs_y)
 end
 
 -- NOTE ON PLACEMENT: this sits AFTER BUYL because it reads it.
@@ -3059,6 +3094,17 @@ end
 -- actually called the functions below -- only the tests did.
 local PANEL_V_INSET = 80 + 16 + 6 + 6
 
+-- ...and the same sum horizontally: the content frame is inset 14 at each side
+-- of the window, and each tab panel a further 6 inside that.
+--
+-- This exists for the reason PANEL_V_INSET does, and it was added after the
+-- same bug happened again in the other axis. The Advanced tab strip and the
+-- Filter Builder's columns both sized themselves from a MEASURED frame, and
+-- both came out at the window's CREATION width -- a tab strip filling 69% of
+-- the panel and a form column at 29% where 41% was asked for. See
+-- ui.PanelWidthAt.
+local PANEL_H_INSET = 14 + 14 + 6 + 6
+
 -- Panel height at a given WINDOW height.
 --
 -- Deriving from the window rather than measuring a frame is the whole point:
@@ -3072,6 +3118,26 @@ local PANEL_V_INSET = 80 + 16 + 6 + 6
 -- The window's height is set explicitly, so it is true the moment it is read.
 function ui.PanelHeightAt(h)
     return (h or 0) - PANEL_V_INSET
+end
+
+-- Panel width at a given WINDOW width. Same reasoning as PanelHeightAt above,
+-- and it is not a hypothetical: GetWidth() on the Buy panel returned ~1003 on
+-- a window whose panel was ~1430, because that is the size it was laid out at
+-- when the window was created and nothing had relaid it since.
+--
+-- ANY layout that divides the panel horizontally must come through here rather
+-- than measure a frame.
+function ui.PanelWidthAt(w)
+    return (w or 0) - PANEL_H_INSET
+end
+
+-- The width available to Advanced's content: the panel, less its left margin
+-- and right padding. One place, because the tab strip and the Filter Builder
+-- both divide it and drifting apart would show as a form that does not line up
+-- with the tabs above it.
+function ui.AdvContentWidth()
+    local w = ui.PanelWidthAt(ui.frame and ui.frame:GetWidth() or 0)
+    return w - BUYL.side_x - ADVL.right_pad
 end
 
 function ui.TableAreaAt(h)
@@ -3162,31 +3228,73 @@ function ui.BuilderStackGate()
     end
 end
 
--- Give the builder's two columns their share of the frame, and stretch the
--- form controls to fill the left one.
+-- Room a trailing checkbox and its label need to the right of a control:
+-- the 16px box, its gap, and the wider of the two labels ("Usable").
 --
--- Computed, not fixed: the frame is ~940px at the minimum window size and
--- ~1340 at the maximum, and a 190px dropdown that looked right at one of
--- those looks stranded at the other.
+-- MEASURED, not guessed. A guess that is too small puts the checkbox over the
+-- next column -- which is exactly what shipped: Exact and Usable landed in the
+-- gutter and drew on top of the POST FILTER panel's own labels.
+local function CheckReserve()
+    local w = 0
+    if ui.fbUsable and ui.fbUsable.label then
+        local ok, sw = pcall(function()
+            return ui.fbUsable.label:GetStringWidth()
+        end)
+        if ok and sw and sw > 0 then w = sw end
+    end
+    if w < 40 then w = 40 end       -- before the font string has measured
+    return 16 + FBL.chk_gap + math.ceil(w) + 6
+end
+
+-- Give the builder's two columns their share of the panel, and size the form's
+-- controls to the left one.
+--
+-- TWO widths, not one, and that is the whole fix. Stretching every control to
+-- fill the column left no room for the checkbox anchored to the Name box's
+-- right edge, so it landed past the column. The concept has it right: the Name
+-- box and the level pair stop SHORT with their checkbox beside them, while the
+-- four dropdowns run the FULL width, past where that checkbox sits.
+--
+-- The width comes from the WINDOW, not from measuring ui.buyBuilder: that
+-- frame is anchored by two edges and reports the width it was last laid out
+-- at, which is how the left column ended up at 29% of the panel when it was
+-- asked for 41%. See ui.PanelWidthAt.
 function ui.LayoutBuilderForm()
     local colL = ui.fbColL
     if not colL or not ui.buyBuilder then return end
-    local total = ui.buyBuilder:GetWidth() or 0
-    if total < 200 then return end          -- not laid out yet; keep defaults
-    -- 41/59, the concept's split: the post-filter side carries longer strings.
-    local lw = math.floor((total - FBL.gutter) * 0.41)
+    local total = ui.AdvContentWidth()
+    if total < 200 then return end          -- no window size yet; keep defaults
+
+    -- 50/50. It was 41/59 on the theory that the post-filter side carries
+    -- longer strings, but the form is the side with six labelled rows plus
+    -- three options, and the clause lines clip rather than wrap.
+    local lw = math.floor((total - FBL.gutter) / 2)
     colL:SetWidth(lw)
 
-    local w = lw - FBL.ctl_x - FBL.pad
-    if w < 120 then w = 120 end
-    FBL.ctl_w = w
-    if ui.fbName then ui.fbName:SetWidth(w) end
+    -- Full width: the four dropdowns, which have nothing beside them.
+    local ctl = lw - FBL.ctl_x - FBL.pad
+    if ctl < 120 then ctl = 120 end
+    FBL.ctl_w = ctl
+
+    -- Short: the Name box, which has Exact beside it.
+    local nameW = ctl - CheckReserve()
+    if nameW < 80 then nameW = 80 end
+
+    if ui.fbName then ui.fbName:SetWidth(nameW) end
     local dds = { ui.fbClass, ui.fbSubclass, ui.fbSlot, ui.fbQuality }
     local i = 1
     while i <= table.getn(dds) do
-        if dds[i] and dds[i].SetWidth then dds[i]:SetWidth(w) end
+        if dds[i] and dds[i].SetWidth then dds[i]:SetWidth(ctl) end
         i = i + 1
     end
+
+    -- The level pair shares the Name box's span, so Usable lands under Exact
+    -- rather than wherever two fixed 66px boxes and a dash happened to end.
+    -- Each box takes half of what is left after the dash's gaps.
+    local lvl = math.floor((nameW - 14) / 2)
+    if lvl < 40 then lvl = 40 end
+    if ui.fbMinLevel then ui.fbMinLevel:SetWidth(lvl) end
+    if ui.fbMaxLevel then ui.fbMaxLevel:SetWidth(lvl) end
 end
 local SIDE_ROWS_MAX = 38
 -- Sidebar width. The mockup's is 18.1% of the panel; ours was ~16%, and the
@@ -3453,9 +3561,11 @@ function ui.BuildBuyTab()
     local searchBtn = ui.MakeButton(panel, "primary",
         "AegisExchangeBuySearchButton")
     searchBtn:SetWidth(BUY_SEARCH_W); searchBtn:SetHeight(20)
-    -- A real gap. These were flush against each other, so they read as one
-    -- two-tone control rather than as two buttons.
-    searchBtn:SetPoint("RIGHT", advBtn, "LEFT", -14, 0)
+    -- Placed by ui.AnchorSearchButton, because WHERE it belongs depends on the
+    -- mode. It used to hang off the Advanced button in both -- but Advanced is
+    -- a DEFAULT-mode widget, hidden in Advanced and still carrying a position,
+    -- so in Advanced the Search button inherited a slot 10px below the strip's
+    -- own baseline and 88+14px in from the edge that nothing else knew about.
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
     ui.buySearchBtn = searchBtn
@@ -3486,9 +3596,12 @@ function ui.BuildBuyTab()
     ui.buyQueryBox = CreateFrame("EditBox", "AegisExchangeBuyQueryBox", panel,
         "InputBoxTemplate")
     ui.buyQueryBox:SetHeight(20)
+    -- Its right edge hangs off the SEARCH BUTTON, not off a constant measured
+    -- to clear it. The constant was 172 where the button's left edge is at
+    -- 196, so the box drew across the button -- and the two numbers had no way
+    -- to know about each other. Anchoring to the widget cannot drift.
     ui.buyQueryBox:SetPoint("TOPLEFT", backBtn, "TOPRIGHT", 12, -1)
-    ui.buyQueryBox:SetPoint("TOPRIGHT", panel, "TOPRIGHT",
-        -ADVL.search_w, -ADVL.strip_y)
+    ui.buyQueryBox:SetPoint("RIGHT", searchBtn, "LEFT", -ADVL.strip_gap, 0)
     ui.buyQueryBox:SetAutoFocus(false)
     ui.buyQueryBox:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     ui.buyQueryBox:SetScript("OnEscapePressed", function()
@@ -4167,7 +4280,11 @@ function ui.OnSavedClick(row, button)
             -- Drops BELOW the row and stays inside the favourites column.
             -- Opening to the left cleared the row it acts on but landed on
             -- the Recent column instead; below-right clears both.
-            ui.savedMenu:SetPoint("TOPRIGHT", row, "BOTTOMRIGHT", 0, 0)
+            --
+            -- Inset from the row's right edge by the well's own padding, so
+            -- the menu sits clear of the border rather than straddling it.
+            ui.savedMenu:SetPoint("TOPRIGHT", row, "BOTTOMRIGHT",
+                -SAVED_PAD, -2)
             ui.savedMenu:Show()
         end
         return
@@ -4403,13 +4520,17 @@ function ui.BuildFilterBuilder(panel, advLeft)
     ui.fbComponent.button:SetPoint("TOPLEFT", colR, "TOPLEFT",
         FBL.pad + 72, FBL.r1 + 3)
 
-    -- "<return> adds", right of the value box, so the Enter-to-add rule is
-    -- visible while you are typing rather than only in the empty-state hint
-    -- underneath.
+    -- Right of the value box, so the Enter-to-add rule is visible while you
+    -- are typing rather than only in the empty-state hint underneath.
+    --
+    -- PLAIN WORDS, not the concept's "↵". U+21B5 is not in the 1.12 font and
+    -- rendered as nothing at all, leaving a blank before "adds" -- an
+    -- invisible character is worse than a longer label, because it reads as a
+    -- layout fault rather than as a missing glyph.
     local addsHint = contentR:CreateFontString(nil, "OVERLAY",
         "GameFontDisableSmall")
     addsHint:SetPoint("TOPRIGHT", colR, "TOPRIGHT", -FBL.pad, FBL.r1)
-    addsHint:SetText("\226\134\181 adds")
+    addsHint:SetText("Enter adds")
 
     -- FLATTENED, like every other box in the window. Raw InputBoxTemplate
     -- brings its own rounded end-cap textures, and with nothing drawn between
@@ -4437,6 +4558,21 @@ function ui.BuildFilterBuilder(panel, advLeft)
     pfArea:SetPoint("BOTTOMRIGHT", colR, "BOTTOMRIGHT", -FBL.pad, FBL.pad)
     ui.MakeWell(colR, pfArea, 0)
     ui.fbPostArea = pfArea
+
+    -- The stacking rule, on the well rather than printed under the clauses.
+    -- Mouse is enabled ONLY for this: the clause rows are children and take
+    -- their own clicks, so nothing is swallowed.
+    pfArea:EnableMouse(true)
+    pfArea:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(pfArea, "ANCHOR_TOPLEFT")
+        GameTooltip:SetText("Post filter", 1, 1, 1)
+        GameTooltip:AddLine(
+            "Stacked lines must ALL hold. Add 'or' between two to widen.",
+            0.8, 0.8, 0.8, 1)
+        GameTooltip:AddLine("Click a line to remove it.", 0.8, 0.8, 0.8, 1)
+        GameTooltip:Show()
+    end)
+    pfArea:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- One clickable row per clause. Clicking removes it, which is the only
     -- edit the list needs: order is assembled front-to-back anyway.
@@ -4789,49 +4925,72 @@ local function PaintPostFilter()
         local row = ui.fbPostRows[i]
         local e = list[i]
         if e then
-            local text, note
+            -- Three parts, kept separate so the CLIP below can shorten the
+            -- value without ever cutting a colour escape in half. Splicing
+            -- them first and clipping the result would sooner or later slice
+            -- through a "|cffRRGGBB", which prints as literal garbage and
+            -- leaks the colour into every line after it.
+            local pre, val, post
             local cr, cg, cb = ui.ComponentColor(e.kind)
             local hex = string.format("|cff%02x%02x%02x",
                 math.floor(cr * 255), math.floor(cg * 255), math.floor(cb * 255))
             if e.kind == "and" or e.kind == "or" or e.kind == "not" then
-                text = hex .. e.kind .. "|r"
-                note = ""
+                pre, val, post = hex .. e.kind .. "|r", "", ""
             elseif e.kind == "tooltip" then
-                text = hex .. e.kind .. ":|r " .. tostring(e.value)
+                pre, val = hex .. e.kind .. ":|r ", tostring(e.value)
                 local needles = A.buy.TooltipNeedles(e.value)
                 if table.getn(needles) > 1 then
-                    note = "  |cff8d7d5c\226\134\146 or \226\128\156"
+                    post = "  |cff8d7d5c\226\134\146 or \226\128\156"
                         .. needles[2] .. "\226\128\157|r"
                 else
-                    note = ""
+                    post = ""
                 end
             elseif ui.PENDING_COMPONENTS[e.kind] then
                 -- Drawn dim and labelled, because it does not filter yet.
-                text = hex .. e.kind .. ": " .. tostring(e.value) .. "|r"
-                note = "  |cffd08050not wired up yet \226\128\148 ignored|r"
+                pre, val = hex .. e.kind .. ": ", tostring(e.value)
+                post = "|r  |cffd08050not wired up yet \226\128\148 ignored|r"
             else
-                text = hex .. e.kind .. ":|r "
-                    .. util.FormatMoney(e.value, true)
-                note = "  |cff8d7d5cper item|r"
+                pre = hex .. e.kind .. ":|r "
+                val = util.FormatMoney(e.value, true)
+                post = "  |cff8d7d5cper item|r"
             end
-            row.label:SetText(text .. note)
+
+            -- Clip, never wrap -- a wrapped line in a fixed-height row is
+            -- worse than a clipped one, the rule everywhere else in this file.
+            -- The label carries no SetWidth, so an over-long clause runs past
+            -- the well's edge instead; measured here and shortened only when
+            -- it actually overflows, so the common case costs nothing.
+            row.label:SetText(pre .. val .. post)
+            local avail = (row:GetWidth() or 0) - 6
+            if avail > 40 and row.label:GetStringWidth() > avail then
+                -- Budget for the value = what is left once the decorations
+                -- have had their share. Measured with the escapes stripped by
+                -- setting the plain text and reading it back.
+                row.label:SetText(pre .. post)
+                local fixed = row.label:GetStringWidth() or 0
+                ui.SetTextClipped(row.label, val, avail - fixed)
+                row.label:SetText(pre .. (row.label:GetText() or "") .. post)
+            end
             row:Show()
         else
             row:Hide()
         end
         i = i + 1
     end
+    -- The hint belongs to the EMPTY state only.
+    --
+    -- It used to change with the clause count and stay on screen underneath
+    -- them, so a populated list carried a long centred sentence competing with
+    -- the clauses themselves -- and the concept has no such line. What it said
+    -- is worth keeping, so the stacking rule moved to a tooltip on the well
+    -- (see the OnEnter in ui.BuildFilterBuilder), where it is there when
+    -- wanted and is not permanent furniture.
     if ui.fbPostHint then
-        local n = table.getn(list)
-        if n == 0 then
+        if table.getn(list) == 0 then
             ui.fbPostHint:SetText("Pick a component, type a value, press Enter.")
-        elseif n == 1 then
-            ui.fbPostHint:SetText("Click a line to remove it.")
+            ui.fbPostHint:Show()
         else
-            -- Say the rule out loud rather than making people infer it.
-            ui.fbPostHint:SetText(
-                "Stacked lines must ALL hold \226\128\148 add 'or' between "
-                .. "two to widen.  Click a line to remove it.")
+            ui.fbPostHint:Hide()
         end
     end
 end
@@ -4990,7 +5149,9 @@ function ui.SetBuyMode(mode)
     ShowBits(BitsFor("default"), not adv)
 
     -- The results table moves with the mode: Advanced has no category tree, so
-    -- the table starts at the panel margin and is wider.
+    -- the table starts at the panel margin and is wider. Search moves with it,
+    -- because the widget it hung off in default mode is not there any more.
+    if ui.AnchorSearchButton then ui.AnchorSearchButton() end
     if ui.LayoutBuyTable then ui.LayoutBuyTable() end
     if ui.LayoutViewTabs then ui.LayoutViewTabs() end
     if ui.LayoutBuilderForm then ui.LayoutBuilderForm() end
