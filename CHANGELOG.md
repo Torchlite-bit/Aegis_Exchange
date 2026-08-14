@@ -12,6 +12,65 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.18.0]
+
+Buy tab: the category tree stops searching on its own, the results table and
+the category list stop losing rows they had room for, and every check box in
+the addon is drawn by one helper. `/reload`.
+
+### Fixed
+- **Clicking a category no longer fires a search.** Picking "Weapons" searched
+  every weapon on the auction house; picking "Staves" underneath it
+  immediately searched again. Selecting is now just selecting — the status
+  line names what you picked and waits for Search. Results already on screen
+  are deliberately LEFT there rather than cleared: a click that blanked a
+  search you had just run would be worse than one that leaves it, and the
+  status line names the pending selection so the rows cannot be mistaken for
+  it.
+- **The empty band under the results, and the categories cut off at the
+  smallest window, were the same bug.** Both lists sized themselves from a
+  frame height that was 86 pixels wrong, so the results table drew fewer rows
+  than it had room for while the category list believed it had less room than
+  it did. Both now derive their height from the one number that is explicitly
+  set — the window's own — through `ui.PanelHeightAt`. At the minimum window
+  size all eleven top-level categories fit, which they did not before.
+- **Check boxes were not boxes.** A `SetBackdrop` whose `edgeSize` approaches
+  the frame size cannot draw a border — the two corner pieces are each
+  `edgeSize` square and physically will not fit across a 14px button — so the
+  result rows' tick boxes rendered as a garbled cross. Under pfUI they became
+  circles instead, because pfUI reskins anything reporting `CheckButton`.
+  There is now one helper (`ui.MakeCheckBox`) behind every check box in the
+  addon: result rows, "Usable items", the Filter Builder and the Settings tab.
+  Its border is four 1px textures, which stay square at any size, and it opts
+  out of the pfUI pass the same way the sort headers already do.
+- **A row you own now shows a dimmed tick box rather than no tick box.**
+  Hiding it punched a hole in the tick column, so an owned row read as a row
+  missing a cell instead of a row you are not allowed to buy.
+
+### Changed
+- **The three control-strip labels are placed by one rule instead of two.**
+  "Name" hung off the panel at a fixed y while "Level Range" and "Min Quality"
+  hung off their own controls, so nothing held the three in line — there was no
+  single number to adjust. Each label now sits on its own control's top edge,
+  and `BUYL.strip_lbl_gap` is the only place that air is set. The gap is wider,
+  which is what the labels sitting on top of the boxes needed.
+- **The Min Quality dropdown shows each quality in that quality's colour**, from
+  FrameXML's own `ITEM_QUALITY_COLORS` — the same table item links and the
+  results' Item column use, so a Rare here is exactly the blue a Rare is
+  everywhere else. The closed button shows the selection in its colour too.
+  "All" stays neutral: no quality filter is not a quality and must not borrow
+  one's colour.
+
+### Verified, not assumed
+- **Bid-only auctions sort last, in both directions.** A listing with no buyout
+  has no unit price, and "last" for a priceless row has to mean last whichever
+  way the arrow points — the alternative reads as "these are the most
+  expensive". `tests/sort_results.lua` pins it, and pins that the Bid column
+  does *not* sink them, since there they have a real value. The test extracts
+  `ui.SortResults` from `ui/frame.lua` at run time rather than copying it, so
+  it cannot pass against a stale duplicate. It is not in the `.toc` and the
+  client never loads it; run it with `lua5.1 tests/sort_results.lua`.
+
 ## [1.17.0]
 
 Buy tab polish: alignment, clipping and colour. `/reload`.
@@ -1405,6 +1464,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.18.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.17.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.16.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.16.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

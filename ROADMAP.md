@@ -947,6 +947,60 @@ final unless someone ships a font with the addon.
 - **"Miscellaneous" first under Armor is the client's own subclass order**,
   and the stock AH does the same. Left alone: this view is the Blizzlike one.
 
+### 2t — Category selection, list sizing, one check box — ✅ **DONE** (v1.18.0)
+
+- **Selecting a category no longer searches.** `ui.CatApply` sets a pending
+  selection and a status line; only Search issues the query. The results
+  already on screen are LEFT there rather than cleared — a fold click that
+  blanked a real search is worse than one that leaves it, and the status line
+  names the pending selection so the rows cannot be mistaken for it. Decided
+  once, recorded here, and written in the code at `ui.NotePendingCat`.
+- **The dead band under the results and the categories cut off at the smallest
+  window were ONE bug, not two.** `ui.TableAreaAt` subtracted 22 where the
+  panel's real vertical inset is 108 — an 86px error — so both lists sized
+  themselves from a height that was wrong in opposite-looking ways. `GetHeight()`
+  on a two-edge-anchored frame returns the LAST LAID-OUT height, one frame
+  stale, which is why measuring looked right and was not. Everything now
+  derives from `ui.frame:GetHeight()`, the one number that is explicitly set,
+  via `ui.PanelHeightAt`. At MIN_H all eleven top-level categories fit — the
+  arithmetic, not a nudge: 262px available against 242px needed.
+- **One check box helper, `ui.MakeCheckBox`, behind every check box.** Two
+  separate failures met here. A `SetBackdrop` whose `edgeSize` approaches the
+  frame size CANNOT draw a border — two corner pieces of `edgeSize` square do
+  not fit across a 14px frame — so it drew a cross; and pfUI reskins anything
+  reporting `CheckButton`, so under the skin it became a circle. Borders are
+  four 1px textures, and `aegisNoSkin` opts out of the pfUI pass.
+- **The helper does NOT override `SetChecked`/`GetChecked`.** A `CheckButton`
+  toggles itself before `OnClick` runs and every handler in the file is written
+  against that. Shadowing those two methods with our own flag leaves the
+  widget's state and ours disagreeing, and each handler silently reads the
+  wrong one. Only the ART is replaced: the tick is the widget's own CHECKED
+  texture, so the client shows and hides it and it cannot drift. **Do not
+  "simplify" this into a private boolean.**
+- **Field labels are placed by ONE rule.** "Name" hung off the panel while
+  "Level Range" and "Min Quality" hung off their controls — two rules, so no
+  single number could hold the three in line. Every label now hangs off its own
+  control, and the controls already share one top edge. When a layout will not
+  come into line after repeated nudging, count the rules before adding another
+  constant.
+- **Min Quality is coloured from `ITEM_QUALITY_COLORS`**, FrameXML's own table,
+  so a Rare here is the blue a Rare is everywhere. "All" stays neutral — no
+  filter is not a quality. The button's colour is applied inside
+  `RepaintButton` via `aegisTextColor`, not by the caller: that function runs on
+  every hover and press, so a colour set from outside is wiped by the first
+  mouseover.
+- **Bid-only auctions sort last in BOTH directions** — verified by running the
+  code, not by reading it. The nil guards in `ui.SortResults` sit BEFORE the
+  direction branch deliberately; folded into it, a descending sort floats
+  priceless rows to the top where they read as the most expensive.
+  `tests/sort_results.lua` pins this, and was itself checked against two
+  sabotaged copies of the function.
+- **`tests/` now exists, in the repo.** The previous test harness lived in
+  `/tmp`, was never version-controlled, and was destroyed with the container —
+  twice. Tests extract the function under test from the source at run time
+  rather than copying it, so they cannot pass against a stale duplicate.
+  Nothing in `tests/` is in the `.toc`; the 1.12 client never sees it.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

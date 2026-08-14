@@ -267,10 +267,16 @@ local function RepaintButton(b)
     end
 
     if b.label then
+        -- aegisTextColor overrides the kind's text colour, and it has to be
+        -- read HERE rather than set once by the caller: this function runs on
+        -- every hover, press and enable, so anything that colours the label
+        -- from outside is wiped by the next mouseover. The Min Quality
+        -- dropdown uses it to show its selection in that quality's colour.
+        local tc = b.aegisTextColor or tx
         if enabled then
-            b.label:SetTextColor(tx[1], tx[2], tx[3])
+            b.label:SetTextColor(tc[1], tc[2], tc[3])
         else
-            local r, g, bl = DimRGB(tx, BTN_DIM_TEXT)
+            local r, g, bl = DimRGB(tc, BTN_DIM_TEXT)
             b.label:SetTextColor(r, g, bl)
         end
         -- Press nudge. Done by moving the label ourselves rather than via
@@ -441,6 +447,112 @@ function ui.FlattenEditBox(e)
     return e
 end
 
+-- A square check box, at any size, in either skin.
+--
+-- Two problems this solves.
+--
+-- 1. A `SetBackdrop` whose edgeSize approaches the frame size renders as a
+--    garbled CROSS, not a box: the two corner pieces are each edgeSize square
+--    and physically cannot both fit across a 14px frame. The result rows used
+--    edgeSize 8 in a 14px button. Borders here are four 1px textures, which
+--    stay square at any size.
+--
+-- 2. pfUI reskins anything reporting `CheckButton` -- that is what turned the
+--    row boxes into crosses and "Usable items" into a circle under the skin
+--    while they looked correct unskinned. aegisNoSkin opts out, the same way
+--    the sort headers and category rows already do.
+--
+-- The checked state stays the WIDGET's OWN state -- SetChecked/GetChecked are
+-- deliberately NOT overridden. A CheckButton toggles itself before OnClick
+-- runs, and every handler in this file is written against that (they read
+-- GetChecked() inside OnClick and expect the new value). Shadowing those two
+-- methods with our own flag would leave the widget's state and ours
+-- disagreeing, and each of those handlers would silently read the wrong one.
+-- Instead we only replace the ART: the tick is the widget's CHECKED texture,
+-- so the client shows and hides it for us and it can never drift.
+function ui.MakeCheckBox(parent, size, name)
+    size = size or 14
+    local c = CreateFrame("CheckButton", name, parent)
+    c:SetWidth(size); c:SetHeight(size)
+    c.aegisNoSkin = true          -- our art, not pfUI's
+
+    local fill = c:CreateTexture(nil, "BACKGROUND")
+    fill:SetAllPoints(c)
+    fill:SetTexture(0.08, 0.07, 0.06, 1)
+    c.fill = fill
+
+    c.edge = {}
+    local ei = 1
+    while ei <= 4 do
+        local ln = c:CreateTexture(nil, "BORDER")
+        ln:SetTexture(0.45, 0.38, 0.22, 1)
+        c.edge[ei] = ln
+        ei = ei + 1
+    end
+    c.edge[1]:SetPoint("TOPLEFT", c, "TOPLEFT", 0, 0)
+    c.edge[1]:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, 0)
+    c.edge[1]:SetHeight(1)
+    c.edge[2]:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 0)
+    c.edge[2]:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 0)
+    c.edge[2]:SetHeight(1)
+    c.edge[3]:SetPoint("TOPLEFT", c, "TOPLEFT", 0, 0)
+    c.edge[3]:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 0)
+    c.edge[3]:SetWidth(1)
+    c.edge[4]:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, 0)
+    c.edge[4]:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 0)
+    c.edge[4]:SetWidth(1)
+
+    -- SetCheckedTexture takes a PATH on 1.12, not a texture object, so the
+    -- texture has to be created from a file that exists -- then immediately
+    -- re-pointed and repainted as a flat colour, which SetTexture(r,g,b,a)
+    -- does without touching the file again. If a client ever fails to hand
+    -- back the region, the stock check mark stays: wrong art, still legible,
+    -- never a box you cannot read the state of.
+    pcall(function()
+        c:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    end)
+    local tick
+    pcall(function() tick = c:GetCheckedTexture() end)
+    if tick then
+        tick:ClearAllPoints()
+        tick:SetPoint("TOPLEFT", c, "TOPLEFT", 3, -3)
+        tick:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -3, 3)
+        tick:SetTexture(1.0, 0.82, 0.0, 1)
+        c.tick = tick
+    end
+
+    -- Caption to the right of the box. UICheckButtonTemplate supplied one as
+    -- a global named "<name>Text"; ours is a plain field, so the settings
+    -- rows no longer need a name just to reach their own label.
+    c.SetLabel = function(self, text, colour)
+        if not self.label then
+            self.label = self:CreateFontString(nil, "OVERLAY",
+                "GameFontHighlightSmall")
+            self.label:SetPoint("LEFT", self, "RIGHT", 5, 0)
+            self.label:SetJustifyH("LEFT")
+        end
+        self.label:SetText(text)
+        if colour then
+            self.label:SetTextColor(colour[1], colour[2], colour[3])
+        end
+        return self.label
+    end
+
+    -- Dimmed rather than hidden, so a row you cannot tick still reads as a
+    -- row with a tick box rather than one missing a column. Pairs with
+    -- Disable(), which is what actually refuses the click.
+    c.SetDimmed = function(self, on)
+        local a = on and 0.30 or 1
+        self.fill:SetAlpha(a)
+        if self.tick then self.tick:SetAlpha(a) end
+        local k = 1
+        while k <= 4 do self.edge[k]:SetAlpha(a); k = k + 1 end
+        if self.label then self.label:SetAlpha(on and 0.45 or 1) end
+        if on then self:Disable() else self:Enable() end
+    end
+    return c
+end
+
 -- Set `text` on a FontString, shortened with an ellipsis if it would run wider
 -- than `maxWidth` pixels.
 --
@@ -493,6 +605,28 @@ function ui.RestoreWindowSize()
     if h > MAX_H then h = MAX_H end
     ui.frame:SetWidth(w)
     ui.frame:SetHeight(h)
+    ui.QueueRepaint()
+end
+
+-- Repaint the open tab on the NEXT OnUpdate tick.
+--
+-- Deferred deliberately. The client relayouts frames one tick after an
+-- ancestor's size changes, so calling RefreshCurrentTab inline here would
+-- read exactly the stale numbers this exists to avoid. The Buy tab no longer
+-- depends on that -- it derives from the window's own height -- but every
+-- other list still measures, and they all need the second look.
+function ui.QueueRepaint()
+    if not ui.frame then return end
+    if not ui.repaintDriver then
+        local drv = CreateFrame("Frame", nil, ui.frame)
+        drv:Hide()
+        drv:SetScript("OnUpdate", function()
+            this:Hide()
+            if ui.RefreshCurrentTab then ui.RefreshCurrentTab() end
+        end)
+        ui.repaintDriver = drv
+    end
+    ui.repaintDriver:Show()
 end
 
 -- ---------------------------------------------------------------------------
@@ -1246,15 +1380,9 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     scReset:SetScript("OnClick", function() ui.StepWindowScale(nil) end)
 
     -- ---- Toggles ----------------------------------------------------------
-    local tipChk = CreateFrame("CheckButton", "AegisExchangeSetTooltip", panel,
-        "UICheckButtonTemplate")
-    tipChk:SetWidth(24); tipChk:SetHeight(24)
+    local tipChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetTooltip")
     tipChk:SetPoint("TOPLEFT", scLbl, "BOTTOMLEFT", -2, -16)
-    local tipTxt = getglobal(tipChk:GetName() .. "Text")
-    if tipTxt then
-        tipTxt:SetText("Show Aegis price lines on item tooltips")
-        tipTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    tipChk:SetLabel("Show Aegis price lines on item tooltips", C.text)
     tipChk:SetScript("OnClick", function()
         A.db.SetSetting("tooltip", tipChk:GetChecked() and true or false)
         ui.RefreshSettings()   -- grey the per-line options with the master
@@ -1275,19 +1403,13 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local si = 1
     while si <= table.getn(tipSubs) do
         local spec = tipSubs[si]
-        local c = CreateFrame("CheckButton", "AegisExchangeSet" .. spec.key,
-            panel, "UICheckButtonTemplate")
-        c:SetWidth(20); c:SetHeight(20)
+        local c = ui.MakeCheckBox(panel, 16, "AegisExchangeSet" .. spec.key)
         if prevSub then
-            c:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
+            c:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -4)
         else
-            c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -2)
+            c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -6)
         end
-        local t = getglobal(c:GetName() .. "Text")
-        if t then
-            t:SetText(spec.text)
-            t:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        end
+        c:SetLabel(spec.text, C.goldDim)
         c.settingKey = spec.key
         c:SetScript("OnClick", function()
             A.db.SetSetting(c.settingKey, c:GetChecked() and true or false)
@@ -1297,29 +1419,18 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         si = si + 1
     end
 
-    local stackChk = CreateFrame("CheckButton", "AegisExchangeSetTipStackShift",
-        panel, "UICheckButtonTemplate")
-    stackChk:SetWidth(20); stackChk:SetHeight(20)
-    stackChk:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
-    local stackTxt = getglobal(stackChk:GetName() .. "Text")
-    if stackTxt then
-        stackTxt:SetText("Stack totals only while Shift is held")
-        stackTxt:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    end
+    local stackChk = ui.MakeCheckBox(panel, 16,
+        "AegisExchangeSetTipStackShift")
+    stackChk:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -4)
+    stackChk:SetLabel("Stack totals only while Shift is held", C.goldDim)
     stackChk:SetScript("OnClick", function()
         A.db.SetSetting("tipStackShift", stackChk:GetChecked() and true or false)
     end)
     ui.setTipStackShift = stackChk
 
-    local profChk = CreateFrame("CheckButton", "AegisExchangeSetProfLine", panel,
-        "UICheckButtonTemplate")
-    profChk:SetWidth(24); profChk:SetHeight(24)
-    profChk:SetPoint("TOPLEFT", stackChk, "BOTTOMLEFT", -18, -4)
-    local profTxt = getglobal(profChk:GetName() .. "Text")
-    if profTxt then
-        profTxt:SetText("Show profit line on profession windows")
-        profTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    local profChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetProfLine")
+    profChk:SetPoint("TOPLEFT", stackChk, "BOTTOMLEFT", -18, -8)
+    profChk:SetLabel("Show profit line on profession windows", C.text)
     profChk:SetScript("OnClick", function()
         A.db.SetSetting("profLine", profChk:GetChecked() and true or false)
         ui.UpdateProfLine()
@@ -1328,15 +1439,9 @@ function ui.BuildAegisSettings(panel, anchorAbove)
 
     -- pfUI skin toggle. Only meaningful with pfUI installed, and changing it
     -- takes effect on the next /reload (we can't un-skin frames in place).
-    local pfChk = CreateFrame("CheckButton", "AegisExchangeSetPfSkin", panel,
-        "UICheckButtonTemplate")
-    pfChk:SetWidth(24); pfChk:SetHeight(24)
-    pfChk:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 0, -4)
-    local pfTxt = getglobal(pfChk:GetName() .. "Text")
-    if pfTxt then
-        pfTxt:SetText("Match pfUI's look (needs /reload)")
-        pfTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    local pfChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetPfSkin")
+    pfChk:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 0, -6)
+    pfChk:SetLabel("Match pfUI's look (needs /reload)", C.text)
     pfChk:SetScript("OnClick", function()
         A.db.SetSetting("pfSkin", pfChk:GetChecked() and true or false)
     end)
@@ -1344,15 +1449,10 @@ function ui.BuildAegisSettings(panel, anchorAbove)
 
     -- Ask before cancelling an auction? Off makes the Auctions tab's Cancel
     -- buttons act immediately.
-    local ccChk = CreateFrame("CheckButton", "AegisExchangeSetConfirmCancel",
-        panel, "UICheckButtonTemplate")
-    ccChk:SetWidth(24); ccChk:SetHeight(24)
-    ccChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -4)
-    local ccTxt = getglobal(ccChk:GetName() .. "Text")
-    if ccTxt then
-        ccTxt:SetText("Ask before cancelling an auction")
-        ccTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    local ccChk = ui.MakeCheckBox(panel, 18,
+        "AegisExchangeSetConfirmCancel")
+    ccChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)
+    ccChk:SetLabel("Ask before cancelling an auction", C.text)
     ccChk:SetScript("OnClick", function()
         A.db.SetSetting("confirmCancel", ccChk:GetChecked() and true or false)
     end)
@@ -1484,18 +1584,16 @@ function ui.RefreshSettings()
         while si <= table.getn(ui.setTipSubs) do
             local c = ui.setTipSubs[si]
             c:SetChecked(A.db.Setting(c.settingKey) ~= false and 1 or nil)
-            if tipOn then c:Enable() else c:Disable() end
+            -- SetDimmed, not Enable/Disable: the stock template greyed its own
+            -- label when disabled, ours has to be told to.
+            c:SetDimmed(not tipOn)
             si = si + 1
         end
     end
     if ui.setTipStackShift then
         ui.setTipStackShift:SetChecked(
             A.db.Setting("tipStackShift") == true and 1 or nil)
-        if tipOn then
-            ui.setTipStackShift:Enable()
-        else
-            ui.setTipStackShift:Disable()
-        end
+        ui.setTipStackShift:SetDimmed(not tipOn)
     end
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
@@ -2021,16 +2119,25 @@ local function MakeDropdown(parent, width, onSelect, noAll)
     end
 
     -- Label for the currently selected value, or "All" when nothing is set.
+    --
+    -- An option may carry `colour = {r,g,b}`; the closed button then shows the
+    -- selection in it. "All" carries none and stays the button's own colour,
+    -- which is the point -- "no quality filter" is not a quality and must not
+    -- borrow one's colour.
     function dd:Repaint()
         local text = dd.noAll and "" or "All"
+        local colour = nil
         local i = 1
         while i <= table.getn(dd.options) do
             if dd.options[i].value == dd.value then
                 text = dd.options[i].text
+                colour = dd.options[i].colour
                 break
             end
             i = i + 1
         end
+        btn.aegisTextColor = colour
+        RepaintButton(btn)
         ui.SetTextClipped(btn:GetFontString(), text, width - 8)
     end
 
@@ -2102,6 +2209,15 @@ local function MakeDropdown(parent, width, onSelect, noAll)
                 dd.rows[r] = row
             end
             row.optValue = entries[r].value
+            -- Rows are pooled, so the colour is set on EVERY pass -- including
+            -- back to the default. Setting it only when an option has one
+            -- leaves the previous option's colour on a reused row.
+            local oc = entries[r].colour
+            if oc then
+                row.label:SetTextColor(oc[1], oc[2], oc[3])
+            else
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
             ui.SetTextClipped(row.label, entries[r].text, width - 12)
             row:Show()
             r = r + 1
@@ -2294,23 +2410,8 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         -- Tick box for the multi-buyout batch. Its own small CheckButton
         -- rather than the 32px UICheckButtonTemplate, which does not fit a
         -- listing row.
-        local cb = CreateFrame("CheckButton", nil, row)
-        cb:SetWidth(14); cb:SetHeight(14)
+        local cb = ui.MakeCheckBox(row, 14)
         cb:SetPoint("LEFT", row, "LEFT", X.check, 0)
-        cb:SetBackdrop({
-            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 },
-        })
-        cb:SetBackdropColor(0.08, 0.07, 0.06, 1)
-        cb:SetBackdropBorderColor(0.45, 0.38, 0.22)
-        local tick = cb:CreateTexture(nil, "OVERLAY")
-        tick:SetPoint("TOPLEFT", cb, "TOPLEFT", 3, -3)
-        tick:SetPoint("BOTTOMRIGHT", cb, "BOTTOMRIGHT", -3, 3)
-        tick:SetTexture(1.0, 0.82, 0.0, 1)
-        tick:Hide()
-        cb.tick = tick
         cb:SetScript("OnClick", function()
             if row.entry then ui.ToggleBuyCheck(row.entry) end
         end)
@@ -2561,14 +2662,12 @@ function ui.FillResultRow(row, r)
         end
         row.name:SetAlpha(a)
         if row.icon then row.icon:SetAlpha(a) end
-        -- ...and you cannot tick your own auction into a buyout batch.
-        if r.mine then
-            row.check:Hide()
-        else
-            row.check:Show()
-            local on = ui.IsBuyChecked(r)
-            if on then row.check.tick:Show() else row.check.tick:Hide() end
-        end
+        -- ...and you cannot tick your own auction into a buyout batch. The
+        -- box is DIMMED rather than hidden: hiding it punched a hole in the
+        -- tick column, so an owned row read as a row missing a cell instead
+        -- of a row you are not allowed to buy.
+        row.check:SetChecked(ui.IsBuyChecked(r) and 1 or nil)
+        row.check:SetDimmed(r.mine and true or false)
     end
     -- Per-row buttons exist only on the Crafting tab's rows now; the Buy tab
     -- is Blizzlike (select a row, act from the bottom bar), so its rows carry
@@ -2720,6 +2819,11 @@ end
 -- give five visible rows.
 local BUY_ROWS,  BUY_ROW_H  = 11, 26
 local BUY_ROWS_MAX  = 34
+-- Two row heights: the mockup's plates are noticeably taller than its bare
+-- subcategory rows (38px vs 27px at its scale). One height for both is what
+-- made our tree look cramped and evenly-spaced where the mockup has rhythm.
+local SIDE_ROWS, SIDE_ROW_H = 13, 22   -- SIDE_ROW_H is the PLATED height
+local SIDE_BARE_H = 17                 -- ...and bare rows are tighter
 -- Table geometry, named because three things have to agree about it: the well
 -- that draws the box, the headers inside it, and the scroll frame the rows
 -- live in. When these were three loose numbers at three call sites the well
@@ -2737,7 +2841,7 @@ local BUY_ROWS_MAX  = 34
 -- the strip rather than beneath it. In the mockup the Name field, the BROWSE
 -- heading and the category plates all share one left edge.
 local BUYL = {
-    strip_lbl_y = 8,    -- field labels: ONE baseline for all three
+    strip_lbl_gap = 6,  -- air between a field label and ITS control
     strip_ctl_y = 23,   -- ...and ONE top edge for every control
     ctl_h       = 20,   -- ...at ONE height, dropdown included
     side_x      = 10,   -- shared left edge: strip, BROWSE, plates
@@ -2781,8 +2885,32 @@ local BUYL = {
 -- the thing that has to be checked is the other direction: that the strip
 -- above and the count/pager, rule and action bar below all still have their
 -- space. Returns the usable row area, and false if the budget is blown.
+-- Vertical distance from the WINDOW's height to a tab panel's height. The
+-- content frame is inset 80 at the top and 16 at the bottom of the window,
+-- and each tab panel a further 6 inside that.
+--
+-- This said 22, so everything derived from it thought the panel had 86 more
+-- pixels than it does. It was never noticed because nothing in the addon
+-- actually called the functions below -- only the tests did.
+local PANEL_V_INSET = 80 + 16 + 6 + 6
+
+-- Panel height at a given WINDOW height.
+--
+-- Deriving from the window rather than measuring a frame is the whole point:
+-- GetHeight() on a two-edge-anchored frame reports the height it was last
+-- LAID OUT at, and the client relayouts on the next frame. RestoreWindowSize
+-- sets the window's height and nothing repaints afterwards, so every list
+-- that measured its own scroll frame kept the count it computed at the
+-- window's creation size while the box grew with its anchors. That gap
+-- between a full-height box and a half-full list is the bug.
+--
+-- The window's height is set explicitly, so it is true the moment it is read.
+function ui.PanelHeightAt(h)
+    return (h or 0) - PANEL_V_INSET
+end
+
 function ui.TableAreaAt(h)
-    local panelH = h - 22                 -- window minus its border
+    local panelH = ui.PanelHeightAt(h)
     local area = panelH - BUYL.rows_top - BUYL.table_bot
     -- Below the table: 8px gap, the 20px pager row, 10px gap, then the rule
     -- at 38 and the action bar under it.
@@ -2813,16 +2941,28 @@ function ui.TableRowsAt(h)
     return n
 end
 
+-- Usable height of the BROWSE column at a given window height.
+function ui.CatAreaAt(h)
+    return ui.PanelHeightAt(h) - BUYL.side_top - BUYL.side_bot
+end
+
+-- Do all the TOP-LEVEL categories fit without scrolling, at window height h?
+--
+-- There are eleven ("All Categories" plus ten classes) and they are the
+-- plated, taller kind. Asserted true at MIN_H: a category list that cannot
+-- show its own categories at the smallest allowed window is a list with a
+-- hidden minimum nobody wrote down.
+local CAT_TOP_LEVEL_N = 11
+
+function ui.AllCategoriesFitAt(h)
+    return ui.CatAreaAt(h) >= (CAT_TOP_LEVEL_N * SIDE_ROW_H)
+end
+
 function ui.ColumnsFitAt(w)
     local rowLeft = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
     local rowW = (w - 22) - rowLeft - BUYL.gutter_w
     return BUY_COLS_END <= rowW
 end
--- Two row heights: the mockup's plates are noticeably taller than its bare
--- subcategory rows (38px vs 27px at its scale). One height for both is what
--- made our tree look cramped and evenly-spaced where the mockup has rhythm.
-local SIDE_ROWS, SIDE_ROW_H = 13, 22   -- SIDE_ROW_H is the PLATED height
-local SIDE_BARE_H = 17                 -- ...and bare rows are tighter
 -- Post Filter clause rows in the Filter Builder.
 local FB_POST_ROWS = 9
 local SIDE_ROWS_MAX = 38
@@ -2995,11 +3135,24 @@ function ui.BuildBuyTab()
     -- Field order is the stock auction house's: Name, Level Range, Min
     -- Quality, Usable, Search. Everything here composes into ONE term
     -- alongside whatever the category tree has selected -- see ui.DefaultTerm.
-    local nameLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    nameLbl:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        BUYL.side_x, -BUYL.strip_lbl_y)
-    nameLbl:SetText("Name")
-    ui.buyNameLbl = nameLbl
+    -- Every field label is placed by ONE rule: sit on my own control's top
+    -- edge, left edges flush, the same gap above it.
+    --
+    -- They were placed by two rules before, and that is the whole of why they
+    -- looked crooked. "Name" hung off the PANEL at a fixed y while "Level
+    -- Range" and "Min Quality" hung off their CONTROLS -- so the moment a
+    -- control's height or the strip's y changed, Name stayed put and the other
+    -- two moved, and no amount of nudging one of the numbers could hold all
+    -- three in line because there was no single number to nudge. The controls
+    -- already share one top edge (strip_ctl_y), so hanging every label off its
+    -- own control gives one baseline for free, and strip_lbl_gap is now the
+    -- only place the label-to-control air is set.
+    local function stripLabel(text, ctl)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("BOTTOMLEFT", ctl, "TOPLEFT", 0, BUYL.strip_lbl_gap)
+        fs:SetText(text)
+        return fs
+    end
 
     -- The strip is a FIXED-WIDTH cluster on the left, two buttons pinned
     -- right, and the slack left as empty space between them -- the mockup's
@@ -3028,6 +3181,7 @@ function ui.BuildBuyTab()
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
     box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
     ui.buyBox = box
+    ui.buyNameLbl = stripLabel("Name", box)
 
     -- Left cluster, chained left-to-right off Name at fixed widths.
     ui.buyMinLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
@@ -3039,20 +3193,13 @@ function ui.BuildBuyTab()
     ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
     ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 7, 0)
 
-    local lvlLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    lvlLbl:SetPoint("BOTTOMLEFT", ui.buyMinLevel, "TOPLEFT", 0, 3)
-    lvlLbl:SetText("Level Range")
-    ui.buyLvlLbl = lvlLbl
+    ui.buyLvlLbl = stripLabel("Level Range", ui.buyMinLevel)
 
     ui.buyQuality = MakeDropdown(panel, BUY_QUAL_W, function() end)
     ui.buyQuality.button:SetPoint("LEFT", ui.buyMaxLevel, "RIGHT", 16, 0)
-    local qLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    qLbl:SetPoint("BOTTOMLEFT", ui.buyQuality.button, "TOPLEFT", 0, 3)
-    qLbl:SetText("Min Quality")
-    ui.buyQualLbl = qLbl
+    ui.buyQualLbl = stripLabel("Min Quality", ui.buyQuality.button)
 
-    ui.buyUsable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    ui.buyUsable:SetWidth(20); ui.buyUsable:SetHeight(20)
+    ui.buyUsable = ui.MakeCheckBox(panel, 16)
     ui.buyUsable:SetPoint("LEFT", ui.buyQuality.button, "RIGHT", 10, 0)
     local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     usableLbl:SetPoint("LEFT", ui.buyUsable, "RIGHT", 2, 0)
@@ -3754,13 +3901,9 @@ function ui.BuildFilterBuilder(panel, rowLeft)
         return fs
     end
     local function check(text, x, y, onClick)
-        local c = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-        c:SetWidth(20); c:SetHeight(20)
+        local c = ui.MakeCheckBox(f, 16)
         c:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
-        local fs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("LEFT", c, "RIGHT", 2, 0)
-        fs:SetText(text)
-        fs:SetTextColor(C.text[1], C.text[2], C.text[3])
+        c:SetLabel(text, C.text)
         c:SetScript("OnClick", function()
             if onClick then onClick() end
             ui.RefreshBuilder()
@@ -3933,14 +4076,24 @@ end
 
 -- ---- Filter Builder: form <-> term --------------------------------------
 
--- Quality dropdown options, from the client's own localized names.
+-- Quality dropdown options, from the client's own localized names, each
+-- carrying that quality's colour so the list reads as the qualities it is
+-- naming rather than as six identical words. ITEM_QUALITY_COLORS is FrameXML's
+-- own table -- the same one item links and the result rows' Item column use --
+-- so a Rare here is exactly the blue a Rare is everywhere else. Guarded
+-- because a colourless list is a cosmetic loss and a nil index is an error.
 local function BuilderQualityOptions()
     local out = {}
     local i = 0
     while i <= 5 do
         local desc = getglobal("ITEM_QUALITY" .. i .. "_DESC")
         if desc and desc ~= "" then
-            table.insert(out, { value = i, text = desc })
+            local colour = nil
+            if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[i] then
+                local c = ITEM_QUALITY_COLORS[i]
+                colour = { c.r, c.g, c.b }
+            end
+            table.insert(out, { value = i, text = desc, colour = colour })
         end
         i = i + 1
     end
@@ -4613,7 +4766,11 @@ function ui.UpdateCatTree()
     -- different heights, so it depends on WHICH rows are about to be shown.
     -- The scroll offset is still counted in ROWS, which is what lets the
     -- FauxScrollFrame maths keep working with a ragged list.
-    local avail = ui.buyCatScroll:GetHeight() or 0
+    -- Same reason as the results table: measuring this frame returns whatever
+    -- height it was last laid out at, which is why the tree stopped at
+    -- "Quiver" on a window tall enough for all eleven categories.
+    local avail = ui.CatAreaAt(
+        (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0)
     if avail <= 0 then avail = SIDE_ROWS * SIDE_ROW_H end
     local offset = FauxScrollFrame_GetOffset(ui.buyCatScroll) or 0
     local function HeightOf(e)
@@ -4737,17 +4894,17 @@ function ui.OnCatClick(e)
     if not e then return end
     if e.kind == "class" then
         ui.buyCatExpanded[e.class] = not ui.buyCatExpanded[e.class]
-        ui.CatApply(e.class, nil, nil)
+        ui.CatApply(e.class, nil, nil, e.name)
     elseif e.kind == "sub" then
         if e.expandable then
             local skey = e.class .. ":" .. e.subclass
             ui.buyCatExpanded[skey] = not ui.buyCatExpanded[skey]
         end
-        ui.CatApply(e.class, e.subclass, nil)
+        ui.CatApply(e.class, e.subclass, nil, e.name)
     elseif e.kind == "slot" then
-        ui.CatApply(e.class, e.subclass, e.slot)
+        ui.CatApply(e.class, e.subclass, e.slot, e.name)
     else
-        ui.CatApply(nil, nil, nil)
+        ui.CatApply(nil, nil, nil, nil)
     end
     ui.buyCatSel = ui.CatKey(e)
     ui.RefreshCatTree()
@@ -4761,10 +4918,36 @@ end
 -- which is what makes the Name field mean "within the selected category"
 -- exactly as the stock UI does -- and why the level/quality/usable controls
 -- keep applying across a category change instead of being wiped by it.
-function ui.CatApply(class, subclass, slot)
+-- Set the browse selection. DOES NOT SEARCH.
+--
+-- It used to call DoBuySearch, so every click in the tree fired a full server
+-- query -- selecting "Weapon" pulled every weapon on the auction house, and
+-- merely EXPANDING a category did the same. Navigation should be free; the
+-- Search button is what costs a round trip.
+--
+-- The results already on screen are left alone rather than cleared: they are
+-- a real search someone asked for, and blanking the table on a fold click
+-- would be worse than leaving it. What is not acceptable is silence about it,
+-- so the status line says which selection is pending -- see ui.NotePendingCat.
+function ui.CatApply(class, subclass, slot, label)
     if not A.buy then return end
     ui.buyCatClass, ui.buyCatSubclass, ui.buyCatSlot = class, subclass, slot
-    ui.DoBuySearch()
+    ui.NotePendingCat(label)
+end
+
+-- Name the selection that Search would apply, so the rows above are not
+-- mistaken for it.
+-- `label` is the row's own display name, passed down from the click. The
+-- class/subclass/slot values are numeric INDICES into the client's category
+-- tables, so building a name from them here would print "1 selected".
+function ui.NotePendingCat(label)
+    if not ui.buyStatus then return end
+    ui.buyCatPending = true
+    if label and label ~= "" then
+        ui.buyStatus:SetText(label .. " selected \226\128\148 press Search")
+    else
+        ui.buyStatus:SetText("All categories selected \226\128\148 press Search")
+    end
 end
 
 -- ---- (shopping lists removed) -------------------------------------------
@@ -4804,6 +4987,8 @@ function ui.BuyAutocomplete()
 end
 
 function ui.DoBuySearch()
+    -- The pending-category note is answered by the search it was asking for.
+    ui.buyCatPending = nil
     local sb = ui.ActiveSearchBox()
     if not sb then return end
     sb:ClearFocus()
@@ -4889,7 +5074,12 @@ function ui.UpdateBuyList()
     ui.PaintSortHeaders(ui.buyHeaders, sortKey, dir)
 
     local total = table.getn(rows)
-    local vis = ui.RowsFor(ui.buyScroll, BUY_ROW_H, BUY_ROWS, BUY_ROWS_MAX)
+    -- Row count comes from the same arithmetic that POSITIONS the box, not
+    -- from measuring the scroll frame -- see ui.PanelHeightAt for why a
+    -- measurement is unreliable here. Whole rows only: nothing clips a
+    -- partial one, it would simply draw over the match-count line.
+    local vis = ui.TableRowsAt(
+        (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0)
     ui.GrowBuyRows(vis)
     ui.SkinNewRows(ui.buyRows)
     FauxScrollFrame_Update(ui.buyScroll, total, vis, BUY_ROW_H)
@@ -4899,7 +5089,10 @@ function ui.UpdateBuyList()
         local _, page, totalPages, totalAuctions, termIndex, totalTerms, stats =
             A.buy.GetResults()
         local unknown = stats and stats.unknownStack or 0
-        if ui.buyResults then
+        -- A pending category note owns the status line until the search it
+        -- asks for actually runs. Repainting the list must not answer a
+        -- question nobody has pressed Search on yet.
+        if ui.buyResults and not ui.buyCatPending then
             local usedPageMax = stats and stats.usedPageMax
             if table.getn(all) == 0 then
                 if unknown > 0 then
@@ -7539,9 +7732,7 @@ function ui.BuildVendorList()
             return fs
         end
         -- Mark this item to sell at a merchant.
-        local chk = CreateFrame("CheckButton", "AegisExchangeVendCheck" .. i,
-            row, "UICheckButtonTemplate")
-        chk:SetWidth(20); chk:SetHeight(20)
+        local chk = ui.MakeCheckBox(row, 16, "AegisExchangeVendCheck" .. i)
         chk:SetPoint("LEFT", row, "LEFT", 4, 0)
         chk:SetScript("OnClick", function()
             if row.entry then
@@ -8140,10 +8331,8 @@ function ui.BuildCategoryPicker()
         end)
         row.expand = expand
 
-        local check = CreateFrame("CheckButton",
-            "AegisExchangePickerCheck" .. i, row, "UICheckButtonTemplate")
-        check:SetWidth(20)
-        check:SetHeight(20)
+        local check = ui.MakeCheckBox(row, 16,
+            "AegisExchangePickerCheck" .. i)
         check:SetPoint("LEFT", row, "LEFT", 20, 0)
         check:SetScript("OnClick", function()
             local entry = row.entry
