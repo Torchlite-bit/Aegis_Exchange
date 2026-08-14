@@ -12,6 +12,69 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.17.0]
+
+Buy tab polish: alignment, clipping and colour. `/reload`.
+
+### Fixed
+- **The BROWSE scrollbar was drawn across the results table's left border.**
+  `FauxScrollFrameTemplate` hangs its scrollbar outward from the scroll
+  frame's right edge, which sat in the same eight pixels the results box
+  starts at. Its down-arrow also floated far below the category list, since
+  that frame runs to the panel bottom while the categories usually end
+  higher. The scrollbar is hidden — the mockup has none — and the mouse wheel
+  still scrolls the tree. Hiding it once was not enough: `FauxScrollFrame_Update`
+  re-shows the bar whenever content overflows.
+- **"N selected — <price>" no longer crowds the action buttons.** It sat
+  inside the band the Bid / Buyout / Close buttons occupy. It now shares the
+  action bar's baseline, to the right of the gold.
+
+### Changed
+- **The results table fills the height available to it.** It previously
+  stopped well short, leaving a dead band above the action bar — the mockup's
+  table ends high, but the mockup is one screenshot with five results and a
+  real page has fifty. Only whole rows are drawn: a row that would be clipped
+  by the bottom edge is dropped rather than half-shown, since rows are not the
+  scroll frame's scroll-child and nothing would clip it — it would simply draw
+  over the count line.
+
+  **This reverses the "table is the shorter column" decision** recorded in
+  ROADMAP 2r. That entry has been updated rather than left contradicting the
+  code.
+- **Your gold is left-aligned on the panel margin**, sharing the edge the Name
+  field, "BROWSE" and the category plates sit on. It used to be anchored by
+  its copper coin and grow leftwards, so that a total gaining a digit could
+  not shove the layout about; on the left margin there is nothing to its right
+  until the Bid row, so alignment is worth more than that. Because Blizzard
+  hides denominations above the value, the anchor moves to whichever
+  denomination is currently leftmost — otherwise 43 copper would leave a hole
+  where the gold and silver would have been.
+- **Column headings are warm tan rather than disabled grey**, so the header
+  band reads as headings instead of as something switched off.
+- **The control strip is raised, and every control in it shares one height and
+  one top edge.** The Min Quality dropdown was 20px against the others' 18 and
+  hung below the line; the three labels now sit the same distance above their
+  own controls.
+- **A rule under the control strip**, matching the one above the action bar.
+  The mockup has both; we had only the lower one, so the strip ran into the
+  BROWSE heading and the table with nothing between them.
+- The match count is plain grey rather than amber — it was one of the warmest
+  things on the tab and is the least important line in the column.
+
+### Not changed, and why
+- **`% Mkt` showing 100% on every row is correct arithmetic, not a broken
+  colour.** Market value is a weighted median of daily minimum unit prices, so
+  an item first seen in the scan you are looking at has a market value equal to
+  that page's own cheapest listing — the comparison is the number against
+  itself. The colour helper was verified again: below market green, exactly
+  market neutral, above market red. It will show the full range once the price
+  DB has history older than the current page.
+- **"Miscellaneous" listing first under Armor is the client's own order** —
+  it is Armor's subclass 0, and the stock auction house lists it there too.
+  Left alone deliberately, since this view is the Blizzlike one.
+
+---
+
 ## [1.16.1]
 
 **Hotfix — 1.16.0 would not load.** `/reload`.
@@ -1342,6 +1405,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.17.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.16.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.16.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.15.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

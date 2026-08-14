@@ -73,7 +73,7 @@ local MAX_W, MAX_H = 1400, 900
 local BUY_NAME_W   = 200
 local BUY_LVL_W    = 32
 local BUY_QUAL_W   = 116
-local BUY_SEARCH_W = 76
+local BUY_SEARCH_W = 82
 local BUY_ADV_W    = 88
 -- What the cluster occupies end to end, including the gaps chained above.
 -- Anything that needs to know whether the strip fits asks this rather than
@@ -1779,62 +1779,6 @@ end
 -- point and the gold figure grows leftwards -- a total that gains a digit
 -- must not shove the rest of the bar sideways.
 local MONEY_COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
-local function MakeMoneyDisplay(parent)
-    local m = {}
-    local function part(coin, rightOf)
-        local tex = parent:CreateTexture(nil, "OVERLAY")
-        tex:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
-        local u = MONEY_COIN_U[coin]
-        tex:SetTexCoord(u, u + 0.25, 0, 1)
-        tex:SetWidth(15); tex:SetHeight(15)
-        if rightOf then
-            tex:SetPoint("RIGHT", rightOf, "LEFT", -5, 0)
-        end
-        -- Larger and GOLD, and set tight against its own coin -- the mockup
-        -- reads as three amounts, not six separate things. The gap belongs
-        -- BETWEEN denominations (the -5 above), not between a number and the
-        -- coin it labels.
-        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        fs:SetPoint("RIGHT", tex, "LEFT", -1, 0)
-        fs:SetJustifyH("RIGHT")
-        fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-        return { tex = tex, fs = fs }
-    end
-    m.copper = part("copper", nil)
-    m.silver = part("silver", m.copper.fs)
-    m.gold   = part("gold",   m.silver.fs)
-
-    m.Anchor = function(self, ...)
-        self.copper.tex:SetPoint(unpack(arg))
-    end
-    m.SetMoney = function(self, copper)
-        local g, sv, c = util.MoneyParts(copper or 0)
-        self.gold.fs:SetText(tostring(g))
-        self.silver.fs:SetText(tostring(sv))
-        self.copper.fs:SetText(tostring(c))
-        -- Blizzard hides denominations above the value: 43c shows as "43c",
-        -- not "0g 0s 43c".
-        local showG = g > 0
-        local showS = showG or sv > 0
-        if showG then self.gold.tex:Show(); self.gold.fs:Show()
-        else self.gold.tex:Hide(); self.gold.fs:Hide() end
-        if showS then self.silver.tex:Show(); self.silver.fs:Show()
-        else self.silver.tex:Hide(); self.silver.fs:Hide() end
-    end
-    m.Show = function(self)
-        self.copper.tex:Show(); self.copper.fs:Show()
-        -- gold/silver visibility is SetMoney's call, not ours.
-    end
-    return m
-end
-
--- A gold / silver / copper triplet, the way the stock AH and aux present a
--- price. Three small numeric boxes with coloured suffixes.
---
--- It deliberately EMULATES the single money box's interface (GetText / SetText
--- / ClearFocus) so ReadMoneyBox, SetMoneyBox and every existing caller keep
--- working untouched -- the Sell tab still thinks in plain copper everywhere,
--- only the presentation changed.
 MakeMoneyGSC = function(parent, onChange)
     local grp = {}
     -- Blizzard's own coin art, the same the stock money frame uses -- so a
@@ -1925,16 +1869,98 @@ MakeMoneyGSC = function(parent, onChange)
     return grp
 end
 
--- A compact dropdown: a button showing the current choice, and a popup list.
+-- A read-only coin readout, LEFT-aligned: the figure grows rightward from
+-- its anchor, so its left edge stays on the panel margin with the Name field,
+-- BROWSE and the category plates.
 --
--- Hand-built from Frame + Button for the same reason MakeHSlider is hand-built
--- from Slider. UIDropDownMenuTemplate does exist on 1.12 -- aux uses it -- but
--- it is a fiddly template with its own initialise-timing and width rules, and
--- this file's standing policy is to build from primitives that always exist
--- rather than inherit a template whose behaviour we have not verified here.
+-- It used to be anchored by its COPPER coin and grow leftwards, so that a
+-- total gaining a digit could not shove the layout about. That mattered when
+-- it sat mid-bar; on the left margin there is nothing to its right until the
+-- Bid row, so growth is free and alignment is what you actually see.
 --
--- The popup is parented to the WINDOW, not to the row, so it draws above
--- everything and is not clipped by whatever panel the dropdown sits in.
+-- The catch with left-aligning: Blizzard hides denominations ABOVE the value
+-- (43 copper shows one coin, not three), and hiding the LEADING elements of a
+-- left-anchored chain leaves a gap where they would have been. So the anchor
+-- is stored and re-applied to the first VISIBLE denomination each time the
+-- value changes.
+local function MakeMoneyDisplay(parent)
+    local m = {}
+    local function part(coin, after)
+        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetJustifyH("LEFT")
+        fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        if after then
+            -- The gap belongs BETWEEN denominations, not between a number and
+            -- the coin it labels -- that is what makes it read as three
+            -- amounts rather than six separate things.
+            fs:SetPoint("LEFT", after, "RIGHT", 7, 0)
+        end
+        local tex = parent:CreateTexture(nil, "OVERLAY")
+        tex:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
+        local u = MONEY_COIN_U[coin]
+        tex:SetTexCoord(u, u + 0.25, 0, 1)
+        tex:SetWidth(15); tex:SetHeight(15)
+        tex:SetPoint("LEFT", fs, "RIGHT", 1, 0)
+        return { tex = tex, fs = fs }
+    end
+    m.gold   = part("gold",   nil)
+    m.silver = part("silver", m.gold.tex)
+    m.copper = part("copper", m.silver.tex)
+
+    -- Anchor STORES the point; SetMoney is what places things, because which
+    -- denomination sits on the margin depends on the value. Placing anything
+    -- here as well would be dead work -- SetMoney clears and re-anchors the
+    -- whole chain on the next call regardless.
+    -- Put the chain's head on the stored anchor. Called whenever which
+    -- denominations are visible changes.
+    m.Rehead = function(self, first)
+        if not self.anchor then return end
+        first.fs:ClearAllPoints()
+        first.fs:SetPoint(unpack(self.anchor))
+    end
+    m.Anchor = function(self, ...)
+        self.anchor = arg
+        self:Rehead(self.gold)
+    end
+    m.SetMoney = function(self, copper)
+        local g, sv, c = util.MoneyParts(copper or 0)
+        self.gold.fs:SetText(tostring(g))
+        self.silver.fs:SetText(tostring(sv))
+        self.copper.fs:SetText(tostring(c))
+        local showG = g > 0
+        local showS = showG or sv > 0
+        if showG then self.gold.tex:Show(); self.gold.fs:Show()
+        else self.gold.tex:Hide(); self.gold.fs:Hide() end
+        if showS then self.silver.tex:Show(); self.silver.fs:Show()
+        else self.silver.tex:Hide(); self.silver.fs:Hide() end
+        -- Re-anchor whichever denomination is now leftmost, or the hidden
+        -- ones leave a hole on the margin.
+        if showG then
+            self:Rehead(self.gold)
+        elseif showS then
+            self.silver.fs:ClearAllPoints()
+            self:Rehead(self.silver)
+        else
+            self.copper.fs:ClearAllPoints()
+            self:Rehead(self.copper)
+        end
+        -- ...and restore the chain for the ones still shown.
+        if showG then
+            self.silver.fs:ClearAllPoints()
+            self.silver.fs:SetPoint("LEFT", self.gold.tex, "RIGHT", 7, 0)
+        end
+        if showS then
+            self.copper.fs:ClearAllPoints()
+            self.copper.fs:SetPoint("LEFT", self.silver.tex, "RIGHT", 7, 0)
+        end
+    end
+    m.Show = function(self)
+        self.copper.tex:Show(); self.copper.fs:Show()
+        -- gold/silver visibility is SetMoney's call, not ours.
+    end
+    return m
+end
+
 local openDropdown
 -- `noAll` suppresses the implicit "All" row. Class / Subclass / Slot /
 -- Quality all want it -- "no filter" is a real choice there. Component does
@@ -2152,11 +2178,14 @@ local function SetMoneyBox(e, copper)
 end
 
 -- A small numeric entry box (stack size / number of stacks).
-local function MakeNumBox(parent, width, onChanged)
+local function MakeNumBox(parent, width, onChanged, height)
     local e = ui.FlattenEditBox(
         CreateFrame("EditBox", nil, parent, "InputBoxTemplate"))
     e:SetWidth(width)
-    e:SetHeight(18)
+    -- Callers that share a strip with a dropdown pass its height, so every
+    -- control on the row lines up top AND bottom rather than only at its
+    -- anchor point.
+    e:SetHeight(height or 18)
     e:SetAutoFocus(false)
     e:SetNumeric(true)
     e:SetJustifyH("CENTER")
@@ -2637,8 +2666,12 @@ function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
             local b = CreateFrame("Button", nil, panel)
             b:SetHeight(16)
             b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
-            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             fs:SetText(d.text)
+            -- Warm tan, as the mockup has them. GameFontDisableSmall's grey
+            -- made the whole header band read as disabled rather than as the
+            -- table's headings.
+            fs:SetTextColor(0.85, 0.72, 0.42)
             b.label = fs
             b.baseText = d.text
             if d.just == "RIGHT" then
@@ -2686,6 +2719,7 @@ end
 -- CSS pixel in a 2000px-wide render, and translating it straight across would
 -- give five visible rows.
 local BUY_ROWS,  BUY_ROW_H  = 11, 26
+local BUY_ROWS_MAX  = 34
 -- Table geometry, named because three things have to agree about it: the well
 -- that draws the box, the headers inside it, and the scroll frame the rows
 -- live in. When these were three loose numbers at three call sites the well
@@ -2703,8 +2737,9 @@ local BUY_ROWS,  BUY_ROW_H  = 11, 26
 -- the strip rather than beneath it. In the mockup the Name field, the BROWSE
 -- heading and the category plates all share one left edge.
 local BUYL = {
-    strip_lbl_y = 10,   -- field labels
-    strip_ctl_y = 26,   -- the controls themselves
+    strip_lbl_y = 8,    -- field labels: ONE baseline for all three
+    strip_ctl_y = 23,   -- ...and ONE top edge for every control
+    ctl_h       = 20,   -- ...at ONE height, dropdown included
     side_x      = 10,   -- shared left edge: strip, BROWSE, plates
     gut_w       = 8,    -- sidebar -> table gutter (the mockup's is tight)
 
@@ -2715,14 +2750,16 @@ local BUYL = {
     well_top    = 56,   -- table box starts just above the headings
     hdr_top     = 62,   -- headings sit INSIDE the box
     hdr_h       = 22,   -- headings band inside the well
-    rows_top    = 90,   -- ...so the first row starts here
+    rows_top    = 86,   -- ...so the first row starts here
 
-    -- The table is the SHORTER column: it stops well above the action bar and
-    -- the count/pager sit directly beneath it. The mockup ends it at ~64% of
-    -- panel height; a fixed offset cannot hold a percentage across a
-    -- resizable window, so this lands there at the sizes people use and keeps
-    -- growing rows as the window grows.
-    table_bot   = 150,
+    -- The table FILLS the height available to it, stopping only far enough
+    -- above the action bar for the count/pager row and the rule.
+    --
+    -- It used to stop at ~64% of the panel because the mockup's does. That
+    -- reads as dead space on a real window: the mockup is one screenshot with
+    -- five results, and ours has fifty. Rows are what the tab is for.
+    -- Budget below this line: 8 gap + 20 pager + 10 gap + rule at 38.
+    table_bot   = 82,
 
     -- Gutter right of the table. FauxScrollFrameTemplate hangs its scrollbar
     -- OUTWARD from the scroll frame's right edge; this keeps it off the last
@@ -2737,12 +2774,50 @@ local BUYL = {
 -- constraint is arithmetic and belongs somewhere it can be checked. Removing
 -- the Seller column changed every offset after it; this is what says whether
 -- the new numbers still fit rather than someone re-adding them by hand.
+-- How much room the results table has, and whether what sits beneath it
+-- still fits, at a window `h` tall.
+--
+-- The table now FILLS the height rather than stopping at a fixed fraction, so
+-- the thing that has to be checked is the other direction: that the strip
+-- above and the count/pager, rule and action bar below all still have their
+-- space. Returns the usable row area, and false if the budget is blown.
+function ui.TableAreaAt(h)
+    local panelH = h - 22                 -- window minus its border
+    local area = panelH - BUYL.rows_top - BUYL.table_bot
+    -- Below the table: 8px gap, the 20px pager row, 10px gap, then the rule
+    -- at 38 and the action bar under it.
+    local belowNeeded = 8 + 20 + 10 + 38
+    return area, (area > 0 and BUYL.table_bot >= belowNeeded)
+end
+
+-- How much room below the table is NOT spoken for -- the dead band between
+-- the table's bottom edge and the things that have to sit under it.
+--
+-- The point of the table filling the height is that this stays small. A
+-- generous table_bot satisfies TableAreaAt perfectly well while leaving a
+-- visible empty strip, which is the state this pass set out to remove, so it
+-- needs its own number rather than being implied by "the budget fits".
+function ui.TableSlack()
+    return BUYL.table_bot - (8 + 20 + 10 + 38)
+end
+
+-- How many WHOLE rows that area holds. Never a partial row: a row clipped by
+-- the box's bottom edge is worse than the gap it would have filled, and rows
+-- are not the scroll frame's scroll-child so nothing would clip it -- it
+-- would simply draw over the count line.
+function ui.TableRowsAt(h)
+    local area = ui.TableAreaAt(h)
+    local n = math.floor(area / BUY_ROW_H)
+    if n < 1 then n = 1 end
+    if n > BUY_ROWS_MAX then n = BUY_ROWS_MAX end
+    return n
+end
+
 function ui.ColumnsFitAt(w)
     local rowLeft = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
     local rowW = (w - 22) - rowLeft - BUYL.gutter_w
     return BUY_COLS_END <= rowW
 end
-local BUY_ROWS_MAX  = 34
 -- Two row heights: the mockup's plates are noticeably taller than its bare
 -- subcategory rows (38px vs 27px at its scale). One height for both is what
 -- made our tree look cramped and evenly-spaced where the mockup has rhythm.
@@ -2791,6 +2866,30 @@ function ui.BuildBuyTab()
     end)
     catScroll:Hide()
     ui.buyCatScroll = catScroll
+
+    -- HIDE THE SCROLLBAR. FauxScrollFrameTemplate hangs it OUTWARD from the
+    -- scroll frame's right edge, which here is 186 -- and the results box
+    -- starts at 194. The two occupied the same eight pixels, so the arrows
+    -- and thumb drew across the table's left border. Its down-arrow also
+    -- floated far below the list, because this frame runs to the panel bottom
+    -- while the categories usually end much higher.
+    --
+    -- Widening the gutter would fix the overlap but open the tight gap the
+    -- mockup deliberately has, and the mockup shows no scrollbar at all. The
+    -- WHEEL still scrolls: FauxScrollFrameTemplate's OnMouseWheel drives the
+    -- scroll bar's value, and a hidden frame still holds and reports a value.
+    ui.HideScrollBar = function(sf)
+        local nm = sf:GetName()
+        if not nm then return end
+        local bar = getglobal(nm .. "ScrollBar")
+        if bar then
+            bar:Hide()
+            -- FauxScrollFrame_Update re-Shows the bar whenever the content
+            -- overflows, so neutralise Show rather than relying on one Hide.
+            bar.Show = function() end
+        end
+    end
+    ui.HideScrollBar(catScroll)
 
     -- The mockup draws NO box around the category list -- just the BROWSE
     -- heading and the plates below it, directly on the panel. This frame is
@@ -2921,7 +3020,7 @@ function ui.BuildBuyTab()
     local box = ui.FlattenEditBox(
         CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
             "InputBoxTemplate"))
-    box:SetWidth(BUY_NAME_W); box:SetHeight(18)
+    box:SetWidth(BUY_NAME_W); box:SetHeight(BUYL.ctl_h)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT",
         BUYL.side_x, -BUYL.strip_ctl_y)
     box:SetAutoFocus(false)
@@ -2931,13 +3030,13 @@ function ui.BuildBuyTab()
     ui.buyBox = box
 
     -- Left cluster, chained left-to-right off Name at fixed widths.
-    ui.buyMinLevel = MakeNumBox(panel, BUY_LVL_W)
+    ui.buyMinLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
     ui.buyMinLevel:SetPoint("LEFT", box, "RIGHT", 14, 0)
     local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 7, 0)
     lvlDash:SetText("-")
     ui.buyLvlDash = lvlDash
-    ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W)
+    ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
     ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 7, 0)
 
     local lvlLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -2980,6 +3079,19 @@ function ui.BuildBuyTab()
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
     ui.buySearchBtn = searchBtn
+
+    -- The mockup rules off the control strip from the columns below it, in a
+    -- matching pair with the one above the action bar. We only had the lower
+    -- one, so the strip ran into the BROWSE heading and the table with
+    -- nothing between them.
+    local stripRule = panel:CreateTexture(nil, "ARTWORK")
+    stripRule:SetPoint("TOPLEFT", panel, "TOPLEFT", 10,
+        -(BUYL.strip_ctl_y + BUYL.ctl_h + 8))
+    stripRule:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12,
+        -(BUYL.strip_ctl_y + BUYL.ctl_h + 8))
+    stripRule:SetHeight(1)
+    stripRule:SetTexture(0.35, 0.30, 0.18, 0.6)
+    ui.buyStripRule = stripRule
 
     -- ---- ADVANCED-mode strip -------------------------------------------
     local backBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBackButton")
@@ -3067,7 +3179,9 @@ function ui.BuildBuyTab()
     ui.buyStatus:SetJustifyH("LEFT")
     -- Muted, as the mockup has it. Gold made the least important line on
     -- screen the loudest thing in the results column.
-    ui.buyStatus:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    -- Plain grey. This is the least important line in the column and was
+    -- one of the warmest things on the tab.
+    ui.buyStatus:SetTextColor(0.62, 0.60, 0.55)
     ui.buyStatus:SetText("Type an item name and Search.")
 
     -- Column layout (row-relative x, width). Sized so Buy+Bid finish well
@@ -3210,8 +3324,8 @@ ui.GrowBuyRows = function(n)
     -- panel width, so it reads as the window's own division rather than as
     -- part of the results column.
     local barRule = panel:CreateTexture(nil, "ARTWORK")
-    barRule:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 34)
-    barRule:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 34)
+    barRule:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 38)
+    barRule:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 38)
     barRule:SetHeight(1)
     barRule:SetTexture(0.35, 0.30, 0.18, 0.6)
     ui.buyBarRule = barRule
@@ -3220,7 +3334,11 @@ ui.GrowBuyRows = function(n)
     -- progress line while a batch runs.
     ui.buyCheckTotal = panel:CreateFontString(nil, "OVERLAY",
         "GameFontHighlightSmall")
-    ui.buyCheckTotal:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", RX + 6, 26)
+    -- Beside the gold, on the action bar's own baseline. It used to sit at
+    -- bottom+26 which is inside the button band (8..29), so it crowded Bid /
+    -- Buyout / Close and the rule above them at once.
+    ui.buyCheckTotal:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        BUYL.side_x + 190, 13)
     ui.buyCheckTotal:SetJustifyH("LEFT")
     ui.buyCheckTotal:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.buyCheckTotal:Hide()
@@ -3249,7 +3367,9 @@ ui.GrowBuyRows = function(n)
     -- text. Anchored by its COPPER coin, so the figure grows leftwards and a
     -- total that gains a digit does not shove the bar about.
     ui.buyMoney = MakeMoneyDisplay(panel)
-    ui.buyMoney:Anchor("BOTTOMLEFT", panel, "BOTTOMLEFT", 128, 13)
+    -- LEFT-aligned on the panel margin, sharing the spine that the Name
+    -- field, BROWSE and the category plates all sit on.
+    ui.buyMoney:Anchor("BOTTOMLEFT", panel, "BOTTOMLEFT", BUYL.side_x, 13)
 
     ui.BuildFilterBuilder(panel, rowLeft)
     ui.BuildSavedSearches(panel, rowLeft)

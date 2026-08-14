@@ -890,6 +890,9 @@ on a reference, check whether the two are built on the same skeleton before
 tuning anything else.**
 
 - **The columns are deliberately unequal lengths.** Table short, tree long.
+  **REVERSED in v1.17.0 — see 2s.** The table fills its height now. The
+  mockup's short table is one screenshot with five results; a real page has
+  fifty, and rows are what the tab is for.
   Ours had them the wrong way round — the table nearly reached the action bar
   while the tree stopped halfway down.
 - **`MIN_W`: the binding constraint MOVED.** It was the strip; it is now the
@@ -911,6 +914,38 @@ tuning anything else.**
 for headings and buttons; 1.12 offers only the game's font objects and cannot
 load a face. Weight and colour are matched; the typeface is not, and that is
 final unless someone ships a font with the addon.
+
+### 2s — Alignment, clipping and colour — ✅ **DONE** (v1.17.0)
+
+- **The BROWSE scrollbar overlapped the results box**, because
+  `FauxScrollFrameTemplate` hangs it OUTWARD from the scroll frame's right
+  edge — into the gutter the table starts in. Hidden, as the mockup has it.
+  **Hiding it once is not enough**: `FauxScrollFrame_Update` re-shows the bar
+  whenever content overflows, so `Show` is neutralised as well. The wheel
+  still scrolls, because the template's OnMouseWheel drives the bar's VALUE
+  and a hidden frame still holds one.
+- **The table fills its height, whole rows only.** This REVERSES 2r's "table
+  is the shorter column". Rows are not the scroll frame's scroll-child, so
+  nothing clips a partial row — it would draw over the count line — which is
+  why the count floors and is asserted to.
+- **`ui.TableSlack()` exists because `ui.TableAreaAt` was not enough.** The
+  area check passes just as happily for a table that stops halfway up; only a
+  direct measure of the dead band below it can tell the two apart. Worth
+  remembering when writing a geometry assertion: check the thing you changed,
+  not a thing that merely correlates with it.
+- **The gold readout is left-aligned and grows rightward**, reversing the
+  1.13.0 choice to anchor it by its copper coin. That existed so a growing
+  total could not shove the layout; on the left margin nothing is to its
+  right. Blizzard hides denominations above the value, so the margin anchor
+  moves to whichever denomination is leftmost — otherwise 43 copper leaves a
+  hole.
+- **`% Mkt` at 100% on every row is NOT a bug.** Market value is a weighted
+  median of daily minimums; an item first seen in the current scan has a
+  market value equal to that page's cheapest listing, so the ratio is the
+  number against itself. Verified rather than "fixed". It resolves itself as
+  the DB gains history.
+- **"Miscellaneous" first under Armor is the client's own subclass order**,
+  and the stock AH does the same. Left alone: this view is the Blizzlike one.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 
