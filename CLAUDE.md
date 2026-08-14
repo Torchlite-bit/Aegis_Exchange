@@ -110,6 +110,29 @@ or silent breakage on the 1.12 / Lua 5.0 client.
       tick** (see `AegisExchangeHider` in `ui/frame.lua`). Hiding from our own
       AUCTION_HOUSE_SHOW handler is safe — it runs after this guard.
 
+### The 32-upvalue ceiling
+
+12a. **A function may read at most 32 file-scope locals. Lua 5.0 refuses to
+    LOAD a file that breaks this** — `too many upvalues (limit=32)` — so the
+    whole addon dies, not just that feature.
+
+    Every file-scope `local` a function references costs one upvalue. A big
+    builder function plus a handful of new layout constants is all it takes:
+    `ui.BuildBuyTab` hit 36 and v1.16.0 shipped an addon that would not load.
+
+    **Nothing local catches this.** `luac5.1 -p` compiles the file happily
+    and any Lua 5.1 test harness runs it happily, because 5.1's limit is 60.
+    The only signal is `luac -l`, which prints an upvalue count per function:
+
+    ```
+    luac5.1 -l -p ui/frame.lua | grep upvalues
+    ```
+
+    **The fix is a table.** Thirteen constants as thirteen locals cost
+    thirteen upvalues; the same thirteen as fields of one table cost one. See
+    `BUYL` in `ui/frame.lua`. Group new layout constants into it rather than
+    adding another file-scope local next to a function that is already large.
+
 ### SavedVariables
 
 13. **SavedVariables are `nil` until `ADDON_LOADED` fires for
@@ -333,6 +356,9 @@ are done in practice — **imitate the approach, do not copy code blindly**:
       `GetItemInfo`/`GameTooltip:Set*` per item, or a list repaint inline —
       it is O(1), state-gated, or behind a dirty flag flushed once per frame.
 - [ ] No `hooksecurefunc` / secure hooks — saved original + replaced.
+- [ ] No function exceeds **32 upvalues** (`luac5.1 -l -p f.lua | grep
+      upvalues`). `luac -p` and a 5.1 harness will NOT catch this; the client
+      refuses to load the file.
 - [ ] AH reads match the 12-value `GetAuctionItemInfo` and 9-arg
       `QueryAuctionItems` signatures; queries gated on `CanSendAuctionQuery()`.
 - [ ] DB touched only after `ADDON_LOADED` for `"Aegis_Exchange"`.

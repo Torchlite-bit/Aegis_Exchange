@@ -2690,37 +2690,45 @@ local BUY_ROWS,  BUY_ROW_H  = 11, 26
 -- that draws the box, the headers inside it, and the scroll frame the rows
 -- live in. When these were three loose numbers at three call sites the well
 -- ended up enclosing the rows but not the headings.
--- THE CONTROL STRIP SPANS THE FULL WIDTH AND BOTH COLUMNS SIT UNDER IT.
+-- Buy tab layout, in ONE table rather than a dozen file-scope locals.
 --
--- It used to start to the RIGHT of the sidebar, so the sidebar sat beside the
--- strip rather than beneath it. That is the mockup's single biggest structural
--- difference from what we shipped, and most of the "it doesn't look like the
--- concept" feeling came from it: in the mockup the Name field, the BROWSE
+-- Not tidiness: Lua 5.0 allows a function only 32 UPVALUES, and every
+-- file-scope local that ui.BuildBuyTab reads costs one. Thirteen separate
+-- constants took it to 36 and the client refused to load the file at all --
+-- "too many upvalues (limit=32)". A table is a single upvalue however many
+-- fields it carries. Keep new layout numbers in here.
+--
+-- THE CONTROL STRIP SPANS THE FULL WIDTH AND BOTH COLUMNS SIT UNDER IT.
+-- It used to start to the RIGHT of the sidebar, so the sidebar sat beside
+-- the strip rather than beneath it. In the mockup the Name field, the BROWSE
 -- heading and the category plates all share one left edge.
-local BUY_STRIP_LBL_Y = 10   -- field labels
-local BUY_STRIP_CTL_Y = 26   -- the controls themselves
-local BUY_SIDE_X      = 10   -- shared left edge: strip, BROWSE, plates
-local BUY_GUT_W       = 8    -- sidebar -> table gutter (the mockup's is tight)
+local BUYL = {
+    strip_lbl_y = 10,   -- field labels
+    strip_ctl_y = 26,   -- the controls themselves
+    side_x      = 10,   -- shared left edge: strip, BROWSE, plates
+    gut_w       = 8,    -- sidebar -> table gutter (the mockup's is tight)
 
-local BUY_BROWSE_Y = 62     -- BROWSE heading, below the strip
-local BUY_SIDE_TOP = 82     -- ...and the first category row under it
-local BUY_SIDE_BOT = 40     -- the tree runs nearly to the action bar
+    browse_y    = 62,   -- BROWSE heading, below the strip
+    side_top    = 82,   -- ...and the first category row under it
+    side_bot    = 40,   -- the tree runs nearly to the action bar
 
-local BUY_WELL_TOP = 56     -- table box starts just above the headings
-local BUY_HDR_TOP  = 62     -- headings sit INSIDE the box
-local BUY_HDR_H    = 22     -- headings band inside the well
-local BUY_ROWS_TOP = 90     -- ...so the first row starts here
--- The table is the SHORTER column: it stops well above the action bar and the
--- count/pager sit directly beneath it, with empty panel below. The mockup
--- ends it at ~64% of panel height; a fixed offset cannot hold a percentage
--- across a resizable window, so this is tuned to land there at the sizes
--- people actually use and to keep growing rows as the window grows, which is
--- the better trade for a window you can drag.
-local BUY_TABLE_BOT = 150
--- Gutter on the right of the table. FauxScrollFrameTemplate hangs its
--- scrollbar OUTWARD from the scroll frame's right edge, so this is what keeps
--- it off the last column instead of drawn across the percentages.
-local BUY_GUTTER_W = 26
+    well_top    = 56,   -- table box starts just above the headings
+    hdr_top     = 62,   -- headings sit INSIDE the box
+    hdr_h       = 22,   -- headings band inside the well
+    rows_top    = 90,   -- ...so the first row starts here
+
+    -- The table is the SHORTER column: it stops well above the action bar and
+    -- the count/pager sit directly beneath it. The mockup ends it at ~64% of
+    -- panel height; a fixed offset cannot hold a percentage across a
+    -- resizable window, so this lands there at the sizes people use and keeps
+    -- growing rows as the window grows.
+    table_bot   = 150,
+
+    -- Gutter right of the table. FauxScrollFrameTemplate hangs its scrollbar
+    -- OUTWARD from the scroll frame's right edge; this keeps it off the last
+    -- column instead of drawn across the percentages.
+    gutter_w    = 26,
+}
 
 -- Do the result columns fit the row width at a window `w` wide?
 --
@@ -2730,8 +2738,8 @@ local BUY_GUTTER_W = 26
 -- the Seller column changed every offset after it; this is what says whether
 -- the new numbers still fit rather than someone re-adding them by hand.
 function ui.ColumnsFitAt(w)
-    local rowLeft = BUY_SIDE_X + 176 + BUY_GUT_W + 6   -- SIDE_W is 176
-    local rowW = (w - 22) - rowLeft - BUY_GUTTER_W
+    local rowLeft = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
+    local rowW = (w - 22) - rowLeft - BUYL.gutter_w
     return BUY_COLS_END <= rowW
 end
 local BUY_ROWS_MAX  = 34
@@ -2760,7 +2768,7 @@ function ui.BuildBuyTab()
     -- being clipped by a column that had no business being there.
     local browseHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     browseHdr:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        BUY_SIDE_X, -BUY_BROWSE_Y)
+        BUYL.side_x, -BUYL.browse_y)
     -- Letter-spaced caps, as the mockup has it. 1.12 has no letter-spacing
     -- property, so the spaces are in the string.
     browseHdr:SetText("B R O W S E")
@@ -2771,12 +2779,12 @@ function ui.BuildBuyTab()
     local catScroll = CreateFrame("ScrollFrame", "AegisExchangeBuyCatScroll",
         panel, "FauxScrollFrameTemplate")
     catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        BUY_SIDE_X, -BUY_SIDE_TOP)
+        BUYL.side_x, -BUYL.side_top)
     -- The tree is the LONGER column in the mockup: it runs down past the
     -- table's bottom edge to just above the action bar. It used to stop
     -- halfway, leaving the lower half of the sidebar empty.
     catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        BUY_SIDE_X, BUY_SIDE_BOT)
+        BUYL.side_x, BUYL.side_bot)
     catScroll:SetWidth(SIDE_W)
     catScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateCatTree)
@@ -2882,7 +2890,7 @@ function ui.BuildBuyTab()
     -- column and the match-count line beneath it.
     -- Results column origin. The sidebar plus one tight gutter -- the
     -- mockup's gap here is about a quarter of what we had.
-    local RX = BUY_SIDE_X + SIDE_W + BUY_GUT_W
+    local RX = BUYL.side_x + SIDE_W + BUYL.gut_w
 
     -- ---- DEFAULT-mode control strip (Blizzlike) ------------------------
     -- Field order is the stock auction house's: Name, Level Range, Min
@@ -2890,7 +2898,7 @@ function ui.BuildBuyTab()
     -- alongside whatever the category tree has selected -- see ui.DefaultTerm.
     local nameLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     nameLbl:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        BUY_SIDE_X, -BUY_STRIP_LBL_Y)
+        BUYL.side_x, -BUYL.strip_lbl_y)
     nameLbl:SetText("Name")
     ui.buyNameLbl = nameLbl
 
@@ -2915,7 +2923,7 @@ function ui.BuildBuyTab()
             "InputBoxTemplate"))
     box:SetWidth(BUY_NAME_W); box:SetHeight(18)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        BUY_SIDE_X, -BUY_STRIP_CTL_Y)
+        BUYL.side_x, -BUYL.strip_ctl_y)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
@@ -3030,7 +3038,7 @@ function ui.BuildBuyTab()
     -- Anchored properly below, once the table's box exists. The count and
     -- pager follow the TABLE's bottom edge in the mockup, sitting directly
     -- under the box rather than pinned to the panel with a gap between.
-    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -BUY_GUTTER_W, -200)
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -BUYL.gutter_w, -200)
     nextBtn:SetText("\226\150\182")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
@@ -3071,7 +3079,7 @@ function ui.BuildBuyTab()
     -- EVERY column sorts. Headers are bare clickable text (aegisNoSkin),
     -- never skinned into boxes -- pfUI's SkinButton would give each one a
     -- backdrop and they'd visibly overlap.
-    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -BUY_HDR_TOP,
+    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -BUYL.hdr_top,
         RCX_BUY, RCW_BUY,
         function(key) ui.SetBuySort(key) end,
         {
@@ -3086,10 +3094,10 @@ function ui.BuildBuyTab()
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -BUY_ROWS_TOP)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -BUYL.rows_top)
     -- Headroom for the status/pager row AND the action bar beneath it.
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -BUY_GUTTER_W, BUY_TABLE_BOT)
+        -BUYL.gutter_w, BUYL.table_bot)
 
     -- ONE box around the headers AND the rows, which is what the mockup
     -- shows. The well used to wrap the scroll frame alone, so the column
@@ -3102,7 +3110,7 @@ function ui.BuildBuyTab()
     -- which FauxScrollFrameTemplate anchors outward from that edge -- ends up
     -- outside the box rather than drawn across the last column.
     local well = CreateFrame("Frame", nil, panel)
-    well:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft - 6, -BUY_WELL_TOP)
+    well:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft - 6, -BUYL.well_top)
     -- Right edge flush with the scroll frame's, NOT past it: the scrollbar
     -- hangs outward from exactly that line, so any positive offset here puts
     -- the box under the scrollbar again.
@@ -3130,8 +3138,8 @@ function ui.BuildBuyTab()
 
     -- The rule goes UNDER the headings, not at the top of the box.
     local hdrRule = panel:CreateTexture(nil, "ARTWORK")
-    hdrRule:SetPoint("TOPLEFT", well, "TOPLEFT", 6, -(BUY_HDR_H))
-    hdrRule:SetPoint("TOPRIGHT", well, "TOPRIGHT", -6, -(BUY_HDR_H))
+    hdrRule:SetPoint("TOPLEFT", well, "TOPLEFT", 6, -(BUYL.hdr_h))
+    hdrRule:SetPoint("TOPRIGHT", well, "TOPRIGHT", -6, -(BUYL.hdr_h))
     hdrRule:SetHeight(1)
     hdrRule:SetTexture(0.45, 0.38, 0.22, 0.85)
     ui.buyHdrRule = hdrRule
@@ -3146,7 +3154,7 @@ function ui.BuildBuyTab()
         tk:SetPoint("TOPLEFT", well, "TOPLEFT",
             6 + RCX_BUY[tickKeys[ti]] - 8, -6)
         tk:SetPoint("BOTTOMLEFT", well, "TOPLEFT",
-            6 + RCX_BUY[tickKeys[ti]] - 8, -(BUY_HDR_H))
+            6 + RCX_BUY[tickKeys[ti]] - 8, -(BUYL.hdr_h))
         tk:SetTexture(0.35, 0.30, 0.18, 0.7)
         ui.buyHdrTicks[ti] = tk
         ti = ti + 1

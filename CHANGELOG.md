@@ -12,6 +12,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.16.1]
+
+**Hotfix — 1.16.0 would not load.** `/reload`.
+
+### Fixed
+- **`too many upvalues (limit=32)` — the addon did not load at all.** Lua 5.0
+  allows a function to reference at most 32 file-scope locals, and each one it
+  reads costs an "upvalue". 1.16.0 added thirteen layout constants beside a
+  builder function that was already large, taking it to 36. The client refuses
+  to load a file containing such a function, so nothing in the addon ran.
+
+  The constants are now fields of one table, which costs a single upvalue
+  however many fields it carries. The function sits at 24 with room to spare.
+
+  **Why this was not caught before shipping.** Lua 5.1 — which both `luac5.1`
+  and the test harness use — allows 60 upvalues. The file compiled cleanly and
+  the whole suite passed against a file the 1.12 client would reject on sight.
+  `luac -l` reports the count per function, so the suite now asks it for every
+  file and fails if anything is above 32, with a second check at 30 so the
+  ceiling is noticed while there is still room to react. Recorded in
+  CLAUDE.md as a hard rule and added to the pre-commit checklist.
+
+---
+
 ## [1.16.0]
 
 Buy tab default view rebuilt to the mockup's structure. `/reload`.
@@ -1318,6 +1342,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.16.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.16.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.15.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.15.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
