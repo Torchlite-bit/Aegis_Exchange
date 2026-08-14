@@ -1001,6 +1001,40 @@ final unless someone ships a font with the addon.
   rather than copying it, so they cannot pass against a stale duplicate.
   Nothing in `tests/` is in the `.toc`; the 1.12 client never sees it.
 
+### 2u — Test harness, rebuilt in the repo — ✅ **DONE** (no version change)
+
+Not a release: nothing in `Aegis_Exchange.toc` changed, so there is no version
+bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
+
+- **The lint layer catches what no test can**, because Lua 5.1 (what we test
+  with) is more permissive than Lua 5.0 (what we ship to). `lua50.py` flags
+  `string.match` / `#` / `%` / `select()` / `hooksecurefunc` / modern event
+  handlers, all of which `luac5.1 -p` compiles happily and the unit suites run
+  happily. `upvalues.py` is the 32-ceiling — **5.1's limit is 60**, which is
+  why v1.16.0 passed everything and would not load. `definitions.py` is the
+  scripted-edit-ate-a-function guard, which has earned its place three times.
+- **`lua50.py` has a self-test, and half of it is false POSITIVES.** `%`
+  appears in every `string.format`, `#` throughout the comments. A checker that
+  flags those gets ignored within a day, which is the same outcome as not
+  having one.
+- **`sabotage.py` is the answer to "is this suite actually testing anything".**
+  It plants a real bug in a throwaway copy and requires the named suite to
+  fail. It found two blind spots on the day it was written: the simulated
+  client only ever returned the **vanilla** 9-value `GetItemInfo`, so a
+  hardcoded index passed every `util.ItemInfo` assertion (fixed by making the
+  stub able to return both client shapes and running the same checks against
+  each); and deleting the batch's up-front gold check was invisible, because
+  the per-purchase check also refuses — the case that separates them is
+  affording SOME of the selection, where the missing check means a partial
+  spend.
+- **What the harness deliberately cannot do is anything visual.** Frames in
+  `tests/support/wow.lua` answer every method and draw nothing, and that is on
+  purpose: faking geometry would make layout look testable when it is not. A
+  green run says nothing about whether the window is right.
+- **The simulated client's `getglobal` reads `_G`**, not a side table. Backing
+  it with a private registry made lookups of client constants come back nil —
+  a difference from the real client that a test would have "proved" was fine.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

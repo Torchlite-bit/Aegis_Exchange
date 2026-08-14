@@ -1,0 +1,350 @@
+-- Aegis: Exchange -- tests/support/wow.lua
+--
+-- A simulated WoW 1.12 client, just large enough to LOAD the core modules and
+-- drive them. Desktop Lua 5.1 only; never loaded by the client.
+--
+-- Scope, deliberately: this stands in for the CLIENT, not for FrameXML's look.
+-- Frames answer every method the core modules call and record what they were
+-- told, but they have no geometry and draw nothing. Anything whose correctness
+-- is "does it look right" -- layout, colour, both skins -- is NOT testable here
+-- and must not be faked into looking testable. That is a real client's job.
+--
+-- The 1.12 API shapes are pinned here on purpose, because getting them wrong is
+-- how this addon has actually broken:
+--   * GetAuctionItemInfo returns EXACTLY 12 values, and `owner` may be nil.
+--   * QueryAuctionItems takes 9 args and `page` is 0-indexed.
+--   * CanSendAuctionQuery gates every query.
+--   * GetItemInfo returns the 9-value VANILLA list (no itemLevel at slot 4).
+-- If a test passes against a wrong shape here, it proves nothing, so these are
+-- asserted rather than merely provided -- see W.strictArgs below.
+
+local W = {}
+
+-- ---------------------------------------------------------------------------
+-- Globals table
+-- ---------------------------------------------------------------------------
+
+-- On 1.12 getglobal(name) IS the global environment -- not a private registry.
+-- Anything the client defines as a plain global (AUCTION_TIME_LEFT1,
+-- ITEM_QUALITY_COLORS, a named frame) is reachable through it, and the addon
+-- relies on that for dynamic names like "AuctionFrameTab" .. n. Backing this
+-- with a side table instead made named lookups of client constants come back
+-- nil, which is a difference from the real client, so it reads _G.
+function getglobal(name) return _G[name] end
+function setglobal(name, v) _G[name] = v end
+
+-- ---------------------------------------------------------------------------
+-- Frames
+-- ---------------------------------------------------------------------------
+
+local function noop() end
+
+-- A frame that answers everything. Unknown methods resolve to a no-op via the
+-- metatable rather than erroring, because the point of this file is to let the
+-- modules LOAD -- a missing setter should not look like a logic failure. The
+-- methods that carry meaning (scripts, events, show/hide) are real.
+local frameMT = {}
+frameMT.__index = function(t, k)
+    local fn = function() end
+    rawset(t, k, fn)
+    return fn
+end
+
+function CreateFrame(kind, name, parent, template)
+    local f = {
+        frameType = kind,
+        frameName = name,
+        parent    = parent,
+        template  = template,
+        scripts   = {},
+        events    = {},
+        shown     = true,
+        children  = {},
+    }
+    f.GetName        = function(self) return self.frameName end
+    f.GetObjectType  = function(self) return self.frameType end
+    f.GetParent      = function(self) return self.parent end
+    f.SetScript      = function(self, s, fn) self.scripts[s] = fn end
+    f.GetScript      = function(self, s) return self.scripts[s] end
+    f.HasScript      = function(self) return true end
+    f.RegisterEvent  = function(self, e) self.events[e] = true end
+    f.UnregisterEvent= function(self, e) self.events[e] = nil end
+    f.IsEventRegistered = function(self, e) return self.events[e] end
+    f.Show           = function(self) self.shown = true end
+    f.Hide           = function(self) self.shown = false end
+    f.IsShown        = function(self) return self.shown end
+    f.IsVisible      = function(self) return self.shown end
+    f.GetChildren    = function(self) return unpack(self.children) end
+    f.GetRegions     = function(self) return end
+    f.GetFrameLevel  = function(self) return 1 end
+    f.GetWidth       = function(self) return self.width or 0 end
+    f.GetHeight      = function(self) return self.height or 0 end
+    f.SetWidth       = function(self, v) self.width = v end
+    f.SetHeight      = function(self, v) self.height = v end
+    f.Enable         = function(self) self.disabled = nil end
+    f.Disable        = function(self) self.disabled = true end
+    f.IsEnabled      = function(self) if self.disabled then return nil end return 1 end
+    f.SetChecked     = function(self, v) self.checked = v and true or false end
+    f.GetChecked     = function(self) if self.checked then return 1 end return nil end
+    f.SetText        = function(self, t) self.text = t end
+    f.GetText        = function(self) return self.text end
+
+    -- Scanning tooltips. Lines are supplied per item by W.SetTooltipLines.
+    f.SetOwner       = noop
+    f.ClearLines     = function(self) self.lines = {} end
+    f.SetHyperlink   = function(self, link)
+        self.lines = W.tooltipLines[link] or {}
+    end
+    f.NumLines       = function(self) return table.getn(self.lines or {}) end
+
+    setmetatable(f, frameMT)
+    if name then _G[name] = f end
+    if parent and parent.children then table.insert(parent.children, f) end
+    return f
+end
+
+-- Fire an event the way the 1.12 client does: set the GLOBALS, then call the
+-- frame's OnEvent with no arguments. Any handler written as
+-- function(self, event, ...) will read nil here, which is the point.
+function W.FireEvent(frame, evt, a1, a2, a3, a4)
+    event, arg1, arg2, arg3, arg4 = evt, a1, a2, a3, a4
+    this = frame
+    local fn = frame.scripts and frame.scripts.OnEvent
+    if fn then fn() end
+end
+
+-- Run a frame's OnUpdate once, the 1.12 way: `this` is the frame and the
+-- elapsed seconds arrive as the GLOBAL arg1, not as a parameter.
+--
+-- The client runs OnUpdate every frame, and the addon leans on that -- the
+-- auction query throttle, the batch pacing and the deferred repaint all live
+-- in one. Nothing happens in those paths without this, which is why a test
+-- that calls buy.Search and then looks for a query sees nothing: Search only
+-- arms the driver.
+function W.Tick(frame, elapsed)
+    if not frame then return end
+    local fn = frame.scripts and frame.scripts.OnUpdate
+    if not fn then return end
+    this, arg1 = frame, elapsed or 0.1
+    fn()
+end
+
+-- Tick until `pred` is true or `limit` ticks pass. Returns whether it settled,
+-- so a test can assert on that rather than hanging.
+function W.TickUntil(frame, pred, limit, elapsed)
+    limit = limit or 100
+    for i = 1, limit do
+        if pred() then return true, i end
+        W.Tick(frame, elapsed)
+    end
+    return pred(), limit
+end
+
+-- ---------------------------------------------------------------------------
+-- Chat / misc client globals
+-- ---------------------------------------------------------------------------
+
+W.messages = {}
+DEFAULT_CHAT_FRAME = {
+    AddMessage = function(self, msg) table.insert(W.messages, msg) end,
+}
+UIParent = CreateFrame("Frame", "UIParent")
+
+W.now = 1700000000
+function time() return W.now end
+
+W.realm   = "TestRealm"
+W.player  = "Tester"
+function GetRealmName() return W.realm end
+function UnitName(unit) if unit == "player" then return W.player end return nil end
+function UnitFactionGroup() return "Alliance" end
+
+W.money = 500000                      -- 50g
+function GetMoney() return W.money end
+
+ITEM_QUALITY_COLORS = {
+    [0] = { r = 0.62, g = 0.62, b = 0.62 },
+    [1] = { r = 1.00, g = 1.00, b = 1.00 },
+    [2] = { r = 0.12, g = 1.00, b = 0.00 },
+    [3] = { r = 0.00, g = 0.44, b = 0.87 },
+    [4] = { r = 0.64, g = 0.21, b = 0.93 },
+    [5] = { r = 1.00, g = 0.50, b = 0.00 },
+}
+
+AUCTION_TIME_LEFT1 = "Short"
+AUCTION_TIME_LEFT2 = "Medium"
+AUCTION_TIME_LEFT3 = "Long"
+AUCTION_TIME_LEFT4 = "Very Long"
+
+-- ---------------------------------------------------------------------------
+-- Items
+-- ---------------------------------------------------------------------------
+
+-- itemId -> record. GetItemInfo answers only for items placed here, which is
+-- the behaviour that matters: on 1.12 it returns nil for anything not in the
+-- client's cache, and code that assumes otherwise breaks on a fresh login.
+W.items = {}
+W.tooltipLines = {}
+
+function W.AddItem(id, rec)
+    rec.id = id
+    rec.link = rec.link
+        or ("|cffffffff|Hitem:" .. id .. ":0:0:0|h[" .. rec.name .. "]|h|r")
+    W.items[id] = rec
+    W.items[rec.name] = rec
+    W.items[rec.link] = rec
+    return rec
+end
+
+-- GetItemInfo's return LIST is not the same on every client:
+--
+--   vanilla 1.12   name link quality minLevel type subType
+--                  stackCount equipLoc texture                    (9 values)
+--   later clients  name link quality iLevel minLevel type subType
+--                  stackCount equipLoc texture                   (10 values)
+--
+-- itemLevel is inserted at position 4, so EVERY field after position 3 sits one
+-- slot further along on a later client. util.ItemInfo therefore anchors on
+-- "stackCount is the LAST NUMBER" instead of indexing a fixed position.
+--
+-- BOTH shapes are offered here, because a test that only ever sees one cannot
+-- tell the anchor apart from a hardcoded index -- and a hardcoded index is
+-- exactly the bug that shipped and cost four rounds of "why does /stack do
+-- nothing". Flip with W.itemInfoShape.
+W.itemInfoShape = "vanilla"          -- or "later"
+
+function GetItemInfo(key)
+    local r = W.items[key]
+    if not r then return nil end
+    if W.itemInfoShape == "later" then
+        return r.name, r.link, r.quality or 1, r.itemLevel or 55,
+               r.minLevel or 0, r.type or "Trade Goods",
+               r.subType or "Cloth", r.stackCount or 20,
+               r.equipLoc or "", r.texture or "icon"
+    end
+    return r.name, r.link, r.quality or 1, r.minLevel or 0,
+           r.type or "Trade Goods", r.subType or "Cloth",
+           r.stackCount or 20, r.equipLoc or "", r.texture or "icon"
+end
+
+-- ---------------------------------------------------------------------------
+-- Auction house
+-- ---------------------------------------------------------------------------
+
+W.page          = {}        -- array of listing records for the current page
+W.totalAuctions = 0
+W.queries       = {}        -- every QueryAuctionItems call, for assertions
+W.queryOpen     = true      -- what CanSendAuctionQuery reports
+W.bids          = {}        -- every PlaceAuctionBid call
+W.strictArgs    = true      -- assert the 1.12 signatures
+
+function W.SetPage(rows, totalAuctions)
+    W.page = rows or {}
+    W.totalAuctions = totalAuctions or table.getn(W.page)
+end
+
+function GetNumAuctionItems(list)
+    if list ~= "list" then return 0, 0 end
+    return table.getn(W.page), W.totalAuctions
+end
+
+-- EXACTLY the 1.12 twelve, in order. `owner` is nil until the name resolves,
+-- and rows may say so by setting ownerUnresolved.
+function GetAuctionItemInfo(list, i)
+    if list ~= "list" then return nil end
+    local r = W.page[i]
+    if not r then return nil end
+    local owner = r.owner
+    if r.ownerUnresolved then owner = nil end
+    return r.name, r.texture or "icon", r.count or 1, r.quality or 1,
+           r.canUse, r.level or 1, r.minBid or 0, r.minIncrement or 0,
+           r.buyout or 0, r.bidAmount or 0, r.highBidder, owner
+end
+
+function GetAuctionItemLink(list, i)
+    local r = (list == "list") and W.page[i]
+    return r and r.link or nil
+end
+
+-- 1-4 on 1.12, indexing AUCTION_TIME_LEFT1..4. Never a string.
+function GetAuctionItemTimeLeft(list, i)
+    local r = (list == "list") and W.page[i]
+    return r and (r.timeLeft or 4) or nil
+end
+
+function CanSendAuctionQuery() return W.queryOpen end
+
+function QueryAuctionItems(name, minLevel, maxLevel, invType,
+                           class, subclass, page, isUsable, quality)
+    if W.strictArgs then
+        -- The stock browse UI sends GetText() results, so these are ALWAYS
+        -- strings; servers may silently ignore a query with nils in these
+        -- slots, which presents as a scan that spins forever.
+        assert(type(name) == "string",
+               "QueryAuctionItems: name must be a string, got "
+               .. type(name))
+        assert(type(minLevel) == "string",
+               "QueryAuctionItems: minLevel must be a string, got "
+               .. type(minLevel))
+        assert(type(maxLevel) == "string",
+               "QueryAuctionItems: maxLevel must be a string, got "
+               .. type(maxLevel))
+        assert(page == nil or (type(page) == "number" and page >= 0),
+               "QueryAuctionItems: page is 0-indexed, got " .. tostring(page))
+    end
+    table.insert(W.queries, {
+        name = name, minLevel = minLevel, maxLevel = maxLevel,
+        invType = invType, class = class, subclass = subclass,
+        page = page, isUsable = isUsable, quality = quality,
+    })
+    W.queryOpen = false          -- the client shuts the gate after a query
+end
+
+function PlaceAuctionBid(list, index, amount)
+    table.insert(W.bids, { list = list, index = index, amount = amount })
+end
+
+function GetAuctionItemClasses() return "Weapon", "Armor", "Trade Goods" end
+function GetAuctionItemSubClasses() return "Cloth", "Leather" end
+
+-- ---------------------------------------------------------------------------
+-- Reset
+-- ---------------------------------------------------------------------------
+
+-- Between suites. Anything a test mutated goes back to a known state, so an
+-- ordering change cannot turn a passing suite into a failing one.
+function W.Reset()
+    W.messages      = {}
+    W.page          = {}
+    W.totalAuctions = 0
+    W.queries       = {}
+    W.queryOpen     = true
+    W.bids          = {}
+    W.items         = {}
+    W.tooltipLines  = {}
+    W.money         = 500000
+    W.now           = 1700000000
+    AegisExchangeDB     = nil
+    AegisExchangeCharDB = nil
+end
+
+-- Load the addon's core modules in .toc order under this simulated client.
+-- `upTo` stops early, e.g. W.LoadCore("util") for the pure-Lua layer only.
+function W.LoadCore(upTo)
+    local order = { "init", "util", "db", "scan", "sell", "buy" }
+    for i = 1, table.getn(order) do
+        dofile("core/" .. order[i] .. ".lua")
+        if order[i] == upTo then break end
+    end
+    return AegisExchange
+end
+
+-- Drive ADDON_LOADED for our addon, which is the ONLY point at which
+-- SavedVariables exist and A.OnLoad callbacks may run.
+function W.FireAddonLoaded(A)
+    AegisExchangeDB     = AegisExchangeDB or {}
+    AegisExchangeCharDB = AegisExchangeCharDB or {}
+    W.FireEvent(A.frame, "ADDON_LOADED", A.name)
+end
+
+return W

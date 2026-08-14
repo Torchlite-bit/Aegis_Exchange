@@ -346,6 +346,17 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
 ## Quick self-check before committing Lua
 
+**Most of this list is now automated — run `./tests/run.sh`.** It checks the
+language rules, syntax, the upvalue ceiling and the top-level definitions, then
+runs the unit suites. `./tests/run.sh --sabotage` additionally plants real bugs
+in a throwaway copy and requires the suites to catch them. See
+[`tests/README.md`](tests/README.md), including what it deliberately does
+**not** cover: anything visual — layout, colour, clipping, either skin — is not
+testable there and still needs a real client and a person looking at it.
+
+Adding a test file changes nothing about the addon: nothing in `tests/` is in
+the `.toc`, so it is never a **restart** release and never a version bump.
+
 - [ ] No `string.match` / `string.gmatch` / `:match()` — used `string.find` /
       `string.gfind`.
 - [ ] No `#` — used `table.getn`. No `table.setn`.
@@ -356,9 +367,13 @@ are done in practice — **imitate the approach, do not copy code blindly**:
       `GetItemInfo`/`GameTooltip:Set*` per item, or a list repaint inline —
       it is O(1), state-gated, or behind a dirty flag flushed once per frame.
 - [ ] No `hooksecurefunc` / secure hooks — saved original + replaced.
-- [ ] No function exceeds **32 upvalues** (`luac5.1 -l -p f.lua | grep
-      upvalues`). `luac -p` and a 5.1 harness will NOT catch this; the client
-      refuses to load the file.
+- [ ] No function exceeds **32 upvalues** (`python3 tests/lint/upvalues.py`, or
+      by hand `luac5.1 -l -p f.lua | grep upvalues`). `luac -p` and a 5.1
+      harness will NOT catch this; the client refuses to load the file.
+- [ ] No top-level definition was lost to a scripted edit
+      (`python3 tests/lint/definitions.py`). Run this after ANY multi-line or
+      scripted edit — the file still compiles when a function goes missing, so
+      nothing else notices.
 - [ ] AH reads match the 12-value `GetAuctionItemInfo` and 9-arg
       `QueryAuctionItems` signatures; queries gated on `CanSendAuctionQuery()`.
 - [ ] DB touched only after `ADDON_LOADED` for `"Aegis_Exchange"`.
