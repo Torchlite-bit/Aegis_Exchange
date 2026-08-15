@@ -12,6 +12,51 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.19.3]
+
+Alignment and spacing across the Advanced view. `/reload`.
+
+### Fixed
+- **The tab row did not line up with the content under it.** It was centred on
+  the PANEL, but the content is not symmetric in the panel — it runs from 10 on
+  the left to 12 on the right — so the row landed 1–2px off the wells below,
+  and by a different amount at each window size because the rounding was thrown
+  away. Two pixels in at the smallest size, one pixel past at the largest. It
+  is centred on the CONTENT now.
+- **All three Advanced views now start on the same line.** Saved Searches and
+  the Filter Builder began at `ADVL.body_y`; the results table was still placed
+  from `BUYL.well_top` — a Blizzlike number measured against the *control*
+  strip, and 2px above where the tab strip ends. Search Results began ten
+  pixels higher than the other two.
+- **The footer rule was covered on Saved Searches and the Filter Builder.** The
+  rule sits 38px up and those wells stopped at 36, so they drew over it. Only
+  Search Results looked right, and by accident: its table stops at 82 to leave
+  room for the count and pager.
+- **Saved Searches and the Filter Builder were not the same size.** Each had
+  its own copy of the two-column split and the copies disagreed — a 16px gutter
+  measured off the frame against a 12px one measured off the window, so both
+  columns differed by 2px. That is the shift when clicking between the two
+  tabs. One `ui.SplitAdvColumns` places both now.
+
+### Changed
+- **The view tabs are sized to their labels and centred**, rather than
+  stretched to a third of the panel each. Three equal thirds made a 442px pill
+  for a 110px label on a wide window and was still 308px on the narrowest one;
+  a tab is now the same size wherever the window is.
+- **More air between the tab strip and the content below it** — 20px, up from
+  8.
+
+### Testing
+- `tests/units/geometry_test.lua` now extracts and RUNS `ui.LayoutViewTabs`
+  against stub buttons rather than restating its arithmetic, and reads every
+  layout constant out of `ui/frame.lua` instead of carrying its own copy. Both
+  changes exist because the first version of this suite would have passed a
+  build with the bug still in it.
+- `tests/lint/sharedlayout.py` is new: it checks that two views sharing a space
+  are placed by ONE function. That property is structural, not arithmetic — a
+  unit test on the numbers passes whether there is one copy of the split or
+  two — so it is checked structurally.
+
 ## [1.19.2]
 
 Clipping and proportion pass over the Advanced view. `/reload`.
@@ -1625,6 +1670,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.19.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

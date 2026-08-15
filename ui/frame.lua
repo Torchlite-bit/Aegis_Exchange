@@ -626,6 +626,7 @@ function ui.QueueRepaint()
             -- itself across the panel, so it has to be re-spread on a resize
             -- or it keeps whatever widths the previous size gave it.
             if ui.LayoutViewTabs then ui.LayoutViewTabs() end
+            if ui.LayoutAdvColumns then ui.LayoutAdvColumns() end
             if ui.LayoutBuilderForm then ui.LayoutBuilderForm() end
             if ui.RefreshCurrentTab then ui.RefreshCurrentTab() end
         end)
@@ -912,8 +913,9 @@ function ui.BuildWindow()
         f:StopMovingOrSizing()
         ui.SaveWindowSize()
         ui.Refresh()
-        ui.LayoutViewTabs()      -- re-spread the Advanced tabs to the new width
-        ui.LayoutBuilderForm()   -- ...and the builder's columns and controls
+        ui.LayoutViewTabs()      -- re-centre the Advanced tabs
+        ui.LayoutAdvColumns()    -- ...re-split BOTH overlay views together
+        ui.LayoutBuilderForm()   -- ...and size the builder's own controls
         ui.RefreshCurrentTab()   -- re-fit the visible list to the new height
     end)
     -- Deliberately NO per-frame refresh while dragging. Repainting mid-drag
@@ -2946,11 +2948,35 @@ local BUYL = {
 local ADVL = {
     strip_y   = 12,   -- Back button / query box, top of the panel
     tabs_y    = 38,   -- the three view tabs, under the strip
-    tab_gap   = 6,    -- between tabs; widths are computed, never fixed
-    body_y    = 66,   -- Saved / Builder content starts here
-    body_bot  = 36,   -- ...and stops above the action bar
+    tab_h     = 20,   -- ...their height, so body_y can be checked against it
+    tab_gap   = 8,    -- between tabs
+    -- A tab is sized to the widest LABEL, clamped, and the row is centred --
+    -- it does not stretch to fill the panel. Three equal thirds of a 1400px
+    -- window is a 442px pill for a 95px label; three thirds of a 1000px one is
+    -- still 308. Bounded and centred, a tab is the same size wherever the
+    -- window is, which is what a tab strip should be.
+    tab_pad   = 26,   -- label -> tab edge, each side
+    tab_min   = 200,
+    tab_max   = 280,
+
+    -- CONTENT TOP. All three Advanced views start here -- Search Results as
+    -- well as Saved and Builder. It used to be Saved/Builder only, with the
+    -- results table still positioned from BUYL.well_top (56), a number
+    -- measured against the Blizzlike CONTROL strip. The tab strip ends at
+    -- tabs_y + tab_h = 58, so that table's box began 2px ABOVE the tabs, and
+    -- the three views started on three different lines.
+    body_y    = 78,
+    -- ...and stops here, clear of the action bar's rule.
+    --
+    -- The rule is 38px up (ui.buyBarRule). At 36 the wells stopped BELOW it
+    -- and drew over it, which is why the footer only looked right on Search
+    -- Results -- its table stops at BUYL.table_bot (82) to leave room for the
+    -- count and pager, and cleared the rule by accident rather than by intent.
+    body_bot  = 52,
+
     right_pad = 12,   -- content's right margin inside the panel
     strip_gap = 10,   -- query box -> Search button
+    gutter    = 12,   -- between the two columns, Saved and Builder alike
 }
 
 -- Put the Search button where the CURRENT mode wants it.
@@ -2992,26 +3018,62 @@ end
 -- Both are fixed by the same pair of changes: take the width from the WINDOW,
 -- which is set explicitly (ui.AdvContentWidth), and anchor the row by its
 -- centre so any rounding residue splits evenly instead of landing on one edge.
+-- The width all three tabs take: the widest LABEL plus padding, clamped.
+--
+-- Equal to each other, as the concept has them, but sized to their text rather
+-- than to the panel. Three equal thirds of the content width made a 442px pill
+-- for a 95px label on a wide window and was still 308px on the narrowest one.
+local function ViewTabWidth(btns)
+    local widest = 0
+    local i = 1
+    while i <= table.getn(btns) do
+        local fs = btns[i].label
+        if fs then
+            local ok, sw = pcall(function() return fs:GetStringWidth() end)
+            if ok and sw and sw > widest then widest = sw end
+        end
+        i = i + 1
+    end
+    local w = math.ceil(widest) + 2 * ADVL.tab_pad
+    if w < ADVL.tab_min then w = ADVL.tab_min end
+    if w > ADVL.tab_max then w = ADVL.tab_max end
+    return w
+end
+
+-- Size the three view tabs and CENTRE the row.
+--
+-- Centred on the CONTENT's centre, not the panel's. The content does not sit
+-- symmetrically in the panel -- it runs from BUYL.side_x (10) to
+-- -ADVL.right_pad (12) -- so centring on the panel put the row 1-2px off the
+-- wells below it, and by a different amount at each window size because
+-- math.floor threw the remainder away. Off by two at the minimum size, off by
+-- one the other way at the maximum.
 function ui.LayoutViewTabs()
     local btns = ui.buyViewBtns
     if not btns or table.getn(btns) == 0 then return end
     local n = table.getn(btns)
     local avail = ui.AdvContentWidth()
-    -- Before the window has a size, fall back to the old fixed width rather
-    -- than collapsing every tab to nothing.
-    local w = math.floor((avail - (n - 1) * ADVL.tab_gap) / n)
-    if not w or w < 60 then w = 112 end
+    if avail < 200 then return end          -- no window size yet
+
+    local w = ViewTabWidth(btns)
+    -- Never wider than the space actually available, however the labels
+    -- measure -- a localised client could hand us a long one.
+    local maxW = math.floor((avail - (n - 1) * ADVL.tab_gap) / n)
+    if w > maxW then w = maxW end
     local i = 1
     while i <= n do
         btns[i]:SetWidth(w)
         i = i + 1
     end
-    -- Re-centre the row. Only the FIRST tab is anchored to the panel; the
-    -- other two chain off it, so this one point places all three.
+
+    -- Only the FIRST tab is anchored to the panel; the other two chain off it,
+    -- so this one point places all three. The offset is from the content's
+    -- left edge, which is what makes the row agree with every well below it.
     local total = n * w + (n - 1) * ADVL.tab_gap
+    local left = BUYL.side_x + math.floor((avail - total) / 2)
     btns[1]:ClearAllPoints()
-    btns[1]:SetPoint("TOPLEFT", btns[1]:GetParent(), "TOP",
-        -math.floor(total / 2), -ADVL.tabs_y)
+    btns[1]:SetPoint("TOPLEFT", btns[1]:GetParent(), "TOPLEFT",
+        left, -ADVL.tabs_y)
 end
 
 -- NOTE ON PLACEMENT: this sits AFTER BUYL because it reads it.
@@ -3039,19 +3101,35 @@ function ui.LayoutBuyTable()
     BUY_NAME_EXTRA = ui.buyTableLeft - left
     if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
 
+    -- The table's TOP also moves with the mode.
+    --
+    -- BUYL.well_top / hdr_top / rows_top were measured against the BLIZZLIKE
+    -- control strip. Advanced has a TAB STRIP there instead, ending at
+    -- tabs_y + tab_h = 58 -- so in Advanced the Blizzlike well_top of 56 put
+    -- the table's box 2px ABOVE the tabs, and Search Results began ten pixels
+    -- higher than Saved Searches and the Filter Builder. All three views start
+    -- on ADVL.body_y now; the header and row offsets keep their spacing
+    -- relative to the box rather than being restated.
+    local wellTop, hdrTop, rowsTop = BUYL.well_top, BUYL.hdr_top, BUYL.rows_top
+    if ui.buyMode == "advanced" then
+        wellTop = ADVL.body_y
+        hdrTop  = wellTop + (BUYL.hdr_top - BUYL.well_top)
+        rowsTop = wellTop + (BUYL.rows_top - BUYL.well_top)
+    end
+
     ui.buyScroll:ClearAllPoints()
-    ui.buyScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", left, -BUYL.rows_top)
+    ui.buyScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", left, -rowsTop)
     ui.buyScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
         -BUYL.gutter_w, BUYL.table_bot)
     ui.buyListWell:ClearAllPoints()
     ui.buyListWell:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        left - 6, -BUYL.well_top)
+        left - 6, -wellTop)
     ui.buyListWell:SetPoint("BOTTOMRIGHT", ui.buyScroll, "BOTTOMRIGHT", 0, -6)
 
     for key, b in pairs(ui.buyHeaders or {}) do
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", panel, "TOPLEFT",
-            left + ColX(key), -BUYL.hdr_top)
+            left + ColX(key), -hdrTop)
     end
     local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
     local ti = 1
@@ -3140,9 +3218,66 @@ function ui.AdvContentWidth()
     return w - BUYL.side_x - ADVL.right_pad
 end
 
+-- Split an Advanced view's frame into two equal columns with one gutter.
+--
+-- ONE function for BOTH overlay views, because Saved Searches and the Filter
+-- Builder occupy the same space and clicking between them must move nothing.
+-- They had two copies of this arithmetic and the copies disagreed:
+--
+--   Saved   anchored colL's right to the frame's own BOTTOM midpoint at -8 and
+--           colR's left to its TOP at +8  -> a 16px gutter, columns (W-16)/2,
+--           measured off the frame.
+--   Builder set colL's width to (AdvContentWidth - 12) / 2 and hung colR off
+--           it -> a 12px gutter, columns (W-12)/2, measured off the window.
+--
+-- Two pixels on each column and four on the gutter, which is exactly the shift
+-- you see switching tabs. Returns the column width.
+function ui.SplitAdvColumns(frame, colL, colR)
+    if not frame or not colL or not colR then return 0 end
+    local total = ui.AdvContentWidth()
+    local lw = math.floor((total - ADVL.gutter) / 2)
+    if lw < 100 then lw = 100 end
+
+    colL:ClearAllPoints()
+    colL:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    colL:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    colL:SetWidth(lw)
+
+    -- The right column takes what is left rather than a second computed width,
+    -- so the two can never fail to meet in the middle.
+    colR:ClearAllPoints()
+    colR:SetPoint("TOPLEFT", colL, "TOPRIGHT", ADVL.gutter, 0)
+    colR:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    return lw
+end
+
+-- Re-split both overlay views. Called from every path that changes the
+-- window's width, so the two stay identical rather than only agreeing on the
+-- pass that happened to run last.
+function ui.LayoutAdvColumns()
+    if ui.buySaved and ui.savedColL and ui.savedColR then
+        ui.SplitAdvColumns(ui.buySaved, ui.savedColL, ui.savedColR)
+    end
+    if ui.buyBuilder and ui.fbColL and ui.fbColR then
+        ui.SplitAdvColumns(ui.buyBuilder, ui.fbColL, ui.fbColR)
+    end
+end
+
+-- Where the table's first row starts, for the CURRENT mode. Advanced puts the
+-- tab strip where Blizzlike puts its control strip, so the table sits lower
+-- there -- and the row count has to know, or it fills the box for a Blizzlike
+-- height and draws the last row past the bottom of a shorter one. Rows are not
+-- the scroll frame's scroll-child; nothing clips an overflowing one.
+function ui.TableRowsTop()
+    if ui.buyMode == "advanced" then
+        return ADVL.body_y + (BUYL.rows_top - BUYL.well_top)
+    end
+    return BUYL.rows_top
+end
+
 function ui.TableAreaAt(h)
     local panelH = ui.PanelHeightAt(h)
-    local area = panelH - BUYL.rows_top - BUYL.table_bot
+    local area = panelH - ui.TableRowsTop() - BUYL.table_bot
     -- Below the table: 8px gap, the 20px pager row, 10px gap, then the rule
     -- at 38 and the action bar under it.
     local belowNeeded = 8 + 20 + 10 + 38
@@ -3265,11 +3400,10 @@ function ui.LayoutBuilderForm()
     local total = ui.AdvContentWidth()
     if total < 200 then return end          -- no window size yet; keep defaults
 
-    -- 50/50. It was 41/59 on the theory that the post-filter side carries
-    -- longer strings, but the form is the side with six labelled rows plus
-    -- three options, and the clause lines clip rather than wrap.
-    local lw = math.floor((total - FBL.gutter) / 2)
-    colL:SetWidth(lw)
+    -- The 50/50 split itself is ui.SplitAdvColumns' job, shared with Saved
+    -- Searches so the two views cannot drift apart. What is left here is
+    -- sizing the CONTROLS inside the column it returns.
+    local lw = ui.SplitAdvColumns(ui.buyBuilder, colL, ui.fbColR)
 
     -- Full width: the four dropdowns, which have nothing beside them.
     local ctl = lw - FBL.ctl_x - FBL.pad
@@ -4056,13 +4190,14 @@ function ui.BuildSavedSearches(panel, advLeft)
     -- left half and right half, each stretching with the window. The old
     -- fixed 0 / 262 left a dead gap on a wide window and overlapped on a
     -- narrow one.
+    -- Placed by ui.SplitAdvColumns, the SAME function the Filter Builder uses.
+    -- These two views share the space and must not move relative to each
+    -- other; two copies of the split is how they came to differ by 2px on each
+    -- column and 4px on the gutter.
     local colL = CreateFrame("Frame", nil, f)
-    colL:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
-    colL:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -8, 0)
     local colR = CreateFrame("Frame", nil, f)
-    colR:SetPoint("TOPLEFT", f, "TOP", 8, 0)
-    colR:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     ui.savedColL, ui.savedColR = colL, colR
+    ui.SplitAdvColumns(f, colL, colR)
 
     -- Each column's rows live in a WELL that runs to the bottom of the view.
     -- Without one the rows just stopped wherever the content ran out and the
@@ -4366,14 +4501,14 @@ function ui.BuildFilterBuilder(panel, advLeft)
     -- and the post-filter builder are two different things and one box around
     -- both said they were one. colL's width is set by ui.LayoutBuilderForm so
     -- the split holds at any window size; colR simply takes what is left.
+    -- Placed by ui.SplitAdvColumns, the SAME function Saved Searches uses --
+    -- see the note there. Split at BUILD time as well as on resize: the
+    -- builder used to carry a 400px placeholder until the first layout pass,
+    -- so the two views disagreed on the very first paint too.
     local colL = CreateFrame("Frame", nil, f)
-    colL:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
-    colL:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
-    colL:SetWidth(400)
     local colR = CreateFrame("Frame", nil, f)
-    colR:SetPoint("TOPLEFT", colL, "TOPRIGHT", FBL.gutter, 0)
-    colR:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     ui.fbColL, ui.fbColR = colL, colR
+    ui.SplitAdvColumns(f, colL, colR)
     ui.MakeWell(colL, colL, 0)
     ui.MakeWell(colR, colR, 0)
 
@@ -5154,6 +5289,7 @@ function ui.SetBuyMode(mode)
     if ui.AnchorSearchButton then ui.AnchorSearchButton() end
     if ui.LayoutBuyTable then ui.LayoutBuyTable() end
     if ui.LayoutViewTabs then ui.LayoutViewTabs() end
+    if ui.LayoutAdvColumns then ui.LayoutAdvColumns() end
     if ui.LayoutBuilderForm then ui.LayoutBuilderForm() end
 
     -- Rows of the column that is now hidden, put down explicitly.

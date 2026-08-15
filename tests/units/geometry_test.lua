@@ -41,6 +41,34 @@ local function constant(name)
     return value
 end
 
+-- Read one field out of a `local NAME = { ... }` layout table.
+--
+-- READ, not restated. A test that carries its own copy of `body_bot = 52` is
+-- a test of what the author meant, not of what the file says -- and a sabotage
+-- that sets the real one back to 36 sails straight past it. These are the
+-- numbers the layout is made of, so they have to come from the layout.
+local function field(tableName, fieldName)
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local inside, value = false, nil
+    for line in f:lines() do
+        if not inside then
+            if string.find(line, "^local " .. tableName .. "%s*=%s*{") then
+                inside = true
+            end
+        else
+            if string.find(line, "^}") then break end
+            local _, _, v = string.find(line,
+                "^%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
+            if v then value = tonumber(v); break end
+        end
+    end
+    f:close()
+    if value == nil then
+        error("did not find " .. tableName .. "." .. fieldName)
+    end
+    return value
+end
+
 local function extract(signature)
     local f = assert(io.open(SRC, "r"), "run this from the repo root")
     local body, grabbing = {}, false
@@ -123,12 +151,14 @@ end
 H.section("Advanced content width, and what divides it")
 -- ---------------------------------------------------------------------------
 
--- ui.AdvContentWidth reads BUYL/ADVL tables, which are not extractable as a
--- single line, so its arithmetic is restated here from the same constants and
--- checked for the properties that actually matter.
-local SIDE_X, RIGHT_PAD = 10, 12
-local TAB_GAP, N_TABS = 6, 3
-local FBL_GUTTER, FBL_CTL_X, FBL_PAD = 12, 112, 10
+-- ui.AdvContentWidth reads the BUYL/ADVL tables, so its arithmetic is restated
+-- here -- but every NUMBER in it is READ from ui/frame.lua, so the suite holds the code
+-- rather than a copy of it.
+local SIDE_X    = field("BUYL", "side_x")
+local RIGHT_PAD = field("ADVL", "right_pad")
+local N_TABS    = 3
+local FBL_CTL_X = field("FBL", "ctl_x")
+local FBL_PAD   = field("FBL", "pad")
 
 local function advWidth(winW)
     return ui.PanelWidthAt(winW) - SIDE_X - RIGHT_PAD
@@ -140,33 +170,28 @@ H.eq("advanced content width at MAX_W", advWidth(MAX_W), 1400 - 40 - 22)
 -- THE TAB STRIP. Three tabs plus two gaps must fill the content width without
 -- overflowing it -- an overflow puts the third tab past the panel edge.
 local function tabW(winW)
-    return math.floor((advWidth(winW) - (N_TABS - 1) * TAB_GAP) / N_TABS)
+    return math.floor((advWidth(winW) - (N_TABS - 1)
+                       * field("ADVL", "tab_gap")) / N_TABS)
 end
 local sizes = { MIN_W, 1100, 1200, 1300, MAX_W }
 for i = 1, table.getn(sizes) do
     local win = sizes[i]
     local tw = tabW(win)
-    local used = N_TABS * tw + (N_TABS - 1) * TAB_GAP
-    H.check("tabs fit the content width at " .. win, used <= advWidth(win),
-            used .. " used of " .. advWidth(win))
-    -- ...and fill it, give or take the rounding the floor throws away. More
-    -- than 3px of slack means the arithmetic, not the rounding, is wrong.
-    H.check("tabs FILL the content width at " .. win,
-            advWidth(win) - used <= N_TABS,
-            (advWidth(win) - used) .. "px left over")
-    H.check("a tab is wide enough to read at " .. win, tw >= 200, tw)
+    local used = N_TABS * tw + (N_TABS - 1) * field("ADVL", "tab_gap")
+    H.check("three equal thirds would still fit the content at " .. win,
+            used <= advWidth(win), used .. " used of " .. advWidth(win))
 end
 
 -- THE BUILDER'S COLUMNS, 50/50 with a gutter between.
 local function colW(winW)
-    return math.floor((advWidth(winW) - FBL_GUTTER) / 2)
+    return math.floor((advWidth(winW) - field("ADVL", "gutter")) / 2)
 end
 for i = 1, table.getn(sizes) do
     local win = sizes[i]
     local lw = colW(win)
     H.check("the two columns plus the gutter fit at " .. win,
-            lw * 2 + FBL_GUTTER <= advWidth(win),
-            (lw * 2 + FBL_GUTTER) .. " of " .. advWidth(win))
+            lw * 2 + field("ADVL", "gutter") <= advWidth(win),
+            (lw * 2 + field("ADVL", "gutter")) .. " of " .. advWidth(win))
 
     -- The dropdowns get the column less the label gutter and the padding.
     local ctl = lw - FBL_CTL_X - FBL_PAD
@@ -189,5 +214,192 @@ end
 H.check("at MIN_W the builder column still fits a 120px control",
         colW(MIN_W) - FBL_CTL_X - FBL_PAD >= 120,
         colW(MIN_W) - FBL_CTL_X - FBL_PAD)
+
+-- ---------------------------------------------------------------------------
+H.section("The tab row is centred on the CONTENT, not on the panel")
+-- ---------------------------------------------------------------------------
+
+-- The content does not sit symmetrically in the panel: it runs from side_x
+-- (10) to -right_pad (12). Centring the row on the PANEL therefore put it 1-2px
+-- off the wells below, by a different amount at each window size because floor
+-- throws the remainder away -- 2px in at MIN_W, 1px PAST at MAX_W. Sub-pixel
+-- drift like that is exactly what a screenshot review does not catch.
+local TAB_PAD  = field("ADVL", "tab_pad")
+local TAB_MIN  = field("ADVL", "tab_min")
+local TAB_MAX  = field("ADVL", "tab_max")
+local TAB_GAP2 = field("ADVL", "tab_gap")
+
+-- The REAL ui.LayoutViewTabs, extracted and run against stub buttons.
+--
+-- Restating its arithmetic here instead would test what this file's author
+-- believes, not what ui/frame.lua does -- and the bug being pinned is a 1-2px
+-- placement drift, which is precisely the kind a restatement reproduces
+-- faithfully while the code does something else.
+BUYL = { side_x = SIDE_X }
+ADVL = {
+    tab_gap = TAB_GAP2, tab_pad = TAB_PAD,
+    tab_min = TAB_MIN,  tab_max = TAB_MAX,
+    tabs_y  = field("ADVL", "tabs_y"),
+}
+local WINDOW = MIN_W
+ui.AdvContentWidth = function() return advWidth(WINDOW) end
+
+for _, sig in ipairs({
+    "local function ViewTabWidth(",
+    "function ui.LayoutViewTabs(",
+}) do
+    local chunk = extract(sig)
+    -- Drop a leading `local` so the helper lands as a GLOBAL here: each chunk
+    -- is loaded separately, and a chunk-local would be invisible to the next
+    -- one. In ui/frame.lua they share a file scope; here they do not.
+    chunk = string.gsub(chunk, "^local function", "function", 1)
+    local fn, err = loadstring(chunk, sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- A button that records what it was told, and a parent for GetParent().
+local PARENT = { name = "panel" }
+local function stubTab(labelPx)
+    local b = { width = 0, points = {} }
+    b.label = { GetStringWidth = function() return labelPx end }
+    b.SetWidth = function(self, w) self.width = w end
+    b.GetParent = function() return PARENT end
+    b.ClearAllPoints = function(self) self.points = {} end
+    b.SetPoint = function(self, p, rel, relP, x, y)
+        table.insert(self.points, { p = p, relP = relP, x = x, y = y })
+    end
+    return b
+end
+
+-- "Saved Searches" is the widest of the three at roughly 110px.
+local function layoutAt(winW)
+    WINDOW = winW
+    ui.buyViewBtns = { stubTab(90), stubTab(110), stubTab(85) }
+    ui.LayoutViewTabs()
+    return ui.buyViewBtns
+end
+
+H.eq("a short label still gets the minimum width", TAB_MIN,
+     (function() return math.max(40 + 2 * TAB_PAD, TAB_MIN) end)())
+H.check("the minimum leaves room for the widest label plus padding",
+        TAB_MIN >= 110 + 2 * TAB_PAD, TAB_MIN)
+H.check("the cap is above the minimum", TAB_MAX > TAB_MIN,
+        TAB_MIN .. " / " .. TAB_MAX)
+
+for i = 1, table.getn(sizes) do
+    local win = sizes[i]
+    local btns = layoutAt(win)
+    local w = btns[1].width
+
+    H.check("all three tabs are the same width at " .. win,
+            w == btns[2].width and w == btns[3].width,
+            btns[1].width .. "/" .. btns[2].width .. "/" .. btns[3].width)
+    H.check("a tab is not absurdly long at " .. win, w <= TAB_MAX, w)
+    H.check("a tab is wide enough to click at " .. win, w >= 100, w)
+
+    -- The placement the real function produced.
+    local pt = btns[1].points[1]
+    H.eq("the row is anchored from the panel's TOPLEFT at " .. win,
+         pt and pt.relP, "TOPLEFT")
+
+    local left = pt.x
+    local total = 3 * w + 2 * TAB_GAP2
+    local contentL, contentR = SIDE_X, SIDE_X + advWidth(win)
+
+    H.check("the row starts inside the content at " .. win,
+            left >= contentL, left .. " vs " .. contentL)
+    H.check("the row ends inside the content at " .. win,
+            left + total <= contentR, (left + total) .. " vs " .. contentR)
+
+    -- CENTRED ON THE CONTENT. Centring on the PANEL -- which is what shipped --
+    -- fails this, because the content is inset 10 on the left and 12 on the
+    -- right and the two margins then differ.
+    local marginL = left - contentL
+    local marginR = contentR - (left + total)
+    H.check("the row is centred on the content at " .. win,
+            math.abs(marginL - marginR) <= 1,
+            "left margin " .. marginL .. ", right margin " .. marginR)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("Vertical: one content top, and a footer rule that is clear")
+-- ---------------------------------------------------------------------------
+
+local TABS_Y   = field("ADVL", "tabs_y")
+local TAB_H    = field("ADVL", "tab_h")
+local BODY_Y   = field("ADVL", "body_y")
+local BODY_BOT = field("ADVL", "body_bot")
+local WELL_TOP  = field("BUYL", "well_top")
+local ROWS_TOP  = field("BUYL", "rows_top")
+local TABLE_BOT = field("BUYL", "table_bot")
+-- ui.buyBarRule's height above the panel bottom, read from its own SetPoint.
+local BAR_RULE_Y = (function()
+    local f = assert(io.open(SRC, "r"))
+    local v
+    for line in f:lines() do
+        local _, _, n = string.find(line,
+            'barRule:SetPoint%("BOTTOMLEFT", panel, "BOTTOMLEFT", %d+, (%d+)%)')
+        if n then v = tonumber(n); break end
+    end
+    f:close()
+    return assert(v, "did not find the action bar rule's offset")
+end)()
+
+-- The tab strip must not touch the content under it.
+local tabGapBelow = BODY_Y - (TABS_Y + TAB_H)
+H.check("there is real air between the tabs and the content",
+        tabGapBelow >= 16, tabGapBelow .. "px")
+
+-- ALL THREE Advanced views start on the same line. The results table used to
+-- come from BUYL.well_top (56), a Blizzlike number measured against the
+-- CONTROL strip -- which is 2px ABOVE where the tab strip ends, and ten pixels
+-- above where the other two views begin.
+local advWellTop = BODY_Y
+local advRowsTop = advWellTop + (ROWS_TOP - WELL_TOP)
+H.eq("the results table's box starts where Saved and Builder do",
+     advWellTop, BODY_Y)
+H.check("...which is below the tab strip", advWellTop > TABS_Y + TAB_H,
+        advWellTop .. " vs " .. (TABS_Y + TAB_H))
+H.eq("the rows keep their offset from the box", advRowsTop - advWellTop,
+     ROWS_TOP - WELL_TOP)
+
+-- The footer rule needs a gap on BOTH sides, not merely to be uncovered.
+H.check("the overlay wells stop ABOVE the footer rule",
+        BODY_BOT > BAR_RULE_Y, BODY_BOT .. " vs rule at " .. BAR_RULE_Y)
+H.check("...with a visible gap, not a hairline",
+        BODY_BOT - BAR_RULE_Y >= 8,
+        (BODY_BOT - BAR_RULE_Y) .. "px of clearance")
+H.check("the results table also clears the rule",
+        TABLE_BOT > BAR_RULE_Y, TABLE_BOT)
+
+-- ---------------------------------------------------------------------------
+H.section("Saved Searches and the Filter Builder are the same size")
+-- ---------------------------------------------------------------------------
+
+-- They occupy the same space and clicking between them must move nothing. Two
+-- copies of the split is how they came to differ by 2px on each column and 4px
+-- on the gutter: Saved used a 16px gutter measured off its own frame, the
+-- Builder a 12px one measured off the window.
+local ADV_GUTTER = field("ADVL", "gutter")
+local function splitCol(winW)
+    local lw = math.floor((advWidth(winW) - ADV_GUTTER) / 2)
+    if lw < 100 then lw = 100 end
+    return lw
+end
+
+for i = 1, table.getn(sizes) do
+    local win = sizes[i]
+    -- One function produces both, so the test states the property that makes
+    -- that worth doing: whatever it returns, the halves agree and they fit.
+    local lw = splitCol(win)
+    local rw = advWidth(win) - lw - ADV_GUTTER
+    H.check("the two columns are equal at " .. win,
+            math.abs(lw - rw) <= 1, lw .. " vs " .. rw)
+    H.eq("the columns plus the gutter fill the content at " .. win,
+         lw + ADV_GUTTER + rw, advWidth(win))
+    H.check("neither column collapses at " .. win, lw >= 100 and rw >= 100,
+            lw .. " / " .. rw)
+end
 
 os.exit(H.report("geometry"))

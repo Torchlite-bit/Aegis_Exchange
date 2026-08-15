@@ -68,6 +68,10 @@ step "Buy-tab widgets accounted for by every view"
 python3 tests/lint/modebits.py || fail=1
 
 # ---------------------------------------------------------------------------
+step "Views sharing a space are placed by one function"
+python3 tests/lint/sharedlayout.py || fail=1
+
+# ---------------------------------------------------------------------------
 step "Unit suites"
 for t in tests/units/*.lua; do
     if out=$(lua5.1 "$t" 2>&1); then

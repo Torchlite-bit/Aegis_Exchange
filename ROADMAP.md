@@ -1144,6 +1144,63 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
   results page needs the affordance, and it is identical in the Blizzlike view
   which is already signed off.
 
+### 2x — Advanced view: alignment and spacing — ✅ **DONE** (v1.19.3)
+
+- **Centre on the CONTENT, not the container.** The tab row was centred on the
+  panel, but the content is inset 10 left and 12 right, so the row sat 1–2px
+  off every well below it — and by a different amount at each window size,
+  because `math.floor` discards the remainder. Whenever a thing must line up
+  with its neighbours, centre it on THEM.
+- **A number measured for one layout is wrong in another.** `BUYL.well_top`
+  (56) was measured against the Blizzlike control strip. Advanced has a tab
+  strip there, ending at 58 — so the results table's box began 2px above the
+  tabs and ten pixels above where Saved and Builder start. All three now come
+  from `ADVL.body_y`, and `ui.TableRowsTop` exists so the ROW COUNT knows about
+  it too: a table that fills a Blizzlike height inside a shorter Advanced box
+  draws its last row past the bottom, and nothing clips it.
+- **Clearing something by accident is not clearing it.** The footer rule sits
+  38px up; the overlay wells stopped at 36 and drew over it. Search Results
+  looked right only because its table stops at 82 for the count and pager. A
+  gap that exists as a side effect of an unrelated number is not a gap anyone
+  chose.
+- **Two views sharing a space need ONE placement function.** Saved Searches and
+  the Filter Builder each had their own copy of the two-column split: a 16px
+  gutter measured off the frame against a 12px one measured off the window.
+  Both columns differed by 2px, which is the jump when clicking between the
+  tabs. `ui.SplitAdvColumns` places both.
+- **Sized to content beats sized to container, for tabs.** Three equal thirds
+  of the panel gave a 442px pill for a 110px label at MAX_W and 308px at MIN_W.
+  Tabs are now the widest label plus padding, clamped, and the row is centred —
+  the same size wherever the window is, which is what a tab strip should be.
+  This is a deliberate departure from the concept's full-width strip, made at
+  the owner's request after seeing it in game.
+
+#### What the tests learned
+
+- **A restated formula tests the author, not the code.** The first version of
+  the tab assertions re-implemented the centring arithmetic in the test file.
+  It passed against the buggy build, because a restatement reproduces the
+  intent faithfully while the code does something else. The suite now extracts
+  and RUNS `ui.LayoutViewTabs` against stub buttons, and the sabotage that
+  restores panel-centring is caught.
+- **A test carrying its own copy of a constant tests nothing about that
+  constant.** `body_bot = 52` written into the test would have sailed straight
+  past a sabotage setting the real one back to 36. Every layout number is read
+  out of `ui/frame.lua` now.
+- **Some properties are structural and cannot be unit-tested.** The split's
+  arithmetic was never wrong — having two of it was. A test on the numbers
+  passes either way, so `tests/lint/sharedlayout.py` checks the shape instead:
+  both builders call the shared splitter and neither anchors its own columns.
+- **A checker fooled by its own documentation is worse than none.** That lint
+  first passed on a reverted build because the comment above the column block
+  names `ui.SplitAdvColumns`, and the scan counted the mention as a call. It
+  strips comments and requires a paren now.
+- **Two of the four sabotages written for this pass were INVALID and were
+  deleted rather than papered over.** Changing `tab_max` altered nothing
+  because `tab_min` governs at every real label width; changing the single
+  gutter constant altered nothing because a single source cannot disagree with
+  itself. A sabotage that cannot fail proves as little as a test that cannot.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

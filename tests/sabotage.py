@@ -240,6 +240,34 @@ end""",
 end""",
      "geometry"),
 
+    # The footer rule sits 38px up. At 36 the overlay wells stopped BELOW it
+    # and drew over it -- which is why the footer only looked right on Search
+    # Results, whose table stops at 82 for the pager and cleared it by accident.
+    ("body-bot-covers-footer-rule", "ui/frame.lua",
+     "    body_bot  = 52,",
+     "    body_bot  = 36,",
+     "geometry"),
+
+    # Advanced content starting where it used to, 8px under a tab strip that
+    # ends at 58.
+    ("body-y-crowds-the-tabs", "ui/frame.lua",
+     "    body_y    = 78,",
+     "    body_y    = 66,",
+     "geometry"),
+
+    # The §1 bug: centre the tab row on the PANEL rather than on the CONTENT.
+    # The content is not symmetric in the panel (10 left, 12 right), so the row
+    # lands 1-2px off the wells below it, by a different amount at each size.
+    ("tabs-centred-on-panel", "ui/frame.lua",
+     """    local left = BUYL.side_x + math.floor((avail - total) / 2)
+    btns[1]:ClearAllPoints()
+    btns[1]:SetPoint("TOPLEFT", btns[1]:GetParent(), "TOPLEFT",
+        left, -ADVL.tabs_y)""",
+     """    btns[1]:ClearAllPoints()
+    btns[1]:SetPoint("TOPLEFT", btns[1]:GetParent(), "TOP",
+        -math.floor(total / 2), -ADVL.tabs_y)""",
+     "geometry"),
+
     # Loading `stack/N` must NOT also tick full-stacks -- that is the same
     # illegal pair arriving by the other door.
     ("builder-setterm-ticks-both", "ui/frame.lua",
