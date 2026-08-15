@@ -88,6 +88,50 @@ local function SinkBackdrop(frame)
     end)
 end
 
+-- Move an Aegis button's label ONTO pfUI's backdrop frame.
+--
+-- SinkBackdrop above was the first attempt and it is not enough on its own.
+-- Frame level orders SIBLINGS; the rule that a child frame draws over its
+-- parent's regions is separate, and how far a child's level may be pushed
+-- below its parent's is not something worth betting a button's text on --
+-- least of all for a button buried three frames deep inside a ScrollFrame's
+-- scroll child. The Aegis settings panel is exactly that (ui.BuildAegisSettings
+-- draws into AegisExchangeAegisScrollChild) and under pfUI its buttons came
+-- back as blank plates, while the scan strip's buttons -- one frame under the
+-- window -- kept their text with the same sink applied.
+--
+-- Re-homing the label removes the question. Inside ONE frame the draw layer is
+-- the whole ordering rule, so a FontString on the backdrop's OVERLAY layer is
+-- above that backdrop's own background and border textures no matter what the
+-- levels around it are.
+--
+-- Everything that reads the label goes through b.label (RepaintButton,
+-- SetText, GetFontString, the sub-tab tint), so swapping the field is the
+-- whole change -- there is no second reference to update.
+local function LiftLabel(f)
+    if not f or not f.backdrop or not f.label then return end
+    if f.aegisLabelLifted then return end
+    pcall(function()
+        local old = f.label
+        -- Read everything we need off the old string BEFORE touching
+        -- anything, so a missing accessor aborts the lift with nothing
+        -- half-done rather than leaving a button with two labels.
+        local text = old:GetText() or ""
+        local r, g, b = old:GetTextColor()
+
+        local fs = f.backdrop:CreateFontString(nil, "OVERLAY",
+            f.aegisFont or "GameFontNormalSmall")
+        fs:SetPoint("CENTER", f, "CENTER", 0, 0)
+        fs:SetText(text)
+        if r then fs:SetTextColor(r, g, b) end
+
+        f.label = fs
+        f.aegisLabelLifted = true
+        old:SetText("")
+        old:Hide()
+    end)
+end
+
 local function Strip(frame)
     local env = Env()
     if not frame or not env or not env.StripTextures then return end
@@ -167,6 +211,7 @@ local function SkinWidget(f)
     if f.aegisButton then
         Backdrop(f, 1)
         SinkBackdrop(f)
+        LiftLabel(f)
         f.aegisSkinned = true
         if A.ui and A.ui.SetButtonKind then
             A.ui.SetButtonKind(f, f.aegisKind)
@@ -247,6 +292,7 @@ function skin.Apply()
         for _, tab in pairs(ui.subtabs) do
             Backdrop(tab, 1)
             SinkBackdrop(tab)         -- ...and keep their labels above it
+            LiftLabel(tab)            -- ...and mean it
             tab.aegisSkinned = true   -- keep the generic pass off them
         end
     end
@@ -309,8 +355,14 @@ function skin.ApplyExternal()
     while i <= table.getn(names) do
         local b = getglobal(names[i])
         if b and not b.aegisSkinned then
-            Button(b)
-            b.aegisSkinned = true
+            -- Through SkinWidget, NOT straight to pfUI's SkinButton. All four
+            -- of these are ui.MakeButton frames, so they belong in the
+            -- aegisButton branch with every other Aegis button: SkinButton
+            -- would give them a second border on top of the backdrop they
+            -- already draw, and its plate would bury their labels the same way
+            -- the settings panel's did. Fixing the label in one place and
+            -- leaving it broken in four others is not fixing it.
+            SkinWidget(b)
         end
         i = i + 1
     end

@@ -12,6 +12,47 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.20.1]
+
+Two fixes to what 1.20.0 shipped — a settings panel drawing on top of itself,
+and pfUI button labels that the last attempt did not actually rescue.
+`/reload`.
+
+### Fixed
+- **The Aegis tab drew on top of itself.** 1.20.0's new "Ask before posting an
+  auction" checkbox went into the middle of the settings panel's anchor chain,
+  and the Scan pacing row below it was left anchored to the checkbox *above*
+  the new one. So the new checkbox, the pacing label, its two buttons, the
+  price-data line and Clear price data all landed in the same place. Inserting
+  a widget into a chain is two edits, and only one of them was made.
+- **pfUI button labels, properly this time.** 1.20.0 pushed pfUI's backdrop one
+  frame level behind its button, which was not enough: frame level orders
+  *siblings*, while "a child frame draws over its parent's regions" is a
+  separate rule. The scan strip's buttons — one frame under the window — came
+  out fine, and the Aegis settings buttons, three frames deep inside a scroll
+  child, stayed blank. The label is now rebuilt **on** the backdrop frame,
+  where the draw layer is the whole ordering rule and no level can get in
+  front of it.
+- **The same fix, in the four places it was missing.** Our buttons on other
+  addons' frames (the tradeskill and craft "Add to shopping list" buttons, the
+  merchant sell button, and the "Aegis UI" button on the Blizzard auction
+  house) were being handed to pfUI's generic button skinner rather than
+  treated as Aegis buttons, which gave them a second border and the same
+  buried label. They go through the same path as every other Aegis button now.
+
+### Internal
+- **New lint: `tests/lint/anchorchain.py`.** Two widgets anchored below the
+  same one is a fork in a vertical chain, and it is invisible to everything
+  else — the addon loads, every widget exists, nothing errors, the tab just
+  overlaps. It reads the chain relation only (`TOPLEFT` to a `BOTTOMLEFT`),
+  so sharing a container's corner — which is normal and everywhere — is not
+  flagged, and it skips reassigned loop cursors. Run by `tests/run.sh`, and
+  sabotage-tested against the exact bug above, through both the raw `SetPoint`
+  and the settings panel's `label()` helper.
+- `tests/sabotage.py` can now run a **lint** as a suite, not only a Lua unit
+  file. A lint makes a claim about the source and can be wrong about it the
+  same way an assertion can.
+
 ## [1.20.0]
 
 Phase one of the feature batch: the window remembers where you put it, a post
@@ -1745,6 +1786,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.20.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

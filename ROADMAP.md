@@ -1298,6 +1298,42 @@ skin.lua's `aegisButton` branch. **That is not true**:
 remaining hypothesis and on its own merits, not on that one — worth recording,
 because a confident wrong premise is more expensive than an open question.
 
+### 3a-fix — What 1.20.0 got wrong — ✅ **DONE** (v1.20.1)
+
+Both items here are 1.20.0's own, not older faults it uncovered.
+
+- **The clipping the user reported was self-inflicted.** Adding the
+  "Ask before posting" checkbox to the settings panel put a new link in the
+  middle of a vertical anchor chain, and the row below it kept anchoring to the
+  widget the new one displaced — so the new checkbox, the pacing label, its
+  buttons, the price-data line and Clear price data all drew in one spot.
+  **Inserting a widget into a chain is TWO edits**, and only one was made.
+  Nothing else could have noticed: the addon loads, every widget exists,
+  nothing errors. It is a lint now — `tests/lint/anchorchain.py` — because the
+  fault is a property of how the file is written (one anchor named twice) and
+  reading it back off a stub frame would only restate the two `SetPoint` calls,
+  which is the mistake this repo has already made twice.
+- **Sinking pfUI's backdrop a frame level was the wrong fix for the right
+  diagnosis.** The layering rule was correctly identified; the remedy was not
+  strong enough. Frame level orders SIBLINGS, and "a child frame draws over
+  its parent's regions" is a separate rule — so the sink helped the scan
+  strip's buttons (one frame under the window) and did nothing for the Aegis
+  settings buttons, three frames deep inside a ScrollFrame's scroll child.
+  **The discriminator was depth, and it was visible in the screenshots
+  before the fix was written.** The label is rebuilt on the backdrop frame
+  now: inside one frame the draw layer is the whole ordering rule, so there is
+  no level left to lose to.
+- **And the same fix was missing in four more places** — `skin.ApplyExternal`
+  was handing our buttons on other addons' frames to pfUI's *generic* button
+  skinner rather than to the `aegisButton` branch, which both double-bordered
+  them and buried their labels. This is the second consecutive release where
+  the pattern-grep rule from 3a earned its place; the rule is to grep for the
+  pattern **as part of the fix**, not after the next report.
+- **A lint is a suite.** `tests/sabotage.py` runs Python lints as well as Lua
+  unit files now. A lint makes a claim about the source and can be wrong about
+  it exactly the way an assertion can — `sharedlayout.py` already passed once
+  on a reverted build.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

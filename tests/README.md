@@ -44,6 +44,10 @@ tools we test with are more permissive than the client we ship to.
 | `lua50.py` | `string.match`, `#`, `%`, `select()`, `hooksecurefunc`, `table.setn`, modern event handlers | All valid Lua 5.1. `luac5.1 -p` compiles them; the unit suites run them |
 | `upvalues.py` | A function reading >32 file-scope locals | 5.0's limit is 32, **5.1's is 60**. The client refuses to load the file; every local tool says it is fine |
 | `definitions.py` | A scripted edit that deleted a neighbouring function | The file still compiles. Lua does not care a function is missing until something calls it |
+| `scoping.py` | A file-scope local read **above** its declaration | Legal Lua — it reads a nil *global* of the same name. Compiles, loads, fails only when that line runs |
+| `modebits.py` | A Buy-tab widget no view shows or hides | Every widget exists; one just never appears, or never goes away |
+| `sharedlayout.py` | Two views placed into one space by two different functions | Both look right until one of them is edited |
+| `anchorchain.py` | Two widgets anchored below the same one | A fork in a vertical chain. The addon loads, every widget exists, nothing errors — the tab just draws on top of itself |
 
 That middle row is not hypothetical. v1.16.0 shipped an addon that would not
 load at all: thirteen new layout constants took `ui.BuildBuyTab` to 36
@@ -108,7 +112,11 @@ tests/
   lint/
     lua50.py          Lua 5.0 language rules (CLAUDE.md hard rules 1-7)
     upvalues.py       the 32-upvalue ceiling (hard rule 12a)
+    scoping.py        no file-scope local read above its declaration
     definitions.py    every top-level definition still present vs a git ref
+    modebits.py       every Buy-tab widget accounted for by every view
+    sharedlayout.py   views sharing a space are placed by ONE function
+    anchorchain.py    no two widgets hang off the same anchor
     selftest.py       proves lua50.py fires, and does not over-fire
   units/
     util_test.lua           money, strings, tables, GetItemInfo normalisation
@@ -117,7 +125,16 @@ tests/
     buy_page_test.lua       reading a page; the throttle gate
     buy_batch_test.lua      multi-buyout safety
     sort_results_test.lua   bid-only rows sort last, both directions
+    builder_term_test.lua   the Filter Builder's form <-> term round trip
+    geometry_test.lua       panel insets, row counts, tab and form layout
+    window_point_test.lua   a restored window point you can still reach
 ```
+
+`sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a
+lint makes a claim about the source and can be wrong about it the same way an
+assertion can. `sharedlayout.py` passed once on a build where the thing it
+checks for had been reverted — it was matching the *comment* that named the
+function.
 
 ---
 

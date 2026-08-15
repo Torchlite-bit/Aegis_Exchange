@@ -346,8 +346,11 @@ function ui.MakeButton(parent, kind, name)
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
 
-    local fs = b:CreateFontString(nil, "OVERLAY",
-        (BTN_KIND[b.aegisKind] or BTN_KIND.quiet).font)
+    -- Recorded so ui/skin.lua can rebuild this font string on pfUI's backdrop
+    -- frame with the same font. SetButtonKind only ever changes colours, so
+    -- the font a button is born with is the font it keeps.
+    b.aegisFont = (BTN_KIND[b.aegisKind] or BTN_KIND.quiet).font
+    local fs = b:CreateFontString(nil, "OVERLAY", b.aegisFont)
     fs:SetPoint("CENTER", b, "CENTER", 0, 0)
     b.label = fs
 
@@ -895,7 +898,8 @@ local function MakeSubTab(parent, name)
         tile = true, tileSize = 16, edgeSize = 10,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    b.aegisFont = "GameFontNormalSmall"
+    local fs = b:CreateFontString(nil, "OVERLAY", b.aegisFont)
     fs:SetPoint("CENTER", b, "CENTER", 0, 0)
     fs:SetText(TAB_LABELS[name] or name)
     b.label = fs
@@ -1635,7 +1639,13 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
     -- running the AuctionQueryThrottle DLL scans as fast as the server answers
     -- while a stock client still waits its ~5s. "Safe" keeps the fixed floor.
-    local thLbl = label("Scan pacing:", ccChk, -12)
+    -- Anchored to cpChk, the LAST checkbox above it. v1.20.0 added cpChk into
+    -- the middle of the chain and left this pointing at ccChk, which drew the
+    -- new checkbox and this whole row -- pacing, its buttons, the price-data
+    -- line and Clear price data, all of which chain off thLbl -- on top of
+    -- each other. Inserting a widget into an anchor chain means re-pointing
+    -- the link BELOW it as well.
+    local thLbl = label("Scan pacing:", cpChk, -12)
 
     ui.setThrottleBtns = {}
     local modes = { { "Auto", "auto" }, { "Safe 4s", "safe" } }

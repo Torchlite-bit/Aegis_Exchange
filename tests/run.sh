@@ -72,6 +72,13 @@ step "Views sharing a space are placed by one function"
 python3 tests/lint/sharedlayout.py || fail=1
 
 # ---------------------------------------------------------------------------
+step "No two widgets hang off the same anchor"
+# Inserting a widget into a vertical chain and forgetting to re-anchor the one
+# below it. Everything still loads; the tab just draws on top of itself. This
+# is what 1.20.0 shipped in the settings panel.
+python3 tests/lint/anchorchain.py || fail=1
+
+# ---------------------------------------------------------------------------
 step "Unit suites"
 for t in tests/units/*.lua; do
     if out=$(lua5.1 "$t" 2>&1); then

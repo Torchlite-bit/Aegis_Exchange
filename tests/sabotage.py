@@ -325,6 +325,25 @@ end""",
      "    ui.fbFullStack:SetChecked((t.stackOnly and not t.stackSize) and 1 or nil)",
      "    ui.fbFullStack:SetChecked(t.stackOnly and 1 or nil)",
      "builder.term"),
+
+    # ---- anchor chains -----------------------------------------------------
+    # The v1.20.0 shipping bug, restored verbatim: a checkbox went into the
+    # middle of the settings chain and the row below it kept anchoring to the
+    # widget the new one displaced, so the new checkbox and the whole tail of
+    # the panel drew in the same place. Reached through the `label` helper,
+    # which is the door the original came through.
+    ("settings-chain-forks-via-label", "ui/frame.lua",
+     '    local thLbl = label("Scan pacing:", cpChk, -12)',
+     '    local thLbl = label("Scan pacing:", ccChk, -12)',
+     "anchorchain"),
+
+    # The same fork through a plain SetPoint, so the lint is not just matching
+    # one helper: two checkboxes hung under pfChk instead of one under the
+    # other.
+    ("settings-chain-forks-via-setpoint", "ui/frame.lua",
+     '    cpChk:SetPoint("TOPLEFT", ccChk, "BOTTOMLEFT", 0, -6)',
+     '    cpChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)',
+     "anchorchain"),
 ]
 
 SUITES = {
@@ -337,7 +356,19 @@ SUITES = {
     "builder.term": "tests/units/builder_term_test.lua",
     "geometry": "tests/units/geometry_test.lua",
     "window.point": "tests/units/window_point_test.lua",
+    # A lint is a suite too. It makes a claim about the source and can be
+    # wrong about it the same way an assertion can, so it earns its place here
+    # rather than being trusted because it printed "ok" once.
+    "anchorchain": "tests/lint/anchorchain.py",
 }
+
+
+# Lua suites and Python lints are both just "a command that exits non-zero
+# when it notices".
+def SuiteCmd(path):
+    if path[-3:] == ".py":
+        return ["python3", path]
+    return ["lua5.1", path]
 
 
 def run_one(root, sab):
@@ -349,7 +380,7 @@ def run_one(root, sab):
                          "code changed and this entry needs updating")
     open(target, "w", encoding="utf-8").write(src.replace(find, replace, 1))
 
-    proc = subprocess.run(["lua5.1", SUITES[suite]], cwd=root,
+    proc = subprocess.run(SuiteCmd(SUITES[suite]), cwd=root,
                           capture_output=True, text=True)
     # Restore for the next sabotage in the same copy.
     open(target, "w", encoding="utf-8").write(src)
@@ -372,7 +403,7 @@ def main(argv):
         print("baseline (unmodified copy):")
         baseline_ok = True
         for suite, path in sorted(SUITES.items()):
-            proc = subprocess.run(["lua5.1", path], cwd=root,
+            proc = subprocess.run(SuiteCmd(path), cwd=root,
                                   capture_output=True, text=True)
             if proc.returncode == 0:
                 print("  ok   %s" % suite)
