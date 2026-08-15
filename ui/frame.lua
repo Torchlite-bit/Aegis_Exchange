@@ -300,6 +300,36 @@ function ui.SetButtonKind(b, kind)
     RepaintButton(b)
 end
 
+-- Mark exactly one of a row of segmented buttons as the chosen one.
+-- `match(b)` answers true for it.
+--
+-- SIX loops used to do this with b:LockHighlight() / b:UnlockHighlight(), and
+-- every one of them was doing NOTHING. LockHighlight drives a TEMPLATE
+-- highlight texture; ui.MakeButton draws its own backdrop and has no such
+-- texture, so the chosen duration, sell mode, undercut mode, throttle mode,
+-- history period and post duration all looked identical to their neighbours.
+--
+-- This is the same bug that was found and fixed for the Advanced view tabs --
+-- see the note in ui.SetBuyView. It was fixed there in one place and left
+-- everywhere else, which is why this is now a shared function rather than a
+-- seventh copy of the loop.
+function ui.MarkChosen(btns, match)
+    local i = 1
+    while i <= table.getn(btns or {}) do
+        local b = btns[i]
+        if b then
+            -- The kind it had BEFORE we ever touched it. Restoring "quiet"
+            -- would be a guess, and a row of accent buttons would come back
+            -- wrong the first time one was deselected.
+            if not b.aegisBaseKind then
+                b.aegisBaseKind = b.aegisKind or "quiet"
+            end
+            ui.SetButtonKind(b, match(b) and "primary" or b.aegisBaseKind)
+        end
+        i = i + 1
+    end
+end
+
 -- Build an Aegis button. Drop-in for
 --     ui.MakeButton(parent, "quiet", name)
 -- -- the returned frame answers SetText/GetText/Enable/Disable/IsEnabled the
@@ -590,6 +620,81 @@ function ui.SaveWindowSize()
     s.height = math.floor(ui.frame:GetHeight() or MIN_H)
 end
 
+-- Remember where the window was dragged to.
+--
+-- All FOUR values, not just x and y: GetPoint returns the anchor it is
+-- currently using, and a pair of offsets means nothing without the point they
+-- are measured from. Storing only x/y and restoring against CENTER puts the
+-- window somewhere it has never been.
+function ui.SaveWindowPoint()
+    if not ui.frame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    local ok, point, _, relPoint, x, y = pcall(function()
+        return ui.frame:GetPoint(1)
+    end)
+    if not ok or not point then return end
+    s.point    = point
+    s.relPoint = relPoint or point
+    s.x        = math.floor(x or 0)
+    s.y        = math.floor(y or 0)
+end
+
+-- Would this saved point put the window somewhere it can still be dragged?
+--
+-- THE CASE THIS EXISTS FOR: a window saved near the edge of a large screen,
+-- restored on a smaller one, lands with its title bar off-screen -- and the
+-- title bar is the only drag handle, so there is no way back short of wiping
+-- the saved variables. Anything that can strand a user gets checked, not
+-- assumed.
+--
+-- Deliberately generous: it asks only that a reasonable slice of the title bar
+-- is reachable, not that the whole window fits. Someone who likes their window
+-- half off the edge is allowed to keep it there.
+local GRAB_MARGIN = 80      -- of title bar that must remain on screen
+local BAR_H = 26            -- ...and its height, for the bottom-edge check
+function ui.PointIsReachable(point, relPoint, x, y, screenW, screenH,
+                             winW, winH)
+    if not point or not relPoint then return false end
+    screenW, screenH = screenW or 0, screenH or 0
+    winW, winH = winW or 0, winH or 0
+    -- An unmeasured screen means UIParent has not been laid out yet. Refusing
+    -- the saved point there would move the window to CENTER on some logins,
+    -- which is worse than the fault this guards against.
+    if screenW <= 0 or screenH <= 0 then return true end
+
+    -- Convert the anchor and its offsets into the frame's LEFT and TOP edges,
+    -- both measured from the screen's top-left with DOWN and RIGHT positive.
+    -- The offsets mean different things per anchor, and the window's own size
+    -- is needed for the far edges -- a BOTTOM anchor fixes the frame's bottom,
+    -- so its top depends on how tall the frame is.
+    local left
+    if string.find(relPoint, "LEFT") then
+        left = x
+    elseif string.find(relPoint, "RIGHT") then
+        left = screenW + x - winW
+    else
+        left = screenW / 2 + x - winW / 2
+    end
+
+    local top
+    if string.find(relPoint, "TOP") then
+        top = -y                                  -- y is negative going down
+    elseif string.find(relPoint, "BOTTOM") then
+        top = screenH - (y + winH)
+    else
+        top = screenH / 2 - y - winH / 2
+    end
+
+    -- A grabbable slice of the title bar has to be on screen horizontally,
+    -- and the bar itself has to be within the screen vertically.
+    if left + GRAB_MARGIN > screenW then return false end
+    if left + winW - GRAB_MARGIN < 0 then return false end
+    if top < 0 then return false end                    -- above the top edge
+    if top > screenH - BAR_H then return false end      -- below the bottom
+    return true
+end
+
 function ui.RestoreWindowSize()
     if not ui.frame or not A.db or not A.db.char then return end
     -- Scale first, and unconditionally: it is stored independently of the size,
@@ -597,14 +702,42 @@ function ui.RestoreWindowSize()
     -- width to restore -- and would otherwise lose their scale every login.
     ui.ApplyWindowScale()
     local s = A.db.char.ui
-    if not s or not s.width or not s.height then return end
-    local w, h = s.width, s.height
-    if w < MIN_W then w = MIN_W end
-    if h < MIN_H then h = MIN_H end
-    if w > MAX_W then w = MAX_W end
-    if h > MAX_H then h = MAX_H end
-    ui.frame:SetWidth(w)
-    ui.frame:SetHeight(h)
+    if not s then return end
+
+    if s.width and s.height then
+        local w, h = s.width, s.height
+        if w < MIN_W then w = MIN_W end
+        if h < MIN_H then h = MIN_H end
+        if w > MAX_W then w = MAX_W end
+        if h > MAX_H then h = MAX_H end
+        ui.frame:SetWidth(w)
+        ui.frame:SetHeight(h)
+    end
+
+    -- Put it back where it was left -- but only if that is somewhere it can
+    -- still be dragged from. See ui.PointIsReachable: the title bar is the
+    -- only drag handle, so a point restored off-screen on a smaller monitor
+    -- would strand the window with no way back.
+    if s.point and s.relPoint then
+        local sw = (UIParent and UIParent.GetWidth
+                    and UIParent:GetWidth()) or 0
+        local sh = (UIParent and UIParent.GetHeight
+                    and UIParent:GetHeight()) or 0
+        if ui.PointIsReachable(s.point, s.relPoint, s.x or 0, s.y or 0,
+                               sw, sh, ui.frame:GetWidth() or 0,
+                               ui.frame:GetHeight() or 0) then
+            ui.frame:ClearAllPoints()
+            ui.frame:SetPoint(s.point, UIParent, s.relPoint,
+                              s.x or 0, s.y or 0)
+        else
+            -- Unreachable: centre it and forget the bad point, so the next
+            -- drag saves a good one instead of this running every login.
+            ui.frame:ClearAllPoints()
+            ui.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            s.point, s.relPoint, s.x, s.y = nil, nil, nil, nil
+        end
+    end
+
     ui.QueueRepaint()
 end
 
@@ -834,7 +967,10 @@ function ui.BuildWindow()
     titleBar:EnableMouse(true)
     titleBar:RegisterForDrag("LeftButton")
     titleBar:SetScript("OnDragStart", function() f:StartMoving() end)
-    titleBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+    titleBar:SetScript("OnDragStop", function()
+        f:StopMovingOrSizing()
+        ui.SaveWindowPoint()
+    end)
     ui.titleBar = titleBar
 
     local titleText = titleBar:CreateFontString(
@@ -1485,6 +1621,16 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setConfirmCancel = ccChk
 
+    -- Ask before posting an auction? Off makes the Sell tab's Post button act
+    -- immediately. Same shape as the cancel toggle above it.
+    local cpChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetConfirmPost")
+    cpChk:SetPoint("TOPLEFT", ccChk, "BOTTOMLEFT", 0, -6)
+    cpChk:SetLabel("Ask before posting an auction", C.text)
+    cpChk:SetScript("OnClick", function()
+        A.db.SetSetting("confirmPost", cpChk:GetChecked() and true or false)
+    end)
+    ui.setConfirmPost = cpChk
+
     -- ---- Scan pacing -------------------------------------------------------
     -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
     -- running the AuctionQueryThrottle DLL scans as fast as the server answers
@@ -1569,28 +1715,11 @@ end
 function ui.RefreshSettings()
     if not ui.settingsBuilt then return end
     local dur = A.db.Setting("duration")
-    local di = 1
-    while di <= table.getn(ui.setDurBtns) do
-        local b = ui.setDurBtns[di]
-        if b.minutes == dur then b:LockHighlight() else b:UnlockHighlight() end
-        di = di + 1
-    end
+    ui.MarkChosen(ui.setDurBtns, function(b) return b.minutes == dur end)
     local mode = A.db.Setting("sellDefault")
-    local mi = 1
-    while mi <= table.getn(ui.setSellModeBtns) do
-        local b = ui.setSellModeBtns[mi]
-        if b.mode == mode then b:LockHighlight() else b:UnlockHighlight() end
-        mi = mi + 1
-    end
+    ui.MarkChosen(ui.setSellModeBtns, function(b) return b.mode == mode end)
     local ucMode = A.db.Setting("undercutMode")
-    if ui.setUcModeBtns then
-        local ui2 = 1
-        while ui2 <= table.getn(ui.setUcModeBtns) do
-            local b = ui.setUcModeBtns[ui2]
-            if b.mode == ucMode then b:LockHighlight() else b:UnlockHighlight() end
-            ui2 = ui2 + 1
-        end
-    end
+    ui.MarkChosen(ui.setUcModeBtns, function(b) return b.mode == ucMode end)
     if ui.setUndercut then
         ui.setUndercut:SetText(tostring(A.db.Setting("undercutPct")))
     end
@@ -1625,6 +1754,10 @@ function ui.RefreshSettings()
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
     end
+    if ui.setConfirmPost then
+        ui.setConfirmPost:SetChecked(
+            A.db.Setting("confirmPost") ~= false and 1 or nil)
+    end
     if ui.setConfirmCancel then
         ui.setConfirmCancel:SetChecked(
             A.db.Setting("confirmCancel") ~= false and 1 or nil)
@@ -1653,14 +1786,7 @@ function ui.RefreshSettings()
     -- query gate is actually doing, so it's obvious whether a throttle-removing
     -- DLL (AuctionQueryThrottle) is having any effect.
     local thMode = A.db.Setting("queryThrottle") or "auto"
-    if ui.setThrottleBtns then
-        local ti = 1
-        while ti <= table.getn(ui.setThrottleBtns) do
-            local b = ui.setThrottleBtns[ti]
-            if b.mode == thMode then b:LockHighlight() else b:UnlockHighlight() end
-            ti = ti + 1
-        end
-    end
+    ui.MarkChosen(ui.setThrottleBtns, function(b) return b.mode == thMode end)
     if ui.setThrottleInfo then
         local p = A.scan.GetProgress()
         if thMode == "safe" then
@@ -7442,12 +7568,7 @@ end
 function ui.RefreshHistory()
     if not ui.histBuilt then return end
     -- Highlight the active period button.
-    local pi = 1
-    while pi <= table.getn(ui.histPerBtns) do
-        local b = ui.histPerBtns[pi]
-        if b.idx == ui.histPeriod then b:LockHighlight() else b:UnlockHighlight() end
-        pi = pi + 1
-    end
+    ui.MarkChosen(ui.histPerBtns, function(b) return b.idx == ui.histPeriod end)
 
     local secs = HIST_PERIODS[ui.histPeriod].secs
     local since = (secs > 0) and (time() - secs) or nil
@@ -8372,12 +8493,8 @@ function ui.RefreshSell()
     if not ui.sellBuilt then return end
     local it = A.sell.GetItem()
 
-    local di = 1
-    while di <= table.getn(ui.sellDurBtns) do
-        local b = ui.sellDurBtns[di]
-        if b.minutes == ui.sellDuration then b:LockHighlight() else b:UnlockHighlight() end
-        di = di + 1
-    end
+    ui.MarkChosen(ui.sellDurBtns,
+        function(b) return b.minutes == ui.sellDuration end)
 
     local count = A.sell.OwnerCount()
     local atCap = count >= A.sell.CAP
@@ -8993,6 +9110,16 @@ function ui.ConfirmPost()
         nStacks = nStacks, unitBuyout = unitBuy, unitBid = unitBid,
         minutes = ui.sellDuration,
     }
+    -- The Aegis tab can turn the confirmation off, which is what you want when
+    -- relisting a stack at a time. Same shape as ui.ConfirmCancelAuction.
+    --
+    -- The check goes AFTER pendingPost is filled and after every validation
+    -- above it: skipping the dialog must skip only the dialog, not the price
+    -- and stack checks that decide whether posting is sane at all.
+    if A.db.Setting("confirmPost") == false then
+        ui.DoPost()
+        return
+    end
     StaticPopup_Show("AEGIS_EXCHANGE_POST", it.name, detail)
 end
 

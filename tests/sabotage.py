@@ -290,6 +290,35 @@ end""",
      """    local n = math.floor((col - SAVED_HEAD_H - SAVED_PAD) / SAVED_ROW_H) - 3""",
      "geometry"),
 
+    # ---- window position ---------------------------------------------------
+    # The clamp inverted: a reachable point refused and an unreachable one
+    # accepted, which strands the window with no drag handle on screen.
+    ("point-clamp-top-inverted", "ui/frame.lua",
+     "    if top < 0 then return false end                    -- above the top edge",
+     "    if top > 0 then return false end                    -- above the top edge",
+     "window.point"),
+
+    # A BOTTOM anchor converted without the window's height -- the mistake that
+    # made BOTTOMLEFT at the origin look off-screen.
+    ("point-bottom-ignores-height", "ui/frame.lua",
+     "        top = screenH - (y + winH)",
+     "        top = screenH - y",
+     "window.point"),
+
+    # Judging a screen it has not measured: every login on a slow layout would
+    # move the window to CENTER.
+    ("point-judges-unmeasured-screen", "ui/frame.lua",
+     "    if screenW <= 0 or screenH <= 0 then return true end",
+     "    if screenW <= 0 or screenH <= 0 then return false end",
+     "window.point"),
+
+    # No horizontal grab margin at all: a window one pixel on screen counts as
+    # reachable, and it is not.
+    ("point-no-grab-margin", "ui/frame.lua",
+     "local GRAB_MARGIN = 80      -- of title bar that must remain on screen",
+     "local GRAB_MARGIN = 0       -- of title bar that must remain on screen",
+     "window.point"),
+
     # Loading `stack/N` must NOT also tick full-stacks -- that is the same
     # illegal pair arriving by the other door.
     ("builder-setterm-ticks-both", "ui/frame.lua",
@@ -307,6 +336,7 @@ SUITES = {
     "sort_results": "tests/units/sort_results_test.lua",
     "builder.term": "tests/units/builder_term_test.lua",
     "geometry": "tests/units/geometry_test.lua",
+    "window.point": "tests/units/window_point_test.lua",
 }
 
 

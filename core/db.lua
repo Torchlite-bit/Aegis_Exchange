@@ -167,6 +167,9 @@ local SETTING_DEFAULTS = {
     -- Ask before cancelling an auction. Off = cancel on the first click, which
     -- is what you want when clearing a lot of undercuts by hand.
     confirmCancel  = true,
+    -- Ask before posting an auction. Off = post on the first click, which is
+    -- what you want when relisting a stack at a time.
+    confirmPost    = true,
 }
 
 -- Read a user setting, falling back to its default when unset.

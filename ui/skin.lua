@@ -66,6 +66,28 @@ local function Backdrop(frame, alpha)
     pcall(function() env.CreateBackdrop(frame, nil, nil, alpha) end)
 end
 
+-- Push pfUI's backdrop BEHIND the frame it was made for.
+--
+-- CreateBackdrop builds a CHILD FRAME, and a child draws above ALL of its
+-- parent's regions whatever draw layer they are on -- the same rule that makes
+-- ui/frame.lua put the Filter Builder's text on a child rather than on the
+-- well. For a button that means the plate can cover the label, and a button
+-- with no text on it reads as a broken button rather than as a layering
+-- accident.
+--
+-- Dropping the backdrop one frame level below its parent puts the label back
+-- on top. Harmless where pfUI already does this; the point is that we no
+-- longer depend on whether it does.
+local function SinkBackdrop(frame)
+    if not frame or not frame.backdrop then return end
+    pcall(function()
+        local lvl = frame:GetFrameLevel()
+        if lvl and lvl > 0 then
+            frame.backdrop:SetFrameLevel(lvl - 1)
+        end
+    end)
+end
+
 local function Strip(frame)
     local env = Env()
     if not frame or not env or not env.StripTextures then return end
@@ -144,6 +166,7 @@ local function SkinWidget(f)
     -- sub-tab pills use.
     if f.aegisButton then
         Backdrop(f, 1)
+        SinkBackdrop(f)
         f.aegisSkinned = true
         if A.ui and A.ui.SetButtonKind then
             A.ui.SetButtonKind(f, f.aegisKind)
@@ -223,6 +246,7 @@ function skin.Apply()
     if ui.subtabs then
         for _, tab in pairs(ui.subtabs) do
             Backdrop(tab, 1)
+            SinkBackdrop(tab)         -- ...and keep their labels above it
             tab.aegisSkinned = true   -- keep the generic pass off them
         end
     end

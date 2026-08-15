@@ -1251,6 +1251,53 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
   clause box is nested inside its well and inset on purpose. Recorded rather
   than "fixed".
 
+### 3a — Feature batch, phase one — ✅ **DONE** (v1.20.0)
+
+First of three phases. Phases two (Tab traversal, the `tooltip` run-on syntax)
+and three (the pending filter components, restyling Sell / Auctions / Crafting
+/ History) are NOT started — each waits on the previous one being confirmed in
+game.
+
+- **A fix applied in one place and left in six others is not a fix.**
+  `LockHighlight` drives a template highlight texture that `ui.MakeButton` has
+  no such texture for, so it does nothing. That was discovered and fixed for
+  the Advanced view tabs in 1.15.1 — and the same dead call was still marking
+  the chosen post duration, sell mode, undercut mode, scan pacing, history
+  period and Sell-tab duration. **When a bug turns out to be a pattern, grep
+  for the pattern before closing it.** It is `ui.MarkChosen` now, one function.
+- **A "not chosen" button restores the kind it was BUILT with**, captured on
+  first use, not a hardcoded "quiet". A row of accent buttons would otherwise
+  come back wrong the first time one was deselected.
+- **The window saved its size but not its point.** Restoring one needs a guard
+  the size never did: the title bar is the only drag handle, so a point saved
+  near the edge of a large monitor and restored on a smaller one strands the
+  window with no way back. `ui.PointIsReachable` decides, and it is deliberately
+  generous — half off the edge is a choice, unreachable is a bug. When it
+  refuses it also CLEARS the bad point, so the fallback runs once rather than
+  every login.
+- **The reachability check needs the window's HEIGHT, not just its width.** A
+  BOTTOM anchor fixes the frame's bottom edge, so its top depends on how tall
+  the frame is. The first version ignored that and reported a perfectly normal
+  BOTTOMLEFT window as off-screen; the test caught it before it shipped.
+- **It refuses to judge a screen it has not measured.** UIParent reporting 0
+  means it has not been laid out yet, and treating that as "unreachable" would
+  move the window to CENTER on some logins — worse than the fault guarded
+  against.
+- **pfUI's backdrop is a CHILD FRAME and a child draws above all of its
+  parent's regions**, label included. Pushed one frame level behind now. The
+  same layering rule already governs the Filter Builder's text; it applies to
+  every button, not just the ones a screenshot happened to show.
+
+#### One diagnosis in the prompt was wrong
+
+The brief stated as a "confirmed structural fact" that the settings panel is
+built lazily AFTER `A.skin.Apply()`, and that its buttons therefore never reach
+skin.lua's `aegisButton` branch. **That is not true**:
+`ui.BuildAegisSettings` is called at ui/frame.lua:1172 and `A.skin.Apply()` at
+1203, so the panel is skinned normally. The layering fix above was made on the
+remaining hypothesis and on its own merits, not on that one — worth recording,
+because a confident wrong premise is more expensive than an open question.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

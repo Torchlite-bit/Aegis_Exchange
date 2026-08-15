@@ -12,6 +12,42 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.20.0]
+
+Phase one of the feature batch: the window remembers where you put it, a post
+confirmation you can switch off, and selected buttons that actually look
+selected. `/reload`.
+
+### Added
+- **The window remembers its position.** It saved its size but not its point,
+  so it returned to centre every session. A restored point is checked against
+  the current screen first: the title bar is the only drag handle, so a window
+  saved near the edge of a large monitor and restored on a smaller one would
+  otherwise be stranded off-screen with no way back. If it would land
+  unreachable it centres instead and forgets the bad point.
+- **"Ask before posting an auction"** on the Aegis tab, alongside the existing
+  cancel toggle. Off posts on the first click, which is what you want when
+  relisting a stack at a time. The confirmation is all that is skipped — the
+  price and stack checks still run.
+
+### Fixed
+- **Selected buttons showed no selected state, in six places.** The chosen post
+  duration, sell mode, undercut mode, scan pacing, history period and Sell-tab
+  duration were all marked with `LockHighlight()`, which drives a *template*
+  highlight texture that `ui.MakeButton` does not have — so every one of those
+  calls was silently doing nothing and the chosen button looked exactly like
+  its neighbours. The selected one now takes the warm gold plate that Search
+  and Full Scan wear.
+
+  This is the same bug that was found and fixed for the Advanced view tabs in
+  1.15.1. It was fixed in one place and left in six others, so it is a shared
+  `ui.MarkChosen` now rather than a seventh copy of the loop.
+- **pfUI's backdrop could cover a button's label.** `CreateBackdrop` builds a
+  child frame, and a child draws above *all* of its parent's regions whatever
+  layer they are on — the same rule that puts the Filter Builder's text on a
+  child rather than on the well. The backdrop is pushed one frame level behind
+  its button now, so the label is always on top.
+
 ## [1.19.4]
 
 The Filter Builder's form fits its box, and the saved lists fill theirs and
@@ -1709,6 +1745,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.20.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
