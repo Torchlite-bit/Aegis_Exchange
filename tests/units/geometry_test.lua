@@ -402,4 +402,142 @@ for i = 1, table.getn(sizes) do
             lw .. " / " .. rw)
 end
 
+-- ---------------------------------------------------------------------------
+H.section("The Filter Builder's form fits its column")
+-- ---------------------------------------------------------------------------
+
+-- THE ASSERTION WHOSE ABSENCE LET THE FORM OVERFLOW BY 34px. FBL.r1..r10 were
+-- ten hand-written offsets ending at 276, in a column that is 254px tall at
+-- MIN_H -- so "Stack Size" was cut off by the well's border and the note below
+-- it escaped onto the action bar. Three rows had been added and nothing
+-- anywhere said the form had run out of room.
+local FB_ROW_1  = field("FBL", "row_1")
+local FB_ROW_H  = field("FBL", "row_h")
+local FB_GAP_X  = field("FBL", "gap_extra")
+local FB_ROWS_N = field("FBL", "n_rows")
+
+-- ui.FBRow, restated: row 1 at row_1, pitch row_h, one added gap from row 7.
+local function fbRow(n)
+    local y = FB_ROW_1 + (n - 1) * FB_ROW_H
+    if n >= 7 then y = y + FB_GAP_X end
+    return y
+end
+
+local function builderColumnHeight(winH)
+    return ui.PanelHeightAt(winH) - BODY_Y - BODY_BOT
+end
+
+local CONTROL_H = 18       -- the tallest control on a form row
+local ROW_OFFSET = 3       -- a control sits at its label's y + 3
+
+for _, winH in ipairs({ MIN_H, 600, 700, MAX_H }) do
+    local col = builderColumnHeight(winH)
+    local lastRow = fbRow(FB_ROWS_N)
+    local needed = lastRow + ROW_OFFSET + CONTROL_H + FBL_PAD
+    H.check("the whole form fits the column at window height " .. winH,
+            needed <= col,
+            needed .. "px of form in a " .. col .. "px column")
+end
+
+-- A real margin at the tightest size, not a hairline. Demanding a WHOLE spare
+-- row here was the wrong trade -- it would force a cramped pitch today to
+-- reserve space for a field nobody has asked for. The fit check above is what
+-- makes the next field fail the suite instead of the screenshot: add a tenth
+-- row and `needed` grows by the pitch and that check goes red.
+local minCol = builderColumnHeight(MIN_H)
+local minNeeded = fbRow(FB_ROWS_N) + ROW_OFFSET + CONTROL_H + FBL_PAD
+H.check("the fit at MIN_H is not a hairline",
+        minCol - minNeeded >= 8,
+        (minCol - minNeeded) .. "px spare")
+
+-- The pitch has to leave daylight between one control and the next.
+H.check("rows are not so tight the controls touch",
+        FB_ROW_H - CONTROL_H >= 3,
+        (FB_ROW_H - CONTROL_H) .. "px between controls")
+
+-- The extra-options block is separated from the AH-side fields on purpose.
+H.check("rows 7-9 are set apart from rows 1-6",
+        fbRow(7) - fbRow(6) > FB_ROW_H,
+        (fbRow(7) - fbRow(6)) .. " vs a pitch of " .. FB_ROW_H)
+H.eq("...and the rows within each group share one pitch",
+     fbRow(3) - fbRow(2), FB_ROW_H)
+H.eq("...including inside the extra block", fbRow(9) - fbRow(8), FB_ROW_H)
+
+-- ---------------------------------------------------------------------------
+H.section("Saved Searches: row count and scroll clamp")
+-- ---------------------------------------------------------------------------
+
+-- The REAL ui.SavedRowsAt, extracted and run -- not restated.
+--
+-- The first draft of this section restated its arithmetic, and the sabotage
+-- that makes the lists stop three rows short of their well sailed straight
+-- past it: a restatement reproduces the intent while the code does something
+-- else. That is the SECOND time in two passes, so the rule is now explicit --
+-- if a function can be extracted, extract it.
+-- GLOBALS, not locals: the extracted function reads these the way ui/frame.lua
+-- reads its file-scope locals, and a local here would be invisible to it.
+SAVED_HEAD_H = constant("SAVED_HEAD_H")
+SAVED_PAD    = constant("SAVED_PAD")
+do
+    -- `local SAVED_ROWS, SAVED_ROW_H = 30, 21` declares two names on one line,
+    -- so it needs its own read rather than the single-value helper.
+    local f = assert(io.open(SRC, "r"))
+    for line in f:lines() do
+        local _, _, a, b = string.find(line,
+            "^local SAVED_ROWS, SAVED_ROW_H = (%d+), (%d+)")
+        if a then SAVED_ROWS, SAVED_ROW_H = tonumber(a), tonumber(b); break end
+    end
+    f:close()
+end
+assert(SAVED_ROWS and SAVED_ROW_H, "did not find the SAVED_ROWS declaration")
+ADVL.body_y, ADVL.body_bot = BODY_Y, BODY_BOT
+do
+    local fn, err = loadstring(extract("function ui.SavedRowsAt("),
+                               "SavedRowsAt")
+    if not fn then error("SavedRowsAt will not compile: " .. tostring(err)) end
+    fn()
+end
+local savedRowsAt = ui.SavedRowsAt
+
+for _, winH in ipairs({ MIN_H, 600, 700, MAX_H }) do
+    local n = savedRowsAt(winH)
+    local col = ui.PanelHeightAt(winH) - BODY_Y - BODY_BOT
+    H.check("at least one row at window height " .. winH, n >= 1, n)
+    H.check("the rows fit the column at " .. winH,
+            SAVED_HEAD_H + n * SAVED_ROW_H + SAVED_PAD <= col,
+            (SAVED_HEAD_H + n * SAVED_ROW_H + SAVED_PAD) .. " of " .. col)
+    -- ...and FILL it: less than one row of slack, or the list is stopping
+    -- short of its own box, which is the reported fault.
+    H.check("the rows FILL the column at " .. winH,
+            col - (SAVED_HEAD_H + n * SAVED_ROW_H + SAVED_PAD) < SAVED_ROW_H,
+            (col - (SAVED_HEAD_H + n * SAVED_ROW_H + SAVED_PAD)) .. "px spare")
+end
+
+H.check("a taller window shows more rows",
+        savedRowsAt(MAX_H) > savedRowsAt(MIN_H),
+        savedRowsAt(MIN_H) .. " -> " .. savedRowsAt(MAX_H))
+
+-- THE SCROLL CLAMP. Offsets past the end would show an empty band below the
+-- last entry; a maximum below total-visible would make the last entry
+-- unreachable, which is the bug being fixed.
+local function clamp(offset, total, visible)
+    local maxOff = total - visible
+    if maxOff < 0 then maxOff = 0 end
+    if offset > maxOff then offset = maxOff end
+    if offset < 0 then offset = 0 end
+    return offset
+end
+
+local vis = 10
+H.eq("a list that fits does not scroll", clamp(5, 6, vis), 0)
+H.eq("...nor exactly filling it", clamp(3, vis, vis), 0)
+H.eq("a negative offset clamps to the top", clamp(-4, 40, vis), 0)
+H.eq("the maximum offset is total minus visible", clamp(999, 40, vis), 30)
+H.eq("...so the LAST entry is reachable", clamp(999, 40, vis) + vis, 40)
+H.check("...and nothing past it is", clamp(999, 40, vis) + vis <= 40,
+        clamp(999, 40, vis) + vis)
+-- Shrinking the list under a scrolled offset -- deleting a favourite while at
+-- the bottom -- must pull the view back, not leave it past the end.
+H.eq("deleting from the end pulls the view back", clamp(30, 35, vis), 25)
+
 os.exit(H.report("geometry"))

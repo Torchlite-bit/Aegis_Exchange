@@ -724,6 +724,24 @@ end
 -- it out, and painting one row on that pass was wrong. Both behaviours are
 -- correct; they are just not the same parameter, and conflating them is what
 -- produced an overflowing table.)
+-- WARNING -- THIS MEASURES A FRAME, AND MEASURING IS A TRAP.
+--
+-- GetHeight() on a frame anchored by TWO EDGES returns the height it was last
+-- LAID OUT at, not its current one; the client relayouts a frame after its
+-- ancestor's size changes. Restoring a saved window size and then asking a
+-- two-edge-anchored scroll frame how tall it is gets the answer from the
+-- window's CREATION size, forever.
+--
+-- That has now cost three separate bugs: the Buy table's row count (fixed by
+-- ui.PanelHeightAt), the Advanced layout's widths (ui.PanelWidthAt, 1.19.2)
+-- and the Saved Searches lists (ui.SavedRowsAt, 1.19.4). Each replaced a call
+-- to this function with arithmetic on the WINDOW's height, which is set
+-- explicitly and is therefore true the moment it is read.
+--
+-- Only use this on a frame whose height was set with SetHeight. The remaining
+-- callers -- Crafting, Auctions, History, the bag and list pickers -- have not
+-- been audited; if one of those lists is ever reported as not filling its box,
+-- this is the first thing to look at.
 function ui.RowsFor(scroll, rowH, minRows, maxRows)
     if not scroll then return minRows end
     local h = scroll:GetHeight() or 0
@@ -3345,9 +3363,56 @@ local FBL = {
     chk_gap = 12,   -- box -> its trailing checkbox (Exact / Usable)
     comp_w  = 126,  -- component dropdown
 
-    r1 = -34, r2 = -60, r3 = -86,  r4 = -112, r5 = -138,
-    r6 = -164, r7 = -196, r8 = -220, r9 = -244, r10 = -276,
+    -- ROW GEOMETRY, derived rather than written out.
+    --
+    -- These used to be ten hand-written offsets ending at -276, and nothing
+    -- checked they fit. At MIN_H the column is only 254px tall
+    -- (384 panel - 78 body_y - 52 body_bot), so the Stack Size box overran its
+    -- well by 21px and the note below it by 34 -- which is the clipping you
+    -- see at the smallest window size. Three rows were added in 1.19.0 and the
+    -- form had no way to say it had run out of room.
+    --
+    -- row_1 is the first row's baseline, row_h the pitch, and gap_extra the
+    -- deliberate separation before the Buyout / Full stacks / Stack Size
+    -- block. ui.FBRow(n) turns a row number into an offset, and
+    -- tests/units/geometry_test.lua asserts the last one still fits at MIN_H.
+    row_1     = 30,
+    row_h     = 21,
+    gap_extra = 8,    -- before the extra-options block (rows 7-9)
+    n_rows    = 9,
 }
+
+-- Negative y of form row `n` (1-based) inside the builder's left column.
+-- Rows 7-9 are the extra-options block and sit after one added gap.
+function ui.FBRow(n)
+    local y = FBL.row_1 + (n - 1) * FBL.row_h
+    if n >= 7 then y = y + FBL.gap_extra end
+    return -y
+end
+
+-- Set the Builder's status line. Empty text puts it away.
+--
+-- ONE writer, because the note now lives on the action bar rather than inside
+-- the form's column, and something has to raise and lower it -- eight call
+-- sites each remembering to Show and Hide is seven chances to forget. `warn`
+-- picks the amber the multi-term and missing-value messages use; everything
+-- else is quiet gold.
+function ui.BuilderNote(text, warn)
+    local fs = ui.fbNote
+    if not fs then return end
+    if not text or text == "" then
+        fs:SetText("")
+        fs:Hide()
+        return
+    end
+    fs:SetText(text)
+    if warn then
+        fs:SetTextColor(0.9, 0.6, 0.3)
+    else
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    fs:Show()
+end
 
 -- Full stacks and an explicit stack size cannot both be set: the term holds
 -- one or the other (TermToQuery emits `stack/N` when stackSize is set, bare
@@ -4081,6 +4146,9 @@ function ui.SetBuyView(name)
     if ui.fbBuildBtn then
         if builder then ui.fbBuildBtn:Enable() else ui.fbBuildBtn:Disable() end
     end
+    -- The Builder's status line lives on the action bar now, so it has to be
+    -- put away with the view rather than with the form's frame.
+    if not builder and ui.BuilderNote then ui.BuilderNote("") end
     -- Bid / Buyout and the bid entry act on a SELECTED AUCTION, and neither
     -- Builder nor Saved has one. Showing them there offers an action that
     -- cannot do anything. Close and the gold total stay everywhere.
@@ -4163,9 +4231,11 @@ end
 --                     on a favorite-> Move Up / Move Down / Delete menu
 -- ---------------------------------------------------------------------------
 
--- SAVED_ROWS is the CEILING, not the count. The visible number comes from the
--- column's height at paint time (ui.RowsFor), the way every other list in the
--- window works -- a fixed 12 was what left the tall void under the lists.
+-- SAVED_ROWS is the POOL CEILING, not the count. The visible number comes from
+-- ui.SavedRowsAt, computed from the WINDOW's height -- not from measuring the
+-- column, which is what left both lists stopping short of the bottom of their
+-- own well whatever size the window was. Rows beyond the visible count are
+-- reachable by the wheel; see ui.ScrollSaved.
 local SAVED_ROWS, SAVED_ROW_H = 30, 21
 local SAVED_HEAD_H = 32       -- heading band INSIDE the well
 local SAVED_PAD = 8           -- well inset: heading, rows and rules share it
@@ -4210,7 +4280,7 @@ function ui.BuildSavedSearches(panel, advLeft)
     --
     -- So the well is drawn around the WHOLE column and the heading is placed
     -- inside its top inset, rather than the well starting below the heading.
-    local function column(parentCol, title, hint)
+    local function column(parentCol, title, hint, which)
         ui.MakeWell(parentCol, parentCol, 0)
 
         local h = parentCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -4226,13 +4296,22 @@ function ui.BuildSavedSearches(panel, advLeft)
         area:SetPoint("TOPLEFT", parentCol, "TOPLEFT", SAVED_PAD, -SAVED_HEAD_H)
         area:SetPoint("BOTTOMRIGHT", parentCol, "BOTTOMRIGHT",
             -SAVED_PAD, SAVED_PAD)
+        -- Wheel scrolling, on the AREA -- and again on each row below, which
+        -- is a Button and would otherwise swallow the event wherever the
+        -- pointer actually is, i.e. over the list you are trying to scroll.
+        area.which = which
+        area:EnableMouseWheel(true)
+        area:SetScript("OnMouseWheel", function()
+            ui.ScrollSaved(area.which, arg1)
+        end)
         return area
     end
     -- "right-click -> * favorite" / "right-click -> menu", the concept's
     -- wording: it names the RESULT of the click, not a verb for it.
     ui.savedAreaL = column(colL, "RECENT",
-        "right-click \226\134\146 " .. SAVED_STAR .. " favorite")
-    ui.savedAreaR = column(colR, "FAVORITES", "right-click \226\134\146 menu")
+        "right-click \226\134\146 " .. SAVED_STAR .. " favorite", "recent")
+    ui.savedAreaR = column(colR, "FAVORITES",
+        "right-click \226\134\146 menu", "fav")
 
     -- One row builder for both columns; `which` tags the row so the click
     -- handlers know which list they are looking at.
@@ -4253,6 +4332,14 @@ function ui.BuildSavedSearches(panel, advLeft)
             r:SetPoint("TOPRIGHT", col, "TOPRIGHT", -SAVED_PAD,
                 -SAVED_HEAD_H - (i - 1) * SAVED_ROW_H)
             r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            -- A row covers the area beneath it, so the wheel has to be
+            -- forwarded from here as well or scrolling only works in the
+            -- empty band under the last entry -- which is exactly where the
+            -- pointer is not.
+            r:EnableMouseWheel(true)
+            r:SetScript("OnMouseWheel", function()
+                ui.ScrollSaved(which, arg1)
+            end)
 
             -- Hover / selection band, full row width. Drawn in BACKGROUND so
             -- the separator and the label both sit over it.
@@ -4437,28 +4524,60 @@ function ui.OnSavedClick(row, button)
     ui.DoBuySearch()
 end
 
+-- How many rows a Saved Searches column shows at a given WINDOW height.
+--
+-- Derived, never measured -- see ui.PanelHeightAt for why. The column runs
+-- from ADVL.body_y to ADVL.body_bot, less the heading band that sits inside
+-- the well above the first row.
+function ui.SavedRowsAt(h)
+    local col = ui.PanelHeightAt(h) - ADVL.body_y - ADVL.body_bot
+    local n = math.floor((col - SAVED_HEAD_H - SAVED_PAD) / SAVED_ROW_H)
+    if n < 1 then n = 1 end
+    if n > SAVED_ROWS then n = SAVED_ROWS end
+    return n
+end
+
+-- NOTE ON PLACEMENT: below the SAVED_* constants because it reads
+-- them. tests/lint/scoping.py caught this one before it shipped --
+-- written 900 lines higher, every one of those names resolved to a
+-- nil GLOBAL, which compiles cleanly and fails only when called.
 function ui.RefreshSavedSearches()
     if not ui.buySaved then return end
-    -- How many rows the column can actually show at the window's CURRENT
-    -- height. Asked at paint time, like every other list here, so dragging the
-    -- window taller shows more saved searches instead of more empty well.
-    -- The floor is the old fixed count, NOT 1. A two-edge-anchored frame
-    -- reports height 0 until the client has laid it out, so a floor of 1
-    -- would paint a single row on the first pass -- and permanently, in any
-    -- environment that never lays out at all.
-    local fit = SAVED_ROWS
-    if ui.savedAreaL then
-        fit = ui.RowsFor(ui.savedAreaL, SAVED_ROW_H, 12, SAVED_ROWS)
-    end
-    local function paint(rows, list, which)
+    -- DERIVED from the window's height, not measured off the column.
+    --
+    -- It used to call ui.RowsFor(ui.savedAreaL, ...), which reads GetHeight()
+    -- on a frame anchored by two edges -- so it got the height that frame was
+    -- last LAID OUT at, which is the window's creation size. Both lists then
+    -- stopped short of the bottom of their own well however tall the window
+    -- was. Third time this trap has bitten: ui.PanelHeightAt exists for it and
+    -- ui.PanelWidthAt was added for it in 1.19.2.
+    local fit = ui.SavedRowsAt(
+        (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0)
+
+    local function paint(rows, list, which, offset)
+        local total = table.getn(list)
+        -- Re-clamp EVERY paint, not only on the wheel: deleting a favourite
+        -- while scrolled to the bottom would otherwise leave the list showing
+        -- an empty band past the end of it.
+        local maxOff = total - fit
+        if maxOff < 0 then maxOff = 0 end
+        if offset > maxOff then offset = maxOff end
+        if offset < 0 then offset = 0 end
+        if which == "recent" then ui.savedOffRecent = offset
+        else ui.savedOffFav = offset end
+
         local i = 1
         while i <= table.getn(rows) do
             local r = rows[i]
-            local q = list[i]
-            if i > fit then q = nil end
+            local q = nil
+            if i <= fit then q = list[i + offset] end
             if q then
                 r.full = q
-                r.listIndex = i
+                -- The list index is the REAL one, not the row's position:
+                -- Move Up / Move Down / Delete act on the favourite you
+                -- clicked, and a scrolled list would otherwise reorder the
+                -- wrong one.
+                r.listIndex = i + offset
                 -- The favourite star is its OWN FontString now (created with
                 -- the row), so it stays gold whatever the label does and no
                 -- longer needs a |c prefix spliced onto every query string.
@@ -4481,9 +4600,26 @@ function ui.RefreshSavedSearches()
             i = i + 1
         end
     end
-    paint(ui.savedRecentRows, A.buy.Recent(), "recent")
-    paint(ui.savedFavRows, A.buy.Favorites(), "fav")
+    paint(ui.savedRecentRows, A.buy.Recent(), "recent",
+          ui.savedOffRecent or 0)
+    paint(ui.savedFavRows, A.buy.Favorites(), "fav", ui.savedOffFav or 0)
     ui.HideSavedMenu()
+end
+
+-- Scroll one saved column by `delta` wheel notches and repaint.
+--
+-- The two columns scroll INDEPENDENTLY -- Recent is a capped auto-list and
+-- Favorites is yours, and there is no reason moving through one should move
+-- the other. The clamp lives in the paint, so this only has to nudge the
+-- number and let the paint decide whether it was legal.
+function ui.ScrollSaved(which, delta)
+    if which == "recent" then
+        ui.savedOffRecent = (ui.savedOffRecent or 0) - delta
+    else
+        ui.savedOffFav = (ui.savedOffFav or 0) - delta
+    end
+    ui.HideSavedMenu()
+    ui.RefreshSavedSearches()
 end
 
 -- `advLeft` is the ADVANCED content origin -- see ui.BuildSavedSearches.
@@ -4555,11 +4691,11 @@ function ui.BuildFilterBuilder(panel, advLeft)
     -- ---- Blizzard-side filters ----------------------------------------
     header(contentL, colL, "AUCTION HOUSE FILTER")
 
-    label("Name", FBL.r1)
+    label("Name", ui.FBRow(1))
     local nameBox = ui.FlattenEditBox(
         CreateFrame("EditBox", nil, colL, "InputBoxTemplate"))
     nameBox:SetWidth(FBL.ctl_w); nameBox:SetHeight(18)
-    nameBox:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r1 + 3)
+    nameBox:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(1) + 3)
     nameBox:SetAutoFocus(false)
     nameBox:SetScript("OnEscapePressed", function() nameBox:ClearFocus() end)
     nameBox:SetScript("OnEnterPressed", function()
@@ -4575,9 +4711,9 @@ function ui.BuildFilterBuilder(panel, advLeft)
     ui.fbExact:ClearAllPoints()
     ui.fbExact:SetPoint("LEFT", nameBox, "RIGHT", FBL.chk_gap, 0)
 
-    label("Level Range", FBL.r2)
+    label("Level Range", ui.FBRow(2))
     ui.fbMinLevel = MakeNumBox(colL, FBL.lvl_w, function() ui.RefreshBuilder() end)
-    ui.fbMinLevel:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r2 + 3)
+    ui.fbMinLevel:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(2) + 3)
     local dash = contentL:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 7, 0)
     dash:SetText("\226\128\147")
@@ -4589,54 +4725,54 @@ function ui.BuildFilterBuilder(panel, advLeft)
     ui.fbUsable:ClearAllPoints()
     ui.fbUsable:SetPoint("LEFT", ui.fbMaxLevel, "RIGHT", FBL.chk_gap, 0)
 
-    label("Item Class", FBL.r3)
+    label("Item Class", ui.FBRow(3))
     ui.fbClass = MakeDropdown(colL, FBL.ctl_w, function()
         -- Class gates Subclass gates Slot: changing it invalidates both below.
         ui.fbSubclass:SetValue(nil, true)
         ui.fbSlot:SetValue(nil, true)
         ui.RefreshBuilder()
     end)
-    ui.fbClass.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r3 + 3)
+    ui.fbClass.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(3) + 3)
 
-    label("Item Subclass", FBL.r4)
+    label("Item Subclass", ui.FBRow(4))
     ui.fbSubclass = MakeDropdown(colL, FBL.ctl_w, function()
         ui.fbSlot:SetValue(nil, true)
         ui.RefreshBuilder()
     end)
-    ui.fbSubclass.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r4 + 3)
+    ui.fbSubclass.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(4) + 3)
 
-    label("Item Slot", FBL.r5)
+    label("Item Slot", ui.FBRow(5))
     ui.fbSlot = MakeDropdown(colL, FBL.ctl_w, function() ui.RefreshBuilder() end)
-    ui.fbSlot.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r5 + 3)
+    ui.fbSlot.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(5) + 3)
 
-    label("Min Quality", FBL.r6)
+    label("Min Quality", ui.FBRow(6))
     ui.fbQuality = MakeDropdown(colL, FBL.ctl_w, function() ui.RefreshBuilder() end)
-    ui.fbQuality.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r6 + 3)
+    ui.fbQuality.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(6) + 3)
 
     -- ---- Extra term options --------------------------------------------
     -- Three flags the term language has always understood and the form could
     -- not reach: `buyout`, bare `stack`, and `stack/N`. Until now ui.BuilderTerm
     -- did not read them either, so a query carrying any of them lost it the
     -- moment you pressed Build.
-    ui.fbBuyout = check("Buyout only", CX, FBL.r7)
+    ui.fbBuyout = check("Buyout only", CX, ui.FBRow(7))
 
     -- Full stacks and an explicit size are MUTUALLY EXCLUSIVE, because the
     -- term cannot hold both: TermToQuery emits `stack/N` when stackSize is set
     -- and bare `stack` only when it is not. A form that let you tick both
     -- would express a state the query cannot, and Build would silently drop
     -- one of them. So each one clears the other -- see ui.BuilderStackGate.
-    ui.fbFullStack = check("Full stacks only", CX, FBL.r8, function()
+    ui.fbFullStack = check("Full stacks only", CX, ui.FBRow(8), function()
         if ui.fbFullStack:GetChecked() and ui.fbStackSize then
             ui.fbStackSize:SetText("")
         end
     end)
 
-    label("Stack Size", FBL.r9)
+    label("Stack Size", ui.FBRow(9))
     ui.fbStackSize = MakeNumBox(colL, FBL.lvl_w, function()
         ui.BuilderStackGate()
         ui.RefreshBuilder()
     end)
-    ui.fbStackSize:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, FBL.r9 + 3)
+    ui.fbStackSize:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(9) + 3)
 
     -- ---- Component / post-filter system --------------------------------
     -- Pick a component, type a value, press Enter: the clause is appended to
@@ -4645,7 +4781,7 @@ function ui.BuildFilterBuilder(panel, advLeft)
     header(contentR, colR, "POST FILTER")
 
     local compLbl = contentR:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    compLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, FBL.r1)
+    compLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(1))
     compLbl:SetText("Component")
     compLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
@@ -4653,7 +4789,7 @@ function ui.BuildFilterBuilder(panel, advLeft)
         function() ui.RefreshBuilder() end,
         true)   -- no "All" row: there is no such thing as all components
     ui.fbComponent.button:SetPoint("TOPLEFT", colR, "TOPLEFT",
-        FBL.pad + 72, FBL.r1 + 3)
+        FBL.pad + 72, ui.FBRow(1) + 3)
 
     -- Right of the value box, so the Enter-to-add rule is visible while you
     -- are typing rather than only in the empty-state hint underneath.
@@ -4664,7 +4800,7 @@ function ui.BuildFilterBuilder(panel, advLeft)
     -- layout fault rather than as a missing glyph.
     local addsHint = contentR:CreateFontString(nil, "OVERLAY",
         "GameFontDisableSmall")
-    addsHint:SetPoint("TOPRIGHT", colR, "TOPRIGHT", -FBL.pad, FBL.r1)
+    addsHint:SetPoint("TOPRIGHT", colR, "TOPRIGHT", -FBL.pad, ui.FBRow(1))
     addsHint:SetText("Enter adds")
 
     -- FLATTENED, like every other box in the window. Raw InputBoxTemplate
@@ -4682,14 +4818,14 @@ function ui.BuildFilterBuilder(panel, advLeft)
     ui.fbCompValue = cvBox
 
     local pfLbl = contentR:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    pfLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, FBL.r2)
+    pfLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(2))
     pfLbl:SetText("Post Filter:")
 
     -- The clause list gets its own recessed well, as the concept draws it.
     -- Bare rows on the panel read as text that happened to land there rather
     -- than as a list you can act on.
     local pfArea = CreateFrame("Frame", nil, colR)
-    pfArea:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, FBL.r2 - 18)
+    pfArea:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(2) - 18)
     pfArea:SetPoint("BOTTOMRIGHT", colR, "BOTTOMRIGHT", -FBL.pad, FBL.pad)
     ui.MakeWell(colR, pfArea, 0)
     ui.fbPostArea = pfArea
@@ -4739,10 +4875,19 @@ function ui.BuildFilterBuilder(panel, advLeft)
     ui.fbPostHint:SetJustifyH("CENTER")
 
     -- ---- Preview + actions ---------------------------------------------
-    ui.fbNote = contentL:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ui.fbNote:SetPoint("TOPLEFT", colL, "TOPLEFT", FBL.lbl_x, FBL.r10)
-    ui.fbNote:SetPoint("TOPRIGHT", colL, "TOPRIGHT", -FBL.pad, FBL.r10)
+    -- The note is a STATUS line -- "Copied to the search box.", "Loaded term 1
+    -- of 3..." -- not a form field, and it is parented to the PANEL, not to
+    -- the column.
+    --
+    -- It used to sit below the last form row, at a fixed offset that assumed a
+    -- column tall enough to hold it. At the minimum window height the column
+    -- is 254px and the note landed at 288, so it escaped the well entirely and
+    -- drew across the money readout on the action bar. It belongs on that bar,
+    -- which is where every other status line in this window lives.
+    ui.fbNote = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.fbNote:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", FBL.pad, 26)
     ui.fbNote:SetJustifyH("LEFT")
+    ui.fbNote:Hide()
 
     -- Action row: parented to the PANEL and anchored bottom-right, not to the
     -- builder frame. It sits on the window's action bar beside Bid / Buyout /
@@ -4905,19 +5050,17 @@ function ui.BuilderImport()
     ui.BuilderSetTerm(terms[1])
     local n = table.getn(terms)
     if n > 1 then
-        ui.fbNote:SetText("Loaded term 1 of " .. n
+        ui.BuilderNote("Loaded term 1 of " .. n
             .. " \226\128\148 the other " .. (n - 1)
-            .. " are not shown here, and Build will replace them.")
-        ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+            .. " are not shown here, and Build will replace them.", true)
     else
-        ui.fbNote:SetText("Loaded from the search box.")
-        ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.BuilderNote("Loaded from the search box.")
     end
 end
 
 function ui.BuilderClear()
     ui.BuilderSetTerm(nil)
-    if ui.fbNote then ui.fbNote:SetText("") end
+    ui.BuilderNote("")
     if ui.fbCompValue then ui.fbCompValue:SetText("") end
     -- Clear the SEARCH BAR too. Leaving the query behind after emptying the
     -- form is the worst of both: the next Search runs the old query while the
@@ -5012,16 +5155,14 @@ function ui.BuilderAddComponent()
     if not ui.fbComponent then return end
     local kind = ui.fbComponent:GetValue()
     if not kind then
-        ui.fbNote:SetText("Pick a component first.")
-        ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+        ui.BuilderNote("Pick a component first.", true)
         return
     end
     local raw = util.Trim(ui.fbCompValue:GetText() or "")
     local value = nil
     if ComponentTakesValue(kind) then
         if raw == "" then
-            ui.fbNote:SetText("'" .. kind .. "' needs a value.")
-            ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+            ui.BuilderNote("'" .. kind .. "' needs a value.", true)
             return
         end
         if kind == "tooltip" or ui.PENDING_COMPONENTS[kind] then
@@ -5029,9 +5170,8 @@ function ui.BuilderAddComponent()
         else
             value = util.ParseMoney(raw)
             if not value or value <= 0 then
-                ui.fbNote:SetText("'" .. kind
-                    .. "' needs a price, like 5g or 50s.")
-                ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
+                ui.BuilderNote("'" .. kind
+                    .. "' needs a price, like 5g or 50s.", true)
                 return
             end
         end
@@ -5039,7 +5179,7 @@ function ui.BuilderAddComponent()
     ui.builderPost = ui.builderPost or {}
     table.insert(ui.builderPost, { kind = kind, value = value })
     ui.fbCompValue:SetText("")
-    ui.fbNote:SetText("")
+    ui.BuilderNote("")
     ui.RefreshBuilder()
 end
 
@@ -5195,12 +5335,12 @@ function ui.BuilderExport(orTerm)
     local cur = util.Trim(ui.buyQueryBox:GetText() or "")
     if orTerm and cur ~= "" and q ~= "" then
         ui.buyQueryBox:SetText(cur .. ";" .. q)
-        ui.fbNote:SetText("Appended as another OR term.")
+        ui.BuilderNote("Appended as another OR term.")
     else
         ui.buyQueryBox:SetText(q)
-        ui.fbNote:SetText("Copied to the search box.")
+        ui.BuilderNote("Copied to the search box.")
     end
-    ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
 end
 
 -- ---- sidebar model + paint ---------------------------------------------

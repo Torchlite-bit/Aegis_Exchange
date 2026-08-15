@@ -12,6 +12,45 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.19.4]
+
+The Filter Builder's form fits its box, and the saved lists fill theirs and
+scroll. `/reload`.
+
+### Fixed
+- **The Filter Builder's form overflowed its column at small window sizes.**
+  "Stack Size" was cut off by the well's border and the status note escaped
+  entirely, drawing across the money readout. The row offsets were ten
+  hand-written numbers ending at 276 in a column that is 254px tall at the
+  minimum window height — and nothing anywhere checked they fit. The three
+  options added in 1.19.0 are what pushed it over. Rows now come from a pitch
+  constant, and the suite asserts the last one fits.
+- **The Builder's status line moved to the action bar.** "Copied to the search
+  box." is a status message, not a form field; it never belonged inside the
+  column, and at the minimum height it landed outside it.
+- **Saved Searches and Recent stopped short of the bottom of their own well.**
+  The visible row count came from measuring the column — `GetHeight()` on a
+  frame anchored by two edges, which reports the size it was last laid out at,
+  i.e. the window's creation size. The third time this trap has bitten;
+  `ui.SavedRowsAt` derives from the window's height, like the results table.
+- **Neither saved list could scroll.** Anything past the visible count was
+  simply unreachable — with a dozen favourites and a short window the last few
+  did not exist as far as the UI was concerned. Both columns take the mouse
+  wheel now, independently, with the offset re-clamped on every repaint so
+  deleting an entry while scrolled to the bottom pulls the view back instead of
+  leaving an empty band.
+
+### Changed
+- `ui.RowsFor` carries a warning naming the trap and the three bugs it has
+  caused. Its remaining callers — Crafting, Auctions, History, the bag and list
+  pickers — have not been audited; if one of those lists is ever reported as
+  not filling its box, that is the first thing to look at.
+
+### Not changed, and why
+- **The two Filter Builder wells already end on the same line.** The right
+  column's clause box is inset from its own well on purpose — it is nested
+  inside it — which reads as a mismatch in a screenshot but is correct.
+
 ## [1.19.3]
 
 Alignment and spacing across the Advanced view. `/reload`.
@@ -1670,6 +1709,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.19.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

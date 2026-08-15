@@ -268,6 +268,28 @@ end""",
         -math.floor(total / 2), -ADVL.tabs_y)""",
      "geometry"),
 
+    # The form back to a pitch that does not fit its column at MIN_H -- the
+    # 34px overflow that clipped "Stack Size" and pushed the note onto the
+    # action bar.
+    ("fb-row-pitch-overflows", "ui/frame.lua",
+     "    row_h     = 21,",
+     "    row_h     = 26,",
+     "geometry"),
+
+    # The extra-options gap eating the headroom instead of coming out of the
+    # pitch.
+    ("fb-extra-gap-overflows", "ui/frame.lua",
+     "    gap_extra = 8,    -- before the extra-options block (rows 7-9)",
+     "    gap_extra = 40,   -- before the extra-options block (rows 7-9)",
+     "geometry"),
+
+    # The saved lists sized so they stop short of their own well -- what
+    # measuring the column instead of deriving from the window produced.
+    ("saved-rows-stop-short", "ui/frame.lua",
+     """    local n = math.floor((col - SAVED_HEAD_H - SAVED_PAD) / SAVED_ROW_H)""",
+     """    local n = math.floor((col - SAVED_HEAD_H - SAVED_PAD) / SAVED_ROW_H) - 3""",
+     "geometry"),
+
     # Loading `stack/N` must NOT also tick full-stacks -- that is the same
     # illegal pair arriving by the other door.
     ("builder-setterm-ticks-both", "ui/frame.lua",

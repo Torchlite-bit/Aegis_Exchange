@@ -1201,6 +1201,56 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
   gutter constant altered nothing because a single source cannot disagree with
   itself. A sabotage that cannot fail proves as little as a test that cannot.
 
+### 2y — Form height and saved-list scrolling — ✅ **DONE** (v1.19.4)
+
+- **A fixed layout with no fit check will eventually not fit.** The Filter
+  Builder's rows were ten hand-written offsets ending at 276, in a column that
+  is 254px tall at MIN_H. Three rows were added in 1.19.0 and nothing anywhere
+  could say the form had run out of room, so it clipped. Rows come from a pitch
+  constant now and the suite asserts the last one lands inside the column at
+  every window height — **add a tenth row and the suite goes red, not the
+  screenshot.**
+- **A status line is not a form field.** `ui.fbNote` sat below the last row at
+  a fixed offset and, at the minimum height, escaped the well and drew across
+  the money readout. It lives on the action bar now, behind one
+  `ui.BuilderNote` writer — eight call sites each remembering to Show and Hide
+  is seven chances to forget.
+- **`ui.RowsFor` measures a frame, and that is the trap.** Third bug from it:
+  the Buy table's row count (fixed by `ui.PanelHeightAt`), the Advanced widths
+  (`ui.PanelWidthAt`, 1.19.2) and now the saved lists (`ui.SavedRowsAt`). It
+  carries a warning naming all three. **Six callers on other tabs are
+  unaudited** — Crafting, Auctions, History, the bag and list pickers — and any
+  "list does not fill its box" report should start there.
+- **A capped list needs an OFFSET, not just a count.** `SAVED_ROWS` was a pool
+  ceiling and `fit` a visible count, and nothing carried a position — so a
+  thirteenth favourite could not be reached at all. Both columns scroll on the
+  wheel, independently, and the clamp lives in the PAINT so it re-applies when
+  the list shrinks under a scrolled view.
+- **A row is a Button and eats the wheel.** The handler is on the column's area
+  *and* on every row, or scrolling only works in the empty band below the last
+  entry — which is exactly where the pointer is not.
+- **`ui.SavedRowsAt` was written 900 lines above the constants it reads**, and
+  `tests/lint/scoping.py` caught it before it shipped. That lint was added in
+  1.19.1 after the same mistake took the window out; this is the first time it
+  has paid for itself.
+
+#### The restatement mistake, twice
+
+- **A restated formula tests the author, not the code — and I did it again.**
+  1.19.3 recorded this lesson for the tab strip. The first draft of this pass's
+  `ui.SavedRowsAt` assertions restated its arithmetic, and the sabotage that
+  makes the lists stop three rows short sailed straight past. **The rule is now
+  explicit in the test file: if a function can be extracted, extract it.**
+- **A "headroom for one more row" assertion was the wrong trade** and was
+  replaced. It forced a cramped pitch today to reserve space for a field nobody
+  has asked for; the plain fit check already makes the next field fail the
+  suite. When an assertion starts dictating the design rather than describing
+  it, it is the assertion that is wrong.
+- **One reported difference turned out not to be one.** The two Filter Builder
+  wells were said to end on different lines; they do not. The right column's
+  clause box is nested inside its well and inset on purpose. Recorded rather
+  than "fixed".
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
