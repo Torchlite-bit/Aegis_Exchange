@@ -540,4 +540,181 @@ H.check("...and nothing past it is", clamp(999, 40, vis) + vis <= 40,
 -- the bottom -- must pull the view back, not leave it past the end.
 H.eq("deleting from the end pulls the view back", clamp(30, 35, vis), 25)
 
+-- ---------------------------------------------------------------------------
+H.section("Nothing in the settings block falls outside its scroll frame")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. The Aegis tab's settings live in a ScrollFrame, which is
+-- the only 1.12 widget that CLIPS -- and the clip line falls exactly on the
+-- scroll child's left edge. v1.20.0 put the block at x=0, and the checkbox
+-- column is nudged 2px LEFT of the text column so the boxes line up under the
+-- labels, so every top-level check box hung 2px outside the frame and came
+-- back with its left edge shaved. Text got away with it because a glyph
+-- carries its own side bearing; a solid 1px edge texture does not.
+--
+-- This does NOT restate the layout. It reads the real anchor chain out of
+-- ui.BuildAegisSettings -- every vertical link, with the offsets the file
+-- actually carries -- and resolves where each widget lands. Trim SET_INSET,
+-- or add a widget with another negative nudge, and the number moves here.
+--
+-- Only the VERTICAL links matter. A widget anchored LEFT to something's RIGHT
+-- can only move right, away from the edge being guarded.
+
+local function settingsChain()
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local inside, skipping = false, false
+    local edges, alias = {}, {}
+    for line in f:lines() do
+        if not inside then
+            if string.find(line, "function ui.BuildAegisSettings(", 1, true) == 1
+            then
+                inside = true
+            end
+        elseif line == "end" then
+            break
+        elseif skipping then
+            -- The nested `label` helper's own body: its SetPoint anchors to a
+            -- PARAMETER, which is not a widget in this chain. Its callers are
+            -- picked up below instead.
+            if line == "    end" then skipping = false end
+        elseif string.find(line, "local function label(", 1, true) then
+            skipping = true
+        else
+            local child, anchor, dx
+            local _, _, c1, a1, d1 = string.find(line,
+                -- TOPLEFT to a BOTTOMLEFT is a chain link; TOPLEFT to a
+                -- container's TOPLEFT is the chain's ROOT. Both carry an x.
+                '([%w_.]+):SetPoint%("TOPLEFT",%s*([%w_]+),%s*"%u+LEFT",'
+                .. '%s*(%-?[%w_]+)')
+            if c1 then
+                child, anchor, dx = c1, a1, d1
+            else
+                -- local NAME = label("text", anchor, dy) -- always dx 0
+                local _, _, c2, a2 = string.find(line,
+                    '^%s*local ([%w_]+) = label%(".-",%s*([%w_]+),')
+                if c2 then child, anchor, dx = c2, a2, "0" end
+            end
+            if child then
+                -- The `anchorAbove` branch is the other call shape; the only
+                -- caller passes nil, so that edge is not on any live path.
+                if anchor ~= "anchorAbove" then
+                    table.insert(edges,
+                        { child = child, anchor = anchor, dx = dx })
+                end
+            else
+                -- A loop cursor: `prevSub = c` makes prevSub whatever c is.
+                local _, _, lhs, rhs = string.find(line,
+                    "^%s*([%w_]+) = ([%w_]+)%s*$")
+                if lhs and rhs and rhs ~= "nil" then alias[lhs] = rhs end
+            end
+        end
+    end
+    f:close()
+    return edges, alias
+end
+
+local SET_INSET = constant("SET_INSET")
+
+local function resolveOffset(dx)
+    local n = tonumber(dx)
+    if n then return n end
+    if dx == "SET_INSET" then return SET_INSET end
+    return nil    -- an offset this walk cannot evaluate: reported, not ignored
+end
+
+local function settingsX()
+    local edges, alias = settingsChain()
+    local x = { panel = 0 }
+    local unresolvedOffset = nil
+
+    -- Relax to a fixed point rather than in one pass: `c` is anchored to the
+    -- loop cursor `prevSub`, which is only assigned further down the file.
+    -- Leftmost wins -- two anchors on one widget are exclusive branches, and
+    -- the question here is how far left it can end up.
+    local pass = 1
+    while pass <= 20 do
+        local changed = false
+        local i = 1
+        while i <= table.getn(edges) do
+            local e = edges[i]
+            local a = e.anchor
+            local hops = 0
+            while alias[a] and hops < 10 do a = alias[a]; hops = hops + 1 end
+            local base = x[a]
+            local off = resolveOffset(e.dx)
+            if off == nil then unresolvedOffset = e.dx end
+            if base and off then
+                local v = base + off
+                if x[e.child] == nil or v < x[e.child] then
+                    x[e.child] = v
+                    changed = true
+                end
+            end
+            i = i + 1
+        end
+        if not changed then break end
+        pass = pass + 1
+    end
+    return x, edges, unresolvedOffset
+end
+
+local sx, sedges, badOffset = settingsX()
+
+H.isNil("every offset in the chain is a number this walk can read", badOffset)
+
+-- An unresolved widget means the walk lost the chain, and a walk that silently
+-- skips the one broken widget is worse than no walk at all.
+local unresolved, worst, worstName = nil, nil, nil
+do
+    local i = 1
+    while i <= table.getn(sedges) do
+        local name = sedges[i].child
+        if sx[name] == nil then
+            unresolved = unresolved or name
+        elseif worst == nil or sx[name] < worst then
+            worst, worstName = sx[name], name
+        end
+        i = i + 1
+    end
+end
+
+H.isNil("every widget in the settings chain resolves", unresolved)
+
+-- The walk skips the `anchorAbove` branch of the root because the only caller
+-- passes nil. Check that stays true rather than trusting it: a caller that
+-- passed a frame would put the block on a chain this never looked at.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local calls, nilCalls = 0, 0
+    for line in f:lines() do
+        -- ...but not the definition, which starts at column 1.
+        if string.find(line, "ui.BuildAegisSettings(", 1, true)
+           and string.find(line, "function ui.BuildAegisSettings(", 1, true)
+               ~= 1 then
+            calls = calls + 1
+            if string.find(line, ", nil)", 1, true) then
+                nilCalls = nilCalls + 1
+            end
+        end
+    end
+    f:close()
+    H.eq("there is exactly one caller of ui.BuildAegisSettings", calls, 1)
+    H.eq("...and it passes no anchorAbove", nilCalls, calls)
+end
+H.check("the chain is actually being walked", table.getn(sedges) >= 10,
+        table.getn(sedges) .. " vertical links found")
+
+-- THE CHECK. Strictly inside: x=0 sits ON the clip line, which is where the
+-- check boxes were.
+H.check("the leftmost settings widget is inside the scroll frame",
+        worst ~= nil and worst >= 1,
+        tostring(worstName) .. " at x=" .. tostring(worst))
+
+-- ...and the inset is what puts it there, rather than the chain happening to
+-- have no left nudges in it. If nothing ever steps left, this check would pass
+-- for a reason that has nothing to do with the fault.
+H.check("the chain does step left of its root, so the inset is load-bearing",
+        worst ~= nil and worst < SET_INSET,
+        "root " .. SET_INSET .. ", leftmost " .. tostring(worst))
+
 os.exit(H.report("geometry"))

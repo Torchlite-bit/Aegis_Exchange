@@ -12,6 +12,33 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.20.2]
+
+The Aegis tab's check boxes were losing their left edge to the scroll frame
+that holds them. `/reload`.
+
+### Fixed
+- **Check boxes on the Aegis tab were clipped down their left side.** The
+  settings block lives in a ScrollFrame — the only 1.12 widget that clips,
+  which is why overflow stays inside the window instead of spilling past the
+  bottom edge — and the clip line falls exactly on the block's left edge. The
+  block started at x=0, and the top-level check box column is nudged 2px
+  *further* left than the labels so the boxes line up under the text above
+  them, which put their left edge outside the frame. The labels got away with
+  it because a glyph carries its own side bearing; a solid 1px edge texture
+  does not, which is why the check boxes were the only thing that showed it.
+  The block is inset now, and the scroll frame moved the same distance the
+  other way so nothing shifted on screen.
+
+### Internal
+- The geometry suite walks the settings panel's **real anchor chain** out of
+  `ui/frame.lua` — every vertical link, with the offsets the file carries —
+  and requires the leftmost widget to land strictly inside the frame. It also
+  checks the chain genuinely steps left of its root, so the check cannot pass
+  for the wrong reason, and that nothing has resolved to a widget the walk
+  lost track of. Sabotage-tested from both directions: removing the inset, and
+  leaving the inset alone but nudging a widget further left than it covers.
+
 ## [1.20.1]
 
 Two fixes to what 1.20.0 shipped — a settings panel drawing on top of itself,
@@ -1786,6 +1813,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.19.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

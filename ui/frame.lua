@@ -68,6 +68,20 @@ local MakeMoneyGSC, MakeHSlider, SetSliderRange
 local MIN_W, MIN_H = 1000, 492
 local MAX_W, MAX_H = 1400, 900
 
+-- How far the Aegis tab's settings block is inset inside its scroll child.
+--
+-- A ScrollFrame is the only 1.12 widget that CLIPS, which is why the settings
+-- live in one -- and the clip line falls exactly on the scroll child's left
+-- edge. Content at x=0 sits ON it, and the checkbox column is nudged 2px
+-- FURTHER left (see tipChk) so the boxes line up under the text above them,
+-- which put their left edge outside the frame entirely. Text got away with it
+-- because a glyph carries its own side bearing; a solid 1px edge texture does
+-- not, so the check boxes -- and only the check boxes -- came back shaved.
+--
+-- The scroll frame moves the same distance the other way, so the block still
+-- lines up with the tip line above it and the inset is pure clip margin.
+local SET_INSET = 6
+
 -- Buy tab control-strip widths, from the mockup. Fixed, so the left cluster
 -- stays tight and the slack falls between it and the buttons.
 local BUY_NAME_W   = 200
@@ -1224,7 +1238,9 @@ function ui.BuildWindow()
     local SB_W = 16
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeAegisScroll",
         scanPanel)
-    scroll:SetPoint("TOPLEFT", tip, "BOTTOMLEFT", 0, -8)
+    -- Pulled left by exactly the inset the content carries, so the settings
+    -- block still lines up with the tip line above it.
+    scroll:SetPoint("TOPLEFT", tip, "BOTTOMLEFT", -SET_INSET, -8)
     scroll:SetPoint("BOTTOMRIGHT", scanPanel, "BOTTOMRIGHT", -(SB_W + 10), 6)
     ui.aegisScroll = scroll
 
@@ -1398,7 +1414,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     if anchorAbove then
         hdr:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, -18)
     else
-        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
+        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", SET_INSET, -4)
     end
     hdr:SetText("Settings")
     hdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])

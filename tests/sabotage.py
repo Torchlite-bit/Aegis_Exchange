@@ -326,6 +326,22 @@ end""",
      "    ui.fbFullStack:SetChecked(t.stackOnly and 1 or nil)",
      "builder.term"),
 
+    # ---- the settings block inside its clipping scroll frame ---------------
+    # The v1.20.1 report: no inset, so the check box column -- nudged 2px left
+    # of the text column -- hung outside the ScrollFrame's clip line and came
+    # back shaved.
+    ("settings-no-clip-inset", "ui/frame.lua",
+     "local SET_INSET = 6",
+     "local SET_INSET = 0",
+     "geometry"),
+
+    # The other way in: the inset is untouched but a widget steps further left
+    # than it covers. Proves the walk reads the CHAIN, not just the constant.
+    ("settings-nudge-past-the-inset", "ui/frame.lua",
+     '    tipChk:SetPoint("TOPLEFT", scLbl, "BOTTOMLEFT", -2, -16)',
+     '    tipChk:SetPoint("TOPLEFT", scLbl, "BOTTOMLEFT", -8, -16)',
+     "geometry"),
+
     # ---- anchor chains -----------------------------------------------------
     # The v1.20.0 shipping bug, restored verbatim: a checkbox went into the
     # middle of the settings chain and the row below it kept anchoring to the

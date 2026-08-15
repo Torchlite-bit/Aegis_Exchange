@@ -1334,6 +1334,27 @@ Both items here are 1.20.0's own, not older faults it uncovered.
   it exactly the way an assertion can — `sharedlayout.py` already passed once
   on a reverted build.
 
+#### And a third, found on the next screenshot (v1.20.2)
+
+- **A ScrollFrame CLIPS, and the clip line is its child's edge.** The settings
+  block started at x=0 — flush with it — and the top-level check box column is
+  nudged 2px *further* left than the labels so the boxes line up under the text.
+  So they hung outside the frame and came back shaved. **Text hides this and
+  textures do not**: a glyph carries its own side bearing, a 1px edge texture
+  does not, which is why five check boxes showed it and nothing else on the tab
+  did. Anything placed in a clipping frame needs a margin, not an alignment.
+- The guard is a **chain walk in the geometry suite**, not a restated constant:
+  it reads every vertical link out of `ui.BuildAegisSettings` with the offsets
+  the file carries, resolves each widget's x, and requires the leftmost to land
+  strictly inside. It also asserts the chain really does step left of its root,
+  so it cannot pass for the wrong reason, and that the one caller still passes
+  no `anchorAbove` — the branch the walk skips.
+- **Three consecutive releases have been screenshot-driven.** Each fault was
+  invisible to every check that existed and obvious to a person looking at the
+  tab. That is the standing division of labour, not a failure of the suite —
+  but each one has since been converted into something automatic, which is the
+  part that has to keep happening.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
