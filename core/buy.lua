@@ -123,6 +123,54 @@ function buy.AutocompleteCandidates(prefix)
     return out
 end
 
+-- ---- Favorites (saved searches) ----------------------------------------
+--
+-- An ordered list of query strings. Order is the user's, so every mutator
+-- here preserves it -- promoting appends rather than sorting, and moving is
+-- an explicit swap.
+
+function buy.Favorites()
+    local s = Store()
+    if not s then return {} end
+    -- Databases saved before this existed have no `favorites` key.
+    s.favorites = s.favorites or {}
+    return s.favorites
+end
+
+-- Promote a query to Favorites. Deduped case-insensitively, and it does NOT
+-- reorder an existing entry: re-favouriting something you already saved
+-- should be a no-op, not a jump to the bottom of your own list.
+-- Returns true when it was actually added.
+function buy.AddFavorite(q)
+    local s = Store()
+    if not s or not q or util.Trim(q) == "" then return false end
+    q = util.Trim(q)
+    local favs = buy.Favorites()
+    local i = 1
+    while i <= table.getn(favs) do
+        if string.lower(favs[i]) == string.lower(q) then return false end
+        i = i + 1
+    end
+    table.insert(favs, q)
+    return true
+end
+
+function buy.RemoveFavorite(index)
+    local favs = buy.Favorites()
+    if favs[index] then table.remove(favs, index); return true end
+    return false
+end
+
+-- Move a favorite one place up (dir -1) or down (dir +1). Returns the new
+-- index, or nil when it could not move (already at the end).
+function buy.MoveFavorite(index, dir)
+    local favs = buy.Favorites()
+    local to = index + dir
+    if not favs[index] or not favs[to] then return nil end
+    favs[index], favs[to] = favs[to], favs[index]
+    return to
+end
+
 function buy.AddList(name)
     local s = Store()
     if not s or not name or name == "" then return nil end
@@ -475,6 +523,14 @@ end
 -- "silk cloth/stack 20" hands the parser ONE token, "stack 20" -- it never
 -- reaches the two-token "stack" branch. Supporting all three spellings means
 -- the obvious thing to type works whichever way you reach for it.
+-- Component names that are accepted by the parser but not yet implemented by
+-- CompileOperand. Kept next to the parser so the two lists cannot drift.
+local PENDING_COMPONENT = {
+    ["item"] = true, ["min-level"] = true, ["max-level"] = true,
+    ["rarity"] = true, ["seller"] = true, ["percent"] = true,
+    ["vendor-profit"] = true, ["left"] = true, ["disenchant-profit"] = true,
+}
+
 local function ParseFusedStack(tok)
     local _, _, digits = string.find(tok, "^stack%s*(%d+)$")
     if digits then
@@ -498,18 +554,22 @@ end
 -- back to becoming literal name/tooltip text, so a query never "breaks".
 function buy.ParseTerm(text)
     local term = {
-        nameWords = {}, tooltipWords = {}, inTooltip = false,
+        nameWords = {},
         exact = false, usable = false, buyoutOnly = false, stackOnly = false,
         stackSize = nil,
         quality = nil, minLevel = nil, maxLevel = nil,
         class = nil, subclass = nil, slot = nil,
+        -- Ordered post-filter entries. Each is either an operand
+        -- ({ kind = "tooltip", value = "+3 stamina" }) or a combinator
+        -- ({ kind = "and" | "or" | "not" }). Consecutive operands with no
+        -- combinator between them are ANDed -- see buy.CompilePost.
+        post = {},
     }
     local function appendWord(word)
-        if term.inTooltip then
-            table.insert(term.tooltipWords, word)
-        else
-            table.insert(term.nameWords, word)
-        end
+        table.insert(term.nameWords, word)
+    end
+    local function addPost(kind, value)
+        table.insert(term.post, { kind = kind, value = value })
     end
 
     local cats = buy.Categories()
@@ -537,7 +597,44 @@ function buy.ParseTerm(text)
                 term.stackOnly = true
             end
         elseif tok == "tooltip" then
-            term.inTooltip = true
+            -- ONE token, like quality/level -- NOT the rest of the term.
+            --
+            -- It used to switch into a sticky mode that swallowed everything
+            -- after it, which made a second tooltip clause impossible:
+            -- "tooltip/+3 stam/tooltip/+3 agi" parsed as the single string
+            -- "+3 stam tooltip +3 agi". Tokens split on "/" ONLY, so a
+            -- multi-word value like "tooltip/+3 stamina" is still one token
+            -- and still works -- and "container/bag/tooltip/8" is unaffected.
+            local nxt = tokens[i + 1]
+            if nxt and util.Trim(nxt) ~= "" then
+                addPost("tooltip", util.Trim(nxt)); i = i + 1
+            else
+                appendWord(raw)
+            end
+        elseif tok == "and" or tok == "or" or tok == "not" then
+            addPost(tok)
+        elseif PENDING_COMPONENT[tok] then
+            -- Reserved component names. They parse and round-trip so a query
+            -- containing one survives an edit, but they narrow nothing yet --
+            -- CompileOperand returns "always true" for them and the builder
+            -- draws them as inert. Emitting them silently as NAME text would
+            -- be worse: the search would quietly become a name search.
+            local nxt = tokens[i + 1]
+            if nxt and util.Trim(nxt) ~= "" then
+                addPost(tok, util.Trim(nxt)); i = i + 1
+            else
+                addPost(tok, "")
+            end
+        elseif tok == "max-unit-buy" or tok == "min-unit-buy" then
+            -- Per-UNIT price bound, so a stack of 20 compares against a
+            -- stack of 1 honestly. Values are money text ("5g", "50s").
+            local nxt = tokens[i + 1]
+            local money = nxt and util.ParseMoney(util.Trim(nxt))
+            if money and money > 0 then
+                addPost(tok, money); i = i + 1
+            else
+                appendWord(raw)
+            end
         elseif tok == "quality" then
             local nxt = tokens[i + 1]
             local q = nxt and ParseQualityValue(string.lower(util.Trim(nxt)))
@@ -567,16 +664,19 @@ function buy.ParseTerm(text)
             -- Categories, in the order they can be resolved. A subclass only
             -- means anything once its class is known, and a slot only once
             -- both are -- which is why "armor/leather" works and
-            -- "leather/armor" leaves "leather" as name text. Never inside a
-            -- tooltip clause: after `tooltip` every word is search text, so
-            -- searching tooltips for the literal word "bag" still works.
-            elseif not term.inTooltip and not term.class
+            -- "leather/armor" leaves "leather" as name text.
+            --
+            -- No tooltip guard is needed any more: `tooltip` consumes its own
+            -- value token, so a category word can never be reached while
+            -- "inside" a tooltip clause. Searching tooltips for the literal
+            -- word "bag" still works -- it is the tooltip token's value.
+            elseif not term.class
                 and ResolveCategory(cats.classes, tok) then
                 term.class = ResolveCategory(cats.classes, tok)
-            elseif not term.inTooltip and term.class and not term.subclass
+            elseif term.class and not term.subclass
                 and ResolveCategory(cats.subclasses[term.class], tok) then
                 term.subclass = ResolveCategory(cats.subclasses[term.class], tok)
-            elseif not term.inTooltip and term.class and not term.slot
+            elseif term.class and not term.slot
                 and ResolveCategory(SlotsFor(term.class, term.subclass), tok) then
                 term.slot = ResolveCategory(SlotsFor(term.class, term.subclass), tok)
             else
@@ -587,11 +687,6 @@ function buy.ParseTerm(text)
     end
 
     term.name = util.Trim(table.concat(term.nameWords, " "))
-    if table.getn(term.tooltipWords) > 0 then
-        term.tooltipText = util.Trim(table.concat(term.tooltipWords, " "))
-    else
-        term.tooltipText = nil
-    end
     return term
 end
 
@@ -641,13 +736,52 @@ function buy.TermToQuery(term)
     elseif term.stackOnly then
         add("stack")
     end
-    -- Tooltip LAST: everything after the keyword is swallowed as tooltip text,
-    -- so anything emitted after it would silently stop being a filter.
-    if term.tooltipText and term.tooltipText ~= "" then
-        add("tooltip/" .. term.tooltipText)
+    -- Post-filter entries, in the order the user assembled them. Order is
+    -- load-bearing here: the combinators sit BETWEEN operands, so re-ordering
+    -- would change the meaning rather than just the spelling.
+    --
+    -- These no longer have to come last. `tooltip` consumes exactly one token
+    -- now, so nothing after it can be swallowed -- which is what made the old
+    -- "tooltip must be emitted last" rule necessary.
+    local pi = 1
+    while pi <= table.getn(term.post or {}) do
+        local e = term.post[pi]
+        if e.kind == "and" or e.kind == "or" or e.kind == "not" then
+            add(e.kind)
+        elseif e.kind == "tooltip" then
+            add("tooltip/" .. tostring(e.value))
+        elseif e.kind == "max-unit-buy" or e.kind == "min-unit-buy" then
+            add(e.kind .. "/" .. util.FormatMoney(e.value))
+        elseif e.value and e.value ~= "" then
+            add(e.kind .. "/" .. tostring(e.value))
+        else
+            add(e.kind)
+        end
+        pi = pi + 1
     end
 
     return table.concat(parts, "/")
+end
+
+-- Do two post-filter lists mean the same thing? Element-wise, in order.
+local function PostEqual(a, b)
+    a, b = a or {}, b or {}
+    if table.getn(a) ~= table.getn(b) then return false end
+    local i = 1
+    while i <= table.getn(a) do
+        if a[i].kind ~= b[i].kind then return false end
+        -- Money values are numbers, tooltip values strings; compare as
+        -- written, but case-insensitively for text so "+3 Int" and "+3 int"
+        -- are the same filter (the matcher lowercases anyway).
+        local av, bv = a[i].value, b[i].value
+        if type(av) == "string" and type(bv) == "string" then
+            if string.lower(av) ~= string.lower(bv) then return false end
+        elseif av ~= bv then
+            return false
+        end
+        i = i + 1
+    end
+    return true
 end
 
 -- Two parsed terms mean the same search? Used by the builder's round-trip
@@ -655,9 +789,10 @@ end
 -- (see TermToQuery).
 function buy.TermsEqual(a, b)
     if not a or not b then return false end
+    if not PostEqual(a.post, b.post) then return false end
     local keys = { "name", "exact", "usable", "buyoutOnly", "stackOnly",
                    "stackSize", "quality", "minLevel", "maxLevel",
-                   "class", "subclass", "slot", "tooltipText" }
+                   "class", "subclass", "slot" }
     local i = 1
     while i <= table.getn(keys) do
         local k = keys[i]
@@ -775,6 +910,154 @@ local function TooltipContainsAt(index, needleLower)
     return false
 end
 
+-- ---------------------------------------------------------------------------
+-- Post-filter compilation (ROADMAP 2i)
+-- ---------------------------------------------------------------------------
+
+-- Stat abbreviations people actually type, and the words tooltips actually
+-- use. Typing either form finds both, so "+3 agi" and "+3 Agility" are the
+-- same search.
+--
+-- The pairs are checked FULL-FIRST on purpose: "int" is a substring of
+-- "intellect", so expanding short->full without that check would turn
+-- "+3 intellect" into "+3 intellectellect". Same trap for spi/spirit.
+local STAT_FORMS = {
+    { short = "stam", full = "stamina" },
+    { short = "agi",  full = "agility" },
+    { short = "str",  full = "strength" },
+    { short = "int",  full = "intellect" },
+    { short = "spi",  full = "spirit" },
+}
+
+-- Every spelling of `text` worth looking for, lowercased. Always includes the
+-- text as typed; adds the other form of any stat word it recognises.
+--
+-- Expansion only ever ADDS needles, so a false recognition ("printer" ->
+-- "printellect") costs nothing: the extra needle simply never matches.
+function buy.TooltipNeedles(text)
+    local out = {}
+    if not text or text == "" then return out end
+    local low = string.lower(text)
+    table.insert(out, low)
+    local i = 1
+    while i <= table.getn(STAT_FORMS) do
+        local f = STAT_FORMS[i]
+        -- gsub returns (string, count). Passing it straight to table.insert
+        -- hands over THREE arguments and Lua reads the count as the position
+        -- -- "bad argument #2 to 'insert' (number expected, got string)".
+        -- Bind it to a single local first. Same family as the `and`
+        -- truncation trap noted in ROADMAP 2a.
+        local alt
+        if string.find(low, f.full, 1, true) then
+            alt = string.gsub(low, f.full, f.short)
+        elseif string.find(low, f.short, 1, true) then
+            alt = string.gsub(low, f.short, f.full)
+        end
+        if alt then table.insert(out, alt) end
+        i = i + 1
+    end
+    return out
+end
+
+-- Turn one post-filter entry into a predicate(row, stats).
+local function CompileOperand(e)
+    if e.kind == "tooltip" then
+        local needles = buy.TooltipNeedles(e.value)
+        return function(row)
+            local n = 1
+            while n <= table.getn(needles) do
+                if TooltipContainsAt(row.index, needles[n]) then return true end
+                n = n + 1
+            end
+            return false
+        end
+    elseif e.kind == "max-unit-buy" then
+        local cap = e.value
+        return function(row) return row.unit and row.unit <= cap end
+    elseif e.kind == "min-unit-buy" then
+        local floorV = e.value
+        return function(row) return row.unit and row.unit >= floorV end
+    end
+    -- Unknown component: never narrows the search. Refusing to match would
+    -- empty the page for a token we simply do not implement yet.
+    return function() return true end
+end
+
+-- Compile an ordered post-filter list into ONE predicate, or nil when empty.
+--
+-- Semantics, decided with the owner and mirrored by the builder UI:
+--   * consecutive operands are ANDed -- stacking two tooltip lines means one
+--     item carrying BOTH, which is the common case and needs no typing;
+--   * an explicit `and` / `or` between operands overrides that;
+--   * `not` is unary and applies to the operand that follows it;
+--   * evaluation is strictly LEFT TO RIGHT with no precedence, so
+--     "A or B and C" is "(A or B) and C". No precedence table means nothing
+--     to remember, and the builder shows the list in the order it applies.
+--
+-- Parsed ONCE here, not per row: TooltipContainsAt is the expensive call in
+-- this addon and a page can hold 50 rows.
+function buy.CompilePost(entries)
+    entries = entries or {}
+    if table.getn(entries) == 0 then return nil end
+
+    local ops = {}          -- { { join = "and"|"or", neg = bool, fn = pred } }
+    local i, n = 1, table.getn(entries)
+    local pendingJoin = nil
+    while i <= n do
+        local e = entries[i]
+        if e.kind == "and" or e.kind == "or" then
+            pendingJoin = e.kind
+            i = i + 1
+        elseif e.kind == "not" then
+            -- Collect a run of `not`s; two cancel.
+            local neg = false
+            while i <= n and entries[i].kind == "not" do
+                neg = not neg
+                i = i + 1
+            end
+            if i <= n then
+                table.insert(ops, { join = pendingJoin or "and", neg = neg,
+                                    fn = CompileOperand(entries[i]) })
+                pendingJoin = nil
+                i = i + 1
+            end
+        else
+            table.insert(ops, { join = pendingJoin or "and", neg = false,
+                                fn = CompileOperand(e) })
+            pendingJoin = nil
+            i = i + 1
+        end
+    end
+    if table.getn(ops) == 0 then return nil end
+
+    return function(row, stats)
+        local acc = nil
+        local k = 1
+        while k <= table.getn(ops) do
+            local o = ops[k]
+            -- Short-circuit: skip the operand entirely when the running
+            -- result already decides it. This is what keeps an `or` chain
+            -- from running a tooltip scan it does not need.
+            local skip = (acc == true and o.join == "or")
+                or (acc == false and o.join == "and")
+            if not skip then
+                local v = o.fn(row, stats) and true or false
+                if o.neg then v = not v end
+                if acc == nil then
+                    acc = v
+                elseif o.join == "or" then
+                    acc = acc or v
+                else
+                    acc = acc and v
+                end
+            end
+            k = k + 1
+        end
+        if acc == nil then return true end
+        return acc
+    end
+end
+
 -- Compile a parsed term into what the engine actually needs: the 1.12
 -- QueryAuctionItems args (CLAUDE.md rule 9: strings for name/min/max, "" when
 -- unused, never nil; flag/index args stay nil for "no filter") plus a
@@ -800,8 +1083,7 @@ function buy.CompileTerm(term)
     if term.exact and term.name and term.name ~= "" then
         exactName = string.lower(term.name)
     end
-    local tooltipNeedle = term.tooltipText and string.lower(term.tooltipText)
-        or nil
+    local post = buy.CompilePost(term.post)
     local buyoutOnly = term.buyoutOnly
     local stackOnly  = term.stackOnly
     local stackSize  = term.stackSize
@@ -835,9 +1117,7 @@ function buy.CompileTerm(term)
             end
             if row.count ~= max then return false end
         end
-        if tooltipNeedle and not TooltipContainsAt(row.index, tooltipNeedle) then
-            return false
-        end
+        if post and not post(row, stats) then return false end
         return true
     end
 
@@ -999,6 +1279,20 @@ function buy.ReadPage()
                 nextBid = minBid or 0
             end
             local link = GetAuctionItemLink("list", i)
+            -- Time left is NOT one of GetAuctionItemInfo's 12 values; it has
+            -- its own call, which stock 1.12.1 FrameXML makes on the very next
+            -- line after GetAuctionItemInfo in AuctionFrameBrowse_Update.
+            -- Returns 1..4, rendered through AUCTION_TIME_LEFT1..4.
+            --
+            -- This is page data the client already holds, not an item-cache
+            -- lookup, so it adds no per-item query to a loop that is already
+            -- state-gated (HARD RULE 16). Guarded anyway: a server that does
+            -- not answer it should cost the column, not the scan.
+            local timeLeft
+            if GetAuctionItemTimeLeft then
+                local okT, v = pcall(GetAuctionItemTimeLeft, "list", i)
+                if okT then timeLeft = v end
+            end
             table.insert(rawRows, {
                 index   = i,
                 name    = name,
@@ -1007,6 +1301,7 @@ function buy.ReadPage()
                 quality = quality,
                 canUse  = canUse,
                 level   = level,
+                timeLeft = timeLeft,
                 buyout  = buyout or 0,
                 unit    = (buyout and buyout > 0) and math.floor(buyout / count)
                           or nil,
@@ -1085,6 +1380,14 @@ function buy.ReadPage()
         st.callbacks.onResults(rows)
     end
     Notify()
+
+    -- A batch buyout advances HERE, once the page the purchase invalidated has
+    -- been re-read -- never straight after PlaceAuctionBid. Stepping earlier
+    -- would pick an index out of the page we already know is stale, which is
+    -- the whole bug the batch exists to avoid.
+    if buy.batch and buy.batch.active then
+        buy.BatchStep()
+    end
 end
 
 -- The listing at `row.index` still matches what we displayed (guards against
@@ -1093,6 +1396,176 @@ function buy.Verify(row)
     local name, _, count, _, _, _, _, _, buyout = GetAuctionItemInfo("list", row.index)
     return name == row.name and count == row.count
         and (buyout or 0) == row.buyout
+end
+
+-- ---------------------------------------------------------------------------
+-- Batch buyout
+--
+-- THE PROBLEM. 1.12 has no bulk buy. Each buyout is PlaceAuctionBid against an
+-- INDEX into the page the client currently holds, and a successful purchase
+-- removes that auction and re-sends the page -- so every index after it shifts
+-- down by one. Walking a list of captured indices therefore buys the WRONG
+-- auctions from the second purchase onward. That is the worst bug this addon
+-- could have: it spends real gold on something nobody chose.
+--
+-- WHY MATCHING BY IDENTITY IS THE WRONG GOAL. There is no auction ID on 1.12.
+-- The obvious fix -- re-find "the same auction" after each purchase -- cannot
+-- be done, and chasing it leads to the trap in the live screenshot: eleven
+-- Linen Bandage auctions at 8c each are INDISTINGUISHABLE from one another.
+--
+-- WHAT IS ACTUALLY REQUIRED. The buyer does not care which of eleven identical
+-- 8c auctions they get. They care that they never pay for something they did
+-- not pick. So the safety property is not identity, it is:
+--
+--     every purchase matches the (name, count, buyout) of a ticked row,
+--     and no more than the ticked COUNT of each such fingerprint is bought.
+--
+-- That is satisfiable, and it is what this implements: the batch is a multiset
+-- of fingerprints with remaining counts. Each step re-reads the CURRENT page,
+-- finds any index whose fingerprint is still owed, buys exactly that index,
+-- decrements, and waits for the page to settle before the next step. Nothing
+-- is ever bought against a stale index -- the index is re-derived from the
+-- live page every single time.
+--
+-- Anything unexpected ABORTS rather than guessing: a fingerprint that is owed
+-- but no longer present (someone else bought it, or the page moved) stops the
+-- batch and reports what completed. Partial completion is fine and expected;
+-- silent substitution is not.
+-- ---------------------------------------------------------------------------
+
+-- A fingerprint identifies a KIND of auction, not an instance. Deliberately
+-- the same three fields buy.Verify compares, so a row that passes Verify at
+-- its own index also matches its own fingerprint.
+function buy.Fingerprint(row)
+    return (row.name or "") .. "\001" .. (row.count or 1)
+        .. "\001" .. (row.buyout or 0)
+end
+
+-- Scan the CURRENT page for an index whose fingerprint is `fp`. Returns the
+-- index, or nil. This is what replaces trusting a captured index.
+function buy.FindByFingerprint(fp)
+    local n = GetNumAuctionItems("list")
+    local i = 1
+    while i <= (n or 0) do
+        local name, _, count, _, _, _, _, _, buyout = GetAuctionItemInfo("list", i)
+        if name then
+            local here = name .. "\001" .. (count or 1) .. "\001" .. (buyout or 0)
+            if here == fp then return i end
+        end
+        i = i + 1
+    end
+    return nil
+end
+
+buy.batch = { active = false }
+
+-- Total cost of `rows`, and whether the player can cover it.
+function buy.BatchCost(rows)
+    local total, n = 0, 0
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 and not r.mine then
+            total = total + r.buyout
+            n = n + 1
+        end
+        i = i + 1
+    end
+    return total, n
+end
+
+-- Start a batch buyout of `rows`. Returns (true) or (false, reason).
+function buy.StartBatch(rows, onDone, onStep)
+    if buy.batch.active then return false, "A buyout is already running." end
+    if not rows or table.getn(rows) == 0 then
+        return false, "Nothing selected."
+    end
+    local total, n = buy.BatchCost(rows)
+    if n == 0 then return false, "Nothing selected has a buyout price." end
+    if GetMoney and total > (GetMoney() or 0) then
+        return false, "Not enough gold for the whole selection."
+    end
+    -- Collapse to a multiset: fingerprint -> how many of that kind to buy.
+    local owed, order = {}, {}
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 and not r.mine then
+            local fp = buy.Fingerprint(r)
+            if not owed[fp] then
+                owed[fp] = { count = 0, price = r.buyout, name = r.name }
+                table.insert(order, fp)
+            end
+            owed[fp].count = owed[fp].count + 1
+        end
+        i = i + 1
+    end
+    buy.batch = {
+        active = true, owed = owed, order = order,
+        bought = 0, spent = 0, want = n, total = total,
+        onDone = onDone, onStep = onStep,
+    }
+    return buy.BatchStep()
+end
+
+function buy.AbortBatch(reason)
+    local b = buy.batch
+    if not b.active then return end
+    b.active = false
+    if b.onDone then b.onDone(b.bought, b.want, b.spent, reason) end
+end
+
+-- One purchase. Called to start the batch and again each time the page
+-- settles after a buy.
+function buy.BatchStep()
+    local b = buy.batch
+    if not b.active then return false, "No batch running." end
+
+    -- Find the next fingerprint still owed that is actually ON the page now.
+    local fp, info, index
+    local oi = 1
+    while oi <= table.getn(b.order) do
+        local f = b.order[oi]
+        local rec = b.owed[f]
+        if rec and rec.count > 0 then
+            local at = buy.FindByFingerprint(f)
+            if at then fp, info, index = f, rec, at; break end
+            -- Owed but gone: someone else took it, or the page moved under
+            -- us. Stop -- do NOT fall through to a different auction.
+            buy.AbortBatch("A selected auction is no longer available.")
+            return false, "gone"
+        end
+        oi = oi + 1
+    end
+    if not fp then
+        b.active = false
+        if b.onDone then b.onDone(b.bought, b.want, b.spent, nil) end
+        return true
+    end
+
+    -- Gold is re-checked before EVERY purchase, not just at the start. The
+    -- opening check can be stale by now: mail, repairs and other windows all
+    -- move money while an auction house is open.
+    if GetMoney and info.price > (GetMoney() or 0) then
+        buy.AbortBatch("Ran out of gold partway through.")
+        return false, "gold"
+    end
+
+    info.count = info.count - 1
+    b.bought = b.bought + 1
+    b.spent = b.spent + info.price
+
+    local st = buy.state
+    st.phase   = "wait_results"
+    st.timeout = buy.TIMEOUT
+    buy.driver:Show()
+    PlaceAuctionBid("list", index, info.price)
+    -- Reported per PURCHASE, with what was bought, so the caller can book each
+    -- one as it happens. Booking the whole batch at the end would lose
+    -- everything bought before an abort -- and an abort is the case where an
+    -- accurate ledger matters most.
+    if b.onStep then b.onStep(b.bought, b.want, info.name, info.price) end
+    return true
 end
 
 -- Buy out `row`. Returns (true) or (false, reason). The refreshed page arrives

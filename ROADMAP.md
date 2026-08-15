@@ -141,6 +141,21 @@ is unmistakable, and it would turn this exact mistake into something visible.
 
 Full design (data-flow direction, standalone requirement) below in **Phase 1**.
 
+**The other cross-addon convention: event-handler cost.** The integration
+contract above is about *data*; this one is about *not freezing the client*,
+and it binds all four Aegis addons. A 1.12 client populates its item cache
+lazily, so the first mailbox open of a session with unseen attachments fires
+`MAIL_INBOX_UPDATE` / `BAG_UPDATE` dozens of times in a few frames. Any
+handler that does an unbounded rescan, a `GetItemInfo` per item, a
+`GameTooltip:Set*` per item, or a list repaint inline gets multiplied by that
+storm — which is what froze Courier and stalled RallyPower (~18s, from a bag
+event, with no mailbox feature at all) while Exchange stayed clean.
+
+**Exchange is the reference implementation; the rule and the three safe
+shapes are HARD RULE 16 in [`CLAUDE.md`](CLAUDE.md).** Port that rule and its
+self-check line into the other repos' `CLAUDE.md` verbatim rather than
+restating it here — one wording, four addons.
+
 ### 0.3 Historical-value weighting audit — ✅ **DONE** (v1.4.0)
 **The gap was real, and it was both halves of the intent.** Target behaviour was
 "recent days weighted more, decreasing effect past roughly a month". Neither
@@ -423,13 +438,19 @@ the vanilla-vs-later 9/10-value shift can't bite again. `sell.ScanBags` and
 `buy.StackCountFromItemInfo` both route through it; **no caller indexes
 `GetItemInfo` positionally any more**, and the suite runs under both layouts.
 
-### 2c — Saved Searches tab
+### 2c — Saved Searches tab — ✅ **DONE** (v1.10.0, as 2j)
 Favorites and Recent, styled after aux's split-column layout. Hover for a
 formatted tooltip, left-click to run, right-click for a context menu,
 shift-click to copy the query into the search box, shift-right-click to
 append to whatever's already there. No Auto Buy toggle (decided above).
 
-### 2d — Full primitive set + boolean combinators
+### 2d — Full primitive set + boolean combinators — partly **DONE** (v1.10.0)
+`and` / `or` / `not` shipped with the post-filter system in 2i, over the
+clause list rather than as prefix polish notation. What remains here is the
+rest of aux's primitive set (`percent`, `vendor-profit`, `seller`, `left`,
+stat-suffix matching) — the combinator work itself is done.
+
+### 2d (original scope) — Full primitive set + boolean combinators
 Everything from 2a's primitive set generalized under full `and`/`or`/`not`
 prefix-notation combination, plus stat-suffix matching (the
 `+3 stamina/+3 agility` wristband-suffix case) and any remaining aux
@@ -461,13 +482,880 @@ recent searches); the choice persists per character, tree by default.
   search refreshes the recent list, and an unguarded sidebar repaint would
   `Show()` its rows straight over the tree. A test drives a search from the
   tree and asserts the sidebar stays down.
-- **"Advanced replaces the tree"** is interpreted as: Advanced shows the
-  Shopping Lists sidebar (which contains the saved/recent searches), while
-  the Results/Builder switch on the right stays available in BOTH modes.
-  When 2c ships a dedicated Saved Searches view it slots into the existing
-  right-hand view switcher, not the left column.
+- **"Advanced replaces the tree"** was first read as a left-column swap.
+  **Superseded by the 2g redesign below**, where Advanced replaces the whole
+  content area. The tree itself carried over unchanged and is now the default
+  view's left column, which is what it should always have been.
 
-### 2f — Session Purchase & Crafting Material Tracker
+### 2g — Blizzlike default view + Advanced (Phase 2 of the Buy redesign) — ✅ **DONE** (v1.9.0)
+
+Approved from a mockup before any code. The Buy tab now has two faces:
+
+- **DEFAULT** is the stock auction house: Name / Level Range / Min Quality /
+  Usable / Search, the category list on the left, and gold + Bid / Buyout /
+  Close along the bottom. Rows have no buttons — click to select, act from the
+  bottom bar. Two Aegis columns survive: **Unit** and **% Mkt**.
+- **ADVANCED** (one button, in the slot Blizzard used for "Display on
+  Character") swaps in the query box, the Shopping Lists sidebar and the
+  Filter Builder. **< Back** returns.
+
+**Settled while building it:**
+
+- **Everything on the strip composes into ONE term.** `ui.DefaultTerm()`
+  folds Name + level range + quality + usable together with the category the
+  tree has selected, and hands it to the same `buy.TermToQuery` /
+  `buy.CompileTerm` the typed language uses. That is what makes "the Name
+  field searches within the selected category" true with no special casing —
+  the category is just three more fields on the term. It is also why clicking
+  through categories no longer resets the rest of the strip.
+- **The category is STATE, not text.** 2e wrote picks into the search box;
+  that box is now Blizzard's Name field, so a pick would have overwritten what
+  the user typed. Held in `ui.buyCatClass/Subclass/Slot` instead and merged at
+  search time.
+- **The mode switch round-trips through the term**, both directions. Post-
+  filters the default view cannot express are dropped on the way back **and
+  said out loud** in the status line. A filter you cannot see but that still
+  narrows results is the failure mode this whole area keeps producing (see the
+  empty-page message in 1.8.0), so it gets an explicit test.
+- **Max moved to Advanced and is no longer READ in default mode.** Hiding the
+  box alone would have left a stale value silently filtering — the same class
+  of bug. Gated at the read, with a test that drives it both ways.
+- **Selection compares index AND name.** The page can be re-queried between
+  the click and the button press; matching on index alone would light up
+  whatever slid into that slot. A sabotage that only removed the name half
+  passed at first — the test was missing, not the code — so the stale-page
+  case is now covered directly.
+- **`BuildResultRow` grew a `selectable` flag** rather than being forked. The
+  Crafting tab shares it and keeps its per-row buttons; only Buy rows get the
+  selection tint.
+- **Import was removed** at the owner's request, and with it
+  `ui.BuilderImport` — an unreachable function is worse than a missing one.
+  The round-trip acceptance test now drives `ParseTerm` → `BuilderSetTerm`
+  directly, which is what Import called anyway once it had read the box.
+
+**Still to come in this redesign:** Phase 3 rebuilds the Advanced side to the
+approved mockup — Recent/Favorites with right-click promotion and a reorder
+menu, and the component/post-filter builder (stacked entries are ANDed;
+`and`/`or`/`not` only to override that). Phase 4 is the tooltip parser's
+abbreviation expansion. Both need the one parser change already identified:
+`tooltip` must take a single token instead of swallowing the rest of the
+term, so several tooltip clauses can coexist.
+
+### 2i — Post-filter clauses + combinators — ✅ **DONE** (v1.10.0)
+
+The parser change 2g flagged, plus the semantics the owner specified.
+
+- **`tooltip` takes ONE token**, like `quality` and `level`, instead of
+  switching into a sticky mode that swallowed the rest of the term. That is
+  what makes a second tooltip clause possible at all. Tokens split on `/`
+  only, so multi-word values still work and `container/bag/tooltip/8` is
+  untouched. It also retires the "tooltip must be emitted last" rule in
+  `TermToQuery`.
+- **The term carries an ordered `post` list** of clauses and combinators.
+  `buy.CompilePost` folds it **left to right with no precedence**:
+  consecutive clauses AND, an explicit `or`/`and` overrides, `not` is unary
+  over the clause that follows. No precedence table means nothing to
+  memorise, and the builder lists the clauses in the order they apply.
+- **Compiled once per search, not per row.** `TooltipContainsAt` is the
+  expensive call in this addon and a page holds 50 rows, so the expression is
+  built in `CompilePost` and only evaluated in the closure — with
+  short-circuiting, so an `or` that is already satisfied skips a tooltip scan
+  it does not need.
+
+**The correction worth recording:** the original Phase 4 spec asked for
+`stam/agi` inside ONE tooltip value to mean AND. That collided head-on with
+`/` being the term separator. The owner's clarification removed the conflict
+entirely — two stats are two clauses, and stacking already means AND. No
+change to what `/` means, and no existing query changed meaning. Worth
+remembering that the cheapest fix for a syntax collision was to not need the
+syntax.
+
+### 2j — Saved Searches — ✅ **DONE** (v1.10.0)
+
+Recent | Favorites, sharing the results area as a third view. Right-click a
+recent to promote it; right-click a favorite for Move Up / Move Down /
+Delete; left-click runs, shift-left-click loads into the Builder.
+
+Favorites are an **ordered array** in SavedVariables, and every mutator
+preserves that order: promoting appends rather than sorting, re-promoting an
+existing entry is a no-op rather than a jump to the bottom, and the ends of
+the list are walls rather than wrap-arounds. The order is the user's, so
+nothing is allowed to quietly rearrange it.
+
+### 2k — Buy tab layout pass — ✅ **DONE** (v1.11.0)
+
+Reported against the concept with screenshots; every finding fixed.
+
+**All three "widget is somewhere it cannot be used" bugs had one cause:** a
+widget anchored to ANOTHER widget that later moved. The view switcher was
+pinned 232px right of the Search button, which was correct until 2g moved
+Search to the right edge and threw all three tabs clean off the window. The
+pager and the Advanced button were both anchored to the panel's top-right,
+so they landed on top of each other. Both now hang off the panel at fixed
+corners, and three tests assert the anchor RELATIONSHIP rather than a
+coordinate, so the next widget that moves cannot drag them with it.
+
+**Advanced has no left column.** The Shopping Lists sidebar is gone, and with
+it `+ Add` / `Rename` / `Del` / `Search entire list`, the `Max` box and
+`Add to list`. The Builder and Saved views span the full content width, which
+is what the concept shows and what was clipping the form's headings.
+
+The list ENGINE (`buy.Lists` and friends) is deliberately left in place and
+still tested. The saved data is untouched, so nothing a user built is lost
+and re-homing the feature costs a UI rather than a rewrite.
+
+**Placeholder components are LABELLED, not silent.** `item`, `min-level`,
+`max-level`, `rarity`, `seller`, `percent`, `vendor-profit`, `left` and
+`disenchant-profit` are in the dropdown so the finished shape is visible, and
+they parse and round-trip so a query containing one survives an edit. They
+narrow nothing yet, so each is marked `(soon)` in the list and drawn dim with
+"not wired up yet — ignored" in the Post Filter. **This addon has twice
+shipped a filter that silently matched nothing**, so an unimplemented
+component that quietly did nothing was not an option.
+
+> ⚠️ **Import is absent from the bottom row on purpose.** The concept PNG
+> still shows it because that image predates the "you can remove the import
+> button" instruction. `ui.BuilderImport` went with the button. One line to
+> put back if the concept is the intent.
+
+### 2l — Concept-parity polish — ✅ **DONE** (v1.12.0)
+
+> **⚠️ TWO decisions below were later reversed.** The button colour, in
+> v1.14.0 (see 2n) and again in v1.15.0 (see 2p). The removal of the +/- fold
+> glyphs, in v1.15.1 (see 2q) — that argument held for a one-level list and
+> this tree turned out to nest three.
+>
+> **⚠️ The button-colour decision below was REVERSED in v1.14.0 — see 2n.**
+> The analysis still holds (the plates really were vanilla's own art, and
+> matching the concept really did mean drawing every button ourselves); the
+> conclusion changed once the question was the whole addon rather than one
+> tab. Everything else in this entry stands.
+
+**Settled: the button colour was never a bug.** The warm red-brown plates are
+vanilla's own `UIPanelButtonTemplate` art, which is what every stock button
+looks like unskinned. The concept's flat dark plates with thin gold borders
+were CSS in an HTML mockup; no vanilla template produces them, and matching
+them would mean backdrop-drawing every button in the addon, not just the Buy
+tab's. **Decision: keep the stock art**, since "the default view looks like
+the stock auction house" is the whole premise of 2g, with a subtle accent tint
+on Advanced and Build only so the two non-stock actions read as different.
+Recorded here because it will look like an unfixed bug to anyone comparing
+the concept PNGs to a screenshot.
+
+Everything else in the pass:
+
+- **Bid entry reuses the Sell tab's g/s/c control** rather than a second
+  implementation. That widget emulates the plain box's GetText/SetText, so
+  `SetMoneyBox` and every existing caller worked against it untouched.
+- **The Browse tree follows Blizzard's shape**: plates on top-level rows,
+  bare indented children, a bordered well, blue selection bar, and **no +/-
+  fold glyphs** — the stock list signals expansion by highlighting the parent
+  and showing its children.
+- **`MakeDropdown` gained a `noAll` flag.** Component opts out; Class /
+  Subclass / Slot / Quality keep the row, because "no filter" is a real
+  choice there and "all components" is not.
+- **One function owns component colour** (`ui.ComponentColor`), read by both
+  the dropdown's selected text and the Post Filter line, so the two cannot
+  drift.
+- **Clear empties the search bar too.** Leaving the query behind meant the
+  next Search ran something the form no longer described.
+- **Import came back**, reversing the removal in 2g. The reasoning changed
+  with the feature set: the Builder used to be somewhere you only LEFT from,
+  and 2j's shift-click made it somewhere you LAND, at which point a
+  hand-typed query had no route into the form.
+- **Anchors, again.** The component value box had a fixed width that ran off
+  the frame; the Saved columns sat at fixed offsets. Both are anchored on two
+  edges now and stretch with the window. That is the same class of bug as
+  2k's off-screen tabs — **fixed offsets into a resizable frame keep
+  producing it**, so prefer two-edge anchors for anything that should fill
+  its space.
+
+### 2m — Buy tab fixes & layout — ✅ **DONE** (v1.13.0)
+
+- **The paint guard belongs in the paint function, not at the switch.** A scan
+  finishing after you left Results repainted the list straight through Saved
+  Searches or the Builder, because the guard sat where the view was changed
+  and the reply arrived later. `ui.UpdateBuyList` and `ui.RefreshBuyStatus`
+  now each check the visible view themselves and return early. **This is the
+  third time this exact shape has bitten** (sidebar rows, the pager, now the
+  results list). An async callback can fire in any view; only the paint
+  function knows which view is on screen when it actually runs, so that is
+  where the check has to live.
+- **`ui.DoBuySearch` switches on `~= "results"`**, not `== "builder"`. It only
+  ever left the Builder, so a query launched from Saved Searches ran with
+  nothing visible to show it.
+- **Clipping, again — the same 2k/2l class.** The category well's backdrop
+  draws ~6px outside its scroll frame, so a bottom offset that looked correct
+  cut through the gold total; the results column started at `SIDE_W + 24`,
+  inside that same border. Well and column now allow for the border.
+  **Backdrop borders extend past the frame rect** — budget for them when
+  anchoring anything against a bordered well.
+- **`MakeMoneyDisplay`** — read-only coin readout for the gold total, built on
+  `UI-MoneyIcons` with `SetTexCoord` (one sprite sheet, not three files).
+  It is anchored by its **copper** coin and grows leftwards, so the figure
+  never shifts the layout as your gold changes, and denominations above the
+  value are hidden.
+- **`+ OR` removed.** It appended a bare combinator with nothing decided about
+  its operands; the Component dropdown already carries `and` / `or` / `not`
+  next to the clause they apply to. `BuilderExport(true)`'s append mode stays
+  — that is a separate path and still covered.
+- **Bid / Buyout / bid entry hide outside Results.** `MakeMoneyGSC` needed
+  `Show`/`Hide` for this: its coin textures parent to the PANEL, not to the
+  boxes, so hiding the three edit boxes alone leaves three coins floating.
+- **The favourite menu opens below its row**, inside the favourites column.
+  1.12 has no menu-flip logic — placement is whatever you anchor, so anchor
+  it somewhere it cannot cover either column.
+
+### 2n — Custom button art — ✅ **DONE** (v1.14.0)
+
+**This REVERSES 2l's "keep the stock art" decision. Read that entry first.**
+2l settled that the warm red-brown plates were vanilla's own
+`UIPanelButtonTemplate` and not a bug, and that matching the concept would
+mean backdrop-drawing every button in the addon. Both of those statements are
+still true — what changed is the answer, not the analysis. 2l was weighing the
+concept against *the Buy tab's* Blizzlike premise; applied to all six tabs,
+the concept art is simply what the addon was always meant to look like, and
+the half-and-half state 2l implicitly preferred reads as an unfinished port
+rather than a deliberate choice.
+
+- **`ui.MakeButton(parent, kind, name)`** is a drop-in for the template: it
+  answers `SetText` / `GetText` / `GetFontString` / `Enable` / `Disable` /
+  `IsEnabled` the same way, so the 56 call sites changed only their
+  constructor.
+- **Two kinds, from the concept's own stylesheet.** `primary` is the deep red
+  plate with the gold label (`.btn`), and there is exactly ONE per area — the
+  thing that area exists to do. `quiet` is the dark neutral plate
+  (`.btn-quiet`) and is the default.
+- **The four states are now ours to draw.** Normal, hover, pressed and
+  disabled, plus the 1px label nudge on press. Disabled is the one that
+  matters: the template supplied it free, and a hand-drawn plate that skips
+  it ships a button which looks live and silently ignores clicks. It is
+  DERIVED from each kind's colours rather than hand-picked, so a palette edit
+  cannot leave it behind.
+- **Scripts close over their own button rather than reading `this`.** `this`
+  is right for a handler SHARED across frames, but it is only set when the
+  CLIENT invokes the script — and the Filter Builder hides its action buttons
+  from Lua the moment it builds them. That path errored on a nil `this`.
+- **pfUI**: the plates ride on pfUI's backdrop child, resolved at PAINT time
+  because it does not exist until `skin.Apply` runs. The generic `SkinButton`
+  pass skips ours, which would otherwise double-border a button that already
+  has a backdrop. Same arrangement the sub-tab pills use.
+- **`ui.TintButton` is gone.** It vertex-coloured template textures; there are
+  none left. `ui.SetButtonKind` replaces it.
+
+**Process note, because this bit twice in one session.** The bulk conversion
+was first attempted with a DOTALL regex over the whole file. Its `.+?` spanned
+from an unrelated `CreateFrame("Button", ...)` to the next template match and
+ate two buttons' parent arguments — leaving valid Lua that still took clicks
+and still painted, attached to nothing. **Every test passed.** Do bulk edits
+line-oriented, with a bounded window, and diff-audit every deletion; and note
+that the suite could not see this class of bug at all until 2n added a
+parentage check and a source lint for a Button constructed without a parent.
+
+### 2o — Post-1.14.0 cleanup — ✅ **DONE** (v1.14.1)
+
+From screenshots of the button conversion in-game.
+
+- **Fixed offsets into a resizable frame, a FOURTH time** (2k, 2l, 2m, now
+  here). The default filter strip chained left-to-right off the Name box
+  while Search and Advanced were pinned a fixed distance from the right
+  edge, and nothing joined the halves — so they overlapped, printing Search
+  through the "Usable" label. The strip is now built from BOTH ENDS with the
+  Name box absorbing the slack. **The rule, restated because writing it down
+  three times has not stopped it: exactly one widget in a row may stretch,
+  it anchors on two edges, and every fixed-width widget hangs off an end.**
+- **Empty space needs a container.** Saved Searches and the Builder both ran
+  out of content partway down and left bare window below. That is not a
+  layout bug — a top-aligned form is normal — it is a *missing well*: with
+  nothing drawn around it the leftover space reads as a hole in the window.
+  `ui.MakeWell` now factors out the pattern the category tree already used.
+- **A child frame draws above ALL of its parent's regions.** Putting a well
+  on the Builder frame buried every label on it, because those were font
+  strings of that same frame. The text moved to a content layer created
+  after the well. Worth remembering before adding a background to any frame
+  that already carries its own font strings.
+- **Lists ask their height at paint time.** Saved Searches was pinned at 12
+  rows however tall the window was. Note the floor passed to `ui.RowsFor`
+  must be a real row count, not 1: a two-edge-anchored frame reports height
+  0 until the client lays it out, and a floor of 1 paints a single row on
+  that first pass.
+- **The active view button is marked** by swapping it to the primary plate.
+  `LockHighlight` used to do this and silently stopped working at 1.14.0 —
+  it drives a template highlight texture our buttons do not have.
+- **Button borders went dark.** See the CHANGELOG for why they are not
+  literally the concept's `#14120f`: the concept's panel is lighter than its
+  buttons and ours is darker, so an exactly-black edge erases the outline
+  instead of defining it.
+
+### 2p — Mockup parity + multi-buyout — ✅ **DONE** (v1.15.0)
+
+**Time Left IS available on 1.12 — this closes a long-open question.**
+`GetAuctionItemTimeLeft("list", i)` is called by stock 1.12.1 FrameXML on the
+line immediately after `GetAuctionItemInfo` in `AuctionFrameBrowse_Update`
+(verified against five independent 1.12.1 Interface mirrors). It returns 1..4,
+rendered through `AUCTION_TIME_LEFT1..4`. It is page data the client already
+holds, not an item-cache lookup, so it adds no per-item query to the scan and
+does not engage HARD RULE 16. **The `left` filter component is unblocked.**
+
+- **The mockup supersedes `design/07-buy-tab.png` where they disagree.** The
+  older PNG styles the primary button `#5a1414` (deep red); the "A - Default
+  view" mockup draws Search and Buyout warm brown-gold and adds a purple
+  Advanced. 1.14.0 took the red from the PNG. Written down because this has
+  now flipped once and the two files still both exist.
+- **Advanced is a third BTN_KIND, not a tint.** 1.14.0 removed a purple vertex
+  tint for reading as a smudge; that was correct, and is a different thing
+  from a plate of its own.
+- **MIN_W 832 -> 1000, from arithmetic rather than taste.** `ui.StripFitsAt(w)`
+  computes whether the sidebar, the fixed-width strip and the right-hand pair
+  fit; the first attempt at this pass set 1020 and the function immediately
+  showed it was ~14px short. **Make the constraint computable, not a number
+  someone did in their head** -- that is the only reason the overlap did not
+  ship a third time.
+- **Category rows opt out of the pfUI skin** via the existing `aegisNoSkin`,
+  not a new flag. They are Buttons (a row must be clickable), so pfUI's
+  SkinButton plated every one and erased the plated-parent / bare-child
+  distinction the tree uses. Result rows were never affected because they are
+  Frames. A first attempt added a second, redundant opt-out mechanism before
+  noticing `aegisNoSkin` already meant exactly this.
+
+**Batch buyout — the design, because the naive version spends real gold
+wrongly.** 1.12 has no bulk buy and no auction ID. Each buyout is
+`PlaceAuctionBid` against an INDEX into the currently-held page; the purchase
+removes that auction and re-sends the page, shifting every later index. So:
+
+- **Identity is unachievable and unnecessary.** Eleven identical Linen
+  Bandages at 8c cannot be told apart, and the buyer does not care which they
+  get. The property that matters is: *every purchase matches the (name, count,
+  buyout) of a ticked row, and no more than the ticked count of each.*
+- **The batch is a multiset of fingerprints**, and each step re-derives the
+  index from the LIVE page. Nothing is ever bought against a remembered index.
+- **It steps from `ReadPage`**, once the page invalidated by the purchase has
+  been re-read -- never straight after `PlaceAuctionBid`.
+- **Anything unexpected aborts**: a fingerprint that is owed but absent stops
+  the batch and reports what completed. Substitution is never acceptable.
+- **Gold is re-checked before every purchase**, not only at the start, because
+  mail/repairs/vendors move money while the AH is open.
+
+### 2q — Mockup second pass — ✅ **DONE** (v1.15.1)
+
+- **`ui.RowsFor`'s `minRows` was two different ideas wearing one name**, and
+  the collision produced a table that drew over the bottom of the window. It
+  meant both "the answer when the frame has not been laid out" (correct, and
+  what 1.14.1 raised from 1 to 12 for Saved Searches) and "never paint fewer
+  than this" (wrong, and what forced eleven 26px rows into space for eight).
+  A measured fit now always wins; `minRows` applies only when the height is
+  0. Every list in the addon shares the function, so this was one edit.
+  **When a parameter has to be explained with "except when", it is two
+  parameters.**
+- **NO SELLER COLUMN**, deliberately and against the mockup. `owner` is nil
+  until the client resolves the name, so it was blank on nearly every row.
+  The FIELD is still read — it sets `r.mine`, which dims your own rows and
+  keeps them out of a buyout batch — so do not delete it as dead code when
+  the column is gone. Freed width went to the Lvl / Time Left gap.
+- **`ui.ColumnsFitAt(w)`** joins `ui.StripFitsAt(w)`. Removing a column moved
+  every offset after it, and the failure mode is the last column drawn under
+  the scrollbar. Both are asserted to have teeth: they must REJECT a width
+  that genuinely does not fit, or they are decoration.
+- **The table's box encloses the headings.** It wrapped the scroll frame
+  alone, so the headings floated above it. Its right edge is flush with the
+  scroll frame's, because FauxScrollFrameTemplate hangs the scrollbar outward
+  from exactly that line — a positive offset there puts the box back under
+  the scrollbar.
+- **`ui.FlattenEditBox`** strips `InputBoxTemplate`'s three textures and
+  applies our own plate. The template stays for its cursor, selection and
+  focus behaviour; only what it DRAWS is replaced. Textures are found via
+  `GetRegions()`, not `$parentLeft` etc., because most of these boxes have no
+  name for `getglobal` to resolve.
+- **Fold glyphs restored, reversing 2l.** 2l reasoned from the stock 1.12
+  filter list, which is one level deep; ours is three (Armor > Leather >
+  Chest), and highlight-the-parent cannot express which of two open levels
+  you are in. Only EXPANDED rows are marked — a `+` on every collapsed row is
+  noise the mockup does not draw either.
+- **No box around the category tree**, and a selected leaf is bright text
+  rather than a highlight bar. The mockup boxes the results table and nothing
+  else.
+
+### 2r — Mockup structural parity — ✅ **DONE** (v1.16.0)
+
+**The strip's left edge was the whole problem.** Every previous pass treated
+the Buy tab as "sidebar on the left, everything else to its right" and tuned
+details inside that frame. The mockup is not built that way: the control strip
+spans the full panel width at its left edge, and BOTH columns hang below it,
+sharing that edge with the Name field. Once that moved, half the remaining
+differences stopped being differences.
+
+Worth remembering as a method point: four passes of detail work did not close
+a gap that one structural change did. **When repeated polish is not converging
+on a reference, check whether the two are built on the same skeleton before
+tuning anything else.**
+
+- **The columns are deliberately unequal lengths.** Table short, tree long.
+  **REVERSED in v1.17.0 — see 2s.** The table fills its height now. The
+  mockup's short table is one screenshot with five results; a real page has
+  fifty, and rows are what the tab is for.
+  Ours had them the wrong way round — the table nearly reached the action bar
+  while the tree stopped halfway down.
+- **`MIN_W`: the binding constraint MOVED.** It was the strip; it is now the
+  result columns. Moving the strip to the left edge gave it back ~190px and it
+  now fits 832. The columns' floor is ~970, so 1000 stands. Both fit functions
+  assert they still REJECT a too-narrow window, so neither is decoration.
+- **Variable row heights in the tree.** `FauxScrollFrame` assumes uniform rows,
+  and that is usually the end of the discussion — but its offset is counted in
+  ROWS, not pixels, so a ragged list works provided the visible count is
+  derived by ACCUMULATING heights rather than dividing by one. Plated rows are
+  taller than bare ones, which is what gives the mockup's list its rhythm.
+- **`% Mkt` at exactly 100% went from yellow to neutral.** Yellow is a warning
+  colour and market price is the unremarkable case. Green and red carry
+  meaning because the middle does not.
+- **Selection in the tree is a lighter plate plus a gold edge**, not a
+  blue-green highlight bar. The bar appears nowhere in the reference.
+
+**Known un-matchable, do not keep trying.** The mockup is HTML and uses Cinzel
+for headings and buttons; 1.12 offers only the game's font objects and cannot
+load a face. Weight and colour are matched; the typeface is not, and that is
+final unless someone ships a font with the addon.
+
+### 2s — Alignment, clipping and colour — ✅ **DONE** (v1.17.0)
+
+- **The BROWSE scrollbar overlapped the results box**, because
+  `FauxScrollFrameTemplate` hangs it OUTWARD from the scroll frame's right
+  edge — into the gutter the table starts in. Hidden, as the mockup has it.
+  **Hiding it once is not enough**: `FauxScrollFrame_Update` re-shows the bar
+  whenever content overflows, so `Show` is neutralised as well. The wheel
+  still scrolls, because the template's OnMouseWheel drives the bar's VALUE
+  and a hidden frame still holds one.
+- **The table fills its height, whole rows only.** This REVERSES 2r's "table
+  is the shorter column". Rows are not the scroll frame's scroll-child, so
+  nothing clips a partial row — it would draw over the count line — which is
+  why the count floors and is asserted to.
+- **`ui.TableSlack()` exists because `ui.TableAreaAt` was not enough.** The
+  area check passes just as happily for a table that stops halfway up; only a
+  direct measure of the dead band below it can tell the two apart. Worth
+  remembering when writing a geometry assertion: check the thing you changed,
+  not a thing that merely correlates with it.
+- **The gold readout is left-aligned and grows rightward**, reversing the
+  1.13.0 choice to anchor it by its copper coin. That existed so a growing
+  total could not shove the layout; on the left margin nothing is to its
+  right. Blizzard hides denominations above the value, so the margin anchor
+  moves to whichever denomination is leftmost — otherwise 43 copper leaves a
+  hole.
+- **`% Mkt` at 100% on every row is NOT a bug.** Market value is a weighted
+  median of daily minimums; an item first seen in the current scan has a
+  market value equal to that page's cheapest listing, so the ratio is the
+  number against itself. Verified rather than "fixed". It resolves itself as
+  the DB gains history.
+- **"Miscellaneous" first under Armor is the client's own subclass order**,
+  and the stock AH does the same. Left alone: this view is the Blizzlike one.
+
+### 2t — Category selection, list sizing, one check box — ✅ **DONE** (v1.18.0)
+
+- **Selecting a category no longer searches.** `ui.CatApply` sets a pending
+  selection and a status line; only Search issues the query. The results
+  already on screen are LEFT there rather than cleared — a fold click that
+  blanked a real search is worse than one that leaves it, and the status line
+  names the pending selection so the rows cannot be mistaken for it. Decided
+  once, recorded here, and written in the code at `ui.NotePendingCat`.
+- **The dead band under the results and the categories cut off at the smallest
+  window were ONE bug, not two.** `ui.TableAreaAt` subtracted 22 where the
+  panel's real vertical inset is 108 — an 86px error — so both lists sized
+  themselves from a height that was wrong in opposite-looking ways. `GetHeight()`
+  on a two-edge-anchored frame returns the LAST LAID-OUT height, one frame
+  stale, which is why measuring looked right and was not. Everything now
+  derives from `ui.frame:GetHeight()`, the one number that is explicitly set,
+  via `ui.PanelHeightAt`. At MIN_H all eleven top-level categories fit — the
+  arithmetic, not a nudge: 262px available against 242px needed.
+- **One check box helper, `ui.MakeCheckBox`, behind every check box.** Two
+  separate failures met here. A `SetBackdrop` whose `edgeSize` approaches the
+  frame size CANNOT draw a border — two corner pieces of `edgeSize` square do
+  not fit across a 14px frame — so it drew a cross; and pfUI reskins anything
+  reporting `CheckButton`, so under the skin it became a circle. Borders are
+  four 1px textures, and `aegisNoSkin` opts out of the pfUI pass.
+- **The helper does NOT override `SetChecked`/`GetChecked`.** A `CheckButton`
+  toggles itself before `OnClick` runs and every handler in the file is written
+  against that. Shadowing those two methods with our own flag leaves the
+  widget's state and ours disagreeing, and each handler silently reads the
+  wrong one. Only the ART is replaced: the tick is the widget's own CHECKED
+  texture, so the client shows and hides it and it cannot drift. **Do not
+  "simplify" this into a private boolean.**
+- **Field labels are placed by ONE rule.** "Name" hung off the panel while
+  "Level Range" and "Min Quality" hung off their controls — two rules, so no
+  single number could hold the three in line. Every label now hangs off its own
+  control, and the controls already share one top edge. When a layout will not
+  come into line after repeated nudging, count the rules before adding another
+  constant.
+- **Min Quality is coloured from `ITEM_QUALITY_COLORS`**, FrameXML's own table,
+  so a Rare here is the blue a Rare is everywhere. "All" stays neutral — no
+  filter is not a quality. The button's colour is applied inside
+  `RepaintButton` via `aegisTextColor`, not by the caller: that function runs on
+  every hover and press, so a colour set from outside is wiped by the first
+  mouseover.
+- **Bid-only auctions sort last in BOTH directions** — verified by running the
+  code, not by reading it. The nil guards in `ui.SortResults` sit BEFORE the
+  direction branch deliberately; folded into it, a descending sort floats
+  priceless rows to the top where they read as the most expensive.
+  `tests/sort_results.lua` pins this, and was itself checked against two
+  sabotaged copies of the function.
+- **`tests/` now exists, in the repo.** The previous test harness lived in
+  `/tmp`, was never version-controlled, and was destroyed with the container —
+  twice. Tests extract the function under test from the source at run time
+  rather than copying it, so they cannot pass against a stale duplicate.
+  Nothing in `tests/` is in the `.toc`; the 1.12 client never sees it.
+
+### 2u — Test harness, rebuilt in the repo — ✅ **DONE** (no version change)
+
+Not a release: nothing in `Aegis_Exchange.toc` changed, so there is no version
+bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
+
+- **The lint layer catches what no test can**, because Lua 5.1 (what we test
+  with) is more permissive than Lua 5.0 (what we ship to). `lua50.py` flags
+  `string.match` / `#` / `%` / `select()` / `hooksecurefunc` / modern event
+  handlers, all of which `luac5.1 -p` compiles happily and the unit suites run
+  happily. `upvalues.py` is the 32-ceiling — **5.1's limit is 60**, which is
+  why v1.16.0 passed everything and would not load. `definitions.py` is the
+  scripted-edit-ate-a-function guard, which has earned its place three times.
+- **`lua50.py` has a self-test, and half of it is false POSITIVES.** `%`
+  appears in every `string.format`, `#` throughout the comments. A checker that
+  flags those gets ignored within a day, which is the same outcome as not
+  having one.
+- **`sabotage.py` is the answer to "is this suite actually testing anything".**
+  It plants a real bug in a throwaway copy and requires the named suite to
+  fail. It found two blind spots on the day it was written: the simulated
+  client only ever returned the **vanilla** 9-value `GetItemInfo`, so a
+  hardcoded index passed every `util.ItemInfo` assertion (fixed by making the
+  stub able to return both client shapes and running the same checks against
+  each); and deleting the batch's up-front gold check was invisible, because
+  the per-purchase check also refuses — the case that separates them is
+  affording SOME of the selection, where the missing check means a partial
+  spend.
+- **What the harness deliberately cannot do is anything visual.** Frames in
+  `tests/support/wow.lua` answer every method and draw nothing, and that is on
+  purpose: faking geometry would make layout look testable when it is not. A
+  green run says nothing about whether the window is right.
+- **The simulated client's `getglobal` reads `_G`**, not a side table. Backing
+  it with a private registry made lookups of client constants come back nil —
+  a difference from the real client that a test would have "proved" was fine.
+
+### 2v — Advanced view: concept parity — ✅ **DONE** (v1.19.0)
+
+- **Advanced anchored to the RESULTS column, not the panel.** `RX` is where the
+  results table starts *because the category tree sits to its left*. Advanced
+  hides the tree, so anchoring its content at `RX` left the tree's whole width
+  as dead window. `AX = BUYL.side_x` is the Advanced origin now, and
+  `ui.BuildFilterBuilder` / `ui.BuildSavedSearches` take it as `advLeft`.
+  **When one mode hides a column, the other mode's origin is not a constant it
+  can borrow.**
+- **`ui.buyHdrTicks` was in no show/hide list at all** and drew across every
+  view for several releases. It escaped because it is an ARRAY of textures
+  rather than a single widget, and the lists hold widgets. `tests/lint/
+  modebits.py` now enumerates every `ui.buy*` assigned in `BuildBuyTab` against
+  the union of the lists and fails on anything unaccounted for — with the
+  allowlist split into "not a widget" and "deliberately always shown", each
+  needing a reason. It reproduces the original bug when the hide loop is
+  removed.
+- **There is deliberately no "handled by a loop" allowlist in that lint.**
+  Widgets raised by a `while` are NAMED in it, so the scan finds them anyway;
+  exempting them would exempt exactly the names most likely to lose their loop
+  in a refactor, which is how the ticks went unhidden in the first place.
+- **The Builder dropped `buyout` / `stack` / `stack/N` on Build.**
+  `ui.BuilderTerm` never read them although `ParseTerm` and `TermToQuery` have
+  always handled them, so importing a query and rebuilding it ran a *wider*
+  search than the one loaded. Both directions are wired now and pinned by
+  `tests/units/builder_term_test.lua` with eight sabotages.
+- **`stack/N` and bare `stack` are ALTERNATIVES, not additions.** The form can
+  no longer hold both: the size box clears the tick as you type, and
+  `BuilderTerm` drops the tick if a size is set. A form that can express a
+  state the query language cannot spell will lose one of them at Build, and
+  which one is an implementation detail rather than a decision.
+- **The illegal pair needed a test that `ParseTerm` cannot produce.** The
+  sabotage for "SetTerm ticks both" passed at first, because `stack/20` never
+  sets `stackOnly` — the pair only arrives from a hand-built or restored term.
+  Worth remembering: a defensive guard needs a test that reaches it by the
+  door it actually defends.
+- **The Post Filter value box was the last raw `InputBoxTemplate`** in the
+  window and rendered as `( )` — the template's own end-caps with nothing
+  drawn between. The previous diagnosis (clipped by a fixed width) was wrong
+  and its comment said so; both are corrected.
+- **pfUI plates every Button, and saved-search rows are Buttons.** Same fix as
+  the category tree, `aegisNoSkin`. Unskinned they were always correct, which
+  is why only a skinned screenshot showed it.
+- **`ui.LayoutBuyTable` lives at FILE scope, reading `ui.buyPanel`.** Nested
+  inside `ui.BuildBuyTab` it cost two more upvalues and took that function to
+  27 of 32 — the ceiling it has already broken once. The lint's warn threshold
+  at 26 is what surfaced it.
+- **Layout that depends on WIDTH is recomputed, never fixed.**
+  `ui.LayoutViewTabs`, `ui.LayoutBuilderForm` and `ui.LayoutBuyTable` all run
+  from the deferred repaint and from the resize grip, because the window spans
+  1000–1400px and a constant that looks right at one end looks stranded at the
+  other.
+- **Syntax highlighting deferred, not dropped.** A 1.12 `EditBox` prints `|c`
+  escapes literally, so the concept's coloured query needs an overlay
+  FontString swapped on focus — and every path that writes the query has to go
+  through one rebuild or the overlay shows something the box does not contain.
+
+### 2w — Advanced view: clipping and proportion — ✅ **DONE** (v1.19.2)
+
+- **The same measurement bug, in the other axis.** `ui.PanelHeightAt` exists
+  because `GetHeight()` on a two-edge-anchored frame reports the height it was
+  LAST LAID OUT at. 2v then added two width-driven layouts that measured a
+  frame — and got the window's creation width, giving a tab strip at 69% and a
+  builder column at 29% of a resized panel. `ui.PanelWidthAt` /
+  `ui.AdvContentWidth` are the horizontal twins. **Any layout that divides the
+  panel must come through them; measuring a child frame is the bug.**
+- **A widget hidden by mode still has a position.** The Search button hung off
+  the Advanced button in BOTH modes. Advanced hides that button, so Search
+  inherited a slot 10px low and 102px in from the edge — and the query box's
+  right margin was a constant (172) that had to agree with the button's real
+  left edge (196) and could not see it. `ui.AnchorSearchButton` places it per
+  mode and the box hangs off the button. **Anchoring to the widget you must
+  clear beats a constant computed to clear it.**
+- **Filling a column and putting something after it are contradictory.** Every
+  control was stretched to fill the left column, then Exact was anchored to the
+  Name box's right — so it landed past the column and drew on the next panel.
+  The concept had it right all along: TWO widths, a short Name box with its
+  checkbox beside it and full-width dropdowns running past. The reserve is
+  measured off the label rather than guessed.
+- **Clipping coloured text needs the clip BEFORE the colour.** Post-filter
+  clauses carry `|cffRRGGBB` escapes; `ui.SetTextClipped` binary-searches on
+  `string.sub`, so clipping the assembled string would eventually cut an escape
+  in half — literal garbage plus a colour that leaks into every later line. The
+  value is clipped first, then decorated.
+- **U+21B5 is not in the 1.12 font.** The concept's "↵ adds" rendered as a
+  blank followed by "adds". An invisible glyph reads as a layout fault, which
+  is worse than a longer label; it says "Enter adds".
+- **Centre-anchor a row that is meant to fill its space.** From the left, every
+  rounding shortfall pools into one gap on the right and reads as misalignment;
+  from the centre it splits evenly and reads as intentional.
+- **Geometry is now testable, and tested.** `tests/units/geometry_test.lua`
+  pins the insets, `PanelWidthAt`/`PanelHeightAt`, and the derived tab and
+  column widths at five window sizes from MIN_W to MAX_W — including that the
+  tabs fill without overflowing and that the Name box's checkbox lands inside
+  its column. Three sabotages, all caught. This is the part of layout that is
+  arithmetic rather than appearance, and it was the part that kept breaking.
+
+#### Decisions recorded rather than left implicit
+
+- **The Results view carries no action row** — Bid / Buyout / Close only. 2v's
+  spec said it should also have Search / Build / Import / Clear. Reversed after
+  seeing it: Search is redundant beside the strip's own Search button, and
+  Import / Clear are Builder verbs.
+- **The results table keeps its scrollbar**, arrows outside the well and all,
+  which is inherent to `FauxScrollFrameTemplate`. The BROWSE tree's was hidden
+  in 1.17.0 because that list is short and the mockup has none; a fifty-row
+  results page needs the affordance, and it is identical in the Blizzlike view
+  which is already signed off.
+
+### 2x — Advanced view: alignment and spacing — ✅ **DONE** (v1.19.3)
+
+- **Centre on the CONTENT, not the container.** The tab row was centred on the
+  panel, but the content is inset 10 left and 12 right, so the row sat 1–2px
+  off every well below it — and by a different amount at each window size,
+  because `math.floor` discards the remainder. Whenever a thing must line up
+  with its neighbours, centre it on THEM.
+- **A number measured for one layout is wrong in another.** `BUYL.well_top`
+  (56) was measured against the Blizzlike control strip. Advanced has a tab
+  strip there, ending at 58 — so the results table's box began 2px above the
+  tabs and ten pixels above where Saved and Builder start. All three now come
+  from `ADVL.body_y`, and `ui.TableRowsTop` exists so the ROW COUNT knows about
+  it too: a table that fills a Blizzlike height inside a shorter Advanced box
+  draws its last row past the bottom, and nothing clips it.
+- **Clearing something by accident is not clearing it.** The footer rule sits
+  38px up; the overlay wells stopped at 36 and drew over it. Search Results
+  looked right only because its table stops at 82 for the count and pager. A
+  gap that exists as a side effect of an unrelated number is not a gap anyone
+  chose.
+- **Two views sharing a space need ONE placement function.** Saved Searches and
+  the Filter Builder each had their own copy of the two-column split: a 16px
+  gutter measured off the frame against a 12px one measured off the window.
+  Both columns differed by 2px, which is the jump when clicking between the
+  tabs. `ui.SplitAdvColumns` places both.
+- **Sized to content beats sized to container, for tabs.** Three equal thirds
+  of the panel gave a 442px pill for a 110px label at MAX_W and 308px at MIN_W.
+  Tabs are now the widest label plus padding, clamped, and the row is centred —
+  the same size wherever the window is, which is what a tab strip should be.
+  This is a deliberate departure from the concept's full-width strip, made at
+  the owner's request after seeing it in game.
+
+#### What the tests learned
+
+- **A restated formula tests the author, not the code.** The first version of
+  the tab assertions re-implemented the centring arithmetic in the test file.
+  It passed against the buggy build, because a restatement reproduces the
+  intent faithfully while the code does something else. The suite now extracts
+  and RUNS `ui.LayoutViewTabs` against stub buttons, and the sabotage that
+  restores panel-centring is caught.
+- **A test carrying its own copy of a constant tests nothing about that
+  constant.** `body_bot = 52` written into the test would have sailed straight
+  past a sabotage setting the real one back to 36. Every layout number is read
+  out of `ui/frame.lua` now.
+- **Some properties are structural and cannot be unit-tested.** The split's
+  arithmetic was never wrong — having two of it was. A test on the numbers
+  passes either way, so `tests/lint/sharedlayout.py` checks the shape instead:
+  both builders call the shared splitter and neither anchors its own columns.
+- **A checker fooled by its own documentation is worse than none.** That lint
+  first passed on a reverted build because the comment above the column block
+  names `ui.SplitAdvColumns`, and the scan counted the mention as a call. It
+  strips comments and requires a paren now.
+- **Two of the four sabotages written for this pass were INVALID and were
+  deleted rather than papered over.** Changing `tab_max` altered nothing
+  because `tab_min` governs at every real label width; changing the single
+  gutter constant altered nothing because a single source cannot disagree with
+  itself. A sabotage that cannot fail proves as little as a test that cannot.
+
+### 2y — Form height and saved-list scrolling — ✅ **DONE** (v1.19.4)
+
+- **A fixed layout with no fit check will eventually not fit.** The Filter
+  Builder's rows were ten hand-written offsets ending at 276, in a column that
+  is 254px tall at MIN_H. Three rows were added in 1.19.0 and nothing anywhere
+  could say the form had run out of room, so it clipped. Rows come from a pitch
+  constant now and the suite asserts the last one lands inside the column at
+  every window height — **add a tenth row and the suite goes red, not the
+  screenshot.**
+- **A status line is not a form field.** `ui.fbNote` sat below the last row at
+  a fixed offset and, at the minimum height, escaped the well and drew across
+  the money readout. It lives on the action bar now, behind one
+  `ui.BuilderNote` writer — eight call sites each remembering to Show and Hide
+  is seven chances to forget.
+- **`ui.RowsFor` measures a frame, and that is the trap.** Third bug from it:
+  the Buy table's row count (fixed by `ui.PanelHeightAt`), the Advanced widths
+  (`ui.PanelWidthAt`, 1.19.2) and now the saved lists (`ui.SavedRowsAt`). It
+  carries a warning naming all three. **Six callers on other tabs are
+  unaudited** — Crafting, Auctions, History, the bag and list pickers — and any
+  "list does not fill its box" report should start there.
+- **A capped list needs an OFFSET, not just a count.** `SAVED_ROWS` was a pool
+  ceiling and `fit` a visible count, and nothing carried a position — so a
+  thirteenth favourite could not be reached at all. Both columns scroll on the
+  wheel, independently, and the clamp lives in the PAINT so it re-applies when
+  the list shrinks under a scrolled view.
+- **A row is a Button and eats the wheel.** The handler is on the column's area
+  *and* on every row, or scrolling only works in the empty band below the last
+  entry — which is exactly where the pointer is not.
+- **`ui.SavedRowsAt` was written 900 lines above the constants it reads**, and
+  `tests/lint/scoping.py` caught it before it shipped. That lint was added in
+  1.19.1 after the same mistake took the window out; this is the first time it
+  has paid for itself.
+
+#### The restatement mistake, twice
+
+- **A restated formula tests the author, not the code — and I did it again.**
+  1.19.3 recorded this lesson for the tab strip. The first draft of this pass's
+  `ui.SavedRowsAt` assertions restated its arithmetic, and the sabotage that
+  makes the lists stop three rows short sailed straight past. **The rule is now
+  explicit in the test file: if a function can be extracted, extract it.**
+- **A "headroom for one more row" assertion was the wrong trade** and was
+  replaced. It forced a cramped pitch today to reserve space for a field nobody
+  has asked for; the plain fit check already makes the next field fail the
+  suite. When an assertion starts dictating the design rather than describing
+  it, it is the assertion that is wrong.
+- **One reported difference turned out not to be one.** The two Filter Builder
+  wells were said to end on different lines; they do not. The right column's
+  clause box is nested inside its well and inset on purpose. Recorded rather
+  than "fixed".
+
+### 3a — Feature batch, phase one — ✅ **DONE** (v1.20.0)
+
+First of three phases. Phases two (Tab traversal, the `tooltip` run-on syntax)
+and three (the pending filter components, restyling Sell / Auctions / Crafting
+/ History) are NOT started — each waits on the previous one being confirmed in
+game.
+
+- **A fix applied in one place and left in six others is not a fix.**
+  `LockHighlight` drives a template highlight texture that `ui.MakeButton` has
+  no such texture for, so it does nothing. That was discovered and fixed for
+  the Advanced view tabs in 1.15.1 — and the same dead call was still marking
+  the chosen post duration, sell mode, undercut mode, scan pacing, history
+  period and Sell-tab duration. **When a bug turns out to be a pattern, grep
+  for the pattern before closing it.** It is `ui.MarkChosen` now, one function.
+- **A "not chosen" button restores the kind it was BUILT with**, captured on
+  first use, not a hardcoded "quiet". A row of accent buttons would otherwise
+  come back wrong the first time one was deselected.
+- **The window saved its size but not its point.** Restoring one needs a guard
+  the size never did: the title bar is the only drag handle, so a point saved
+  near the edge of a large monitor and restored on a smaller one strands the
+  window with no way back. `ui.PointIsReachable` decides, and it is deliberately
+  generous — half off the edge is a choice, unreachable is a bug. When it
+  refuses it also CLEARS the bad point, so the fallback runs once rather than
+  every login.
+- **The reachability check needs the window's HEIGHT, not just its width.** A
+  BOTTOM anchor fixes the frame's bottom edge, so its top depends on how tall
+  the frame is. The first version ignored that and reported a perfectly normal
+  BOTTOMLEFT window as off-screen; the test caught it before it shipped.
+- **It refuses to judge a screen it has not measured.** UIParent reporting 0
+  means it has not been laid out yet, and treating that as "unreachable" would
+  move the window to CENTER on some logins — worse than the fault guarded
+  against.
+- **pfUI's backdrop is a CHILD FRAME and a child draws above all of its
+  parent's regions**, label included. Pushed one frame level behind now. The
+  same layering rule already governs the Filter Builder's text; it applies to
+  every button, not just the ones a screenshot happened to show.
+
+#### One diagnosis in the prompt was wrong
+
+The brief stated as a "confirmed structural fact" that the settings panel is
+built lazily AFTER `A.skin.Apply()`, and that its buttons therefore never reach
+skin.lua's `aegisButton` branch. **That is not true**:
+`ui.BuildAegisSettings` is called at ui/frame.lua:1172 and `A.skin.Apply()` at
+1203, so the panel is skinned normally. The layering fix above was made on the
+remaining hypothesis and on its own merits, not on that one — worth recording,
+because a confident wrong premise is more expensive than an open question.
+
+### 3a-fix — What 1.20.0 got wrong — ✅ **DONE** (v1.20.1)
+
+Both items here are 1.20.0's own, not older faults it uncovered.
+
+- **The clipping the user reported was self-inflicted.** Adding the
+  "Ask before posting" checkbox to the settings panel put a new link in the
+  middle of a vertical anchor chain, and the row below it kept anchoring to the
+  widget the new one displaced — so the new checkbox, the pacing label, its
+  buttons, the price-data line and Clear price data all drew in one spot.
+  **Inserting a widget into a chain is TWO edits**, and only one was made.
+  Nothing else could have noticed: the addon loads, every widget exists,
+  nothing errors. It is a lint now — `tests/lint/anchorchain.py` — because the
+  fault is a property of how the file is written (one anchor named twice) and
+  reading it back off a stub frame would only restate the two `SetPoint` calls,
+  which is the mistake this repo has already made twice.
+- **Sinking pfUI's backdrop a frame level was the wrong fix for the right
+  diagnosis.** The layering rule was correctly identified; the remedy was not
+  strong enough. Frame level orders SIBLINGS, and "a child frame draws over
+  its parent's regions" is a separate rule — so the sink helped the scan
+  strip's buttons (one frame under the window) and did nothing for the Aegis
+  settings buttons, three frames deep inside a ScrollFrame's scroll child.
+  **The discriminator was depth, and it was visible in the screenshots
+  before the fix was written.** The label is rebuilt on the backdrop frame
+  now: inside one frame the draw layer is the whole ordering rule, so there is
+  no level left to lose to.
+- **And the same fix was missing in four more places** — `skin.ApplyExternal`
+  was handing our buttons on other addons' frames to pfUI's *generic* button
+  skinner rather than to the `aegisButton` branch, which both double-bordered
+  them and buried their labels. This is the second consecutive release where
+  the pattern-grep rule from 3a earned its place; the rule is to grep for the
+  pattern **as part of the fix**, not after the next report.
+- **A lint is a suite.** `tests/sabotage.py` runs Python lints as well as Lua
+  unit files now. A lint makes a claim about the source and can be wrong about
+  it exactly the way an assertion can — `sharedlayout.py` already passed once
+  on a reverted build.
+
+#### And a third, found on the next screenshot (v1.20.2)
+
+- **A ScrollFrame CLIPS, and the clip line is its child's edge.** The settings
+  block started at x=0 — flush with it — and the top-level check box column is
+  nudged 2px *further* left than the labels so the boxes line up under the text.
+  So they hung outside the frame and came back shaved. **Text hides this and
+  textures do not**: a glyph carries its own side bearing, a 1px edge texture
+  does not, which is why five check boxes showed it and nothing else on the tab
+  did. Anything placed in a clipping frame needs a margin, not an alignment.
+- The guard is a **chain walk in the geometry suite**, not a restated constant:
+  it reads every vertical link out of `ui.BuildAegisSettings` with the offsets
+  the file carries, resolves each widget's x, and requires the leftmost to land
+  strictly inside. It also asserts the chain really does step left of its root,
+  so it cannot pass for the wrong reason, and that the one caller still passes
+  no `anchorAbove` — the branch the walk skips.
+- **Three consecutive releases have been screenshot-driven.** Each fault was
+  invisible to every check that existed and obvious to a person looking at the
+  tab. That is the standing division of labour, not a failure of the suite —
+  but each one has since been converted into something automatic, which is the
+  part that has to keep happening.
+
+### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
 

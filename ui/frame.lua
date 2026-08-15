@@ -52,8 +52,69 @@ local MakeMoneyGSC, MakeHSlider, SetSliderRange
 -- Window size bounds. The minimum is the old fixed size -- below it the Sell
 -- tab's header rows start colliding -- and the maximum is generous enough for
 -- a big monitor without letting the window escape a small one.
-local MIN_W, MIN_H = 832, 492
+-- MIN_W is 1000, and what SETS it changed. It was the control strip: with
+-- the strip starting beyond the sidebar, the left cluster and the right-hand
+-- buttons collided below ~1000. Moving the strip to the panel's left edge
+-- gave it ~190px back and it now fits comfortably at 832.
+--
+-- The RESULT COLUMNS are the binding constraint now. `ui.ColumnsFitAt` puts
+-- the true floor at ~970, so 1000 stands with a little slack rather than
+-- dropping to a number with none. It could only go lower by narrowing the
+-- table, which would move AWAY from the mockup -- its table is wide -- and
+-- the whole point of this pass is to match it.
+--
+-- A saved width below the minimum is clamped UP by RestoreWindowSize, so an
+-- existing character just gets a wider window on first login.
+local MIN_W, MIN_H = 1000, 492
 local MAX_W, MAX_H = 1400, 900
+
+-- How far the Aegis tab's settings block is inset inside its scroll child.
+--
+-- A ScrollFrame is the only 1.12 widget that CLIPS, which is why the settings
+-- live in one -- and the clip line falls exactly on the scroll child's left
+-- edge. Content at x=0 sits ON it, and the checkbox column is nudged 2px
+-- FURTHER left (see tipChk) so the boxes line up under the text above them,
+-- which put their left edge outside the frame entirely. Text got away with it
+-- because a glyph carries its own side bearing; a solid 1px edge texture does
+-- not, so the check boxes -- and only the check boxes -- came back shaved.
+--
+-- The scroll frame moves the same distance the other way, so the block still
+-- lines up with the tip line above it and the inset is pure clip margin.
+local SET_INSET = 6
+
+-- Buy tab control-strip widths, from the mockup. Fixed, so the left cluster
+-- stays tight and the slack falls between it and the buttons.
+local BUY_NAME_W   = 200
+local BUY_LVL_W    = 32
+local BUY_QUAL_W   = 116
+local BUY_SEARCH_W = 82
+local BUY_ADV_W    = 88
+-- What the cluster occupies end to end, including the gaps chained above.
+-- Anything that needs to know whether the strip fits asks this rather than
+-- re-adding the numbers and drifting.
+local BUY_STRIP_W = BUY_NAME_W + 14 + BUY_LVL_W + 7 + 8 + 7 + BUY_LVL_W
+                    + 16 + BUY_QUAL_W + 10 + 20 + 2 + 74
+
+-- Does the default control strip fit in a window `w` wide?
+--
+-- With fixed widths, nothing in the anchoring prevents the left cluster from
+-- reaching the right-hand buttons -- the guarantee has to come from the window
+-- never being narrow enough for that to happen. So the arithmetic lives here,
+-- where it can be checked, rather than as a number someone once did in their
+-- head and wrote into MIN_W.
+--
+-- Layout: sidebar (SIDE_W + 48) | 10 | strip | GAP | Search + 10 + Advanced | 12
+function ui.StripFitsAt(w)
+    local MIN_GAP = 24        -- the mockup's empty middle, at its narrowest
+    -- The strip now starts at the PANEL's left edge, not beyond the sidebar,
+    -- so it no longer pays SIDE_W + gutter before it begins. That is ~190px
+    -- back, and it is why this is no longer what sets MIN_W -- the result
+    -- columns are (see ui.ColumnsFitAt).
+    local left  = 10 + BUY_STRIP_W
+    local right = BUY_SEARCH_W + 14 + BUY_ADV_W + 12
+    -- The panel is inset from the window by roughly its border on each side.
+    return (left + MIN_GAP + right) <= (w - 22)
+end
 
 -- Sell tab control block, top to bottom: a header band carrying the item and
 -- the four money figures, a control grid, then the action bar. The bag list
@@ -83,6 +144,460 @@ local TAB_LABELS = { Scan = "Aegis" }
 
 local function ChatMsg(text)
     DEFAULT_CHAT_FRAME:AddMessage(text, 0.35, 0.78, 0.98)
+end
+
+-- ui.TintButton lived here. It vertex-coloured a template button's existing
+-- textures so one button could stand out, and it has no work left to do: no
+-- button in the addon inherits UIPanelButtonTemplate any more, so there are
+-- no textures to colour. ui.SetButtonKind replaces it.
+
+-- ---------------------------------------------------------------------------
+-- Buttons
+--
+-- We draw our own rather than inherit UIPanelButtonTemplate. The template's
+-- warm red-brown plate is vanilla's own art and there is nothing wrong with
+-- it -- ROADMAP 2l settled that explicitly -- but the design concept asks for
+-- flat dark plates with a thin border, and no vanilla template produces that.
+-- So the plate is a backdrop and we own all four visual states.
+--
+-- Two kinds, straight from the concept's stylesheet:
+--   * "primary" -- the deep red plate with a gold label (.btn). ONE per area:
+--     the thing the area exists to do (Search, Post, Full Scan).
+--   * "quiet"   -- the dark neutral plate with a tan label (.btn-quiet).
+--     Everything else. This is the common case, so it is the default.
+--
+-- What the template gave away for free and is hand-written below: the hover
+-- and pressed plates, the 1px label nudge on press (a button that does not
+-- move when clicked feels dead), and the disabled look. Note that a bare
+-- CreateFrame("Button") DOES have working Enable/Disable/IsEnabled -- they
+-- just have no appearance attached, which is exactly the trap that would ship
+-- a button that stops responding while still looking clickable.
+-- ---------------------------------------------------------------------------
+
+-- Borders are DARK, not warm. The concept edges both plates with #14120f --
+-- near black -- and the first pass instead used a warm brown on quiet and a
+-- bright red on primary, which is what made the unskinned buttons read as
+-- outlined-in-brown rather than as flat plates. Under pfUI they already
+-- looked right, because pfUI supplies its own dark edge; that difference
+-- between the two skins was the tell.
+--
+-- Not literally #14120f though. The concept's panel behind these is #3c3a36,
+-- lighter than the buttons, so a near-black edge makes them pop. Our panel is
+-- #211F1A -- DARKER than the plates -- so the same edge would erase the
+-- outline entirely. These sit a little above it: dark enough to read as the
+-- concept's crisp edge, light enough to still separate a plate from the panel.
+-- WHICH REFERENCE WINS, because the two disagree and this has now flipped
+-- once. `design/07-buy-tab.png` styles the primary button `#5a1414` -- deep
+-- red -- and 1.14.0 took its palette from there. The later "A - Default view"
+-- mockup (v1.9.0) draws Search and Buyout as a warm brown-gold plate and adds
+-- a PURPLE Advanced. **The mockup is newer and it wins.** Do not re-derive
+-- these from the older PNG.
+local BTN_KIND = {
+    primary = {
+        bg     = { 0.42, 0.31, 0.13 },
+        over   = { 0.52, 0.39, 0.17 },
+        down   = { 0.30, 0.22, 0.09 },
+        border = { 0.62, 0.49, 0.22 },
+        text   = { 1.00, 0.86, 0.48 },
+        font   = "GameFontNormal",
+    },
+    -- The Advanced button, and nothing else. It is the one control in the
+    -- default strip with no counterpart in the stock auction house, and the
+    -- mockup gives it its own colour to say so.
+    --
+    -- 1.14.0 removed a purple VERTEX TINT from this button, which is not the
+    -- same thing: a tint sat on top of another plate and read as a smudge.
+    -- This is a plate in its own right.
+    accent = {
+        bg     = { 0.36, 0.26, 0.56 },
+        over   = { 0.45, 0.33, 0.68 },
+        down   = { 0.26, 0.18, 0.40 },
+        border = { 0.58, 0.45, 0.80 },
+        text   = { 0.95, 0.92, 1.00 },
+        font   = "GameFontNormal",
+    },
+    quiet = {
+        bg     = { 0.17, 0.16, 0.15 },
+        over   = { 0.27, 0.25, 0.22 },
+        down   = { 0.11, 0.10, 0.09 },
+        border = { 0.13, 0.12, 0.10 },
+        text   = { 0.80, 0.71, 0.42 },
+        font   = "GameFontNormalSmall",
+    },
+}
+
+-- Disabled is DERIVED, not a fourth hand-picked row: the concept just drops
+-- the opacity. Deriving it means a palette edit can never leave the disabled
+-- colour behind pointing at the old plate.
+local BTN_DIM_BG, BTN_DIM_TEXT = 0.55, 0.45
+
+local function DimRGB(c, f)
+    return c[1] * f, c[2] * f, c[3] * f
+end
+
+-- Repaint `b` for its current state. Reads the state off the button rather
+-- than taking it as an argument so every script can just call Repaint(b).
+--
+-- The backdrop target is resolved HERE, every time, not cached at creation:
+-- under pfUI the visible plate is pfUI's own child frame (b.backdrop), and it
+-- does not exist until skin.Apply runs -- which is after the window is built.
+-- Same reason TintTab resolves it late for the sub-tabs.
+local function RepaintButton(b)
+    local k = BTN_KIND[b.aegisKind] or BTN_KIND.quiet
+    local target = b
+    if b.backdrop and b.backdrop.SetBackdropColor then target = b.backdrop end
+
+    -- 1.12 returns 1/nil from IsEnabled(), not a boolean.
+    local enabled = true
+    if b.IsEnabled then
+        local ok, v = pcall(function() return b:IsEnabled() end)
+        if ok and not v then enabled = false end
+    end
+
+    local bg, br, tx = k.bg, k.border, k.text
+    if enabled then
+        if b.aegisDown then
+            bg = k.down
+        elseif b.aegisOver then
+            bg = k.over
+        end
+    end
+
+    if target.SetBackdropColor then
+        if enabled then
+            target:SetBackdropColor(bg[1], bg[2], bg[3], 1)
+        else
+            local r, g, bl = DimRGB(bg, BTN_DIM_BG)
+            target:SetBackdropColor(r, g, bl, 1)
+        end
+    end
+    if target.SetBackdropBorderColor then
+        if enabled then
+            target:SetBackdropBorderColor(br[1], br[2], br[3])
+        else
+            local r, g, bl = DimRGB(br, BTN_DIM_BG)
+            target:SetBackdropBorderColor(r, g, bl)
+        end
+    end
+
+    if b.label then
+        -- aegisTextColor overrides the kind's text colour, and it has to be
+        -- read HERE rather than set once by the caller: this function runs on
+        -- every hover, press and enable, so anything that colours the label
+        -- from outside is wiped by the next mouseover. The Min Quality
+        -- dropdown uses it to show its selection in that quality's colour.
+        local tc = b.aegisTextColor or tx
+        if enabled then
+            b.label:SetTextColor(tc[1], tc[2], tc[3])
+        else
+            local r, g, bl = DimRGB(tc, BTN_DIM_TEXT)
+            b.label:SetTextColor(r, g, bl)
+        end
+        -- Press nudge. Done by moving the label ourselves rather than via
+        -- SetPushedTextOffset, because that only fires for a font string
+        -- registered with SetFontString and we deliberately do not depend on
+        -- that call existing.
+        local dy = 0
+        if enabled and b.aegisDown then dy = -1 end
+        b.label:ClearAllPoints()
+        b.label:SetPoint("CENTER", b, "CENTER", 0, dy)
+    end
+end
+
+-- Change a button's kind after creation and repaint it. This replaces what
+-- ui.TintButton did for the accent buttons: there are no template textures to
+-- vertex-colour any more, so "make this one stand out" means "make it
+-- primary".
+function ui.SetButtonKind(b, kind)
+    if not b or not b.aegisButton then return end
+    b.aegisKind = BTN_KIND[kind] and kind or "quiet"
+    RepaintButton(b)
+end
+
+-- Mark exactly one of a row of segmented buttons as the chosen one.
+-- `match(b)` answers true for it.
+--
+-- SIX loops used to do this with b:LockHighlight() / b:UnlockHighlight(), and
+-- every one of them was doing NOTHING. LockHighlight drives a TEMPLATE
+-- highlight texture; ui.MakeButton draws its own backdrop and has no such
+-- texture, so the chosen duration, sell mode, undercut mode, throttle mode,
+-- history period and post duration all looked identical to their neighbours.
+--
+-- This is the same bug that was found and fixed for the Advanced view tabs --
+-- see the note in ui.SetBuyView. It was fixed there in one place and left
+-- everywhere else, which is why this is now a shared function rather than a
+-- seventh copy of the loop.
+function ui.MarkChosen(btns, match)
+    local i = 1
+    while i <= table.getn(btns or {}) do
+        local b = btns[i]
+        if b then
+            -- The kind it had BEFORE we ever touched it. Restoring "quiet"
+            -- would be a guess, and a row of accent buttons would come back
+            -- wrong the first time one was deselected.
+            if not b.aegisBaseKind then
+                b.aegisBaseKind = b.aegisKind or "quiet"
+            end
+            ui.SetButtonKind(b, match(b) and "primary" or b.aegisBaseKind)
+        end
+        i = i + 1
+    end
+end
+
+-- Build an Aegis button. Drop-in for
+--     ui.MakeButton(parent, "quiet", name)
+-- -- the returned frame answers SetText/GetText/Enable/Disable/IsEnabled the
+-- same way, so existing call sites keep working after the constructor swap.
+function ui.MakeButton(parent, kind, name)
+    local b = CreateFrame("Button", name, parent)
+    b.aegisButton = true
+    b.aegisKind = BTN_KIND[kind] and kind or "quiet"
+    b:SetHeight(22)
+    b:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+
+    -- Recorded so ui/skin.lua can rebuild this font string on pfUI's backdrop
+    -- frame with the same font. SetButtonKind only ever changes colours, so
+    -- the font a button is born with is the font it keeps.
+    b.aegisFont = (BTN_KIND[b.aegisKind] or BTN_KIND.quiet).font
+    local fs = b:CreateFontString(nil, "OVERLAY", b.aegisFont)
+    fs:SetPoint("CENTER", b, "CENTER", 0, 0)
+    b.label = fs
+
+    -- SetText/GetText are defined on the OBJECT, shadowing the widget
+    -- metatable for this frame only -- the same containment rule the tooltip
+    -- hook follows. Nothing else that draws a Button is affected.
+    b.SetText = function(self, t)
+        self.aegisText = t or ""
+        self.label:SetText(self.aegisText)
+    end
+    b.GetText = function(self) return self.aegisText or "" end
+    -- Real 1.12 returns the font string REGISTERED with SetFontString, which
+    -- for a template-less button is nil. Two callers measure a button's label
+    -- through this to clip it (both dropdowns), and nil would error there, so
+    -- answer it properly rather than leaving a hole for the sweep to fall in.
+    b.GetFontString = function(self) return self.label end
+
+    -- Enable/Disable exist and work already; they just have no look. Wrap
+    -- them so the plate follows the state.
+    local origEnable, origDisable = b.Enable, b.Disable
+    b.Enable = function(self)
+        if origEnable then origEnable(self) end
+        RepaintButton(self)
+    end
+    b.Disable = function(self)
+        if origDisable then origDisable(self) end
+        self.aegisDown = false
+        self.aegisOver = false
+        RepaintButton(self)
+    end
+
+    -- These close over `b` rather than reading the global `this`. `this` is
+    -- the right mechanism for a handler SHARED across frames, but each button
+    -- already has itself in scope, and depending on the global means the
+    -- script only works when the CLIENT is the one invoking it. It is not:
+    -- the Filter Builder hides its action buttons from Lua the moment it
+    -- builds them, which fires OnHide with no `this` set.
+    b:SetScript("OnEnter", function()
+        b.aegisOver = true
+        RepaintButton(b)
+    end)
+    -- A press that drags off the button never sends it an OnMouseUp, so the
+    -- pressed plate would stick until the next hover. OnLeave clears BOTH
+    -- flags for that reason, not just the hover one.
+    b:SetScript("OnLeave", function()
+        b.aegisOver = false
+        b.aegisDown = false
+        RepaintButton(b)
+    end)
+    b:SetScript("OnMouseDown", function()
+        b.aegisDown = true
+        RepaintButton(b)
+    end)
+    b:SetScript("OnMouseUp", function()
+        b.aegisDown = false
+        RepaintButton(b)
+    end)
+    -- Hiding mid-press leaves the same stuck plate waiting for the reshow.
+    b:SetScript("OnHide", function()
+        b.aegisDown = false
+        b.aegisOver = false
+        RepaintButton(b)
+    end)
+
+    b:SetText("")
+    RepaintButton(b)
+    return b
+end
+
+-- A recessed content well: the dark inset panel a list or a form sits in.
+-- The concept uses one for every content area (.well), and it is what stops an
+-- area with little in it from reading as a hole in the window rather than as
+-- an empty list.
+--
+-- `inset` is how far the well is pushed OUT past the frame it wraps, since a
+-- well is drawn around its contents. Its backdrop border draws a few pixels
+-- outside the frame rect, so anything anchored just below one needs to allow
+-- for that -- see the 1.13.0 clipping fix.
+function ui.MakeWell(parent, around, inset)
+    inset = inset or 6
+    local w = CreateFrame("Frame", nil, parent)
+    w:SetPoint("TOPLEFT", around, "TOPLEFT", -inset, inset)
+    w:SetPoint("BOTTOMRIGHT", around, "BOTTOMRIGHT", inset, -inset)
+    w:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    w:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    w:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    return w
+end
+
+-- Give an InputBoxTemplate edit box the mockup's flat field instead of
+-- vanilla's art.
+--
+-- The template draws three textures -- a left cap, a right cap and a tiling
+-- middle, all from Common-Input-Border. At a text field's width that reads as
+-- a long rounded trough; at the width of a level-range box it reads as two
+-- brackets with a gap, which is what got reported as "( )" shapes. Neither is
+-- the mockup's flat dark rectangle with a thin border.
+--
+-- We keep the template -- it carries the cursor, selection and focus
+-- behaviour, none of which is worth reimplementing -- and only replace what
+-- it DRAWS. The textures are found through GetRegions() rather than by
+-- $parentLeft/$parentMiddle/$parentRight, because most of these boxes are
+-- created without a name and getglobal has nothing to look up.
+function ui.FlattenEditBox(e)
+    if not e then return e end
+    local regions = { e:GetRegions() }
+    local i = 1
+    while i <= table.getn(regions) do
+        local r = regions[i]
+        local ok, t = pcall(function() return r:GetObjectType() end)
+        if ok and t == "Texture" then pcall(function() r:Hide() end) end
+        i = i + 1
+    end
+    e:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 10,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    e:SetBackdropColor(0.06, 0.05, 0.04, 1)
+    e:SetBackdropBorderColor(0.42, 0.35, 0.20)
+    return e
+end
+
+-- A square check box, at any size, in either skin.
+--
+-- Two problems this solves.
+--
+-- 1. A `SetBackdrop` whose edgeSize approaches the frame size renders as a
+--    garbled CROSS, not a box: the two corner pieces are each edgeSize square
+--    and physically cannot both fit across a 14px frame. The result rows used
+--    edgeSize 8 in a 14px button. Borders here are four 1px textures, which
+--    stay square at any size.
+--
+-- 2. pfUI reskins anything reporting `CheckButton` -- that is what turned the
+--    row boxes into crosses and "Usable items" into a circle under the skin
+--    while they looked correct unskinned. aegisNoSkin opts out, the same way
+--    the sort headers and category rows already do.
+--
+-- The checked state stays the WIDGET's OWN state -- SetChecked/GetChecked are
+-- deliberately NOT overridden. A CheckButton toggles itself before OnClick
+-- runs, and every handler in this file is written against that (they read
+-- GetChecked() inside OnClick and expect the new value). Shadowing those two
+-- methods with our own flag would leave the widget's state and ours
+-- disagreeing, and each of those handlers would silently read the wrong one.
+-- Instead we only replace the ART: the tick is the widget's CHECKED texture,
+-- so the client shows and hides it for us and it can never drift.
+function ui.MakeCheckBox(parent, size, name)
+    size = size or 14
+    local c = CreateFrame("CheckButton", name, parent)
+    c:SetWidth(size); c:SetHeight(size)
+    c.aegisNoSkin = true          -- our art, not pfUI's
+
+    local fill = c:CreateTexture(nil, "BACKGROUND")
+    fill:SetAllPoints(c)
+    fill:SetTexture(0.08, 0.07, 0.06, 1)
+    c.fill = fill
+
+    c.edge = {}
+    local ei = 1
+    while ei <= 4 do
+        local ln = c:CreateTexture(nil, "BORDER")
+        ln:SetTexture(0.45, 0.38, 0.22, 1)
+        c.edge[ei] = ln
+        ei = ei + 1
+    end
+    c.edge[1]:SetPoint("TOPLEFT", c, "TOPLEFT", 0, 0)
+    c.edge[1]:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, 0)
+    c.edge[1]:SetHeight(1)
+    c.edge[2]:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 0)
+    c.edge[2]:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 0)
+    c.edge[2]:SetHeight(1)
+    c.edge[3]:SetPoint("TOPLEFT", c, "TOPLEFT", 0, 0)
+    c.edge[3]:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 0)
+    c.edge[3]:SetWidth(1)
+    c.edge[4]:SetPoint("TOPRIGHT", c, "TOPRIGHT", 0, 0)
+    c.edge[4]:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", 0, 0)
+    c.edge[4]:SetWidth(1)
+
+    -- SetCheckedTexture takes a PATH on 1.12, not a texture object, so the
+    -- texture has to be created from a file that exists -- then immediately
+    -- re-pointed and repainted as a flat colour, which SetTexture(r,g,b,a)
+    -- does without touching the file again. If a client ever fails to hand
+    -- back the region, the stock check mark stays: wrong art, still legible,
+    -- never a box you cannot read the state of.
+    pcall(function()
+        c:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    end)
+    local tick
+    pcall(function() tick = c:GetCheckedTexture() end)
+    if tick then
+        tick:ClearAllPoints()
+        tick:SetPoint("TOPLEFT", c, "TOPLEFT", 3, -3)
+        tick:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -3, 3)
+        tick:SetTexture(1.0, 0.82, 0.0, 1)
+        c.tick = tick
+    end
+
+    -- Caption to the right of the box. UICheckButtonTemplate supplied one as
+    -- a global named "<name>Text"; ours is a plain field, so the settings
+    -- rows no longer need a name just to reach their own label.
+    c.SetLabel = function(self, text, colour)
+        if not self.label then
+            self.label = self:CreateFontString(nil, "OVERLAY",
+                "GameFontHighlightSmall")
+            self.label:SetPoint("LEFT", self, "RIGHT", 5, 0)
+            self.label:SetJustifyH("LEFT")
+        end
+        self.label:SetText(text)
+        if colour then
+            self.label:SetTextColor(colour[1], colour[2], colour[3])
+        end
+        return self.label
+    end
+
+    -- Dimmed rather than hidden, so a row you cannot tick still reads as a
+    -- row with a tick box rather than one missing a column. Pairs with
+    -- Disable(), which is what actually refuses the click.
+    c.SetDimmed = function(self, on)
+        local a = on and 0.30 or 1
+        self.fill:SetAlpha(a)
+        if self.tick then self.tick:SetAlpha(a) end
+        local k = 1
+        while k <= 4 do self.edge[k]:SetAlpha(a); k = k + 1 end
+        if self.label then self.label:SetAlpha(on and 0.45 or 1) end
+        if on then self:Disable() else self:Enable() end
+    end
+    return c
 end
 
 -- Set `text` on a FontString, shortened with an ellipsis if it would run wider
@@ -122,6 +637,81 @@ function ui.SaveWindowSize()
     s.height = math.floor(ui.frame:GetHeight() or MIN_H)
 end
 
+-- Remember where the window was dragged to.
+--
+-- All FOUR values, not just x and y: GetPoint returns the anchor it is
+-- currently using, and a pair of offsets means nothing without the point they
+-- are measured from. Storing only x/y and restoring against CENTER puts the
+-- window somewhere it has never been.
+function ui.SaveWindowPoint()
+    if not ui.frame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    local ok, point, _, relPoint, x, y = pcall(function()
+        return ui.frame:GetPoint(1)
+    end)
+    if not ok or not point then return end
+    s.point    = point
+    s.relPoint = relPoint or point
+    s.x        = math.floor(x or 0)
+    s.y        = math.floor(y or 0)
+end
+
+-- Would this saved point put the window somewhere it can still be dragged?
+--
+-- THE CASE THIS EXISTS FOR: a window saved near the edge of a large screen,
+-- restored on a smaller one, lands with its title bar off-screen -- and the
+-- title bar is the only drag handle, so there is no way back short of wiping
+-- the saved variables. Anything that can strand a user gets checked, not
+-- assumed.
+--
+-- Deliberately generous: it asks only that a reasonable slice of the title bar
+-- is reachable, not that the whole window fits. Someone who likes their window
+-- half off the edge is allowed to keep it there.
+local GRAB_MARGIN = 80      -- of title bar that must remain on screen
+local BAR_H = 26            -- ...and its height, for the bottom-edge check
+function ui.PointIsReachable(point, relPoint, x, y, screenW, screenH,
+                             winW, winH)
+    if not point or not relPoint then return false end
+    screenW, screenH = screenW or 0, screenH or 0
+    winW, winH = winW or 0, winH or 0
+    -- An unmeasured screen means UIParent has not been laid out yet. Refusing
+    -- the saved point there would move the window to CENTER on some logins,
+    -- which is worse than the fault this guards against.
+    if screenW <= 0 or screenH <= 0 then return true end
+
+    -- Convert the anchor and its offsets into the frame's LEFT and TOP edges,
+    -- both measured from the screen's top-left with DOWN and RIGHT positive.
+    -- The offsets mean different things per anchor, and the window's own size
+    -- is needed for the far edges -- a BOTTOM anchor fixes the frame's bottom,
+    -- so its top depends on how tall the frame is.
+    local left
+    if string.find(relPoint, "LEFT") then
+        left = x
+    elseif string.find(relPoint, "RIGHT") then
+        left = screenW + x - winW
+    else
+        left = screenW / 2 + x - winW / 2
+    end
+
+    local top
+    if string.find(relPoint, "TOP") then
+        top = -y                                  -- y is negative going down
+    elseif string.find(relPoint, "BOTTOM") then
+        top = screenH - (y + winH)
+    else
+        top = screenH / 2 - y - winH / 2
+    end
+
+    -- A grabbable slice of the title bar has to be on screen horizontally,
+    -- and the bar itself has to be within the screen vertically.
+    if left + GRAB_MARGIN > screenW then return false end
+    if left + winW - GRAB_MARGIN < 0 then return false end
+    if top < 0 then return false end                    -- above the top edge
+    if top > screenH - BAR_H then return false end      -- below the bottom
+    return true
+end
+
 function ui.RestoreWindowSize()
     if not ui.frame or not A.db or not A.db.char then return end
     -- Scale first, and unconditionally: it is stored independently of the size,
@@ -129,14 +719,70 @@ function ui.RestoreWindowSize()
     -- width to restore -- and would otherwise lose their scale every login.
     ui.ApplyWindowScale()
     local s = A.db.char.ui
-    if not s or not s.width or not s.height then return end
-    local w, h = s.width, s.height
-    if w < MIN_W then w = MIN_W end
-    if h < MIN_H then h = MIN_H end
-    if w > MAX_W then w = MAX_W end
-    if h > MAX_H then h = MAX_H end
-    ui.frame:SetWidth(w)
-    ui.frame:SetHeight(h)
+    if not s then return end
+
+    if s.width and s.height then
+        local w, h = s.width, s.height
+        if w < MIN_W then w = MIN_W end
+        if h < MIN_H then h = MIN_H end
+        if w > MAX_W then w = MAX_W end
+        if h > MAX_H then h = MAX_H end
+        ui.frame:SetWidth(w)
+        ui.frame:SetHeight(h)
+    end
+
+    -- Put it back where it was left -- but only if that is somewhere it can
+    -- still be dragged from. See ui.PointIsReachable: the title bar is the
+    -- only drag handle, so a point restored off-screen on a smaller monitor
+    -- would strand the window with no way back.
+    if s.point and s.relPoint then
+        local sw = (UIParent and UIParent.GetWidth
+                    and UIParent:GetWidth()) or 0
+        local sh = (UIParent and UIParent.GetHeight
+                    and UIParent:GetHeight()) or 0
+        if ui.PointIsReachable(s.point, s.relPoint, s.x or 0, s.y or 0,
+                               sw, sh, ui.frame:GetWidth() or 0,
+                               ui.frame:GetHeight() or 0) then
+            ui.frame:ClearAllPoints()
+            ui.frame:SetPoint(s.point, UIParent, s.relPoint,
+                              s.x or 0, s.y or 0)
+        else
+            -- Unreachable: centre it and forget the bad point, so the next
+            -- drag saves a good one instead of this running every login.
+            ui.frame:ClearAllPoints()
+            ui.frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            s.point, s.relPoint, s.x, s.y = nil, nil, nil, nil
+        end
+    end
+
+    ui.QueueRepaint()
+end
+
+-- Repaint the open tab on the NEXT OnUpdate tick.
+--
+-- Deferred deliberately. The client relayouts frames one tick after an
+-- ancestor's size changes, so calling RefreshCurrentTab inline here would
+-- read exactly the stale numbers this exists to avoid. The Buy tab no longer
+-- depends on that -- it derives from the window's own height -- but every
+-- other list still measures, and they all need the second look.
+function ui.QueueRepaint()
+    if not ui.frame then return end
+    if not ui.repaintDriver then
+        local drv = CreateFrame("Frame", nil, ui.frame)
+        drv:Hide()
+        drv:SetScript("OnUpdate", function()
+            this:Hide()
+            -- Width-driven layout goes first: the Advanced tab strip spreads
+            -- itself across the panel, so it has to be re-spread on a resize
+            -- or it keeps whatever widths the previous size gave it.
+            if ui.LayoutViewTabs then ui.LayoutViewTabs() end
+            if ui.LayoutAdvColumns then ui.LayoutAdvColumns() end
+            if ui.LayoutBuilderForm then ui.LayoutBuilderForm() end
+            if ui.RefreshCurrentTab then ui.RefreshCurrentTab() end
+        end)
+        ui.repaintDriver = drv
+    end
+    ui.repaintDriver:Show()
 end
 
 -- ---------------------------------------------------------------------------
@@ -207,15 +853,51 @@ function ui.SkinNewRows(pool)
     end
 end
 
--- How many rows of `rowH` actually fit in `scroll` at its current height,
--- clamped to [minRows, maxRows]. This is what makes a taller window show more
--- listings instead of more blank space: every list asks at paint time rather
--- than trusting the count it was built with.
+-- How many rows of `rowH` actually fit in `scroll` at its current height.
+-- This is what makes a taller window show more listings instead of more blank
+-- space: every list asks at paint time rather than trusting the count it was
+-- built with.
+--
+-- `minRows` is the answer when the frame has NO measurable height -- it has
+-- not been laid out yet, or there is no frame at all. It is NOT a floor on a
+-- real measurement, and the difference is the whole bug this signature had.
+--
+-- When rows grew from 20px to 26px, a floor of 11 kept insisting on 11 rows
+-- in a space that now held eight. Rows anchor to each other and are not the
+-- scroll frame's scroll-child, so nothing clips them: the surplus three drew
+-- straight down over the match count, the pager, the bid boxes and the action
+-- bar. A measured fit must win over any expectation of how many "should" fit,
+-- because the measurement is the only thing that knows about the space.
+--
+-- (1.14.1 raised a floor from 1 to 12 for the Saved Searches list, which is
+-- the OTHER case: a two-edge-anchored frame reports 0 until the client lays
+-- it out, and painting one row on that pass was wrong. Both behaviours are
+-- correct; they are just not the same parameter, and conflating them is what
+-- produced an overflowing table.)
+-- WARNING -- THIS MEASURES A FRAME, AND MEASURING IS A TRAP.
+--
+-- GetHeight() on a frame anchored by TWO EDGES returns the height it was last
+-- LAID OUT at, not its current one; the client relayouts a frame after its
+-- ancestor's size changes. Restoring a saved window size and then asking a
+-- two-edge-anchored scroll frame how tall it is gets the answer from the
+-- window's CREATION size, forever.
+--
+-- That has now cost three separate bugs: the Buy table's row count (fixed by
+-- ui.PanelHeightAt), the Advanced layout's widths (ui.PanelWidthAt, 1.19.2)
+-- and the Saved Searches lists (ui.SavedRowsAt, 1.19.4). Each replaced a call
+-- to this function with arithmetic on the WINDOW's height, which is set
+-- explicitly and is therefore true the moment it is read.
+--
+-- Only use this on a frame whose height was set with SetHeight. The remaining
+-- callers -- Crafting, Auctions, History, the bag and list pickers -- have not
+-- been audited; if one of those lists is ever reported as not filling its box,
+-- this is the first thing to look at.
 function ui.RowsFor(scroll, rowH, minRows, maxRows)
     if not scroll then return minRows end
     local h = scroll:GetHeight() or 0
+    if h <= 0 then return minRows end     -- never laid out; use the fallback
     local n = math.floor(h / rowH)
-    if n < minRows then n = minRows end
+    if n < 1 then n = 1 end
     if n > maxRows then n = maxRows end
     return n
 end
@@ -230,7 +912,8 @@ local function MakeSubTab(parent, name)
         tile = true, tileSize = 16, edgeSize = 10,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
-    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    b.aegisFont = "GameFontNormalSmall"
+    local fs = b:CreateFontString(nil, "OVERLAY", b.aegisFont)
     fs:SetPoint("CENTER", b, "CENTER", 0, 0)
     fs:SetText(TAB_LABELS[name] or name)
     b.label = fs
@@ -302,7 +985,10 @@ function ui.BuildWindow()
     titleBar:EnableMouse(true)
     titleBar:RegisterForDrag("LeftButton")
     titleBar:SetScript("OnDragStart", function() f:StartMoving() end)
-    titleBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
+    titleBar:SetScript("OnDragStop", function()
+        f:StopMovingOrSizing()
+        ui.SaveWindowPoint()
+    end)
     ui.titleBar = titleBar
 
     local titleText = titleBar:CreateFontString(
@@ -329,8 +1015,7 @@ function ui.BuildWindow()
     -- Swap to the stock Blizzard AH (its counterpart button swaps back —
     -- see HookAuctionFrame). Raised above the title bar's drag region and
     -- anchored to the close button so it sits neatly on the extended bar.
-    local blizBtn = CreateFrame("Button", "AegisExchangeBlizzardButton", f,
-        "UIPanelButtonTemplate")
+    local blizBtn = ui.MakeButton(f, "quiet", "AegisExchangeBlizzardButton")
     blizBtn:SetWidth(92)
     blizBtn:SetHeight(20)
     blizBtn:SetPoint("RIGHT", close, "LEFT", -4, 0)
@@ -400,6 +1085,9 @@ function ui.BuildWindow()
         f:StopMovingOrSizing()
         ui.SaveWindowSize()
         ui.Refresh()
+        ui.LayoutViewTabs()      -- re-centre the Advanced tabs
+        ui.LayoutAdvColumns()    -- ...re-split BOTH overlay views together
+        ui.LayoutBuilderForm()   -- ...and size the builder's own controls
         ui.RefreshCurrentTab()   -- re-fit the visible list to the new height
     end)
     -- Deliberately NO per-frame refresh while dragging. Repainting mid-drag
@@ -444,8 +1132,7 @@ function ui.BuildWindow()
     -- Scan tab: Full Scan / Pause / Resume / Categories + status + progress.
     local scanPanel = ui.panels["Scan"]
 
-    local fullScan = CreateFrame("Button", "AegisExchangeFullScanButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local fullScan = ui.MakeButton(scanPanel, "primary", "AegisExchangeFullScanButton")
     fullScan:SetWidth(100)
     fullScan:SetHeight(22)
     fullScan:SetPoint("TOPLEFT", scanPanel, "TOPLEFT", 8, -10)
@@ -455,8 +1142,7 @@ function ui.BuildWindow()
     end)
     ui.fullScanBtn = fullScan
 
-    local pause = CreateFrame("Button", "AegisExchangePauseButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local pause = ui.MakeButton(scanPanel, "quiet", "AegisExchangePauseButton")
     pause:SetWidth(74)
     pause:SetHeight(22)
     pause:SetPoint("LEFT", fullScan, "RIGHT", 6, 0)
@@ -467,8 +1153,7 @@ function ui.BuildWindow()
     end)
     ui.pauseBtn = pause
 
-    local resume = CreateFrame("Button", "AegisExchangeResumeButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local resume = ui.MakeButton(scanPanel, "quiet", "AegisExchangeResumeButton")
     resume:SetWidth(74)
     resume:SetHeight(22)
     resume:SetPoint("LEFT", pause, "RIGHT", 6, 0)
@@ -482,8 +1167,7 @@ function ui.BuildWindow()
     -- Stop: abandon the scan entirely and free the AH for browsing/posting.
     -- (Pause keeps progress for Resume, but the scanner is shared, so it still
     -- holds the query channel -- Stop is the way to bail out completely.)
-    local stop = CreateFrame("Button", "AegisExchangeStopButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local stop = ui.MakeButton(scanPanel, "quiet", "AegisExchangeStopButton")
     stop:SetWidth(60)
     stop:SetHeight(22)
     stop:SetPoint("LEFT", resume, "RIGHT", 6, 0)
@@ -495,8 +1179,7 @@ function ui.BuildWindow()
     end)
     ui.stopBtn = stop
 
-    local cats = CreateFrame("Button", "AegisExchangeCategoriesButton",
-        scanPanel, "UIPanelButtonTemplate")
+    local cats = ui.MakeButton(scanPanel, "quiet", "AegisExchangeCategoriesButton")
     cats:SetWidth(94)
     cats:SetHeight(22)
     cats:SetPoint("LEFT", stop, "RIGHT", 6, 0)
@@ -555,7 +1238,9 @@ function ui.BuildWindow()
     local SB_W = 16
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeAegisScroll",
         scanPanel)
-    scroll:SetPoint("TOPLEFT", tip, "BOTTOMLEFT", 0, -8)
+    -- Pulled left by exactly the inset the content carries, so the settings
+    -- block still lines up with the tip line above it.
+    scroll:SetPoint("TOPLEFT", tip, "BOTTOMLEFT", -SET_INSET, -8)
     scroll:SetPoint("BOTTOMRIGHT", scanPanel, "BOTTOMRIGHT", -(SB_W + 10), 6)
     ui.aegisScroll = scroll
 
@@ -729,7 +1414,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     if anchorAbove then
         hdr:SetPoint("TOPLEFT", anchorAbove, "BOTTOMLEFT", 0, -18)
     else
-        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -4)
+        hdr:SetPoint("TOPLEFT", panel, "TOPLEFT", SET_INSET, -4)
     end
     hdr:SetText("Settings")
     hdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -749,7 +1434,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local di = 1
     while di <= table.getn(A.sell.DURATIONS) do
         local d = A.sell.DURATIONS[di]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(44); b:SetHeight(20)
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", durLbl, "RIGHT", 10, 0) end
@@ -768,7 +1453,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- ---- Default undercut: percent OR a flat copper amount ----------------
     local ucLbl = label("Default undercut:", durLbl, -20)
 
-    local pctMode = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local pctMode = ui.MakeButton(panel, "quiet")
     pctMode:SetWidth(34); pctMode:SetHeight(20)
     pctMode:SetPoint("LEFT", ucLbl, "RIGHT", 10, 0)
     pctMode:SetText("%")
@@ -776,7 +1461,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     pctMode:SetScript("OnClick", function()
         A.db.SetSetting("undercutMode", "pct"); ui.RefreshSettings()
     end)
-    local flatMode = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local flatMode = ui.MakeButton(panel, "quiet")
     flatMode:SetWidth(48); flatMode:SetHeight(20)
     flatMode:SetPoint("LEFT", pctMode, "RIGHT", 3, 0)
     flatMode:SetText("Flat")
@@ -831,7 +1516,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local mi = 1
     while mi <= table.getn(modes) do
         local m = modes[mi]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(72); b:SetHeight(20)
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", spLbl, "RIGHT", 10, 0) end
@@ -853,7 +1538,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- steps have no such problem and are easier to land on a round number.
     local scLbl = label("Window scale:", spLbl, -20)
 
-    local scDown = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scDown = ui.MakeButton(panel, "quiet")
     scDown:SetWidth(24); scDown:SetHeight(20)
     scDown:SetPoint("LEFT", scLbl, "RIGHT", 10, 0)
     scDown:SetText("-")
@@ -865,28 +1550,22 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     ui.setScaleText:SetJustifyH("CENTER")
     ui.setScaleText:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    local scUp = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scUp = ui.MakeButton(panel, "quiet")
     scUp:SetWidth(24); scUp:SetHeight(20)
     scUp:SetPoint("LEFT", ui.setScaleText, "RIGHT", 8, 0)
     scUp:SetText("+")
     scUp:SetScript("OnClick", function() ui.StepWindowScale(SCALE_STEP) end)
 
-    local scReset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scReset = ui.MakeButton(panel, "quiet")
     scReset:SetWidth(56); scReset:SetHeight(20)
     scReset:SetPoint("LEFT", scUp, "RIGHT", 10, 0)
     scReset:SetText("Reset")
     scReset:SetScript("OnClick", function() ui.StepWindowScale(nil) end)
 
     -- ---- Toggles ----------------------------------------------------------
-    local tipChk = CreateFrame("CheckButton", "AegisExchangeSetTooltip", panel,
-        "UICheckButtonTemplate")
-    tipChk:SetWidth(24); tipChk:SetHeight(24)
+    local tipChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetTooltip")
     tipChk:SetPoint("TOPLEFT", scLbl, "BOTTOMLEFT", -2, -16)
-    local tipTxt = getglobal(tipChk:GetName() .. "Text")
-    if tipTxt then
-        tipTxt:SetText("Show Aegis price lines on item tooltips")
-        tipTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    tipChk:SetLabel("Show Aegis price lines on item tooltips", C.text)
     tipChk:SetScript("OnClick", function()
         A.db.SetSetting("tooltip", tipChk:GetChecked() and true or false)
         ui.RefreshSettings()   -- grey the per-line options with the master
@@ -907,19 +1586,13 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local si = 1
     while si <= table.getn(tipSubs) do
         local spec = tipSubs[si]
-        local c = CreateFrame("CheckButton", "AegisExchangeSet" .. spec.key,
-            panel, "UICheckButtonTemplate")
-        c:SetWidth(20); c:SetHeight(20)
+        local c = ui.MakeCheckBox(panel, 16, "AegisExchangeSet" .. spec.key)
         if prevSub then
-            c:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
+            c:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -4)
         else
-            c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -2)
+            c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -6)
         end
-        local t = getglobal(c:GetName() .. "Text")
-        if t then
-            t:SetText(spec.text)
-            t:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        end
+        c:SetLabel(spec.text, C.goldDim)
         c.settingKey = spec.key
         c:SetScript("OnClick", function()
             A.db.SetSetting(c.settingKey, c:GetChecked() and true or false)
@@ -929,29 +1602,18 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         si = si + 1
     end
 
-    local stackChk = CreateFrame("CheckButton", "AegisExchangeSetTipStackShift",
-        panel, "UICheckButtonTemplate")
-    stackChk:SetWidth(20); stackChk:SetHeight(20)
-    stackChk:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -1)
-    local stackTxt = getglobal(stackChk:GetName() .. "Text")
-    if stackTxt then
-        stackTxt:SetText("Stack totals only while Shift is held")
-        stackTxt:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    end
+    local stackChk = ui.MakeCheckBox(panel, 16,
+        "AegisExchangeSetTipStackShift")
+    stackChk:SetPoint("TOPLEFT", prevSub, "BOTTOMLEFT", 0, -4)
+    stackChk:SetLabel("Stack totals only while Shift is held", C.goldDim)
     stackChk:SetScript("OnClick", function()
         A.db.SetSetting("tipStackShift", stackChk:GetChecked() and true or false)
     end)
     ui.setTipStackShift = stackChk
 
-    local profChk = CreateFrame("CheckButton", "AegisExchangeSetProfLine", panel,
-        "UICheckButtonTemplate")
-    profChk:SetWidth(24); profChk:SetHeight(24)
-    profChk:SetPoint("TOPLEFT", stackChk, "BOTTOMLEFT", -18, -4)
-    local profTxt = getglobal(profChk:GetName() .. "Text")
-    if profTxt then
-        profTxt:SetText("Show profit line on profession windows")
-        profTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    local profChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetProfLine")
+    profChk:SetPoint("TOPLEFT", stackChk, "BOTTOMLEFT", -18, -8)
+    profChk:SetLabel("Show profit line on profession windows", C.text)
     profChk:SetScript("OnClick", function()
         A.db.SetSetting("profLine", profChk:GetChecked() and true or false)
         ui.UpdateProfLine()
@@ -960,15 +1622,9 @@ function ui.BuildAegisSettings(panel, anchorAbove)
 
     -- pfUI skin toggle. Only meaningful with pfUI installed, and changing it
     -- takes effect on the next /reload (we can't un-skin frames in place).
-    local pfChk = CreateFrame("CheckButton", "AegisExchangeSetPfSkin", panel,
-        "UICheckButtonTemplate")
-    pfChk:SetWidth(24); pfChk:SetHeight(24)
-    pfChk:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 0, -4)
-    local pfTxt = getglobal(pfChk:GetName() .. "Text")
-    if pfTxt then
-        pfTxt:SetText("Match pfUI's look (needs /reload)")
-        pfTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    local pfChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetPfSkin")
+    pfChk:SetPoint("TOPLEFT", profChk, "BOTTOMLEFT", 0, -6)
+    pfChk:SetLabel("Match pfUI's look (needs /reload)", C.text)
     pfChk:SetScript("OnClick", function()
         A.db.SetSetting("pfSkin", pfChk:GetChecked() and true or false)
     end)
@@ -976,25 +1632,36 @@ function ui.BuildAegisSettings(panel, anchorAbove)
 
     -- Ask before cancelling an auction? Off makes the Auctions tab's Cancel
     -- buttons act immediately.
-    local ccChk = CreateFrame("CheckButton", "AegisExchangeSetConfirmCancel",
-        panel, "UICheckButtonTemplate")
-    ccChk:SetWidth(24); ccChk:SetHeight(24)
-    ccChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -4)
-    local ccTxt = getglobal(ccChk:GetName() .. "Text")
-    if ccTxt then
-        ccTxt:SetText("Ask before cancelling an auction")
-        ccTxt:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    local ccChk = ui.MakeCheckBox(panel, 18,
+        "AegisExchangeSetConfirmCancel")
+    ccChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)
+    ccChk:SetLabel("Ask before cancelling an auction", C.text)
     ccChk:SetScript("OnClick", function()
         A.db.SetSetting("confirmCancel", ccChk:GetChecked() and true or false)
     end)
     ui.setConfirmCancel = ccChk
 
+    -- Ask before posting an auction? Off makes the Sell tab's Post button act
+    -- immediately. Same shape as the cancel toggle above it.
+    local cpChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetConfirmPost")
+    cpChk:SetPoint("TOPLEFT", ccChk, "BOTTOMLEFT", 0, -6)
+    cpChk:SetLabel("Ask before posting an auction", C.text)
+    cpChk:SetScript("OnClick", function()
+        A.db.SetSetting("confirmPost", cpChk:GetChecked() and true or false)
+    end)
+    ui.setConfirmPost = cpChk
+
     -- ---- Scan pacing -------------------------------------------------------
     -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
     -- running the AuctionQueryThrottle DLL scans as fast as the server answers
     -- while a stock client still waits its ~5s. "Safe" keeps the fixed floor.
-    local thLbl = label("Scan pacing:", ccChk, -12)
+    -- Anchored to cpChk, the LAST checkbox above it. v1.20.0 added cpChk into
+    -- the middle of the chain and left this pointing at ccChk, which drew the
+    -- new checkbox and this whole row -- pacing, its buttons, the price-data
+    -- line and Clear price data, all of which chain off thLbl -- on top of
+    -- each other. Inserting a widget into an anchor chain means re-pointing
+    -- the link BELOW it as well.
+    local thLbl = label("Scan pacing:", cpChk, -12)
 
     ui.setThrottleBtns = {}
     local modes = { { "Auto", "auto" }, { "Safe 4s", "safe" } }
@@ -1002,7 +1669,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local ti = 1
     while ti <= table.getn(modes) do
         local m = modes[ti]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(64); b:SetHeight(20)
         if prevTh then b:SetPoint("LEFT", prevTh, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", thLbl, "RIGHT", 10, 0) end
@@ -1027,7 +1694,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     ui.setDataText:SetPoint("TOPLEFT", thLbl, "BOTTOMLEFT", 0, -14)
     ui.setDataText:SetTextColor(C.text[1], C.text[2], C.text[3])
 
-    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local clearBtn = ui.MakeButton(panel, "quiet")
     clearBtn:SetWidth(120); clearBtn:SetHeight(20)
     clearBtn:SetPoint("LEFT", ui.setDataText, "RIGHT", 14, 0)
     clearBtn:SetText("Clear price data")
@@ -1074,28 +1741,11 @@ end
 function ui.RefreshSettings()
     if not ui.settingsBuilt then return end
     local dur = A.db.Setting("duration")
-    local di = 1
-    while di <= table.getn(ui.setDurBtns) do
-        local b = ui.setDurBtns[di]
-        if b.minutes == dur then b:LockHighlight() else b:UnlockHighlight() end
-        di = di + 1
-    end
+    ui.MarkChosen(ui.setDurBtns, function(b) return b.minutes == dur end)
     local mode = A.db.Setting("sellDefault")
-    local mi = 1
-    while mi <= table.getn(ui.setSellModeBtns) do
-        local b = ui.setSellModeBtns[mi]
-        if b.mode == mode then b:LockHighlight() else b:UnlockHighlight() end
-        mi = mi + 1
-    end
+    ui.MarkChosen(ui.setSellModeBtns, function(b) return b.mode == mode end)
     local ucMode = A.db.Setting("undercutMode")
-    if ui.setUcModeBtns then
-        local ui2 = 1
-        while ui2 <= table.getn(ui.setUcModeBtns) do
-            local b = ui.setUcModeBtns[ui2]
-            if b.mode == ucMode then b:LockHighlight() else b:UnlockHighlight() end
-            ui2 = ui2 + 1
-        end
-    end
+    ui.MarkChosen(ui.setUcModeBtns, function(b) return b.mode == ucMode end)
     if ui.setUndercut then
         ui.setUndercut:SetText(tostring(A.db.Setting("undercutPct")))
     end
@@ -1116,21 +1766,23 @@ function ui.RefreshSettings()
         while si <= table.getn(ui.setTipSubs) do
             local c = ui.setTipSubs[si]
             c:SetChecked(A.db.Setting(c.settingKey) ~= false and 1 or nil)
-            if tipOn then c:Enable() else c:Disable() end
+            -- SetDimmed, not Enable/Disable: the stock template greyed its own
+            -- label when disabled, ours has to be told to.
+            c:SetDimmed(not tipOn)
             si = si + 1
         end
     end
     if ui.setTipStackShift then
         ui.setTipStackShift:SetChecked(
             A.db.Setting("tipStackShift") == true and 1 or nil)
-        if tipOn then
-            ui.setTipStackShift:Enable()
-        else
-            ui.setTipStackShift:Disable()
-        end
+        ui.setTipStackShift:SetDimmed(not tipOn)
     end
     if ui.setProfLine then
         ui.setProfLine:SetChecked(A.db.Setting("profLine") ~= false and 1 or nil)
+    end
+    if ui.setConfirmPost then
+        ui.setConfirmPost:SetChecked(
+            A.db.Setting("confirmPost") ~= false and 1 or nil)
     end
     if ui.setConfirmCancel then
         ui.setConfirmCancel:SetChecked(
@@ -1160,14 +1812,7 @@ function ui.RefreshSettings()
     -- query gate is actually doing, so it's obvious whether a throttle-removing
     -- DLL (AuctionQueryThrottle) is having any effect.
     local thMode = A.db.Setting("queryThrottle") or "auto"
-    if ui.setThrottleBtns then
-        local ti = 1
-        while ti <= table.getn(ui.setThrottleBtns) do
-            local b = ui.setThrottleBtns[ti]
-            if b.mode == thMode then b:LockHighlight() else b:UnlockHighlight() end
-            ti = ti + 1
-        end
-    end
+    ui.MarkChosen(ui.setThrottleBtns, function(b) return b.mode == thMode end)
     if ui.setThrottleInfo then
         local p = A.scan.GetProgress()
         if thMode == "safe" then
@@ -1404,13 +2049,13 @@ local function MakeMoneyBox(parent, width)
     return e
 end
 
--- A gold / silver / copper triplet, the way the stock AH and aux present a
--- price. Three small numeric boxes with coloured suffixes.
+-- A read-only money READOUT: "6 (gold) 75 (silver) 43 (copper)", the way the
+-- stock money frame prints it, rather than the "6g 75s 43c" text shorthand.
 --
--- It deliberately EMULATES the single money box's interface (GetText / SetText
--- / ClearFocus) so ReadMoneyBox, SetMoneyBox and every existing caller keep
--- working untouched -- the Sell tab still thinks in plain copper everywhere,
--- only the presentation changed.
+-- Laid out right-to-left from an anchor so the copper coin lands on a fixed
+-- point and the gold figure grows leftwards -- a total that gains a digit
+-- must not shove the rest of the bar sideways.
+local MONEY_COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
 MakeMoneyGSC = function(parent, onChange)
     local grp = {}
     -- Blizzard's own coin art, the same the stock money frame uses -- so a
@@ -1423,7 +2068,8 @@ MakeMoneyGSC = function(parent, onChange)
     -- invisible rather than wrong.
     local COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
     local function mk(w, coin)
-        local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+        local e = ui.FlattenEditBox(
+            CreateFrame("EditBox", nil, parent, "InputBoxTemplate"))
         e:SetWidth(w)
         e:SetHeight(18)
         e:SetAutoFocus(false)
@@ -1479,6 +2125,18 @@ MakeMoneyGSC = function(parent, onChange)
     grp.ClearFocus = function(self)
         self.g:ClearFocus(); self.s:ClearFocus(); self.c:ClearFocus()
     end
+    -- Raise/lower the whole group. The coin textures are parented to the
+    -- PANEL (they anchor off the boxes but are not children of them), so
+    -- hiding the boxes alone would leave three coins floating on the bar.
+    grp.Show = function(self)
+        self.g:Show(); self.s:Show(); self.c:Show()
+        self.g.tag:Show(); self.s.tag:Show(); self.c.tag:Show()
+    end
+    grp.Hide = function(self)
+        self.g:Hide(); self.s:Hide(); self.c:Hide()
+        self.g.tag:Hide(); self.s.tag:Hide(); self.c.tag:Hide()
+    end
+
     -- Anchor the whole triplet off one widget.
     grp.Attach = function(self, anchor, dx, dy)
         self.g:SetPoint("LEFT", anchor, "RIGHT", dx or 6, dy or 0)
@@ -1488,26 +2146,120 @@ MakeMoneyGSC = function(parent, onChange)
     return grp
 end
 
--- A compact dropdown: a button showing the current choice, and a popup list.
+-- A read-only coin readout, LEFT-aligned: the figure grows rightward from
+-- its anchor, so its left edge stays on the panel margin with the Name field,
+-- BROWSE and the category plates.
 --
--- Hand-built from Frame + Button for the same reason MakeHSlider is hand-built
--- from Slider. UIDropDownMenuTemplate does exist on 1.12 -- aux uses it -- but
--- it is a fiddly template with its own initialise-timing and width rules, and
--- this file's standing policy is to build from primitives that always exist
--- rather than inherit a template whose behaviour we have not verified here.
+-- It used to be anchored by its COPPER coin and grow leftwards, so that a
+-- total gaining a digit could not shove the layout about. That mattered when
+-- it sat mid-bar; on the left margin there is nothing to its right until the
+-- Bid row, so growth is free and alignment is what you actually see.
 --
--- The popup is parented to the WINDOW, not to the row, so it draws above
--- everything and is not clipped by whatever panel the dropdown sits in.
+-- The catch with left-aligning: Blizzard hides denominations ABOVE the value
+-- (43 copper shows one coin, not three), and hiding the LEADING elements of a
+-- left-anchored chain leaves a gap where they would have been. So the anchor
+-- is stored and re-applied to the first VISIBLE denomination each time the
+-- value changes.
+local function MakeMoneyDisplay(parent)
+    local m = {}
+    local function part(coin, after)
+        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetJustifyH("LEFT")
+        fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        if after then
+            -- The gap belongs BETWEEN denominations, not between a number and
+            -- the coin it labels -- that is what makes it read as three
+            -- amounts rather than six separate things.
+            fs:SetPoint("LEFT", after, "RIGHT", 7, 0)
+        end
+        local tex = parent:CreateTexture(nil, "OVERLAY")
+        tex:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
+        local u = MONEY_COIN_U[coin]
+        tex:SetTexCoord(u, u + 0.25, 0, 1)
+        tex:SetWidth(15); tex:SetHeight(15)
+        tex:SetPoint("LEFT", fs, "RIGHT", 1, 0)
+        return { tex = tex, fs = fs }
+    end
+    m.gold   = part("gold",   nil)
+    m.silver = part("silver", m.gold.tex)
+    m.copper = part("copper", m.silver.tex)
+
+    -- Anchor STORES the point; SetMoney is what places things, because which
+    -- denomination sits on the margin depends on the value. Placing anything
+    -- here as well would be dead work -- SetMoney clears and re-anchors the
+    -- whole chain on the next call regardless.
+    -- Put the chain's head on the stored anchor. Called whenever which
+    -- denominations are visible changes.
+    m.Rehead = function(self, first)
+        if not self.anchor then return end
+        first.fs:ClearAllPoints()
+        first.fs:SetPoint(unpack(self.anchor))
+    end
+    m.Anchor = function(self, ...)
+        self.anchor = arg
+        self:Rehead(self.gold)
+    end
+    m.SetMoney = function(self, copper)
+        local g, sv, c = util.MoneyParts(copper or 0)
+        self.gold.fs:SetText(tostring(g))
+        self.silver.fs:SetText(tostring(sv))
+        self.copper.fs:SetText(tostring(c))
+        local showG = g > 0
+        local showS = showG or sv > 0
+        if showG then self.gold.tex:Show(); self.gold.fs:Show()
+        else self.gold.tex:Hide(); self.gold.fs:Hide() end
+        if showS then self.silver.tex:Show(); self.silver.fs:Show()
+        else self.silver.tex:Hide(); self.silver.fs:Hide() end
+        -- Re-anchor whichever denomination is now leftmost, or the hidden
+        -- ones leave a hole on the margin.
+        if showG then
+            self:Rehead(self.gold)
+        elseif showS then
+            self.silver.fs:ClearAllPoints()
+            self:Rehead(self.silver)
+        else
+            self.copper.fs:ClearAllPoints()
+            self:Rehead(self.copper)
+        end
+        -- ...and restore the chain for the ones still shown.
+        if showG then
+            self.silver.fs:ClearAllPoints()
+            self.silver.fs:SetPoint("LEFT", self.gold.tex, "RIGHT", 7, 0)
+        end
+        if showS then
+            self.copper.fs:ClearAllPoints()
+            self.copper.fs:SetPoint("LEFT", self.silver.tex, "RIGHT", 7, 0)
+        end
+    end
+    m.Show = function(self)
+        self.copper.tex:Show(); self.copper.fs:Show()
+        -- gold/silver visibility is SetMoney's call, not ours.
+    end
+    return m
+end
+
 local openDropdown
-local function MakeDropdown(parent, width, onSelect)
+-- `noAll` suppresses the implicit "All" row. Class / Subclass / Slot /
+-- Quality all want it -- "no filter" is a real choice there. Component does
+-- not: there is no such thing as "all components", and the row only offered
+-- a way to pick nothing.
+local function MakeDropdown(parent, width, onSelect, noAll)
     local dd = {}
     dd.options = {}
     dd.value = nil
+    dd.noAll = noAll and true or false
 
-    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    local btn = ui.MakeButton(parent, "quiet")
     btn:SetWidth(width)
     btn:SetHeight(20)
     btn:SetText("All")
+    -- The affordance that says "this opens". Without it a dropdown is
+    -- indistinguishable from a button that does something when clicked.
+    local caret = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    caret:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+    caret:SetText("\226\150\188")
+    caret:SetTextColor(0.80, 0.71, 0.42)
+    btn.caret = caret
     dd.button = btn
 
     local list = CreateFrame("Frame", nil, ui.frame)
@@ -1546,16 +2298,25 @@ local function MakeDropdown(parent, width, onSelect)
     end
 
     -- Label for the currently selected value, or "All" when nothing is set.
+    --
+    -- An option may carry `colour = {r,g,b}`; the closed button then shows the
+    -- selection in it. "All" carries none and stays the button's own colour,
+    -- which is the point -- "no quality filter" is not a quality and must not
+    -- borrow one's colour.
     function dd:Repaint()
-        local text = "All"
+        local text = dd.noAll and "" or "All"
+        local colour = nil
         local i = 1
         while i <= table.getn(dd.options) do
             if dd.options[i].value == dd.value then
                 text = dd.options[i].text
+                colour = dd.options[i].colour
                 break
             end
             i = i + 1
         end
+        btn.aegisTextColor = colour
+        RepaintButton(btn)
         ui.SetTextClipped(btn:GetFontString(), text, width - 8)
     end
 
@@ -1581,14 +2342,29 @@ local function MakeDropdown(parent, width, onSelect)
 
     function dd:GetValue() return dd.value end
 
+    -- Resize after creation. `width` is not just the button's width -- it is
+    -- also what Repaint clips the label to and what Open sizes the popup to --
+    -- so setting the button alone would leave a narrow list under a wide
+    -- button and a label still clipped to the old width.
+    function dd:SetWidth(w)
+        if not w or w < 40 then return end
+        width = w
+        btn:SetWidth(w)
+        dd:Repaint()
+    end
+
     function dd:SetEnabled(on)
         if on then btn:Enable() else btn:Disable(); dd:Close() end
     end
 
     function dd:Open()
         if openDropdown and openDropdown ~= dd then openDropdown:Close() end
-        -- "All" plus one row per option; All clears the filter.
-        local entries = { { text = "All", value = nil } }
+        -- "All" plus one row per option; All clears the filter -- unless
+        -- this dropdown opted out of it.
+        local entries = {}
+        if not dd.noAll then
+            table.insert(entries, { text = "All", value = nil })
+        end
         local i = 1
         while i <= table.getn(dd.options) do
             table.insert(entries, dd.options[i])
@@ -1620,9 +2396,29 @@ local function MakeDropdown(parent, width, onSelect)
                     dd:SetValue(row.optValue)
                     dd:Close()
                 end)
+                -- An option may carry `tip`, which is how a dimmed entry
+                -- explains why it is dimmed rather than leaving the user to
+                -- guess from the colour alone.
+                row:SetScript("OnEnter", function()
+                    if not row.optTip then return end
+                    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                    GameTooltip:SetText(row.optTip, 1, 1, 1, 1, 1)
+                    GameTooltip:Show()
+                end)
+                row:SetScript("OnLeave", function() GameTooltip:Hide() end)
                 dd.rows[r] = row
             end
+            row.optTip = entries[r].tip
             row.optValue = entries[r].value
+            -- Rows are pooled, so the colour is set on EVERY pass -- including
+            -- back to the default. Setting it only when an option has one
+            -- leaves the previous option's colour on a reused row.
+            local oc = entries[r].colour
+            if oc then
+                row.label:SetTextColor(oc[1], oc[2], oc[3])
+            else
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
             ui.SetTextClipped(row.label, entries[r].text, width - 12)
             row:Show()
             r = r + 1
@@ -1699,10 +2495,14 @@ local function SetMoneyBox(e, copper)
 end
 
 -- A small numeric entry box (stack size / number of stacks).
-local function MakeNumBox(parent, width, onChanged)
-    local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+local function MakeNumBox(parent, width, onChanged, height)
+    local e = ui.FlattenEditBox(
+        CreateFrame("EditBox", nil, parent, "InputBoxTemplate"))
     e:SetWidth(width)
-    e:SetHeight(18)
+    -- Callers that share a strip with a dropdown pass its height, so every
+    -- control on the row lines up top AND bottom rather than only at its
+    -- anchor point.
+    e:SetHeight(height or 18)
     e:SetAutoFocus(false)
     e:SetNumeric(true)
     e:SetJustifyH("CENTER")
@@ -1729,7 +2529,11 @@ local function PctColorBuy(pct)
     if pct < 100 then
         return 0.35, 0.85, 0.35   -- under 100%: green (a deal)
     elseif pct == 100 then
-        return 0.90, 0.82, 0.35   -- at 100%: yellow
+        -- NEUTRAL at exactly market, not yellow. Yellow reads as a warning,
+        -- and paying exactly market price is the unremarkable case -- the
+        -- mockup renders it in plain white for that reason. Green and red
+        -- mean something precisely because the middle does not.
+        return 0.88, 0.86, 0.80
     end
     return 0.90, 0.38, 0.38       -- over 100%: red (overpriced)
 end
@@ -1744,14 +2548,80 @@ end
 ui.PctColorBuy = PctColorBuy     -- exposed for tests
 ui.PctColorSell = PctColorSell
 
--- Shared result-row column layout (Buy tab AND Crafting tab), row-relative.
+-- Result-row column layout, row-relative. TWO of them, because the two tabs
+-- that use BuildResultRow want different tables.
+--
+-- The Buy tab follows the mockup: a checkbox, the icon and name, then Lvl,
+-- Time Left, Seller, Current Bid, Buyout, Unit and % Mkt. The stack count is
+-- NOT a column -- it is appended to the name as "x3", which is what the
+-- mockup does and what frees the width for the four new columns.
+--
+-- The Crafting tab keeps the older five-column shape with its own per-row Buy
+-- and Bid buttons. It is a different question ("what can I make and what does
+-- it cost"), it has no room for a seller or a time left, and changing it was
+-- not asked for.
+-- NO SELLER COLUMN. The mockup has one; we deliberately do not -- see
+-- ROADMAP 2q. `owner` is still read by the scanner, because it is what marks
+-- your own auctions; only the column is gone.
+--
+-- The 92px that freed goes first to the gap between Lvl and Time Left, which
+-- were close enough to touch ("43 Very Long" ran together), and then to the
+-- three money columns.
+local RCX_BUY = {
+    check = 2, icon = 22, name = 44, lvl = 288, left = 336,
+    bid = 420, stack = 512, unit = 604, pct = 678,
+}
+local RCW_BUY = {
+    name = 236, lvl = 30, left = 78,
+    bid = 84, stack = 84, unit = 66, pct = 44,
+}
+-- Where the rightmost column ends. Asked for rather than re-added by hand, so
+-- a column edit cannot silently push the table under the scrollbar.
+local BUY_COLS_END = 678 + 44
+
+-- Extra width the ITEM column has been given, over its RCW_BUY.name default.
+--
+-- Advanced hides the category tree, so the results table there starts at the
+-- panel margin and is ~200px wider than the same table in the Blizzlike view.
+-- That surplus goes to Item -- it is the column that actually runs out of
+-- room, and the numeric columns are sized to their contents. Every column
+-- AFTER name shifts right by this, which is why it is one number rather than
+-- a second copy of RCX_BUY: two column tables would drift.
+local BUY_NAME_EXTRA = 0
+
+-- x of column `key` at the current width.
+local function ColX(key)
+    local x = RCX_BUY[key]
+    if key == "check" or key == "icon" or key == "name" then return x end
+    return x + BUY_NAME_EXTRA
+end
+
+-- Re-place one result row's cells at the current width. Called for every row
+-- when the table's width changes, and for a row built after that point.
+function ui.LayoutBuyRow(row)
+    if not row or not row.pct then return end     -- Crafting row: five columns
+    row.name:SetWidth(RCW_BUY.name + BUY_NAME_EXTRA)
+    local keys = { "lvl", "left", "bid", "stack", "unit", "pct" }
+    local i = 1
+    while i <= table.getn(keys) do
+        local cell = row[keys[i]]
+        if cell then
+            cell:ClearAllPoints()
+            cell:SetPoint("LEFT", row, "LEFT", ColX(keys[i]), 0)
+        end
+        i = i + 1
+    end
+end
 local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
               buy = 436, bid = 490 }
 local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 
 -- Build a listing result row (name/ct/unit/stack/pct + Buy/Bid) into `store`.
 -- Buttons act on row.entry, so the same rows serve Buy and Crafting.
-local function BuildResultRow(parent, scroll, store, i, rowH)
+-- `selectable` (Buy tab only) builds a Blizzlike row: no per-row Buy/Bid
+-- buttons, click to select, and the window's bottom bar acts on the selection.
+-- The Crafting tab passes nothing and keeps its own per-row buttons.
+local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(rowH)
     if i == 1 then
@@ -1768,32 +2638,105 @@ local function BuildResultRow(parent, scroll, store, i, rowH)
         fs:SetJustifyH(just or "LEFT")
         return fs
     end
-    -- Item icon, then the name shifted to its right.
-    local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetWidth(16); icon:SetHeight(16)
-    icon:SetPoint("LEFT", row, "LEFT", RCX.name, 0)
-    row.icon = icon
-    row.name  = mkCell(RCX.name + 20, RCW.name - 20)
-    row.ct    = mkCell(RCX.ct, RCW.ct, "RIGHT")
-    row.unit  = mkCell(RCX.unit, RCW.unit)
-    row.stack = mkCell(RCX.stack, RCW.stack)
-    row.pct   = mkCell(RCX.pct, RCW.pct)
-    local buyBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    buyBtn:SetWidth(50); buyBtn:SetHeight(17)
-    buyBtn:SetPoint("LEFT", row, "LEFT", RCX.buy, 0)
-    buyBtn:SetText("Buy")
-    buyBtn:SetScript("OnClick", function()
-        if row.entry then ui.ConfirmBuyout(row.entry) end
-    end)
-    row.buyBtn = buyBtn
-    local bidBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    bidBtn:SetWidth(44); bidBtn:SetHeight(17)
-    bidBtn:SetPoint("LEFT", row, "LEFT", RCX.bid, 0)
-    bidBtn:SetText("Bid")
-    bidBtn:SetScript("OnClick", function()
-        if row.entry then ui.ConfirmBid(row.entry) end
-    end)
-    row.bidBtn = bidBtn
+    if selectable then
+        -- ---- Buy tab: the mockup's eight columns ------------------------
+        local X, W = RCX_BUY, RCW_BUY
+
+        -- Tick box for the multi-buyout batch. Its own small CheckButton
+        -- rather than the 32px UICheckButtonTemplate, which does not fit a
+        -- listing row.
+        local cb = ui.MakeCheckBox(row, 14)
+        cb:SetPoint("LEFT", row, "LEFT", X.check, 0)
+        cb:SetScript("OnClick", function()
+            if row.entry then ui.ToggleBuyCheck(row.entry) end
+        end)
+        row.check = cb
+
+        -- Zebra stripe. Created FIRST, so within the BACKGROUND layer it
+        -- draws beneath both the separator and the selection tint -- a
+        -- selected odd row must read as selected, not as striped-and-
+        -- selected.
+        --
+        -- Keyed to the row's POSITION in the pool, never to the auction, so
+        -- scrolling slides the data past a fixed banding instead of making
+        -- the stripes crawl. It is set once here and never touched by the
+        -- paint, which is what guarantees that.
+        local zebra = row:CreateTexture(nil, "BACKGROUND")
+        zebra:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        zebra:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        if math.mod(i, 2) == 0 then
+            zebra:SetTexture(1, 1, 1, 0.022)
+        else
+            zebra:SetTexture(0, 0, 0, 0)
+        end
+        row.zebra = zebra
+
+        -- Hairline between rows, as the mockup has. BACKGROUND layer so the
+        -- selection tint (also BACKGROUND, drawn after) covers it on the
+        -- selected row rather than showing through as a scar.
+        local sep = row:CreateTexture(nil, "BACKGROUND")
+        sep:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        sep:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        sep:SetHeight(1)
+        sep:SetTexture(0.28, 0.24, 0.15, 0.55)
+        row.sep = sep
+
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", X.icon, 0)
+        row.icon   = icon
+        row.name   = mkCell(ColX("name"), W.name + BUY_NAME_EXTRA)
+        row.lvl    = mkCell(ColX("lvl"),    W.lvl,    "RIGHT")
+        row.left   = mkCell(ColX("left"),   W.left)
+        row.bid    = mkCell(ColX("bid"),    W.bid,    "RIGHT")
+        row.stack  = mkCell(ColX("stack"),  W.stack,  "RIGHT")
+        row.unit   = mkCell(ColX("unit"),   W.unit,   "RIGHT")
+        row.pct    = mkCell(ColX("pct"),    W.pct,    "RIGHT")
+        -- Rows are built on demand as the window grows, so a row created
+        -- AFTER a mode switch has to be laid out at the current width too.
+        ui.LayoutBuyRow(row)
+    else
+        -- ---- Crafting tab: the older five-column shape ------------------
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", RCX.name, 0)
+        row.icon = icon
+        row.name  = mkCell(RCX.name + 20, RCW.name - 20)
+        row.ct    = mkCell(RCX.ct, RCW.ct, "RIGHT")
+        row.unit  = mkCell(RCX.unit, RCW.unit)
+        row.stack = mkCell(RCX.stack, RCW.stack)
+        row.pct   = mkCell(RCX.pct, RCW.pct)
+    end
+    if selectable then
+        -- Selection highlight, drawn UNDER the text (BACKGROUND layer) so it
+        -- tints the row rather than covering the numbers.
+        local sel = row:CreateTexture(nil, "BACKGROUND")
+        sel:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+        sel:Hide()
+        row.selTex = sel
+    else
+        -- Buy is the primary plate and Bid the quiet one, exactly as the
+        -- concept has them: on a row of listings the buyout is the action,
+        -- and a bid is the hedge.
+        local buyBtn = ui.MakeButton(row, "primary")
+        buyBtn:SetWidth(50); buyBtn:SetHeight(17)
+        buyBtn:SetPoint("LEFT", row, "LEFT", RCX.buy, 0)
+        buyBtn:SetText("Buy")
+        buyBtn:SetScript("OnClick", function()
+            if row.entry then ui.ConfirmBuyout(row.entry) end
+        end)
+        row.buyBtn = buyBtn
+        local bidBtn = ui.MakeButton(row, "quiet")
+        bidBtn:SetWidth(44); bidBtn:SetHeight(17)
+        bidBtn:SetPoint("LEFT", row, "LEFT", RCX.bid, 0)
+        bidBtn:SetText("Bid")
+        bidBtn:SetScript("OnClick", function()
+            if row.entry then ui.ConfirmBid(row.entry) end
+        end)
+        row.bidBtn = bidBtn
+    end
     -- Hover tooltip. A Frame gets no OnEnter until its mouse is enabled; the
     -- Buy/Bid buttons are children so they still take their own clicks.
     row:EnableMouse(true)
@@ -1801,6 +2744,13 @@ local function BuildResultRow(parent, scroll, store, i, rowH)
         ui.ShowListingTooltip(row, row.entry)
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    if selectable then
+        -- A Frame has no OnClick; OnMouseDown is the 1.12 equivalent once the
+        -- mouse is enabled (which it is, for the tooltip above).
+        row:SetScript("OnMouseDown", function()
+            if row.entry then ui.SelectBuyRow(row.entry) end
+        end)
+    end
     row:Hide()
     store[i] = row
     return row
@@ -1837,6 +2787,10 @@ end
 -- Fill a result row's content from a listing `r` (shared by Buy and Crafting).
 function ui.FillResultRow(row, r)
     row.entry = r
+    -- Selection tint (Buy tab rows only; the Crafting tab builds no selTex).
+    if row.selTex then
+        if ui.IsBuySelected(r) then row.selTex:Show() else row.selTex:Hide() end
+    end
     if row.icon then
         if r.texture then
             row.icon:SetTexture(r.texture); row.icon:Show()
@@ -1873,17 +2827,50 @@ function ui.FillResultRow(row, r)
             row.icon:SetVertexColor(1, 0.3, 0.3)
         end
     end
-    row.ct:SetText("x" .. r.count)
-    row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
-    if r.buyout and r.buyout > 0 then
-        row.stack:SetText(util.FormatMoney(r.buyout, true))
-    else
-        -- Bid-only auction: show the current/next bid instead of just "bid only".
-        local nb = r.nextBid or r.minBid or 0
-        if nb > 0 then
-            row.stack:SetText("bid " .. util.FormatMoney(nb, true))
+    local DASH = "\226\128\148"
+    if row.ct then
+        -- Crafting tab: the stack count is its own column.
+        row.ct:SetText("x" .. r.count)
+        row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or DASH)
+        if r.buyout and r.buyout > 0 then
+            row.stack:SetText(util.FormatMoney(r.buyout, true))
         else
-            row.stack:SetText("bid only")
+            local nb = r.nextBid or r.minBid or 0
+            if nb > 0 then
+                row.stack:SetText("bid " .. util.FormatMoney(nb, true))
+            else
+                row.stack:SetText("bid only")
+            end
+        end
+    else
+        -- Buy tab: the mockup's columns.
+        --
+        -- Stack count rides on the NAME ("Thick Leather Tunic x2") rather than
+        -- taking a column of its own -- that is what buys the width for Lvl,
+        -- Time Left, Seller and Current Bid.
+        if r.count and r.count > 1 then
+            row.name:SetText(r.name .. "  x" .. r.count)
+        end
+        row.lvl:SetText((r.level and r.level > 0) and r.level or "")
+        -- 1..4 -> Short / Medium / Long / Very Long, through the client's own
+        -- localized globals, so this reads correctly on a non-English client.
+        local tl = ""
+        if r.timeLeft then
+            tl = getglobal("AUCTION_TIME_LEFT" .. r.timeLeft) or ""
+        end
+        row.left:SetText(tl)
+        local bidNow = (r.bidAmount and r.bidAmount > 0) and r.bidAmount
+                       or (r.minBid or 0)
+        row.bid:SetText(bidNow > 0 and util.FormatMoneyGold(bidNow) or DASH)
+
+        if r.buyout and r.buyout > 0 then
+            row.stack:SetText(util.FormatMoneyGold(r.buyout))
+            row.unit:SetText(util.FormatMoneyGold(r.unit or r.buyout))
+        else
+            -- No buyout: an em-dash in the Buyout column and "bid only" under
+            -- Unit, exactly as the mockup's Dredgemire Leggings row reads.
+            row.stack:SetText(DASH)
+            row.unit:SetText("bid only")
         end
     end
     local market = r.itemId and A.db.MarketValue(r.itemId)
@@ -1892,15 +2879,45 @@ function ui.FillResultRow(row, r)
         row.pct:SetText(pct .. "%")
         row.pct:SetTextColor(PctColorBuy(pct))
     else
-        row.pct:SetText("\226\128\148")
+        row.pct:SetText(DASH)
         row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     end
-    if r.mine then
-        row.buyBtn:Disable(); row.bidBtn:Disable()
-    else
-        if r.buyout and r.buyout > 0 then row.buyBtn:Enable()
-        else row.buyBtn:Disable() end
-        row.bidBtn:Enable()
+
+    -- A row you own is dimmed WHOLE and labelled, the way the mockup greys
+    -- its "Wild Leather Vest (yours)". Applied after every cell is written,
+    -- so nothing above can undo it.
+    if row.check then
+        if r.mine then
+            row.name:SetText(row.name:GetText() .. " |cff808080(yours)|r")
+        end
+        local a = r.mine and 0.45 or 1.0
+        local dim = { row.lvl, row.left, row.bid, row.stack,
+                      row.unit, row.pct }
+        local di = 1
+        while di <= table.getn(dim) do
+            dim[di]:SetAlpha(a)
+            di = di + 1
+        end
+        row.name:SetAlpha(a)
+        if row.icon then row.icon:SetAlpha(a) end
+        -- ...and you cannot tick your own auction into a buyout batch. The
+        -- box is DIMMED rather than hidden: hiding it punched a hole in the
+        -- tick column, so an owned row read as a row missing a cell instead
+        -- of a row you are not allowed to buy.
+        row.check:SetChecked(ui.IsBuyChecked(r) and 1 or nil)
+        row.check:SetDimmed(r.mine and true or false)
+    end
+    -- Per-row buttons exist only on the Crafting tab's rows now; the Buy tab
+    -- is Blizzlike (select a row, act from the bottom bar), so its rows carry
+    -- selTex instead and this block is skipped.
+    if row.buyBtn then
+        if r.mine then
+            row.buyBtn:Disable(); row.bidBtn:Disable()
+        else
+            if r.buyout and r.buyout > 0 then row.buyBtn:Enable()
+            else row.buyBtn:Disable() end
+            row.bidBtn:Enable()
+        end
     end
     row:Show()
 end
@@ -1938,6 +2955,14 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
             return nil
         elseif sortKey == "ct" then
             return r.count
+        elseif sortKey == "lvl" then
+            return r.level
+        elseif sortKey == "left" then
+            return r.timeLeft
+        elseif sortKey == "bid" then
+            local b = (r.bidAmount and r.bidAmount > 0) and r.bidAmount
+                      or r.minBid
+            return (b and b > 0) and b or nil
         end
         return r.unit
     end
@@ -1958,35 +2983,53 @@ end
 -- overlap. Each button is sized to its own label so hit areas never collide.
 -- `cols` maps key -> x offset, `widths` key -> column width. Returns the
 -- key -> button table for ui.PaintSortHeaders.
-function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick)
+-- Crafting's five columns. The Buy tab passes its own eight.
+local CRAFT_HEADER_DEFS = {
+    { key = "name",  text = "Item" },
+    { key = "ct",    text = "Ct" },
+    { key = "unit",  text = "Unit price" },
+    { key = "stack", text = "Stack buyout" },
+    { key = "pct",   text = "% mkt" },
+}
+
+function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
     local headers = {}
-    local defs = {
-        { key = "name",  text = "Item" },
-        { key = "ct",    text = "Ct" },
-        { key = "unit",  text = "Unit price" },
-        { key = "stack", text = "Stack buyout" },
-        { key = "pct",   text = "% mkt" },
-    }
+    defs = defs or CRAFT_HEADER_DEFS
     local i = 1
     while i <= table.getn(defs) do
         local d = defs[i]
         local cx = cols[d.key]
         if cx then
             local b = CreateFrame("Button", nil, panel)
-            b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
             b:SetHeight(16)
             b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
-            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-            fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             fs:SetText(d.text)
-            -- Width: the label plus room for the sort arrow, but never wider
-            -- than the column, so adjacent headers can't overlap.
-            local w = fs:GetStringWidth() + 12
-            local maxw = (widths[d.key] or 40) + 12
-            if w > maxw then w = maxw end
-            b:SetWidth(w)
+            -- Warm tan, as the mockup has them. GameFontDisableSmall's grey
+            -- made the whole header band read as disabled rather than as the
+            -- table's headings.
+            fs:SetTextColor(0.85, 0.72, 0.42)
             b.label = fs
             b.baseText = d.text
+            if d.just == "RIGHT" then
+                -- A numeric column's header sits over the RIGHT edge of its
+                -- cells, because the cells are right-justified. Left-aligning
+                -- the header of a right-aligned column is the thing that makes
+                -- a table look like it was assembled rather than designed.
+                b:SetWidth(widths[d.key] or 40)
+                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
+                fs:SetPoint("RIGHT", b, "RIGHT", 0, 0)
+                fs:SetJustifyH("RIGHT")
+            else
+                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
+                fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+                -- Width: the label plus room for the sort arrow, but never
+                -- wider than the column, so adjacent headers can't overlap.
+                local w = fs:GetStringWidth() + 12
+                local maxw = (widths[d.key] or 40) + 12
+                if w > maxw then w = maxw end
+                b:SetWidth(w)
+            end
             b:SetScript("OnClick", function() onClick(d.key) end)
             headers[d.key] = b
         end
@@ -2007,11 +3050,607 @@ function ui.PaintSortHeaders(headers, sortKey, dir)
     end
 end
 
-local BUY_ROWS,  BUY_ROW_H  = 11, 20
+-- Row height 26, up from 20. The mockup's rows are noticeably taller than a
+-- packed list -- eight columns need the breathing room to stay readable, and
+-- a tick box needs somewhere to sit. Not the mockup's literal 43: that is a
+-- CSS pixel in a 2000px-wide render, and translating it straight across would
+-- give five visible rows.
+local BUY_ROWS,  BUY_ROW_H  = 11, 26
 local BUY_ROWS_MAX  = 34
-local SIDE_ROWS, SIDE_ROW_H = 13, 18
+-- Two row heights: the mockup's plates are noticeably taller than its bare
+-- subcategory rows (38px vs 27px at its scale). One height for both is what
+-- made our tree look cramped and evenly-spaced where the mockup has rhythm.
+local SIDE_ROWS, SIDE_ROW_H = 13, 22   -- SIDE_ROW_H is the PLATED height
+local SIDE_BARE_H = 17                 -- ...and bare rows are tighter
+-- Table geometry, named because three things have to agree about it: the well
+-- that draws the box, the headers inside it, and the scroll frame the rows
+-- live in. When these were three loose numbers at three call sites the well
+-- ended up enclosing the rows but not the headings.
+-- Buy tab layout, in ONE table rather than a dozen file-scope locals.
+--
+-- Not tidiness: Lua 5.0 allows a function only 32 UPVALUES, and every
+-- file-scope local that ui.BuildBuyTab reads costs one. Thirteen separate
+-- constants took it to 36 and the client refused to load the file at all --
+-- "too many upvalues (limit=32)". A table is a single upvalue however many
+-- fields it carries. Keep new layout numbers in here.
+--
+-- THE CONTROL STRIP SPANS THE FULL WIDTH AND BOTH COLUMNS SIT UNDER IT.
+-- It used to start to the RIGHT of the sidebar, so the sidebar sat beside
+-- the strip rather than beneath it. In the mockup the Name field, the BROWSE
+-- heading and the category plates all share one left edge.
+local BUYL = {
+    strip_lbl_gap = 6,  -- air between a field label and ITS control
+    strip_ctl_y = 23,   -- ...and ONE top edge for every control
+    ctl_h       = 20,   -- ...at ONE height, dropdown included
+    side_x      = 10,   -- shared left edge: strip, BROWSE, plates
+    gut_w       = 8,    -- sidebar -> table gutter (the mockup's is tight)
+
+    browse_y    = 62,   -- BROWSE heading, below the strip
+    side_top    = 82,   -- ...and the first category row under it
+    side_bot    = 40,   -- the tree runs nearly to the action bar
+
+    well_top    = 56,   -- table box starts just above the headings
+    hdr_top     = 62,   -- headings sit INSIDE the box
+    hdr_h       = 22,   -- headings band inside the well
+    rows_top    = 86,   -- ...so the first row starts here
+
+    -- The table FILLS the height available to it, stopping only far enough
+    -- above the action bar for the count/pager row and the rule.
+    --
+    -- It used to stop at ~64% of the panel because the mockup's does. That
+    -- reads as dead space on a real window: the mockup is one screenshot with
+    -- five results, and ours has fifty. Rows are what the tab is for.
+    -- Budget below this line: 8 gap + 20 pager + 10 gap + rule at 38.
+    table_bot   = 82,
+
+    -- Gutter right of the table. FauxScrollFrameTemplate hangs its scrollbar
+    -- OUTWARD from the scroll frame's right edge; this keeps it off the last
+    -- column instead of drawn across the percentages.
+    gutter_w    = 26,
+}
+
+-- ADVANCED-mode layout, in ONE table for the same upvalue reason as BUYL --
+-- see the note above it. ui.BuildBuyTab is the function that reads both, and
+-- it is the one that broke the 32-upvalue ceiling once already.
+--
+-- Advanced hides the category tree, so every number here is measured from the
+-- panel's own left margin, not from the results column.
+local ADVL = {
+    strip_y   = 12,   -- Back button / query box, top of the panel
+    tabs_y    = 38,   -- the three view tabs, under the strip
+    tab_h     = 20,   -- ...their height, so body_y can be checked against it
+    tab_gap   = 8,    -- between tabs
+    -- A tab is sized to the widest LABEL, clamped, and the row is centred --
+    -- it does not stretch to fill the panel. Three equal thirds of a 1400px
+    -- window is a 442px pill for a 95px label; three thirds of a 1000px one is
+    -- still 308. Bounded and centred, a tab is the same size wherever the
+    -- window is, which is what a tab strip should be.
+    tab_pad   = 26,   -- label -> tab edge, each side
+    tab_min   = 200,
+    tab_max   = 280,
+
+    -- CONTENT TOP. All three Advanced views start here -- Search Results as
+    -- well as Saved and Builder. It used to be Saved/Builder only, with the
+    -- results table still positioned from BUYL.well_top (56), a number
+    -- measured against the Blizzlike CONTROL strip. The tab strip ends at
+    -- tabs_y + tab_h = 58, so that table's box began 2px ABOVE the tabs, and
+    -- the three views started on three different lines.
+    body_y    = 78,
+    -- ...and stops here, clear of the action bar's rule.
+    --
+    -- The rule is 38px up (ui.buyBarRule). At 36 the wells stopped BELOW it
+    -- and drew over it, which is why the footer only looked right on Search
+    -- Results -- its table stops at BUYL.table_bot (82) to leave room for the
+    -- count and pager, and cleared the rule by accident rather than by intent.
+    body_bot  = 52,
+
+    right_pad = 12,   -- content's right margin inside the panel
+    strip_gap = 10,   -- query box -> Search button
+    gutter    = 12,   -- between the two columns, Saved and Builder alike
+}
+
+-- Put the Search button where the CURRENT mode wants it.
+--
+-- It cannot simply hang off the Advanced button, which is what it did: that
+-- button belongs to the default strip, so in Advanced it is hidden but still
+-- positioned, and Search inherited a slot 10px below the Advanced strip's own
+-- baseline and inset by the Advanced button's width plus its gap. The query
+-- box then ran across it, because the box's right margin was a constant that
+-- had to agree with three numbers it could not see.
+--
+-- Both modes put Search at the right end of the strip; only the strip's
+-- baseline and what sits beside it differ.
+function ui.AnchorSearchButton()
+    local b = ui.buySearchBtn
+    if not b then return end
+    b:ClearAllPoints()
+    if ui.buyMode == "advanced" then
+        -- Nothing to its right in Advanced: the Advanced button is what took
+        -- that slot, and it is gone.
+        b:SetPoint("TOPRIGHT", b:GetParent(), "TOPRIGHT",
+            -ADVL.right_pad, -ADVL.strip_y)
+    else
+        -- A real gap. These were flush against each other, so they read as one
+        -- two-tone control rather than as two buttons.
+        b:SetPoint("RIGHT", ui.buyAdvBtn, "LEFT", -14, 0)
+    end
+end
+
+-- Spread the three view tabs across the panel so they fill its width, and
+-- CENTRE the group.
+--
+-- Two things went wrong here before. The widths came from `panel:GetWidth()` --
+-- a measured, two-edge-anchored frame, so they were computed at the window's
+-- creation size and the strip filled 69% of a resized panel. And the group was
+-- anchored from the LEFT, so all of that shortfall pooled into one gap on the
+-- right, which is what it looked like: three buttons shoved to one side.
+--
+-- Both are fixed by the same pair of changes: take the width from the WINDOW,
+-- which is set explicitly (ui.AdvContentWidth), and anchor the row by its
+-- centre so any rounding residue splits evenly instead of landing on one edge.
+-- The width all three tabs take: the widest LABEL plus padding, clamped.
+--
+-- Equal to each other, as the concept has them, but sized to their text rather
+-- than to the panel. Three equal thirds of the content width made a 442px pill
+-- for a 95px label on a wide window and was still 308px on the narrowest one.
+local function ViewTabWidth(btns)
+    local widest = 0
+    local i = 1
+    while i <= table.getn(btns) do
+        local fs = btns[i].label
+        if fs then
+            local ok, sw = pcall(function() return fs:GetStringWidth() end)
+            if ok and sw and sw > widest then widest = sw end
+        end
+        i = i + 1
+    end
+    local w = math.ceil(widest) + 2 * ADVL.tab_pad
+    if w < ADVL.tab_min then w = ADVL.tab_min end
+    if w > ADVL.tab_max then w = ADVL.tab_max end
+    return w
+end
+
+-- Size the three view tabs and CENTRE the row.
+--
+-- Centred on the CONTENT's centre, not the panel's. The content does not sit
+-- symmetrically in the panel -- it runs from BUYL.side_x (10) to
+-- -ADVL.right_pad (12) -- so centring on the panel put the row 1-2px off the
+-- wells below it, and by a different amount at each window size because
+-- math.floor threw the remainder away. Off by two at the minimum size, off by
+-- one the other way at the maximum.
+function ui.LayoutViewTabs()
+    local btns = ui.buyViewBtns
+    if not btns or table.getn(btns) == 0 then return end
+    local n = table.getn(btns)
+    local avail = ui.AdvContentWidth()
+    if avail < 200 then return end          -- no window size yet
+
+    local w = ViewTabWidth(btns)
+    -- Never wider than the space actually available, however the labels
+    -- measure -- a localised client could hand us a long one.
+    local maxW = math.floor((avail - (n - 1) * ADVL.tab_gap) / n)
+    if w > maxW then w = maxW end
+    local i = 1
+    while i <= n do
+        btns[i]:SetWidth(w)
+        i = i + 1
+    end
+
+    -- Only the FIRST tab is anchored to the panel; the other two chain off it,
+    -- so this one point places all three. The offset is from the content's
+    -- left edge, which is what makes the row agree with every well below it.
+    local total = n * w + (n - 1) * ADVL.tab_gap
+    local left = BUYL.side_x + math.floor((avail - total) / 2)
+    btns[1]:ClearAllPoints()
+    btns[1]:SetPoint("TOPLEFT", btns[1]:GetParent(), "TOPLEFT",
+        left, -ADVL.tabs_y)
+end
+
+-- NOTE ON PLACEMENT: this sits AFTER BUYL because it reads it.
+-- Lua scopes a local from its declaration onward, so at its previous
+-- home 500 lines earlier `BUYL` was not a local in scope -- it was a
+-- read of a nil GLOBAL, which compiles cleanly and only fails when the
+-- function runs. It shipped in 1.19.0 and the window would not open.
+-- tests/lint/scoping.py exists to catch the next one.
+-- Move the results table between its two origins, and give the width it gains
+-- in Advanced to the Item column.
+--
+-- Only THREE things are re-anchored -- the well, the scroll frame and the
+-- header buttons. The header rule, the column ticks, the count line and the
+-- pager all hang off the well, and the rows off the scroll frame, so they
+-- follow. That is why those anchors were written as relationships rather than
+-- as repeated panel offsets.
+function ui.LayoutBuyTable()
+    local panel = ui.buyPanel
+    if not panel or not ui.buyListWell or not ui.buyScroll then return end
+    local left = ui.buyTableLeft
+    if ui.buyMode == "advanced" then left = ui.buyTableLeftAdv end
+    -- Surplus over the Blizzlike width, all of it to Item: it is the column
+    -- that actually runs out of room, and every numeric column is already
+    -- sized to its contents.
+    BUY_NAME_EXTRA = ui.buyTableLeft - left
+    if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
+
+    -- The table's TOP also moves with the mode.
+    --
+    -- BUYL.well_top / hdr_top / rows_top were measured against the BLIZZLIKE
+    -- control strip. Advanced has a TAB STRIP there instead, ending at
+    -- tabs_y + tab_h = 58 -- so in Advanced the Blizzlike well_top of 56 put
+    -- the table's box 2px ABOVE the tabs, and Search Results began ten pixels
+    -- higher than Saved Searches and the Filter Builder. All three views start
+    -- on ADVL.body_y now; the header and row offsets keep their spacing
+    -- relative to the box rather than being restated.
+    local wellTop, hdrTop, rowsTop = BUYL.well_top, BUYL.hdr_top, BUYL.rows_top
+    if ui.buyMode == "advanced" then
+        wellTop = ADVL.body_y
+        hdrTop  = wellTop + (BUYL.hdr_top - BUYL.well_top)
+        rowsTop = wellTop + (BUYL.rows_top - BUYL.well_top)
+    end
+
+    ui.buyScroll:ClearAllPoints()
+    ui.buyScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", left, -rowsTop)
+    ui.buyScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -BUYL.gutter_w, BUYL.table_bot)
+    ui.buyListWell:ClearAllPoints()
+    ui.buyListWell:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        left - 6, -wellTop)
+    ui.buyListWell:SetPoint("BOTTOMRIGHT", ui.buyScroll, "BOTTOMRIGHT", 0, -6)
+
+    for key, b in pairs(ui.buyHeaders or {}) do
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT",
+            left + ColX(key), -hdrTop)
+    end
+    local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
+    local ti = 1
+    while ti <= table.getn(ui.buyHdrTicks or {}) do
+        local t = ui.buyHdrTicks[ti]
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", ui.buyListWell, "TOPLEFT",
+            6 + ColX(tk[ti]) - 8, -6)
+        t:SetPoint("BOTTOMLEFT", ui.buyListWell, "TOPLEFT",
+            6 + ColX(tk[ti]) - 8, -(BUYL.hdr_h))
+        ti = ti + 1
+    end
+    local ri = 1
+    while ri <= table.getn(ui.buyRows or {}) do
+        ui.LayoutBuyRow(ui.buyRows[ri])
+        ri = ri + 1
+    end
+end
+
+-- Do the result columns fit the row width at a window `w` wide?
+--
+-- Same reasoning as StripFitsAt below: with fixed column offsets nothing in
+-- the anchoring stops the last column running under the scrollbar, so the
+-- constraint is arithmetic and belongs somewhere it can be checked. Removing
+-- the Seller column changed every offset after it; this is what says whether
+-- the new numbers still fit rather than someone re-adding them by hand.
+-- How much room the results table has, and whether what sits beneath it
+-- still fits, at a window `h` tall.
+--
+-- The table now FILLS the height rather than stopping at a fixed fraction, so
+-- the thing that has to be checked is the other direction: that the strip
+-- above and the count/pager, rule and action bar below all still have their
+-- space. Returns the usable row area, and false if the budget is blown.
+-- Vertical distance from the WINDOW's height to a tab panel's height. The
+-- content frame is inset 80 at the top and 16 at the bottom of the window,
+-- and each tab panel a further 6 inside that.
+--
+-- This said 22, so everything derived from it thought the panel had 86 more
+-- pixels than it does. It was never noticed because nothing in the addon
+-- actually called the functions below -- only the tests did.
+local PANEL_V_INSET = 80 + 16 + 6 + 6
+
+-- ...and the same sum horizontally: the content frame is inset 14 at each side
+-- of the window, and each tab panel a further 6 inside that.
+--
+-- This exists for the reason PANEL_V_INSET does, and it was added after the
+-- same bug happened again in the other axis. The Advanced tab strip and the
+-- Filter Builder's columns both sized themselves from a MEASURED frame, and
+-- both came out at the window's CREATION width -- a tab strip filling 69% of
+-- the panel and a form column at 29% where 41% was asked for. See
+-- ui.PanelWidthAt.
+local PANEL_H_INSET = 14 + 14 + 6 + 6
+
+-- Panel height at a given WINDOW height.
+--
+-- Deriving from the window rather than measuring a frame is the whole point:
+-- GetHeight() on a two-edge-anchored frame reports the height it was last
+-- LAID OUT at, and the client relayouts on the next frame. RestoreWindowSize
+-- sets the window's height and nothing repaints afterwards, so every list
+-- that measured its own scroll frame kept the count it computed at the
+-- window's creation size while the box grew with its anchors. That gap
+-- between a full-height box and a half-full list is the bug.
+--
+-- The window's height is set explicitly, so it is true the moment it is read.
+function ui.PanelHeightAt(h)
+    return (h or 0) - PANEL_V_INSET
+end
+
+-- Panel width at a given WINDOW width. Same reasoning as PanelHeightAt above,
+-- and it is not a hypothetical: GetWidth() on the Buy panel returned ~1003 on
+-- a window whose panel was ~1430, because that is the size it was laid out at
+-- when the window was created and nothing had relaid it since.
+--
+-- ANY layout that divides the panel horizontally must come through here rather
+-- than measure a frame.
+function ui.PanelWidthAt(w)
+    return (w or 0) - PANEL_H_INSET
+end
+
+-- The width available to Advanced's content: the panel, less its left margin
+-- and right padding. One place, because the tab strip and the Filter Builder
+-- both divide it and drifting apart would show as a form that does not line up
+-- with the tabs above it.
+function ui.AdvContentWidth()
+    local w = ui.PanelWidthAt(ui.frame and ui.frame:GetWidth() or 0)
+    return w - BUYL.side_x - ADVL.right_pad
+end
+
+-- Split an Advanced view's frame into two equal columns with one gutter.
+--
+-- ONE function for BOTH overlay views, because Saved Searches and the Filter
+-- Builder occupy the same space and clicking between them must move nothing.
+-- They had two copies of this arithmetic and the copies disagreed:
+--
+--   Saved   anchored colL's right to the frame's own BOTTOM midpoint at -8 and
+--           colR's left to its TOP at +8  -> a 16px gutter, columns (W-16)/2,
+--           measured off the frame.
+--   Builder set colL's width to (AdvContentWidth - 12) / 2 and hung colR off
+--           it -> a 12px gutter, columns (W-12)/2, measured off the window.
+--
+-- Two pixels on each column and four on the gutter, which is exactly the shift
+-- you see switching tabs. Returns the column width.
+function ui.SplitAdvColumns(frame, colL, colR)
+    if not frame or not colL or not colR then return 0 end
+    local total = ui.AdvContentWidth()
+    local lw = math.floor((total - ADVL.gutter) / 2)
+    if lw < 100 then lw = 100 end
+
+    colL:ClearAllPoints()
+    colL:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    colL:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    colL:SetWidth(lw)
+
+    -- The right column takes what is left rather than a second computed width,
+    -- so the two can never fail to meet in the middle.
+    colR:ClearAllPoints()
+    colR:SetPoint("TOPLEFT", colL, "TOPRIGHT", ADVL.gutter, 0)
+    colR:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    return lw
+end
+
+-- Re-split both overlay views. Called from every path that changes the
+-- window's width, so the two stay identical rather than only agreeing on the
+-- pass that happened to run last.
+function ui.LayoutAdvColumns()
+    if ui.buySaved and ui.savedColL and ui.savedColR then
+        ui.SplitAdvColumns(ui.buySaved, ui.savedColL, ui.savedColR)
+    end
+    if ui.buyBuilder and ui.fbColL and ui.fbColR then
+        ui.SplitAdvColumns(ui.buyBuilder, ui.fbColL, ui.fbColR)
+    end
+end
+
+-- Where the table's first row starts, for the CURRENT mode. Advanced puts the
+-- tab strip where Blizzlike puts its control strip, so the table sits lower
+-- there -- and the row count has to know, or it fills the box for a Blizzlike
+-- height and draws the last row past the bottom of a shorter one. Rows are not
+-- the scroll frame's scroll-child; nothing clips an overflowing one.
+function ui.TableRowsTop()
+    if ui.buyMode == "advanced" then
+        return ADVL.body_y + (BUYL.rows_top - BUYL.well_top)
+    end
+    return BUYL.rows_top
+end
+
+function ui.TableAreaAt(h)
+    local panelH = ui.PanelHeightAt(h)
+    local area = panelH - ui.TableRowsTop() - BUYL.table_bot
+    -- Below the table: 8px gap, the 20px pager row, 10px gap, then the rule
+    -- at 38 and the action bar under it.
+    local belowNeeded = 8 + 20 + 10 + 38
+    return area, (area > 0 and BUYL.table_bot >= belowNeeded)
+end
+
+-- How much room below the table is NOT spoken for -- the dead band between
+-- the table's bottom edge and the things that have to sit under it.
+--
+-- The point of the table filling the height is that this stays small. A
+-- generous table_bot satisfies TableAreaAt perfectly well while leaving a
+-- visible empty strip, which is the state this pass set out to remove, so it
+-- needs its own number rather than being implied by "the budget fits".
+function ui.TableSlack()
+    return BUYL.table_bot - (8 + 20 + 10 + 38)
+end
+
+-- How many WHOLE rows that area holds. Never a partial row: a row clipped by
+-- the box's bottom edge is worse than the gap it would have filled, and rows
+-- are not the scroll frame's scroll-child so nothing would clip it -- it
+-- would simply draw over the count line.
+function ui.TableRowsAt(h)
+    local area = ui.TableAreaAt(h)
+    local n = math.floor(area / BUY_ROW_H)
+    if n < 1 then n = 1 end
+    if n > BUY_ROWS_MAX then n = BUY_ROWS_MAX end
+    return n
+end
+
+-- Usable height of the BROWSE column at a given window height.
+function ui.CatAreaAt(h)
+    return ui.PanelHeightAt(h) - BUYL.side_top - BUYL.side_bot
+end
+
+-- Do all the TOP-LEVEL categories fit without scrolling, at window height h?
+--
+-- There are eleven ("All Categories" plus ten classes) and they are the
+-- plated, taller kind. Asserted true at MIN_H: a category list that cannot
+-- show its own categories at the smallest allowed window is a list with a
+-- hidden minimum nobody wrote down.
+local CAT_TOP_LEVEL_N = 11
+
+function ui.AllCategoriesFitAt(h)
+    return ui.CatAreaAt(h) >= (CAT_TOP_LEVEL_N * SIDE_ROW_H)
+end
+
+function ui.ColumnsFitAt(w)
+    local rowLeft = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
+    local rowW = (w - 22) - rowLeft - BUYL.gutter_w
+    return BUY_COLS_END <= rowW
+end
+-- Post Filter clause rows in the Filter Builder.
+local FB_POST_ROWS = 9
+
+-- Filter Builder layout, in ONE table -- same upvalue reason as BUYL and ADVL.
+-- Row offsets are negative y from the column's top edge; a control sits on its
+-- label's row at +3 so text and box share a centre line.
+local FBL = {
+    pad     = 10,   -- well inset, shared by header, rows and the clause box
+    gutter  = 12,   -- between the two columns
+    lbl_x   = 12,   -- labels: ONE left margin, not right-aligned into a box
+    ctl_x   = 112,  -- ...and the controls form a second column here
+    ctl_w   = 230,  -- widened by ui.LayoutBuilderForm at runtime
+    lvl_w   = 66,   -- the two level boxes and Stack Size
+    chk_gap = 12,   -- box -> its trailing checkbox (Exact / Usable)
+    comp_w  = 126,  -- component dropdown
+
+    -- ROW GEOMETRY, derived rather than written out.
+    --
+    -- These used to be ten hand-written offsets ending at -276, and nothing
+    -- checked they fit. At MIN_H the column is only 254px tall
+    -- (384 panel - 78 body_y - 52 body_bot), so the Stack Size box overran its
+    -- well by 21px and the note below it by 34 -- which is the clipping you
+    -- see at the smallest window size. Three rows were added in 1.19.0 and the
+    -- form had no way to say it had run out of room.
+    --
+    -- row_1 is the first row's baseline, row_h the pitch, and gap_extra the
+    -- deliberate separation before the Buyout / Full stacks / Stack Size
+    -- block. ui.FBRow(n) turns a row number into an offset, and
+    -- tests/units/geometry_test.lua asserts the last one still fits at MIN_H.
+    row_1     = 30,
+    row_h     = 21,
+    gap_extra = 8,    -- before the extra-options block (rows 7-9)
+    n_rows    = 9,
+}
+
+-- Negative y of form row `n` (1-based) inside the builder's left column.
+-- Rows 7-9 are the extra-options block and sit after one added gap.
+function ui.FBRow(n)
+    local y = FBL.row_1 + (n - 1) * FBL.row_h
+    if n >= 7 then y = y + FBL.gap_extra end
+    return -y
+end
+
+-- Set the Builder's status line. Empty text puts it away.
+--
+-- ONE writer, because the note now lives on the action bar rather than inside
+-- the form's column, and something has to raise and lower it -- eight call
+-- sites each remembering to Show and Hide is seven chances to forget. `warn`
+-- picks the amber the multi-term and missing-value messages use; everything
+-- else is quiet gold.
+function ui.BuilderNote(text, warn)
+    local fs = ui.fbNote
+    if not fs then return end
+    if not text or text == "" then
+        fs:SetText("")
+        fs:Hide()
+        return
+    end
+    fs:SetText(text)
+    if warn then
+        fs:SetTextColor(0.9, 0.6, 0.3)
+    else
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    fs:Show()
+end
+
+-- Full stacks and an explicit stack size cannot both be set: the term holds
+-- one or the other (TermToQuery emits `stack/N` when stackSize is set, bare
+-- `stack` only when it is not). Typing a size therefore clears the tick.
+--
+-- Enforced in ONE place, called from the size box, so the two controls cannot
+-- drift into a state the query language has no way to express.
+function ui.BuilderStackGate()
+    if not ui.fbStackSize or not ui.fbFullStack then return end
+    local n = tonumber(util.Trim(ui.fbStackSize:GetText() or ""))
+    if n and n >= 1 then
+        ui.fbFullStack:SetChecked(nil)
+    end
+end
+
+-- Room a trailing checkbox and its label need to the right of a control:
+-- the 16px box, its gap, and the wider of the two labels ("Usable").
+--
+-- MEASURED, not guessed. A guess that is too small puts the checkbox over the
+-- next column -- which is exactly what shipped: Exact and Usable landed in the
+-- gutter and drew on top of the POST FILTER panel's own labels.
+local function CheckReserve()
+    local w = 0
+    if ui.fbUsable and ui.fbUsable.label then
+        local ok, sw = pcall(function()
+            return ui.fbUsable.label:GetStringWidth()
+        end)
+        if ok and sw and sw > 0 then w = sw end
+    end
+    if w < 40 then w = 40 end       -- before the font string has measured
+    return 16 + FBL.chk_gap + math.ceil(w) + 6
+end
+
+-- Give the builder's two columns their share of the panel, and size the form's
+-- controls to the left one.
+--
+-- TWO widths, not one, and that is the whole fix. Stretching every control to
+-- fill the column left no room for the checkbox anchored to the Name box's
+-- right edge, so it landed past the column. The concept has it right: the Name
+-- box and the level pair stop SHORT with their checkbox beside them, while the
+-- four dropdowns run the FULL width, past where that checkbox sits.
+--
+-- The width comes from the WINDOW, not from measuring ui.buyBuilder: that
+-- frame is anchored by two edges and reports the width it was last laid out
+-- at, which is how the left column ended up at 29% of the panel when it was
+-- asked for 41%. See ui.PanelWidthAt.
+function ui.LayoutBuilderForm()
+    local colL = ui.fbColL
+    if not colL or not ui.buyBuilder then return end
+    local total = ui.AdvContentWidth()
+    if total < 200 then return end          -- no window size yet; keep defaults
+
+    -- The 50/50 split itself is ui.SplitAdvColumns' job, shared with Saved
+    -- Searches so the two views cannot drift apart. What is left here is
+    -- sizing the CONTROLS inside the column it returns.
+    local lw = ui.SplitAdvColumns(ui.buyBuilder, colL, ui.fbColR)
+
+    -- Full width: the four dropdowns, which have nothing beside them.
+    local ctl = lw - FBL.ctl_x - FBL.pad
+    if ctl < 120 then ctl = 120 end
+    FBL.ctl_w = ctl
+
+    -- Short: the Name box, which has Exact beside it.
+    local nameW = ctl - CheckReserve()
+    if nameW < 80 then nameW = 80 end
+
+    if ui.fbName then ui.fbName:SetWidth(nameW) end
+    local dds = { ui.fbClass, ui.fbSubclass, ui.fbSlot, ui.fbQuality }
+    local i = 1
+    while i <= table.getn(dds) do
+        if dds[i] and dds[i].SetWidth then dds[i]:SetWidth(ctl) end
+        i = i + 1
+    end
+
+    -- The level pair shares the Name box's span, so Usable lands under Exact
+    -- rather than wherever two fixed 66px boxes and a dash happened to end.
+    -- Each box takes half of what is left after the dash's gaps.
+    local lvl = math.floor((nameW - 14) / 2)
+    if lvl < 40 then lvl = 40 end
+    if ui.fbMinLevel then ui.fbMinLevel:SetWidth(lvl) end
+    if ui.fbMaxLevel then ui.fbMaxLevel:SetWidth(lvl) end
+end
 local SIDE_ROWS_MAX = 38
-local SIDE_W = 158    -- sidebar width
+-- Sidebar width. The mockup's is 18.1% of the panel; ours was ~16%, and the
+-- gutter beside it was four times too wide.
+local SIDE_W = 176    -- sidebar width
 
 function ui.BuildBuyTab()
     local panel = ui.panels["Buy"]
@@ -2019,129 +3658,73 @@ function ui.BuildBuyTab()
     ui.buyBuilt = true
     ui.buyExpanded = {}
 
-    -- ===== Left: category tree OR shopping-list sidebar (ROADMAP 2e) ====
-    -- Two modes share this column. "Categories" is the Blizzard-style browse
-    -- tree -- click your way to Weapons > Two-Handed Swords without typing a
-    -- query. "Advanced" is the original Shopping Lists sidebar (lists +
-    -- recent searches). ui.SetBuyLeft switches them; the choice persists per
-    -- character.
-    local catModeBtn = CreateFrame("Button", "AegisExchangeBuyLeftCats",
-        panel, "UIPanelButtonTemplate")
-    catModeBtn:SetWidth(78); catModeBtn:SetHeight(18)
-    catModeBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -6)
-    catModeBtn:SetText("Categories")
-    catModeBtn:SetScript("OnClick", function() ui.SetBuyLeft("cats") end)
-    local advModeBtn = CreateFrame("Button", "AegisExchangeBuyLeftAdv",
-        panel, "UIPanelButtonTemplate")
-    advModeBtn:SetWidth(76); advModeBtn:SetHeight(18)
-    advModeBtn:SetPoint("LEFT", catModeBtn, "RIGHT", 4, 0)
-    advModeBtn:SetText("Advanced")
-    advModeBtn:SetScript("OnClick", function() ui.SetBuyLeft("adv") end)
-    ui.buyLeftBtns = { cats = catModeBtn, adv = advModeBtn }
-
-    local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeBuySideScroll",
-        panel, "FauxScrollFrameTemplate")
-    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 62)
-    sideScroll:SetWidth(SIDE_W)
-    sideScroll:SetScript("OnVerticalScroll", function()
-        FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateBuySidebar)
-    end)
-    ui.buySideScroll = sideScroll
-
-    ui.buySideRows = {}
-ui.GrowBuySideRows = function(n)
-        if n > SIDE_ROWS_MAX then n = SIDE_ROWS_MAX end
-        -- Built on demand: a minimum-size window costs exactly what it
-        -- did before, and dragging taller adds only the rows needed.
-        local i = table.getn(ui.buySideRows) + 1
-        while i <= n do
-            local row = CreateFrame("Button", nil, panel)
-            row:SetHeight(SIDE_ROW_H)
-            row:SetWidth(SIDE_W)
-            if i == 1 then
-                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", 0, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.buySideRows[i - 1], "BOTTOMLEFT", 0, 0)
-            end
-            local ex = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            ex:SetPoint("LEFT", row, "LEFT", 2, 0)
-            ex:SetWidth(12)
-            ex:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-            row.ex = ex
-            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 14, 0)
-            -- NO SetWidth here. A constrained FontString WRAPS long text onto
-            -- a second line on 1.12 (SetTextClipped's comment), and these rows
-            -- are 18px tall -- a wrapped recent-search query painted itself
-            -- across the row below. The paint clips with SetTextClipped
-            -- instead.
-            lbl:SetJustifyH("LEFT")
-            row.label = lbl
-            row:SetScript("OnClick", function() ui.OnBuySideClick(row.entry) end)
-            -- A clipped entry is unreadable without the full text somewhere:
-            -- long queries are exactly the rows that get cut.
-            row:SetScript("OnEnter", function()
-                if row.full then
-                    GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(row.full, 1, 1, 1)
-                    GameTooltip:Show()
-                end
-            end)
-            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            row:Hide()
-            ui.buySideRows[i] = row
-            i = i + 1
-        end
-    end
-    ui.GrowBuySideRows(SIDE_ROWS)
-
-    -- Sidebar action buttons.
-    local addBtn = CreateFrame("Button", "AegisExchangeBuyAddListButton",
-        panel, "UIPanelButtonTemplate")
-    addBtn:SetWidth(50); addBtn:SetHeight(18)
-    addBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 40)
-    addBtn:SetText("+ Add")
-    addBtn:SetScript("OnClick", function() ui.BuyAddList() end)
-
-    local renBtn = CreateFrame("Button", "AegisExchangeBuyRenameButton",
-        panel, "UIPanelButtonTemplate")
-    renBtn:SetWidth(56); renBtn:SetHeight(18)
-    renBtn:SetPoint("LEFT", addBtn, "RIGHT", 4, 0)
-    renBtn:SetText("Rename")
-    renBtn:SetScript("OnClick", function() ui.BuyRenameList() end)
-
-    local delBtn = CreateFrame("Button", "AegisExchangeBuyDelButton",
-        panel, "UIPanelButtonTemplate")
-    delBtn:SetWidth(40); delBtn:SetHeight(18)
-    delBtn:SetPoint("LEFT", renBtn, "RIGHT", 4, 0)
-    delBtn:SetText("Del")
-    delBtn:SetScript("OnClick", function() ui.BuyDeleteList() end)
-
-    local listSearchBtn = CreateFrame("Button", "AegisExchangeBuyListSearchButton",
-        panel, "UIPanelButtonTemplate")
-    listSearchBtn:SetWidth(SIDE_W); listSearchBtn:SetHeight(18)
-    listSearchBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
-    listSearchBtn:SetText("Search entire list")
-    listSearchBtn:SetScript("OnClick", function() ui.BuySearchList() end)
-    ui.buyListSearchBtn = listSearchBtn
-
-    -- Everything that exists only in Advanced mode, so SetBuyLeft can swap
-    -- the whole column in one loop. Sidebar ROWS are not here: their paint
-    -- (UpdateBuySidebar) shows them again, so it is mode-guarded instead.
-    ui.buyAdvBits = { sideScroll, addBtn, renBtn, delBtn, listSearchBtn }
+    -- ===== Left column: the category tree (DEFAULT mode only) ===========
+    -- The Shopping Lists sidebar is gone. Advanced has NO left column at all
+    -- now -- its Builder and Saved views span the full content width, which
+    -- is what the approved concept shows and what stops the form's headings
+    -- being clipped by a column that had no business being there.
+    local browseHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    browseHdr:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUYL.side_x, -BUYL.browse_y)
+    -- Letter-spaced caps, as the mockup has it. 1.12 has no letter-spacing
+    -- property, so the spaces are in the string.
+    browseHdr:SetText("B R O W S E")
+    browseHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.buyBrowseHdr = browseHdr
 
     -- ===== Left, mode 2: the category tree (ROADMAP 2e) =================
     local catScroll = CreateFrame("ScrollFrame", "AegisExchangeBuyCatScroll",
         panel, "FauxScrollFrameTemplate")
-    catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
+    catScroll:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUYL.side_x, -BUYL.side_top)
+    -- The tree is the LONGER column in the mockup: it runs down past the
+    -- table's bottom edge to just above the action bar. It used to stop
+    -- halfway, leaving the lower half of the sidebar empty.
+    catScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        BUYL.side_x, BUYL.side_bot)
     catScroll:SetWidth(SIDE_W)
     catScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(SIDE_ROW_H, ui.UpdateCatTree)
     end)
     catScroll:Hide()
     ui.buyCatScroll = catScroll
+
+    -- HIDE THE SCROLLBAR. FauxScrollFrameTemplate hangs it OUTWARD from the
+    -- scroll frame's right edge, which here is 186 -- and the results box
+    -- starts at 194. The two occupied the same eight pixels, so the arrows
+    -- and thumb drew across the table's left border. Its down-arrow also
+    -- floated far below the list, because this frame runs to the panel bottom
+    -- while the categories usually end much higher.
+    --
+    -- Widening the gutter would fix the overlap but open the tight gap the
+    -- mockup deliberately has, and the mockup shows no scrollbar at all. The
+    -- WHEEL still scrolls: FauxScrollFrameTemplate's OnMouseWheel drives the
+    -- scroll bar's value, and a hidden frame still holds and reports a value.
+    ui.HideScrollBar = function(sf)
+        local nm = sf:GetName()
+        if not nm then return end
+        local bar = getglobal(nm .. "ScrollBar")
+        if bar then
+            bar:Hide()
+            -- FauxScrollFrame_Update re-Shows the bar whenever the content
+            -- overflows, so neutralise Show rather than relying on one Hide.
+            bar.Show = function() end
+        end
+    end
+    ui.HideScrollBar(catScroll)
+
+    -- The mockup draws NO box around the category list -- just the BROWSE
+    -- heading and the plates below it, directly on the panel. This frame is
+    -- kept because BitsFor and the mode switch both raise and lower it with
+    -- the tree, but it draws nothing: a bordered trough fought with the
+    -- plated rows inside it, and the results table is the only thing on this
+    -- tab the mockup puts in a box.
+    local catWell = CreateFrame("Frame", nil, panel)
+    catWell:SetPoint("TOPLEFT", catScroll, "TOPLEFT", -6, 6)
+    catWell:SetPoint("BOTTOMRIGHT", catScroll, "BOTTOMRIGHT", 24, -6)
+    catWell:SetFrameLevel(panel:GetFrameLevel())
+    catWell:Hide()
+    ui.buyCatWell = catWell
 
     ui.buyCatRows = {}
     ui.buyCatExpanded = {}
@@ -2152,16 +3735,66 @@ ui.GrowBuySideRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(SIDE_ROW_H)
             row:SetWidth(SIDE_W)
-            if i == 1 then
-                row:SetPoint("TOPLEFT", catScroll, "TOPLEFT", 0, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
+            -- Clickable, but a LIST ROW, not a button: the plate below is
+            -- the tree's own and says whether this is a top-level category,
+            -- so the skin must not replace it with a uniform button plate.
+            -- aegisNoSkin is the existing opt-out for exactly this.
+            row.aegisNoSkin = true
+            -- Anchored at PAINT time, not here: plated and bare rows are
+            -- different heights in the mockup, so a row's position depends on
+            -- what is above it, which is not known until the tree is walked.
+            -- See ui.UpdateCatTree.
+            row:SetPoint("TOPLEFT", catScroll, "TOPLEFT", 0, 0)
+            -- Blizzard's filter list gives every TOP-LEVEL category a plate
+            -- of its own and leaves subcategories as bare indented text. The
+            -- plate is drawn per row and hidden on child rows by the paint,
+            -- so one row pool serves both.
+            local plate = row:CreateTexture(nil, "BACKGROUND")
+            plate:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            plate:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            plate:SetTexture(0.18, 0.15, 0.10, 0.85)
+            row.plate = plate
+            -- The selected category's blue bar, exactly what the stock list
+            -- uses to say "this is the one you are browsing".
+            -- The mockup marks the browsed category with a LIGHTER plate and
+            -- a gold border, not with a coloured highlight bar. The old
+            -- blue/green gradient appears nowhere in the reference.
+            local sel = row:CreateTexture(nil, "ARTWORK")
+            sel:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            sel:SetTexture(0.30, 0.25, 0.15, 1)
+            sel:Hide()
+            row.selTex = sel
+
+            -- Gold edge on the selected plate, four hairlines rather than a
+            -- backdrop: this is a texture-only row and a backdrop here would
+            -- draw over the label.
+            row.selEdge = {}
+            local ei = 1
+            while ei <= 4 do
+                local ln = row:CreateTexture(nil, "OVERLAY")
+                ln:SetTexture(C.border[1], C.border[2], C.border[3], 0.9)
+                ln:Hide()
+                row.selEdge[ei] = ln
+                ei = ei + 1
             end
+            row.selEdge[1]:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            row.selEdge[1]:SetPoint("TOPRIGHT", row, "TOPRIGHT", -1, -1)
+            row.selEdge[1]:SetHeight(1)
+            row.selEdge[2]:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 1)
+            row.selEdge[2]:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            row.selEdge[2]:SetHeight(1)
+            row.selEdge[3]:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
+            row.selEdge[3]:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 1)
+            row.selEdge[3]:SetWidth(1)
+            row.selEdge[4]:SetPoint("TOPRIGHT", row, "TOPRIGHT", -1, -1)
+            row.selEdge[4]:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+            row.selEdge[4]:SetWidth(1)
             local lbl = row:CreateFontString(nil, "OVERLAY",
                 "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 4, 0)
-            -- No width constraint; the paint clips (same rule as the
-            -- sidebar rows and for the same wrap-onto-the-next-row reason).
+            lbl:SetPoint("LEFT", row, "LEFT", 8, 0)
+            -- No width constraint; the paint clips (same wrap-onto-the-next-
+            -- row reason as everywhere else in this file).
             lbl:SetJustifyH("LEFT")
             row.label = lbl
             row:SetScript("OnClick", function() ui.OnCatClick(row.entry) end)
@@ -2173,56 +3806,187 @@ ui.GrowBuySideRows = function(n)
     ui.GrowCatRows(SIDE_ROWS)
 
     -- ===== Right: filter row + results ==================================
-    local RX = SIDE_W + 24    -- right-column origin
+    -- The well runs to catScroll's right + 24 (it covers the scrollbar), so
+    -- the right column has to start beyond that or the well clips the Item
+    -- column and the match-count line beneath it.
+    -- Results column origin. The sidebar plus one tight gutter -- the
+    -- mockup's gap here is about a quarter of what we had.
+    local RX = BUYL.side_x + SIDE_W + BUYL.gut_w
 
-    local box = CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
-        "InputBoxTemplate")
-    box:SetWidth(180); box:SetHeight(18)
-    box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -12)
+    -- ADVANCED-mode content origin. Advanced HIDES the category tree, so its
+    -- content starts at the panel's own left margin.
+    --
+    -- Everything Advanced owns used to anchor at RX, which is the RESULTS
+    -- column's origin and sits that far right only because the tree occupies
+    -- the space to its left. With the tree hidden, that left the tree's whole
+    -- width as dead window -- about 300px of empty panel down the left of the
+    -- search strip, the sub-tabs, the builder and the saved lists.
+    local AX = BUYL.side_x
+
+    -- ---- DEFAULT-mode control strip (Blizzlike) ------------------------
+    -- Field order is the stock auction house's: Name, Level Range, Min
+    -- Quality, Usable, Search. Everything here composes into ONE term
+    -- alongside whatever the category tree has selected -- see ui.DefaultTerm.
+    -- Every field label is placed by ONE rule: sit on my own control's top
+    -- edge, left edges flush, the same gap above it.
+    --
+    -- They were placed by two rules before, and that is the whole of why they
+    -- looked crooked. "Name" hung off the PANEL at a fixed y while "Level
+    -- Range" and "Min Quality" hung off their CONTROLS -- so the moment a
+    -- control's height or the strip's y changed, Name stayed put and the other
+    -- two moved, and no amount of nudging one of the numbers could hold all
+    -- three in line because there was no single number to nudge. The controls
+    -- already share one top edge (strip_ctl_y), so hanging every label off its
+    -- own control gives one baseline for free, and strip_lbl_gap is now the
+    -- only place the label-to-control air is set.
+    local function stripLabel(text, ctl)
+        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        fs:SetPoint("BOTTOMLEFT", ctl, "TOPLEFT", 0, BUYL.strip_lbl_gap)
+        fs:SetText(text)
+        return fs
+    end
+
+    -- The strip is a FIXED-WIDTH cluster on the left, two buttons pinned
+    -- right, and the slack left as empty space between them -- the mockup's
+    -- arrangement.
+    --
+    -- Two earlier versions of this both failed, in opposite directions.
+    -- Originally everything chained left-to-right off the Name box while
+    -- Search and Advanced were pinned a fixed distance from the right edge,
+    -- with nothing joining the halves: they overlapped, printing Search
+    -- through the "Usable" label. 1.14.1 fixed that by letting Name stretch
+    -- to fill the gap -- which made overlap impossible but pushed Level Range
+    -- and Min Quality into the middle of the strip, away from Name.
+    --
+    -- Fixed widths bring the overlap risk back, so it is bounded arithmetically
+    -- instead of by an anchor: STRIP_MIN_W below is the cluster's total width,
+    -- and MIN_W is large enough to fit it plus the buttons. See the note on
+    -- MIN_W -- eight result columns do not fit in the old 832 either.
+    local box = ui.FlattenEditBox(
+        CreateFrame("EditBox", "AegisExchangeBuySearchBox", panel,
+            "InputBoxTemplate"))
+    box:SetWidth(BUY_NAME_W); box:SetHeight(BUYL.ctl_h)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        BUYL.side_x, -BUYL.strip_ctl_y)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
     box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
     ui.buyBox = box
+    ui.buyNameLbl = stripLabel("Name", box)
 
-    local maxLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    maxLbl:SetPoint("LEFT", box, "RIGHT", 8, 0)
-    maxLbl:SetText("Max")
-    ui.buyMax = MakeMoneyBox(panel, 78)
-    ui.buyMax:SetPoint("LEFT", maxLbl, "RIGHT", 4, 0)
-    ui.buyMax:SetScript("OnTextChanged", function() ui.UpdateBuyList() end)
+    -- Left cluster, chained left-to-right off Name at fixed widths.
+    ui.buyMinLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
+    ui.buyMinLevel:SetPoint("LEFT", box, "RIGHT", 14, 0)
+    local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 7, 0)
+    lvlDash:SetText("-")
+    ui.buyLvlDash = lvlDash
+    ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
+    ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 7, 0)
 
-    local searchBtn = CreateFrame("Button", "AegisExchangeBuySearchButton",
-        panel, "UIPanelButtonTemplate")
-    searchBtn:SetWidth(64); searchBtn:SetHeight(20)
-    searchBtn:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -6)
+    ui.buyLvlLbl = stripLabel("Level Range", ui.buyMinLevel)
+
+    ui.buyQuality = MakeDropdown(panel, BUY_QUAL_W, function() end)
+    ui.buyQuality.button:SetPoint("LEFT", ui.buyMaxLevel, "RIGHT", 16, 0)
+    ui.buyQualLbl = stripLabel("Min Quality", ui.buyQuality.button)
+
+    ui.buyUsable = ui.MakeCheckBox(panel, 16)
+    ui.buyUsable:SetPoint("LEFT", ui.buyQuality.button, "RIGHT", 10, 0)
+    local usableLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    usableLbl:SetPoint("LEFT", ui.buyUsable, "RIGHT", 2, 0)
+    usableLbl:SetText("Usable items")
+    usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.buyUsableLbl = usableLbl
+
+    -- Right pair. Advanced is the outermost, so it lands where the stock UI
+    -- put "Display on Character".
+    local advBtn = ui.MakeButton(panel, "accent",
+        "AegisExchangeBuyAdvancedButton")
+    advBtn:SetWidth(BUY_ADV_W); advBtn:SetHeight(20)
+    advBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -22)
+    advBtn:SetText("Advanced >")
+    advBtn:SetScript("OnClick", function() ui.SetBuyMode("advanced") end)
+    ui.buyAdvBtn = advBtn
+
+    local searchBtn = ui.MakeButton(panel, "primary",
+        "AegisExchangeBuySearchButton")
+    searchBtn:SetWidth(BUY_SEARCH_W); searchBtn:SetHeight(20)
+    -- Placed by ui.AnchorSearchButton, because WHERE it belongs depends on the
+    -- mode. It used to hang off the Advanced button in both -- but Advanced is
+    -- a DEFAULT-mode widget, hidden in Advanced and still carrying a position,
+    -- so in Advanced the Search button inherited a slot 10px below the strip's
+    -- own baseline and 88+14px in from the edge that nothing else knew about.
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoBuySearch() end)
     ui.buySearchBtn = searchBtn
 
-    local addToList = CreateFrame("Button", "AegisExchangeBuyAddToListButton",
-        panel, "UIPanelButtonTemplate")
-    addToList:SetWidth(90); addToList:SetHeight(20)
-    addToList:SetPoint("LEFT", searchBtn, "RIGHT", 6, 0)
-    addToList:SetText("Add to list")
-    addToList:SetScript("OnClick", function() ui.BuyAddSearchToList() end)
+    -- The mockup rules off the control strip from the columns below it, in a
+    -- matching pair with the one above the action bar. We only had the lower
+    -- one, so the strip ran into the BROWSE heading and the table with
+    -- nothing between them.
+    local stripRule = panel:CreateTexture(nil, "ARTWORK")
+    stripRule:SetPoint("TOPLEFT", panel, "TOPLEFT", 10,
+        -(BUYL.strip_ctl_y + BUYL.ctl_h + 8))
+    stripRule:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12,
+        -(BUYL.strip_ctl_y + BUYL.ctl_h + 8))
+    stripRule:SetHeight(1)
+    stripRule:SetTexture(0.35, 0.30, 0.18, 0.6)
+    ui.buyStripRule = stripRule
 
-    -- View switcher. The ROADMAP wants Results / Saved Searches / Filter
-    -- Builder sharing this space rather than a fourth top-level sub-tab;
-    -- Saved Searches is 2c and slots in here without rework.
+    -- ---- ADVANCED-mode strip -------------------------------------------
+    -- Accent, not quiet: this is the counterpart of the Advanced button that
+    -- got you here, and the concept draws the pair in the same purple.
+    local backBtn = ui.MakeButton(panel, "accent", "AegisExchangeBuyBackButton")
+    backBtn:SetWidth(72); backBtn:SetHeight(20)
+    backBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", AX, -ADVL.strip_y)
+    backBtn:SetText("\226\151\128 Back")
+    backBtn:SetScript("OnClick", function() ui.SetBuyMode("default") end)
+    ui.buyBackBtn = backBtn
+
+    ui.buyQueryBox = CreateFrame("EditBox", "AegisExchangeBuyQueryBox", panel,
+        "InputBoxTemplate")
+    ui.buyQueryBox:SetHeight(20)
+    -- Its right edge hangs off the SEARCH BUTTON, not off a constant measured
+    -- to clear it. The constant was 172 where the button's left edge is at
+    -- 196, so the box drew across the button -- and the two numbers had no way
+    -- to know about each other. Anchoring to the widget cannot drift.
+    ui.buyQueryBox:SetPoint("TOPLEFT", backBtn, "TOPRIGHT", 12, -1)
+    ui.buyQueryBox:SetPoint("RIGHT", searchBtn, "LEFT", -ADVL.strip_gap, 0)
+    ui.buyQueryBox:SetAutoFocus(false)
+    ui.buyQueryBox:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
+    ui.buyQueryBox:SetScript("OnEscapePressed", function()
+        ui.buyQueryBox:ClearFocus()
+    end)
+    ui.buyQueryBox:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
+
+
+    -- View switcher: a row of three, INSIDE the frame and under the query
+    -- box. It used to be anchored 232px right of the Search button -- which
+    -- was fine while Search lived on the left, and threw all three clean off
+    -- the window the moment Phase 2 moved Search to the right edge. Anchored
+    -- to the panel now, so it cannot follow another widget off screen.
+    --
+    -- The three SPAN the content width, as the concept has them: they are a
+    -- tab strip, not three buttons that happen to sit together, and three
+    -- 112px buttons on a 1400px panel read as the latter. Widths are computed
+    -- in ui.LayoutViewTabs from the panel's real width so they refill on every
+    -- resize; nothing here is a fixed pixel count.
     ui.buyViewBtns = {}
-    local views = { { "Results", "results" }, { "Builder", "builder" } }
+    local views = { { "Search Results", "results" },
+                    { "Saved Searches", "saved" },
+                    { "Filter Builder", "builder" } }
     local prevView = nil
     local vi = 1
     while vi <= table.getn(views) do
         local v = views[vi]
-        local b = CreateFrame("Button", "AegisExchangeBuyView" .. v[2],
-            panel, "UIPanelButtonTemplate")
-        b:SetWidth(62); b:SetHeight(20)
+        local b = ui.MakeButton(panel, "quiet",
+            "AegisExchangeBuyView" .. v[2])
+        b:SetHeight(20)
         if prevView then
-            b:SetPoint("LEFT", prevView, "RIGHT", 4, 0)
+            b:SetPoint("LEFT", prevView, "RIGHT", ADVL.tab_gap, 0)
         else
-            b:SetPoint("TOPLEFT", searchBtn, "TOPLEFT", 232, 0)
+            b:SetPoint("TOPLEFT", panel, "TOPLEFT", AX, -ADVL.tabs_y)
         end
         b:SetText(v[1])
         b.view = v[2]
@@ -2231,13 +3995,18 @@ ui.GrowBuySideRows = function(n)
         prevView = b
         vi = vi + 1
     end
+    ui.LayoutViewTabs()
 
-    -- Pager.
-    local nextBtn = CreateFrame("Button", "AegisExchangeBuyNextButton",
-        panel, "UIPanelButtonTemplate")
+    -- Pager, bottom-right of the results area. It used to sit at the panel's
+    -- TOP right -- the same spot the Advanced button now occupies, which is
+    -- where the stray "< >" over that button came from.
+    local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
-    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -12)
-    nextBtn:SetText(">")
+    -- Anchored properly below, once the table's box exists. The count and
+    -- pager follow the TABLE's bottom edge in the mockup, sitting directly
+    -- under the box rather than pinned to the panel with a gap between.
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -BUYL.gutter_w, -200)
+    nextBtn:SetText("\226\150\182")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
     ui.buyPageText = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2245,21 +4014,29 @@ ui.GrowBuySideRows = function(n)
     ui.buyPageText:SetJustifyH("RIGHT")
     ui.buyPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    local prevBtn = CreateFrame("Button", "AegisExchangeBuyPrevButton",
-        panel, "UIPanelButtonTemplate")
+    local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyPrevButton")
     prevBtn:SetWidth(24); prevBtn:SetHeight(20)
     prevBtn:SetPoint("RIGHT", ui.buyPageText, "LEFT", -6, 0)
-    prevBtn:SetText("<")
+    prevBtn:SetText("\226\151\128")
     prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
     -- Kept on ui so SetBuyView can hide the pager with the rest of the
     -- results view -- paging results you cannot see still queries the server.
     ui.buyPrevBtn = prevBtn
     ui.buyNextBtn = nextBtn
 
+    -- Result count / sort, bottom-LEFT of the results area, opposite the
+    -- pager. It hung off the Search button before, which dragged it to the
+    -- top right when Search moved.
     ui.buyStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.buyStatus:SetPoint("TOPLEFT", searchBtn, "BOTTOMLEFT", 0, -8)
+    -- Same baseline as the pager opposite it. They sat 4px apart, which is
+    -- the kind of gap that reads as a mistake rather than as a choice.
+    ui.buyStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -200)
     ui.buyStatus:SetJustifyH("LEFT")
-    ui.buyStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    -- Muted, as the mockup has it. Gold made the least important line on
+    -- screen the loudest thing in the results column.
+    -- Plain grey. This is the least important line in the column and was
+    -- one of the warmest things on the tab.
+    ui.buyStatus:SetTextColor(0.62, 0.60, 0.55)
     ui.buyStatus:SetText("Type an item name and Search.")
 
     -- Column layout (row-relative x, width). Sized so Buy+Bid finish well
@@ -2267,21 +4044,103 @@ ui.GrowBuySideRows = function(n)
     ui.buySortKey = "unit"
     ui.buySortDir = "asc"
     local rowLeft = RX + 4
-    local CX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
-                 buy = 436, bid = 490 }
-    local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
+    -- Both origins the table can have. Blizzlike starts right of the category
+    -- tree; Advanced hides the tree and starts at the panel margin, which
+    -- makes the same table ~200px wider. ui.LayoutBuyTable switches between
+    -- them; keeping both here means neither is re-derived at a call site.
+    ui.buyTableLeft    = rowLeft
+    ui.buyTableLeftAdv = AX + 4
 
-    -- EVERY column sorts, including Item and Ct. Headers are bare clickable
-    -- text (aegisNoSkin), never skinned into boxes -- pfUI's SkinButton would
-    -- give each one a backdrop and they'd visibly overlap.
-    ui.buyHeaders = {}
-    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, CX, CW,
-        function(key) ui.SetBuySort(key) end)
+    -- EVERY column sorts. Headers are bare clickable text (aegisNoSkin),
+    -- never skinned into boxes -- pfUI's SkinButton would give each one a
+    -- backdrop and they'd visibly overlap.
+    ui.buyHeaders = ui.MakeSortHeaders(panel, rowLeft, -BUYL.hdr_top,
+        RCX_BUY, RCW_BUY,
+        function(key) ui.SetBuySort(key) end,
+        {
+            { key = "name",   text = "Item" },
+            { key = "lvl",    text = "Lvl",         just = "RIGHT" },
+            { key = "left",   text = "Time Left" },
+            { key = "bid",    text = "Current Bid", just = "RIGHT" },
+            { key = "stack",  text = "Buyout",      just = "RIGHT" },
+            { key = "unit",   text = "Unit",        just = "RIGHT" },
+            { key = "pct",    text = "% Mkt",       just = "RIGHT" },
+        })
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeBuyScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -BUYL.rows_top)
+    -- Headroom for the status/pager row AND the action bar beneath it.
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -BUYL.gutter_w, BUYL.table_bot)
+
+    -- ONE box around the headers AND the rows, which is what the mockup
+    -- shows. The well used to wrap the scroll frame alone, so the column
+    -- headings floated on the panel above the box and the rule that should
+    -- have sat under them landed on the box's top edge instead.
+    --
+    -- Anchored explicitly rather than via ui.MakeWell(scroll): the well has
+    -- to reach UP past the scroll frame to enclose the header row, and its
+    -- right edge has to stop AT the scroll frame's, so that the scrollbar --
+    -- which FauxScrollFrameTemplate anchors outward from that edge -- ends up
+    -- outside the box rather than drawn across the last column.
+    local well = CreateFrame("Frame", nil, panel)
+    well:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft - 6, -BUYL.well_top)
+    -- Right edge flush with the scroll frame's, NOT past it: the scrollbar
+    -- hangs outward from exactly that line, so any positive offset here puts
+    -- the box under the scrollbar again.
+    well:SetPoint("BOTTOMRIGHT", scroll, "BOTTOMRIGHT", 0, -6)
+    well:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    well:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    well:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    ui.buyListWell = well
+
+    -- NOW the count and the pager can hang off the table, which is what the
+    -- mockup does. They are also CENTRED on each other rather than sharing a
+    -- bottom offset: the pager is a 20px button and the count is a ~12px
+    -- font string, so an equal offset left their text baselines ~9px apart.
+    nextBtn:ClearAllPoints()
+    nextBtn:SetPoint("TOPRIGHT", well, "BOTTOMRIGHT", 0, -8)
+    ui.buyStatus:ClearAllPoints()
+    ui.buyStatus:SetPoint("LEFT", well, "BOTTOMLEFT", 6, 0)
+    ui.buyStatus:SetPoint("TOP", nextBtn, "TOP", 0, 0)
+    ui.buyStatus:SetPoint("BOTTOM", nextBtn, "BOTTOM", 0, 0)
+
+    -- ui.LayoutBuyTable is defined at FILE scope, not here, and reads the
+    -- panel back off ui.buyPanel. Nesting it cost ui.BuildBuyTab two more
+    -- upvalues (BUY_NAME_EXTRA and ColX) against a hard limit of 32 that this
+    -- function has already broken once -- see the note above BUYL.
+    ui.buyPanel = panel
+
+    -- The rule goes UNDER the headings, not at the top of the box.
+    local hdrRule = panel:CreateTexture(nil, "ARTWORK")
+    hdrRule:SetPoint("TOPLEFT", well, "TOPLEFT", 6, -(BUYL.hdr_h))
+    hdrRule:SetPoint("TOPRIGHT", well, "TOPRIGHT", -6, -(BUYL.hdr_h))
+    hdrRule:SetHeight(1)
+    hdrRule:SetTexture(0.45, 0.38, 0.22, 0.85)
+    ui.buyHdrRule = hdrRule
+
+    -- Thin separators between the header cells, as the mockup has.
+    ui.buyHdrTicks = {}
+    local tickKeys = { "lvl", "left", "bid", "stack", "unit", "pct" }
+    local ti = 1
+    while ti <= table.getn(tickKeys) do
+        local tk = panel:CreateTexture(nil, "ARTWORK")
+        tk:SetWidth(1)
+        tk:SetPoint("TOPLEFT", well, "TOPLEFT",
+            6 + RCX_BUY[tickKeys[ti]] - 8, -6)
+        tk:SetPoint("BOTTOMLEFT", well, "TOPLEFT",
+            6 + RCX_BUY[tickKeys[ti]] - 8, -(BUYL.hdr_h))
+        tk:SetTexture(0.35, 0.30, 0.18, 0.7)
+        ui.buyHdrTicks[ti] = tk
+        ti = ti + 1
+    end
+
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(BUY_ROW_H, ui.UpdateBuyList)
     end)
@@ -2294,21 +4153,102 @@ ui.GrowBuyRows = function(n)
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.buyRows) + 1
         while i <= n do
-            BuildResultRow(panel, scroll, ui.buyRows, i, BUY_ROW_H)
+            BuildResultRow(panel, scroll, ui.buyRows, i, BUY_ROW_H, true)
             i = i + 1
         end
     end
     ui.GrowBuyRows(BUY_ROWS)
 
-    ui.BuildFilterBuilder(panel, rowLeft)
+    -- ===== Bottom action bar (both modes) ===============================
+    -- Blizzard's shape: your money on the left, a bid entry, then
+    -- Bid / Buyout / Close. All three act on the SELECTED row.
+    local closeBtn = ui.MakeButton(panel, "quiet",
+        "AegisExchangeBuyCloseButton")
+    closeBtn:SetWidth(64); closeBtn:SetHeight(21)
+    closeBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 8)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.CloseWindow() end)
+    ui.buyCloseBtn = closeBtn
+
+    local buyoutBtn = ui.MakeButton(panel, "primary",
+        "AegisExchangeBuyBuyoutButton")
+    buyoutBtn:SetWidth(70); buyoutBtn:SetHeight(21)
+    buyoutBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
+    buyoutBtn:SetText("Buyout")
+    buyoutBtn:SetScript("OnClick", function()
+        -- Ticked rows win over the single selection. You cannot have both
+        -- meanings on one button, and having ticked something is the more
+        -- deliberate act.
+        if table.getn(ui.buyChecked or {}) > 0 then
+            ui.ConfirmBatchBuyout()
+        elseif ui.buySel then
+            ui.ConfirmBuyout(ui.buySel)
+        end
+    end)
+    ui.buyBuyoutBtn = buyoutBtn
+
+    -- The mockup rules off the action bar from the table above it. Full
+    -- panel width, so it reads as the window's own division rather than as
+    -- part of the results column.
+    local barRule = panel:CreateTexture(nil, "ARTWORK")
+    barRule:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 38)
+    barRule:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 38)
+    barRule:SetHeight(1)
+    barRule:SetTexture(0.35, 0.30, 0.18, 0.6)
+    ui.buyBarRule = barRule
+
+    -- What the ticked rows come to, beside the action bar. Doubles as the
+    -- progress line while a batch runs.
+    ui.buyCheckTotal = panel:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlightSmall")
+    -- Beside the gold, on the action bar's own baseline. It used to sit at
+    -- bottom+26 which is inside the button band (8..29), so it crowded Bid /
+    -- Buyout / Close and the rule above them at once.
+    ui.buyCheckTotal:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        BUYL.side_x + 190, 13)
+    ui.buyCheckTotal:SetJustifyH("LEFT")
+    ui.buyCheckTotal:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.buyCheckTotal:Hide()
+
+    local bidBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBidButton")
+    bidBtn:SetWidth(58); bidBtn:SetHeight(21)
+    bidBtn:SetPoint("RIGHT", buyoutBtn, "LEFT", -5, 0)
+    bidBtn:SetText("Bid")
+    bidBtn:SetScript("OnClick", function()
+        if ui.buySel then ui.ConfirmBid(ui.buySel) end
+    end)
+    ui.buyBidBtn = bidBtn
+
+    -- The same g/s/c triplet the Sell tab uses, coin art and all, rather than
+    -- one plain box: a price should read the same everywhere in the window.
+    -- MakeMoneyGSC emulates GetText/SetText/ClearFocus, so SetMoneyBox and
+    -- every existing caller keep working against it untouched.
+    local bidEntryLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    bidEntryLbl:SetPoint("RIGHT", bidBtn, "LEFT", -(PRICE_GSC_W + 4), 0)
+    bidEntryLbl:SetText("Bid")
+    ui.buyBidEntryLbl = bidEntryLbl
+    ui.buyBidBox = MakeMoneyGSC(panel, nil)
+    ui.buyBidBox:Attach(bidEntryLbl, 6, 0)
+
+    -- Your money, with the game's own coin art rather than "6g 75s 43c"
+    -- text. Anchored by its COPPER coin, so the figure grows leftwards and a
+    -- total that gains a digit does not shove the bar about.
+    ui.buyMoney = MakeMoneyDisplay(panel)
+    -- LEFT-aligned on the panel margin, sharing the spine that the Name
+    -- field, BROWSE and the category plates all sit on.
+    ui.buyMoney:Anchor("BOTTOMLEFT", panel, "BOTTOMLEFT", BUYL.side_x, 13)
+
+    -- AX, not rowLeft: both of these belong to ADVANCED, where the category
+    -- tree is hidden, so they start at the panel margin. Handing them the
+    -- results column's origin is what left the tree's width as dead window.
+    ui.BuildFilterBuilder(panel, AX)
+    ui.BuildSavedSearches(panel, AX)
     ui.SetBuyView("results")
 
-    -- Left-column mode: restore the per-character choice; the tree is the
-    -- default for a fresh character (2e: Blizzard-style browsing out of the
-    -- box, with Advanced one click away).
+    -- Mode: default (Blizzlike) unless this character last used Advanced.
     local saved = A.db and A.db.char and A.db.char.ui
-        and A.db.char.ui.buyLeft
-    ui.SetBuyLeft(saved == "adv" and "adv" or "cats")
+        and A.db.char.ui.buyMode
+    ui.SetBuyMode(saved == "advanced" and "advanced" or "default")
 end
 
 -- ---------------------------------------------------------------------------
@@ -2329,76 +4269,568 @@ end
 function ui.SetBuyView(name)
     ui.buyView = name
     local builder = (name == "builder")
+    local saved   = (name == "saved")
+    -- Anything that is not the results table takes the same space, so both
+    -- overlay panels hide the results furniture below.
+    local overlay = builder or saved
     if ui.buyBuilder then
         if builder then ui.buyBuilder:Show() else ui.buyBuilder:Hide() end
     end
+    if ui.buySaved then
+        if saved then ui.buySaved:Show() else ui.buySaved:Hide() end
+    end
+    -- The action row lives on the window's action bar, so it is raised and
+    -- lowered here rather than with the builder frame.
+    --
+    -- It belongs to BOTH overlay views, not just the Builder. Search, Import
+    -- and Clear all mean something on Saved Searches, and the concept shows
+    -- the full row there; hiding everything but Close left that view looking
+    -- like it had no actions at all.
+    local ai = 1
+    while ai <= table.getn(ui.fbActionBtns or {}) do
+        if overlay then ui.fbActionBtns[ai]:Show()
+        else ui.fbActionBtns[ai]:Hide() end
+        ai = ai + 1
+    end
+    -- Build composes the FORM into a query, so it has nothing to act on
+    -- anywhere but the Builder. Disabled rather than hidden: a button that
+    -- vanishes between tabs makes the row jump, and the concept greys it.
+    if ui.fbBuildBtn then
+        if builder then ui.fbBuildBtn:Enable() else ui.fbBuildBtn:Disable() end
+    end
+    -- The Builder's status line lives on the action bar now, so it has to be
+    -- put away with the view rather than with the form's frame.
+    if not builder and ui.BuilderNote then ui.BuilderNote("") end
+    -- Bid / Buyout and the bid entry act on a SELECTED AUCTION, and neither
+    -- Builder nor Saved has one. Showing them there offers an action that
+    -- cannot do anything. Close and the gold total stay everywhere.
+    local bidBits = { ui.buyBidBtn, ui.buyBuyoutBtn, ui.buyBidEntryLbl }
+    local bi = 1
+    while bi <= table.getn(bidBits) do
+        local w = bidBits[bi]
+        if w then if overlay then w:Hide() else w:Show() end end
+        bi = bi + 1
+    end
+    if ui.buyBidBox then
+        if overlay then ui.buyBidBox:Hide() else ui.buyBidBox:Show() end
+    end
+    -- Mark which view you are actually in. All three buttons drew identically
+    -- whatever was on screen, so Results / Saved / Builder read as three
+    -- unrelated actions rather than as the tab strip they are. The active one
+    -- takes the primary plate -- the same thing the sub-tabs above do with
+    -- their gold label.
+    local vi2 = 1
+    while vi2 <= table.getn(ui.buyViewBtns or {}) do
+        local b = ui.buyViewBtns[vi2]
+        if b then
+            ui.SetButtonKind(b, (b.view == name) and "primary" or "quiet")
+        end
+        vi2 = vi2 + 1
+    end
+    if saved then ui.RefreshSavedSearches() end
     -- Everything belonging to the results view hides together. buyStatus is
     -- in the list because it paints at the same height as the form's first
     -- header -- "7 match(es) ..." showing through "AUCTION HOUSE FILTER" was
     -- a reported bug. The pager goes with it: its buttons still worked while
     -- invisible results were underneath, so a stray click queried the server.
+    -- buyCheckTotal is here because it is the results table's "N selected"
+    -- line and belongs to no other view.
     local resultsBits = { ui.buyScroll, ui.buyPageText, ui.buyStatus,
-                          ui.buyPrevBtn, ui.buyNextBtn }
+                          ui.buyPrevBtn, ui.buyNextBtn,
+                          ui.buyListWell, ui.buyHdrRule, ui.buyCheckTotal }
     local i = 1
     while i <= table.getn(resultsBits) do
         local w = resultsBits[i]
-        if w then if builder then w:Hide() else w:Show() end end
+        if w then if overlay then w:Hide() else w:Show() end end
         i = i + 1
     end
     if ui.buyHeaders then
         for _, h in pairs(ui.buyHeaders) do
-            if builder then h:Hide() else h:Show() end
+            if overlay then h:Hide() else h:Show() end
         end
+    end
+    -- The header column separators. An ARRAY of textures rather than a single
+    -- widget, which is exactly how they escaped every list and stayed drawn
+    -- across the top of the Saved and Builder views as a row of stray ticks.
+    local ti = 1
+    while ti <= table.getn(ui.buyHdrTicks or {}) do
+        if overlay then ui.buyHdrTicks[ti]:Hide()
+        else ui.buyHdrTicks[ti]:Show() end
+        ti = ti + 1
     end
     local ri = 1
     while ri <= table.getn(ui.buyRows or {}) do
-        if builder then ui.buyRows[ri]:Hide() end
+        if overlay then ui.buyRows[ri]:Hide() end
         ri = ri + 1
     end
-    if ui.buyViewBtns then
-        local bi = 1
-        while bi <= table.getn(ui.buyViewBtns) do
-            local b = ui.buyViewBtns[bi]
-            if b.view == name then b:LockHighlight() else b:UnlockHighlight() end
-            bi = bi + 1
-        end
-    end
-    if not builder then ui.UpdateBuyList() end
+    -- (The active view is marked further up, by swapping its button to the
+    -- primary plate. LockHighlight used to do this job and no longer can --
+    -- it drives a template highlight texture these buttons do not have, so it
+    -- was silently doing nothing.)
+    if not overlay then ui.UpdateBuyList() end
 end
 
-function ui.BuildFilterBuilder(panel, rowLeft)
+-- ---------------------------------------------------------------------------
+-- Saved Searches (ROADMAP 2j): Recent | Favorites
+--
+-- Two columns sharing the results area. Recent is fed by every search you
+-- run; Favorites is what you promoted out of it and ordered yourself.
+--
+-- Mouse language, matching the spec:
+--   left-click        run it
+--   shift-left-click  load it into the Filter Builder instead of running
+--   right-click       on a recent  -> promote straight to Favorites
+--                     on a favorite-> Move Up / Move Down / Delete menu
+-- ---------------------------------------------------------------------------
+
+-- SAVED_ROWS is the POOL CEILING, not the count. The visible number comes from
+-- ui.SavedRowsAt, computed from the WINDOW's height -- not from measuring the
+-- column, which is what left both lists stopping short of the bottom of their
+-- own well whatever size the window was. Rows beyond the visible count are
+-- reachable by the wheel; see ui.ScrollSaved.
+local SAVED_ROWS, SAVED_ROW_H = 30, 21
+local SAVED_HEAD_H = 32       -- heading band INSIDE the well
+local SAVED_PAD = 8           -- well inset: heading, rows and rules share it
+-- A real star, not an ASCII asterisk. "*" reads as a footnote marker; the
+-- concept's favourites are marked with a gold star and so are ours.
+local SAVED_STAR = "\226\152\133"
+
+-- `advLeft` is the ADVANCED content origin (the panel margin), not the
+-- results column's -- Advanced hides the category tree, so there is nothing to
+-- its left to make room for.
+function ui.BuildSavedSearches(panel, advLeft)
+    if ui.buySaved then return end
+
+    local f = CreateFrame("Frame", "AegisExchangeSavedSearches", panel)
+    f:SetPoint("TOPLEFT", panel, "TOPLEFT", advLeft, -ADVL.body_y)
+    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -ADVL.right_pad, ADVL.body_bot)
+    f:Hide()
+    ui.buySaved = f
+
+    -- Two columns that SPLIT the frame rather than sitting at fixed offsets:
+    -- left half and right half, each stretching with the window. The old
+    -- fixed 0 / 262 left a dead gap on a wide window and overlapped on a
+    -- narrow one.
+    -- Placed by ui.SplitAdvColumns, the SAME function the Filter Builder uses.
+    -- These two views share the space and must not move relative to each
+    -- other; two copies of the split is how they came to differ by 2px on each
+    -- column and 4px on the gutter.
+    local colL = CreateFrame("Frame", nil, f)
+    local colR = CreateFrame("Frame", nil, f)
+    ui.savedColL, ui.savedColR = colL, colR
+    ui.SplitAdvColumns(f, colL, colR)
+
+    -- Each column's rows live in a WELL that runs to the bottom of the view.
+    -- Without one the rows just stopped wherever the content ran out and the
+    -- remaining two-thirds of the panel was bare window -- the reported gap.
+    -- A well makes the same emptiness read as an empty list, which is what the
+    -- concept does with every content area.
+    -- The heading and its hint sit INSIDE the well, on ONE line -- the concept
+    -- puts them there, and stacking them above the box cost two rows of height
+    -- and read as a caption floating over an unlabelled list.
+    --
+    -- So the well is drawn around the WHOLE column and the heading is placed
+    -- inside its top inset, rather than the well starting below the heading.
+    local function column(parentCol, title, hint, which)
+        ui.MakeWell(parentCol, parentCol, 0)
+
+        local h = parentCol:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        h:SetPoint("TOPLEFT", parentCol, "TOPLEFT", SAVED_PAD, -SAVED_PAD)
+        h:SetText(title)
+        h:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        -- On the SAME baseline as the heading, immediately to its right.
+        local sub = parentCol:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        sub:SetPoint("LEFT", h, "RIGHT", 8, 0)
+        sub:SetText(hint)
+
+        local area = CreateFrame("Frame", nil, parentCol)
+        area:SetPoint("TOPLEFT", parentCol, "TOPLEFT", SAVED_PAD, -SAVED_HEAD_H)
+        area:SetPoint("BOTTOMRIGHT", parentCol, "BOTTOMRIGHT",
+            -SAVED_PAD, SAVED_PAD)
+        -- Wheel scrolling, on the AREA -- and again on each row below, which
+        -- is a Button and would otherwise swallow the event wherever the
+        -- pointer actually is, i.e. over the list you are trying to scroll.
+        area.which = which
+        area:EnableMouseWheel(true)
+        area:SetScript("OnMouseWheel", function()
+            ui.ScrollSaved(area.which, arg1)
+        end)
+        return area
+    end
+    -- "right-click -> * favorite" / "right-click -> menu", the concept's
+    -- wording: it names the RESULT of the click, not a verb for it.
+    ui.savedAreaL = column(colL, "RECENT",
+        "right-click \226\134\146 " .. SAVED_STAR .. " favorite", "recent")
+    ui.savedAreaR = column(colR, "FAVORITES",
+        "right-click \226\134\146 menu", "fav")
+
+    -- One row builder for both columns; `which` tags the row so the click
+    -- handlers know which list they are looking at.
+    local function makeRows(store, col, which)
+        local i = 1
+        while i <= SAVED_ROWS do
+            local r = CreateFrame("Button", nil, col)
+            r:SetHeight(SAVED_ROW_H)
+            -- A LIST ROW that happens to be a Button because a row has to be
+            -- clickable -- exactly the case ui/skin.lua's aegisNoSkin branch
+            -- exists for. Without this pfUI's SkinButton gives every row a
+            -- plate, and the concept's clean text list became a stack of
+            -- buttons under the skin while looking correct unskinned.
+            r.aegisNoSkin = true
+            -- Both edges anchored, so a row fills its column at any width.
+            r:SetPoint("TOPLEFT", col, "TOPLEFT", SAVED_PAD,
+                -SAVED_HEAD_H - (i - 1) * SAVED_ROW_H)
+            r:SetPoint("TOPRIGHT", col, "TOPRIGHT", -SAVED_PAD,
+                -SAVED_HEAD_H - (i - 1) * SAVED_ROW_H)
+            r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            -- A row covers the area beneath it, so the wheel has to be
+            -- forwarded from here as well or scrolling only works in the
+            -- empty band under the last entry -- which is exactly where the
+            -- pointer is not.
+            r:EnableMouseWheel(true)
+            r:SetScript("OnMouseWheel", function()
+                ui.ScrollSaved(which, arg1)
+            end)
+
+            -- Hover / selection band, full row width. Drawn in BACKGROUND so
+            -- the separator and the label both sit over it.
+            local sel = r:CreateTexture(nil, "BACKGROUND")
+            sel:SetAllPoints(r)
+            sel:SetTexture(1, 1, 1, 0.055)
+            sel:Hide()
+            r.selTex = sel
+
+            -- Separator under the row. Recent gets one per row, as the concept
+            -- draws it; favourites are a shorter, starred list and the concept
+            -- leaves them unruled.
+            if which == "recent" then
+                local rule = r:CreateTexture(nil, "ARTWORK")
+                rule:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", 0, 0)
+                rule:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", 0, 0)
+                rule:SetHeight(1)
+                rule:SetTexture(0.32, 0.27, 0.16, 0.55)
+                r.rule = rule
+            end
+
+            -- Favourites carry a gold star in its own FontString, so the star
+            -- stays gold while the label takes the row's own colour.
+            local x = 2
+            if which == "fav" then
+                local st = r:CreateFontString(nil, "OVERLAY",
+                    "GameFontNormalSmall")
+                st:SetPoint("LEFT", r, "LEFT", 2, 0)
+                st:SetText(SAVED_STAR)
+                st:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+                r.star = st
+                x = 16
+            end
+
+            local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", r, "LEFT", x, 0)
+            fs:SetJustifyH("LEFT")
+            r.label = fs
+            r.which = which
+            r.idx = i
+            r:SetScript("OnClick", function()
+                ui.OnSavedClick(r, arg1)
+            end)
+            r:SetScript("OnEnter", function()
+                r.selTex:Show()
+                if r.full then
+                    GameTooltip:SetOwner(r, "ANCHOR_RIGHT")
+                    GameTooltip:SetText(r.full, 1, 1, 1, 1, 1)
+                    GameTooltip:Show()
+                end
+            end)
+            r:SetScript("OnLeave", function()
+                -- Stays lit while its own context menu is open: the menu is a
+                -- separate frame, so the pointer leaving the row would
+                -- otherwise unlight the row the menu is acting on.
+                if ui.savedMenuRow ~= r then r.selTex:Hide() end
+                GameTooltip:Hide()
+            end)
+            r:Hide()
+            store[i] = r
+            i = i + 1
+        end
+    end
+    ui.savedRecentRows = {}
+    ui.savedFavRows = {}
+    makeRows(ui.savedRecentRows, colL, "recent")
+    makeRows(ui.savedFavRows, colR, "fav")
+
+    -- The favorite context menu. One frame, repositioned onto whichever row
+    -- was right-clicked -- three buttons is not worth a pool.
+    local menu = CreateFrame("Frame", "AegisExchangeSavedMenu", ui.frame)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetWidth(104); menu:SetHeight(58)
+    menu:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    menu:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    menu:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    menu:EnableMouse(true)
+    menu:Hide()
+    ui.savedMenu = menu
+
+    -- Each item is glyph + label in TWO FontStrings, so the glyph can carry
+    -- its own colour -- the concept's Delete has a red x AND red text, and one
+    -- string cannot be two colours without |c markup in every caller.
+    local function menuItem(glyph, text, order, fn)
+        local b = CreateFrame("Button", nil, menu)
+        b:SetHeight(18)
+        b:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -5 - (order - 1) * 18)
+        b:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -4, -5 - (order - 1) * 18)
+        b:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        b.aegisNoSkin = true
+        local g = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        g:SetPoint("LEFT", b, "LEFT", 4, 0)
+        g:SetText(glyph)
+        g:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        b.glyph = g
+        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", g, "RIGHT", 6, 0)
+        fs:SetText(text)
+        b.label = fs
+        b:SetScript("OnClick", function() fn(); ui.HideSavedMenu() end)
+        return b
+    end
+    menuItem("\226\150\178", "Move Up", 1, function()
+        if ui.savedMenuIndex then
+            A.buy.MoveFavorite(ui.savedMenuIndex, -1)
+            ui.RefreshSavedSearches()
+        end
+    end)
+    menuItem("\226\150\188", "Move Down", 2, function()
+        if ui.savedMenuIndex then
+            A.buy.MoveFavorite(ui.savedMenuIndex, 1)
+            ui.RefreshSavedSearches()
+        end
+    end)
+    local del = menuItem("\195\151", "Delete", 3, function()
+        if ui.savedMenuIndex then
+            A.buy.RemoveFavorite(ui.savedMenuIndex)
+            ui.RefreshSavedSearches()
+        end
+    end)
+    del.label:SetTextColor(0.90, 0.39, 0.39)
+    del.glyph:SetTextColor(0.90, 0.39, 0.39)
+end
+
+function ui.HideSavedMenu()
+    if ui.savedMenu then ui.savedMenu:Hide() end
+    ui.savedMenuIndex = nil
+    -- Put the row's highlight down with the menu. OnLeave deliberately leaves
+    -- it lit while the menu is open, so something has to take it back.
+    if ui.savedMenuRow then
+        if ui.savedMenuRow.selTex then ui.savedMenuRow.selTex:Hide() end
+        ui.savedMenuRow = nil
+    end
+end
+
+-- Left-click runs, shift-left-click loads into the builder, right-click
+-- either promotes (recent) or opens the reorder menu (favorite).
+function ui.OnSavedClick(row, button)
+    if not row.full then return end
+    if button == "RightButton" then
+        if row.which == "recent" then
+            if A.buy.AddFavorite(row.full) then
+                ui.RefreshSavedSearches()
+            end
+        else
+            ui.savedMenuIndex = row.listIndex
+            -- Keep this row lit while its menu is up, so the menu visibly
+            -- belongs to it -- see the row's OnLeave.
+            if ui.savedMenuRow and ui.savedMenuRow.selTex then
+                ui.savedMenuRow.selTex:Hide()
+            end
+            ui.savedMenuRow = row
+            if row.selTex then row.selTex:Show() end
+            ui.savedMenu:ClearAllPoints()
+            -- Drops BELOW the row and stays inside the favourites column.
+            -- Opening to the left cleared the row it acts on but landed on
+            -- the Recent column instead; below-right clears both.
+            --
+            -- Inset from the row's right edge by the well's own padding, so
+            -- the menu sits clear of the border rather than straddling it.
+            ui.savedMenu:SetPoint("TOPRIGHT", row, "BOTTOMRIGHT",
+                -SAVED_PAD, -2)
+            ui.savedMenu:Show()
+        end
+        return
+    end
+    ui.HideSavedMenu()
+    if IsShiftKeyDown and IsShiftKeyDown() then
+        -- Load it for editing rather than running it: the whole point of a
+        -- saved search you want to tweak.
+        ui.BuilderSetTerm(A.buy.ParseQuery(row.full)[1])
+        ui.SetBuyView("builder")
+        return
+    end
+    if ui.buyQueryBox then ui.buyQueryBox:SetText(row.full) end
+    ui.SetBuyView("results")
+    ui.DoBuySearch()
+end
+
+-- How many rows a Saved Searches column shows at a given WINDOW height.
+--
+-- Derived, never measured -- see ui.PanelHeightAt for why. The column runs
+-- from ADVL.body_y to ADVL.body_bot, less the heading band that sits inside
+-- the well above the first row.
+function ui.SavedRowsAt(h)
+    local col = ui.PanelHeightAt(h) - ADVL.body_y - ADVL.body_bot
+    local n = math.floor((col - SAVED_HEAD_H - SAVED_PAD) / SAVED_ROW_H)
+    if n < 1 then n = 1 end
+    if n > SAVED_ROWS then n = SAVED_ROWS end
+    return n
+end
+
+-- NOTE ON PLACEMENT: below the SAVED_* constants because it reads
+-- them. tests/lint/scoping.py caught this one before it shipped --
+-- written 900 lines higher, every one of those names resolved to a
+-- nil GLOBAL, which compiles cleanly and fails only when called.
+function ui.RefreshSavedSearches()
+    if not ui.buySaved then return end
+    -- DERIVED from the window's height, not measured off the column.
+    --
+    -- It used to call ui.RowsFor(ui.savedAreaL, ...), which reads GetHeight()
+    -- on a frame anchored by two edges -- so it got the height that frame was
+    -- last LAID OUT at, which is the window's creation size. Both lists then
+    -- stopped short of the bottom of their own well however tall the window
+    -- was. Third time this trap has bitten: ui.PanelHeightAt exists for it and
+    -- ui.PanelWidthAt was added for it in 1.19.2.
+    local fit = ui.SavedRowsAt(
+        (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0)
+
+    local function paint(rows, list, which, offset)
+        local total = table.getn(list)
+        -- Re-clamp EVERY paint, not only on the wheel: deleting a favourite
+        -- while scrolled to the bottom would otherwise leave the list showing
+        -- an empty band past the end of it.
+        local maxOff = total - fit
+        if maxOff < 0 then maxOff = 0 end
+        if offset > maxOff then offset = maxOff end
+        if offset < 0 then offset = 0 end
+        if which == "recent" then ui.savedOffRecent = offset
+        else ui.savedOffFav = offset end
+
+        local i = 1
+        while i <= table.getn(rows) do
+            local r = rows[i]
+            local q = nil
+            if i <= fit then q = list[i + offset] end
+            if q then
+                r.full = q
+                -- The list index is the REAL one, not the row's position:
+                -- Move Up / Move Down / Delete act on the favourite you
+                -- clicked, and a scrolled list would otherwise reorder the
+                -- wrong one.
+                r.listIndex = i + offset
+                -- The favourite star is its OWN FontString now (created with
+                -- the row), so it stays gold whatever the label does and no
+                -- longer needs a |c prefix spliced onto every query string.
+                --
+                -- Clip, never wrap: a row is one line high and a query is
+                -- long. The width comes from the ROW rather than a constant,
+                -- so a wider window clips less instead of clipping to the
+                -- same 244px it did at the minimum size.
+                local avail = (r:GetWidth() or 0) - 8
+                if r.star then avail = avail - 14 end
+                if avail < 60 then avail = 244 end
+                ui.SetTextClipped(r.label, q, avail)
+                r:Show()
+            else
+                r.full = nil
+                r.listIndex = nil
+                r.selTex:Hide()
+                r:Hide()
+            end
+            i = i + 1
+        end
+    end
+    paint(ui.savedRecentRows, A.buy.Recent(), "recent",
+          ui.savedOffRecent or 0)
+    paint(ui.savedFavRows, A.buy.Favorites(), "fav", ui.savedOffFav or 0)
+    ui.HideSavedMenu()
+end
+
+-- Scroll one saved column by `delta` wheel notches and repaint.
+--
+-- The two columns scroll INDEPENDENTLY -- Recent is a capped auto-list and
+-- Favorites is yours, and there is no reason moving through one should move
+-- the other. The clamp lives in the paint, so this only has to nudge the
+-- number and let the paint decide whether it was legal.
+function ui.ScrollSaved(which, delta)
+    if which == "recent" then
+        ui.savedOffRecent = (ui.savedOffRecent or 0) - delta
+    else
+        ui.savedOffFav = (ui.savedOffFav or 0) - delta
+    end
+    ui.HideSavedMenu()
+    ui.RefreshSavedSearches()
+end
+
+-- `advLeft` is the ADVANCED content origin -- see ui.BuildSavedSearches.
+function ui.BuildFilterBuilder(panel, advLeft)
     if ui.buyBuilder then return end
 
     local f = CreateFrame("Frame", "AegisExchangeFilterBuilder", panel)
-    f:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
-    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 10)
+    f:SetPoint("TOPLEFT", panel, "TOPLEFT", advLeft, -ADVL.body_y)
+    f:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -ADVL.right_pad, ADVL.body_bot)
     f:Hide()
     ui.buyBuilder = f
 
-    local function header(text, x, y)
-        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+    -- TWO wells side by side, as the concept has them: the Blizzard-side form
+    -- and the post-filter builder are two different things and one box around
+    -- both said they were one. colL's width is set by ui.LayoutBuilderForm so
+    -- the split holds at any window size; colR simply takes what is left.
+    -- Placed by ui.SplitAdvColumns, the SAME function Saved Searches uses --
+    -- see the note there. Split at BUILD time as well as on resize: the
+    -- builder used to carry a 400px placeholder until the first layout pass,
+    -- so the two views disagreed on the very first paint too.
+    local colL = CreateFrame("Frame", nil, f)
+    local colR = CreateFrame("Frame", nil, f)
+    ui.fbColL, ui.fbColR = colL, colR
+    ui.SplitAdvColumns(f, colL, colR)
+    ui.MakeWell(colL, colL, 0)
+    ui.MakeWell(colR, colR, 0)
+
+    -- Text goes on a child frame, not on the column: a child draws above ALL
+    -- of its parent's regions, so a FontString made on the column would sit
+    -- behind the well whatever order it was created in.
+    local contentL = CreateFrame("Frame", nil, colL)
+    contentL:SetAllPoints(colL)
+    local contentR = CreateFrame("Frame", nil, colR)
+    contentR:SetAllPoints(colR)
+
+    local function header(parent, on, text)
+        local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        fs:SetPoint("TOPLEFT", on, "TOPLEFT", FBL.pad, -FBL.pad)
         fs:SetText(text)
         fs:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         return fs
     end
-    local function label(text, x, y)
-        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
-        fs:SetWidth(58)
-        fs:SetJustifyH("RIGHT")
+    -- LEFT-aligned, on a shared left margin, with the controls forming a
+    -- second column. They used to be right-aligned into a 58px box, which put
+    -- every label at a different x and read as ragged rather than as a form.
+    local function label(text, y)
+        local fs = contentL:CreateFontString(nil, "OVERLAY",
+            "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", colL, "TOPLEFT", FBL.lbl_x, y)
+        fs:SetJustifyH("LEFT")
         fs:SetText(text)
         fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         return fs
     end
     local function check(text, x, y, onClick)
-        local c = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
-        c:SetWidth(20); c:SetHeight(20)
-        c:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
-        local fs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("LEFT", c, "RIGHT", 2, 0)
-        fs:SetText(text)
-        fs:SetTextColor(C.text[1], C.text[2], C.text[3])
+        local c = ui.MakeCheckBox(colL, 16)
+        c:SetPoint("TOPLEFT", colL, "TOPLEFT", x, y)
+        c:SetLabel(text, C.text)
         c:SetScript("OnClick", function()
             if onClick then onClick() end
             ui.RefreshBuilder()
@@ -2406,16 +4838,16 @@ function ui.BuildFilterBuilder(panel, rowLeft)
         return c
     end
 
-    local LX, RXX = 0, 250        -- the form's two columns
-    local DDW = 116
+    local CX = FBL.ctl_x
 
     -- ---- Blizzard-side filters ----------------------------------------
-    header("AUCTION HOUSE FILTER", LX, 0)
+    header(contentL, colL, "AUCTION HOUSE FILTER")
 
-    label("Name", LX, -22)
-    local nameBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    nameBox:SetWidth(DDW); nameBox:SetHeight(18)
-    nameBox:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -19)
+    label("Name", ui.FBRow(1))
+    local nameBox = ui.FlattenEditBox(
+        CreateFrame("EditBox", nil, colL, "InputBoxTemplate"))
+    nameBox:SetWidth(FBL.ctl_w); nameBox:SetHeight(18)
+    nameBox:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(1) + 3)
     nameBox:SetAutoFocus(false)
     nameBox:SetScript("OnEscapePressed", function() nameBox:ClearFocus() end)
     nameBox:SetScript("OnEnterPressed", function()
@@ -2424,105 +4856,235 @@ function ui.BuildFilterBuilder(panel, rowLeft)
     nameBox:SetScript("OnTextChanged", function() ui.RefreshBuilder() end)
     ui.fbName = nameBox
 
-    ui.fbExact = check("Exact match", LX + 62, -42)
+    -- Exact rides the NAME row and Usable the LEVEL row, as the concept has
+    -- them. On rows of their own they cost the form two rows of height and
+    -- read as unrelated to the field each one actually qualifies.
+    ui.fbExact = check("Exact", 0, 0)
+    ui.fbExact:ClearAllPoints()
+    ui.fbExact:SetPoint("LEFT", nameBox, "RIGHT", FBL.chk_gap, 0)
 
-    label("Level", LX, -70)
-    ui.fbMinLevel = MakeNumBox(f, 32, function() ui.RefreshBuilder() end)
-    ui.fbMinLevel:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -67)
-    local dash = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 4, 0)
+    label("Level Range", ui.FBRow(2))
+    ui.fbMinLevel = MakeNumBox(colL, FBL.lvl_w, function() ui.RefreshBuilder() end)
+    ui.fbMinLevel:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(2) + 3)
+    local dash = contentL:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 7, 0)
     dash:SetText("\226\128\147")
     dash:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.fbMaxLevel = MakeNumBox(f, 32, function() ui.RefreshBuilder() end)
-    ui.fbMaxLevel:SetPoint("LEFT", dash, "RIGHT", 4, 0)
+    ui.fbMaxLevel = MakeNumBox(colL, FBL.lvl_w, function() ui.RefreshBuilder() end)
+    ui.fbMaxLevel:SetPoint("LEFT", dash, "RIGHT", 7, 0)
 
-    label("Class", LX, -94)
-    ui.fbClass = MakeDropdown(f, DDW, function()
+    ui.fbUsable = check("Usable", 0, 0)
+    ui.fbUsable:ClearAllPoints()
+    ui.fbUsable:SetPoint("LEFT", ui.fbMaxLevel, "RIGHT", FBL.chk_gap, 0)
+
+    label("Item Class", ui.FBRow(3))
+    ui.fbClass = MakeDropdown(colL, FBL.ctl_w, function()
         -- Class gates Subclass gates Slot: changing it invalidates both below.
         ui.fbSubclass:SetValue(nil, true)
         ui.fbSlot:SetValue(nil, true)
         ui.RefreshBuilder()
     end)
-    ui.fbClass.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -91)
+    ui.fbClass.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(3) + 3)
 
-    label("Subclass", LX, -118)
-    ui.fbSubclass = MakeDropdown(f, DDW, function()
+    label("Item Subclass", ui.FBRow(4))
+    ui.fbSubclass = MakeDropdown(colL, FBL.ctl_w, function()
         ui.fbSlot:SetValue(nil, true)
         ui.RefreshBuilder()
     end)
-    ui.fbSubclass.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -115)
+    ui.fbSubclass.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(4) + 3)
 
-    label("Slot", LX, -142)
-    ui.fbSlot = MakeDropdown(f, DDW, function() ui.RefreshBuilder() end)
-    ui.fbSlot.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -139)
+    label("Item Slot", ui.FBRow(5))
+    ui.fbSlot = MakeDropdown(colL, FBL.ctl_w, function() ui.RefreshBuilder() end)
+    ui.fbSlot.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(5) + 3)
 
-    label("Quality", LX, -166)
-    ui.fbQuality = MakeDropdown(f, DDW, function() ui.RefreshBuilder() end)
-    ui.fbQuality.button:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 64, -163)
+    label("Min Quality", ui.FBRow(6))
+    ui.fbQuality = MakeDropdown(colL, FBL.ctl_w, function() ui.RefreshBuilder() end)
+    ui.fbQuality.button:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(6) + 3)
 
-    ui.fbUsable = check("Usable by me", LX + 62, -186)
+    -- ---- Extra term options --------------------------------------------
+    -- Three flags the term language has always understood and the form could
+    -- not reach: `buyout`, bare `stack`, and `stack/N`. Until now ui.BuilderTerm
+    -- did not read them either, so a query carrying any of them lost it the
+    -- moment you pressed Build.
+    ui.fbBuyout = check("Buyout only", CX, ui.FBRow(7))
 
-    -- ---- Post-filters --------------------------------------------------
-    header("EXTRA FILTERS", RXX, 0)
-
-    ui.fbBuyout = check("Buyout only", RXX, -20)
-    ui.fbStack  = check("Full stacks only", RXX, -42)
-
-    local ssLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ssLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -70)
-    ssLbl:SetText("Stack size")
-    ssLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.fbStackSize = MakeNumBox(f, 34, function() ui.RefreshBuilder() end)
-    ui.fbStackSize:SetPoint("LEFT", ssLbl, "RIGHT", 6, 0)
-    local ssNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ssNote:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -88)
-    ssNote:SetText("exact size; beats 'full stacks'")
-
-    local ttLbl = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ttLbl:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 2, -114)
-    ttLbl:SetText("Tooltip contains")
-    ttLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    local ttBox = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    ttBox:SetWidth(DDW); ttBox:SetHeight(18)
-    ttBox:SetPoint("TOPLEFT", f, "TOPLEFT", RXX + 4, -132)
-    ttBox:SetAutoFocus(false)
-    ttBox:SetScript("OnEscapePressed", function() ttBox:ClearFocus() end)
-    ttBox:SetScript("OnEnterPressed", function()
-        ttBox:ClearFocus(); ui.RefreshBuilder()
+    -- Full stacks and an explicit size are MUTUALLY EXCLUSIVE, because the
+    -- term cannot hold both: TermToQuery emits `stack/N` when stackSize is set
+    -- and bare `stack` only when it is not. A form that let you tick both
+    -- would express a state the query cannot, and Build would silently drop
+    -- one of them. So each one clears the other -- see ui.BuilderStackGate.
+    ui.fbFullStack = check("Full stacks only", CX, ui.FBRow(8), function()
+        if ui.fbFullStack:GetChecked() and ui.fbStackSize then
+            ui.fbStackSize:SetText("")
+        end
     end)
-    ttBox:SetScript("OnTextChanged", function() ui.RefreshBuilder() end)
-    ui.fbTooltip = ttBox
+
+    label("Stack Size", ui.FBRow(9))
+    ui.fbStackSize = MakeNumBox(colL, FBL.lvl_w, function()
+        ui.BuilderStackGate()
+        ui.RefreshBuilder()
+    end)
+    ui.fbStackSize:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(9) + 3)
+
+    -- ---- Component / post-filter system --------------------------------
+    -- Pick a component, type a value, press Enter: the clause is appended to
+    -- the list below. Stacked clauses are ANDed; `and`/`or`/`not` are there
+    -- to override that, not to be typed for the common case.
+    header(contentR, colR, "POST FILTER")
+
+    local compLbl = contentR:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    compLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(1))
+    compLbl:SetText("Component")
+    compLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.fbComponent = MakeDropdown(colR, FBL.comp_w,
+        function() ui.RefreshBuilder() end,
+        true)   -- no "All" row: there is no such thing as all components
+    ui.fbComponent.button:SetPoint("TOPLEFT", colR, "TOPLEFT",
+        FBL.pad + 72, ui.FBRow(1) + 3)
+
+    -- Right of the value box, so the Enter-to-add rule is visible while you
+    -- are typing rather than only in the empty-state hint underneath.
+    --
+    -- PLAIN WORDS, not the concept's "↵". U+21B5 is not in the 1.12 font and
+    -- rendered as nothing at all, leaving a blank before "adds" -- an
+    -- invisible character is worse than a longer label, because it reads as a
+    -- layout fault rather than as a missing glyph.
+    local addsHint = contentR:CreateFontString(nil, "OVERLAY",
+        "GameFontDisableSmall")
+    addsHint:SetPoint("TOPRIGHT", colR, "TOPRIGHT", -FBL.pad, ui.FBRow(1))
+    addsHint:SetText("Enter adds")
+
+    -- FLATTENED, like every other box in the window. Raw InputBoxTemplate
+    -- brings its own rounded end-cap textures, and with nothing drawn between
+    -- them the box rendered as a bare "( )" -- which had previously been read
+    -- as the box being clipped and "fixed" by anchoring both edges.
+    local cvBox = ui.FlattenEditBox(
+        CreateFrame("EditBox", nil, colR, "InputBoxTemplate"))
+    cvBox:SetHeight(18)
+    cvBox:SetPoint("TOPLEFT", ui.fbComponent.button, "TOPRIGHT", 10, -1)
+    cvBox:SetPoint("TOPRIGHT", addsHint, "TOPLEFT", -8, -3)
+    cvBox:SetAutoFocus(false)
+    cvBox:SetScript("OnEscapePressed", function() cvBox:ClearFocus() end)
+    cvBox:SetScript("OnEnterPressed", function() ui.BuilderAddComponent() end)
+    ui.fbCompValue = cvBox
+
+    local pfLbl = contentR:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    pfLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(2))
+    pfLbl:SetText("Post Filter:")
+
+    -- The clause list gets its own recessed well, as the concept draws it.
+    -- Bare rows on the panel read as text that happened to land there rather
+    -- than as a list you can act on.
+    local pfArea = CreateFrame("Frame", nil, colR)
+    pfArea:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(2) - 18)
+    pfArea:SetPoint("BOTTOMRIGHT", colR, "BOTTOMRIGHT", -FBL.pad, FBL.pad)
+    ui.MakeWell(colR, pfArea, 0)
+    ui.fbPostArea = pfArea
+
+    -- The stacking rule, on the well rather than printed under the clauses.
+    -- Mouse is enabled ONLY for this: the clause rows are children and take
+    -- their own clicks, so nothing is swallowed.
+    pfArea:EnableMouse(true)
+    pfArea:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(pfArea, "ANCHOR_TOPLEFT")
+        GameTooltip:SetText("Post filter", 1, 1, 1)
+        GameTooltip:AddLine(
+            "Stacked lines must ALL hold. Add 'or' between two to widen.",
+            0.8, 0.8, 0.8, 1)
+        GameTooltip:AddLine("Click a line to remove it.", 0.8, 0.8, 0.8, 1)
+        GameTooltip:Show()
+    end)
+    pfArea:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- One clickable row per clause. Clicking removes it, which is the only
+    -- edit the list needs: order is assembled front-to-back anyway.
+    ui.fbPostRows = {}
+    local pi = 1
+    while pi <= FB_POST_ROWS do
+        local r = CreateFrame("Button", nil, pfArea)
+        r:SetHeight(16)
+        r:SetPoint("TOPLEFT", pfArea, "TOPLEFT", 6, -6 - (pi - 1) * 16)
+        r:SetPoint("TOPRIGHT", pfArea, "TOPRIGHT", -6, -6 - (pi - 1) * 16)
+        r.aegisNoSkin = true      -- a list row that has to be clickable
+        local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", r, "LEFT", 2, 0)
+        fs:SetJustifyH("LEFT")
+        r.label = fs
+        r.idx = pi
+        r:SetScript("OnClick", function() ui.BuilderRemoveComponent(r.idx) end)
+        r:Hide()
+        ui.fbPostRows[pi] = r
+        pi = pi + 1
+    end
+
+    -- Empty-state hint, centred in the clause well. The concept only ever
+    -- shows the populated state, but an empty box still has to say what puts
+    -- something in it.
+    ui.fbPostHint = contentR:CreateFontString(nil, "OVERLAY",
+        "GameFontDisableSmall")
+    ui.fbPostHint:SetPoint("CENTER", pfArea, "CENTER", 0, 0)
+    ui.fbPostHint:SetJustifyH("CENTER")
 
     -- ---- Preview + actions ---------------------------------------------
-    local pvLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    pvLbl:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -216)
-    pvLbl:SetText("Query")
-    pvLbl:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-
-    ui.fbPreview = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.fbPreview:SetPoint("TOPLEFT", f, "TOPLEFT", LX + 44, -216)
-    ui.fbPreview:SetJustifyH("LEFT")
-    ui.fbPreview:SetTextColor(C.amber[1], C.amber[2], C.amber[3])
-
-    ui.fbNote = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ui.fbNote:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -234)
+    -- The note is a STATUS line -- "Copied to the search box.", "Loaded term 1
+    -- of 3..." -- not a form field, and it is parented to the PANEL, not to
+    -- the column.
+    --
+    -- It used to sit below the last form row, at a fixed offset that assumed a
+    -- column tall enough to hold it. At the minimum window height the column
+    -- is 254px and the note landed at 288, so it escaped the well entirely and
+    -- drew across the money readout on the action bar. It belongs on that bar,
+    -- which is where every other status line in this window lives.
+    ui.fbNote = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    ui.fbNote:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", FBL.pad, 26)
     ui.fbNote:SetJustifyH("LEFT")
+    ui.fbNote:Hide()
 
-    local function action(text, w, prev, fn)
-        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetWidth(w); b:SetHeight(20)
-        if prev then b:SetPoint("LEFT", prev, "RIGHT", 5, 0)
-        else b:SetPoint("TOPLEFT", f, "TOPLEFT", LX, -258) end
+    -- Action row: parented to the PANEL and anchored bottom-right, not to the
+    -- builder frame. It sits on the window's action bar beside Bid / Buyout /
+    -- Close, so it must line up with them rather than float wherever the
+    -- builder's own bottom edge happens to land.
+    --
+    -- Built right-to-left from the Bid box so the row stays put whatever the
+    -- window width. Only shown while the Builder view is up.
+    local function action(text, w, rightOf, fn, kind)
+        local b = ui.MakeButton(panel, kind or "quiet")
+        b:SetWidth(w); b:SetHeight(21)
+        b:SetPoint("RIGHT", rightOf, "LEFT", -5, 0)
         b:SetText(text)
         b:SetScript("OnClick", fn)
+        b:Hide()
         return b
     end
-    local bSearch = action("Search", 62, nil, function() ui.BuilderSearch() end)
-    local bTo = action("To box", 62, bSearch, function() ui.BuilderExport() end)
-    local bOr = action("+ OR", 52, bTo, function() ui.BuilderExport(true) end)
-    local bFrom = action("From box", 70, bOr, function() ui.BuilderImport() end)
-    action("Clear", 52, bFrom, function() ui.BuilderClear() end)
+    -- Right to left: Clear, Import, Build, Search -- so on screen they read
+    -- Search | Build > | Import | Clear, then the window's Bid / Buyout /
+    -- Close.
+    --
+    -- Import is back. It was dropped when the Builder was somewhere you only
+    -- ever LEFT from; now that a shift-click in Saved Searches lands you in
+    -- it, a query typed by hand has no other route into the form.
+    local bClear = action("Clear", 54, ui.buyCloseBtn,
+        function() ui.BuilderClear() end)
+    local bImport = action("Import", 60, bClear,
+        function() ui.BuilderImport() end)
+    -- No "+ OR": a `;` term is still typeable in the search box and `or` is
+    -- still a component, so the button bought nothing for the space.
+    -- Accent, and an arrow rather than a ">": Build is the Builder's own verb,
+    -- the thing the form exists to produce, and the concept gives it the same
+    -- purple plate the Advanced / Back pair wear.
+    local bBuild = action("Build \226\134\146", 72, bImport,
+        function() ui.BuilderExport() end, "accent")
+    -- Search is the primary plate here for the same reason it is on the
+    -- default strip: it is what the Builder exists to reach. Build > lost its
+    -- purple tint with the Advanced button's, and for the same reason.
+    local bSearch = action("Search", 62, bBuild,
+        function() ui.BuilderSearch() end, "primary")
     ui.fbSearchBtn = bSearch
+    ui.fbBuildBtn = bBuild
+    ui.fbImportBtn = bImport
+    -- Raised and lowered with the Builder view by SetBuyView.
+    ui.fbActionBtns = { bSearch, bBuild, bImport, bClear }
 
     ui.BuilderClear()
 end
@@ -2530,14 +5092,24 @@ end
 
 -- ---- Filter Builder: form <-> term --------------------------------------
 
--- Quality dropdown options, from the client's own localized names.
+-- Quality dropdown options, from the client's own localized names, each
+-- carrying that quality's colour so the list reads as the qualities it is
+-- naming rather than as six identical words. ITEM_QUALITY_COLORS is FrameXML's
+-- own table -- the same one item links and the result rows' Item column use --
+-- so a Rare here is exactly the blue a Rare is everywhere else. Guarded
+-- because a colourless list is a cosmetic loss and a nil index is an error.
 local function BuilderQualityOptions()
     local out = {}
     local i = 0
     while i <= 5 do
         local desc = getglobal("ITEM_QUALITY" .. i .. "_DESC")
         if desc and desc ~= "" then
-            table.insert(out, { value = i, text = desc })
+            local colour = nil
+            if ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[i] then
+                local c = ITEM_QUALITY_COLORS[i]
+                colour = { c.r, c.g, c.b }
+            end
+            table.insert(out, { value = i, text = desc, colour = colour })
         end
         i = i + 1
     end
@@ -2557,21 +5129,33 @@ function ui.BuilderTerm()
     if minL and not maxL then maxL = minL end
     if maxL and not minL then minL = maxL end
 
-    local tip = util.Trim(ui.fbTooltip:GetText() or "")
+    -- An explicit size WINS over the full-stacks tick, and the two can never
+    -- both reach the term: `stack/N` and bare `stack` are alternatives in the
+    -- query language, not additions. The form gate keeps them apart while you
+    -- type; this keeps them apart even if something set both directly.
+    local stackSize = num(ui.fbStackSize)
+    local stackOnly = ui.fbFullStack:GetChecked() and true or false
+    if stackSize then stackOnly = false end
+
     return {
         name       = util.Trim(ui.fbName:GetText() or ""),
         exact      = ui.fbExact:GetChecked() and true or false,
         usable     = ui.fbUsable:GetChecked() and true or false,
+        -- These three were missing entirely, which is why a query carrying
+        -- `buyout` or `stack/20` lost it the moment you pressed Build.
         buyoutOnly = ui.fbBuyout:GetChecked() and true or false,
-        stackOnly  = ui.fbStack:GetChecked() and true or false,
-        stackSize  = num(ui.fbStackSize),
+        stackOnly  = stackOnly,
+        stackSize  = stackSize,
         quality    = ui.fbQuality:GetValue(),
         minLevel   = minL,
         maxLevel   = maxL,
         class      = ui.fbClass:GetValue(),
         subclass   = ui.fbSubclass:GetValue(),
         slot       = ui.fbSlot:GetValue(),
-        tooltipText = (tip ~= "") and tip or nil,
+        -- Copied, not referenced: BuilderTerm's result is handed to
+        -- TermToQuery and TermsEqual, and a shared table would let either
+        -- mutate the builder's live list.
+        post       = util.CopyList(ui.builderPost),
     }
 end
 
@@ -2583,12 +5167,16 @@ function ui.BuilderSetTerm(t)
     ui.fbName:SetText(t.name or "")
     ui.fbExact:SetChecked(t.exact and 1 or nil)
     ui.fbUsable:SetChecked(t.usable and 1 or nil)
-    ui.fbBuyout:SetChecked(t.buyoutOnly and 1 or nil)
-    ui.fbStack:SetChecked(t.stackOnly and 1 or nil)
-    ui.fbStackSize:SetText(t.stackSize and tostring(t.stackSize) or "")
     ui.fbMinLevel:SetText(t.minLevel and tostring(t.minLevel) or "")
     ui.fbMaxLevel:SetText(t.maxLevel and tostring(t.maxLevel) or "")
-    ui.fbTooltip:SetText(t.tooltipText or "")
+    -- The other half of the round trip. Without these, loading a query into
+    -- the form dropped its buyout/stack flags, and Build then wrote the term
+    -- back WITHOUT them -- so importing and rebuilding quietly changed the
+    -- search. The size is written before the tick so the gate cannot clear it.
+    ui.fbBuyout:SetChecked(t.buyoutOnly and 1 or nil)
+    ui.fbStackSize:SetText(t.stackSize and tostring(t.stackSize) or "")
+    ui.fbFullStack:SetChecked((t.stackOnly and not t.stackSize) and 1 or nil)
+    ui.builderPost = util.CopyList(t.post)
 
     ui.fbClass:SetOptions(A.buy.ClassOptions())
     ui.fbClass:SetValue(t.class, true)
@@ -2602,9 +5190,236 @@ function ui.BuilderSetTerm(t)
     ui.RefreshBuilder()
 end
 
+-- Load the search bar back into the form.
+--
+-- The form edits ONE term, so a multi-term query loads its FIRST and SAYS so.
+-- Quietly loading term 1 would be the worst option: you would edit what
+-- looked like your whole query and Build something narrower.
+function ui.BuilderImport()
+    if not ui.buyQueryBox then return end
+    local text = util.Trim(ui.buyQueryBox:GetText() or "")
+    local terms = A.buy.ParseQuery(text)
+    ui.BuilderSetTerm(terms[1])
+    local n = table.getn(terms)
+    if n > 1 then
+        ui.BuilderNote("Loaded term 1 of " .. n
+            .. " \226\128\148 the other " .. (n - 1)
+            .. " are not shown here, and Build will replace them.", true)
+    else
+        ui.BuilderNote("Loaded from the search box.")
+    end
+end
+
 function ui.BuilderClear()
     ui.BuilderSetTerm(nil)
-    if ui.fbNote then ui.fbNote:SetText("") end
+    ui.BuilderNote("")
+    if ui.fbCompValue then ui.fbCompValue:SetText("") end
+    -- Clear the SEARCH BAR too. Leaving the query behind after emptying the
+    -- form is the worst of both: the next Search runs the old query while the
+    -- form in front of you says something else entirely.
+    if ui.buyQueryBox then ui.buyQueryBox:SetText("") end
+end
+
+-- ---- the component / post-filter system ---------------------------------
+
+-- What the Component dropdown offers. Only what the engine can actually
+-- honour: an option that silently does nothing is worse than an absent one.
+-- The combinators come first because they are the ones you reach for to
+-- CHANGE the default, and the default (stacking = AND) needs no component.
+-- Components that are NOT wired to the engine yet. They appear in the
+-- dropdown so the shape of the finished list is visible, and they parse and
+-- round-trip -- but they narrow nothing, so every one of them is labelled
+-- and drawn as inert. A component that silently did nothing would be
+-- indistinguishable from a broken filter, which is the exact failure this
+-- addon keeps having to fix.
+-- A component's colour, used BOTH by the dropdown's selected text and by its
+-- line in the Post Filter list. One source, so the two can never disagree
+-- about what a tooltip clause looks like.
+function ui.ComponentColor(kind)
+    if kind == "and" or kind == "or" or kind == "not" then
+        return 1.00, 0.48, 0.48          -- combinators: red
+    elseif kind == "tooltip" then
+        return 0.79, 0.63, 1.00          -- tooltip: violet
+    elseif kind == "max-unit-buy" or kind == "min-unit-buy" then
+        return 0.50, 0.82, 1.00          -- price bounds: blue
+    elseif ui.PENDING_COMPONENTS and ui.PENDING_COMPONENTS[kind] then
+        return 0.37, 0.33, 0.25          -- not wired up yet: dim
+    end
+    return C.text[1], C.text[2], C.text[3]
+end
+
+ui.PENDING_COMPONENTS = {
+    ["item"]              = true,
+    ["min-level"]         = true,
+    ["max-level"]         = true,
+    ["rarity"]            = true,
+    ["seller"]            = true,
+    ["percent"]           = true,
+    ["vendor-profit"]     = true,
+    ["left"]              = true,
+    ["disenchant-profit"] = true,
+}
+
+-- The concept's order: the three COMBINATORS first, then the filters. They
+-- lead because they are a different kind of thing -- they change how the
+-- clauses below combine rather than narrowing anything themselves -- and
+-- ui.ComponentColor draws them red to say so.
+local COMPONENT_ORDER = {
+    "and", "or", "not",
+    "tooltip", "item", "min-level", "max-level", "rarity", "seller",
+    "max-unit-buy", "min-unit-buy", "percent", "vendor-profit",
+    "left", "disenchant-profit",
+}
+
+local function BuilderComponentOptions()
+    local out = {}
+    local i = 1
+    while i <= table.getn(COMPONENT_ORDER) do
+        local kind = COMPONENT_ORDER[i]
+        local r, g, b = ui.ComponentColor(kind)
+        local tip = nil
+        -- Unavailability is said with COLOUR, as the concept says it, not with
+        -- "(soon)" glued onto the label -- which made every pending row wider
+        -- than the working ones and read as part of the component's name. The
+        -- dim entry still needs to explain itself, so it carries a tooltip.
+        if ui.PENDING_COMPONENTS[kind] then
+            tip = "Not wired up yet \226\128\148 this parses and round-trips, "
+                .. "but it narrows nothing."
+        end
+        table.insert(out, {
+            value = kind, text = kind, colour = { r, g, b }, tip = tip,
+        })
+        i = i + 1
+    end
+    return out
+end
+
+-- Does this component need a typed value?
+local function ComponentTakesValue(kind)
+    if not kind then return false end
+    if kind == "and" or kind == "or" or kind == "not" then return false end
+    return true
+end
+
+-- Append the chosen component to the Post Filter list. This is the Enter key
+-- in the workflow: pick, type, Enter.
+function ui.BuilderAddComponent()
+    if not ui.fbComponent then return end
+    local kind = ui.fbComponent:GetValue()
+    if not kind then
+        ui.BuilderNote("Pick a component first.", true)
+        return
+    end
+    local raw = util.Trim(ui.fbCompValue:GetText() or "")
+    local value = nil
+    if ComponentTakesValue(kind) then
+        if raw == "" then
+            ui.BuilderNote("'" .. kind .. "' needs a value.", true)
+            return
+        end
+        if kind == "tooltip" or ui.PENDING_COMPONENTS[kind] then
+            value = raw
+        else
+            value = util.ParseMoney(raw)
+            if not value or value <= 0 then
+                ui.BuilderNote("'" .. kind
+                    .. "' needs a price, like 5g or 50s.", true)
+                return
+            end
+        end
+    end
+    ui.builderPost = ui.builderPost or {}
+    table.insert(ui.builderPost, { kind = kind, value = value })
+    ui.fbCompValue:SetText("")
+    ui.BuilderNote("")
+    ui.RefreshBuilder()
+end
+
+function ui.BuilderRemoveComponent(i)
+    if not ui.builderPost or not ui.builderPost[i] then return end
+    table.remove(ui.builderPost, i)
+    ui.RefreshBuilder()
+end
+
+-- Paint the Post Filter list, with the live parser feedback beside each
+-- clause. That feedback is the point of the panel: it is where abbreviation
+-- expansion becomes visible, so you can see that "agi" really did become
+-- Agility before you spend a scan on it.
+local function PaintPostFilter()
+    local list = ui.builderPost or {}
+    local i = 1
+    while i <= table.getn(ui.fbPostRows) do
+        local row = ui.fbPostRows[i]
+        local e = list[i]
+        if e then
+            -- Three parts, kept separate so the CLIP below can shorten the
+            -- value without ever cutting a colour escape in half. Splicing
+            -- them first and clipping the result would sooner or later slice
+            -- through a "|cffRRGGBB", which prints as literal garbage and
+            -- leaks the colour into every line after it.
+            local pre, val, post
+            local cr, cg, cb = ui.ComponentColor(e.kind)
+            local hex = string.format("|cff%02x%02x%02x",
+                math.floor(cr * 255), math.floor(cg * 255), math.floor(cb * 255))
+            if e.kind == "and" or e.kind == "or" or e.kind == "not" then
+                pre, val, post = hex .. e.kind .. "|r", "", ""
+            elseif e.kind == "tooltip" then
+                pre, val = hex .. e.kind .. ":|r ", tostring(e.value)
+                local needles = A.buy.TooltipNeedles(e.value)
+                if table.getn(needles) > 1 then
+                    post = "  |cff8d7d5c\226\134\146 or \226\128\156"
+                        .. needles[2] .. "\226\128\157|r"
+                else
+                    post = ""
+                end
+            elseif ui.PENDING_COMPONENTS[e.kind] then
+                -- Drawn dim and labelled, because it does not filter yet.
+                pre, val = hex .. e.kind .. ": ", tostring(e.value)
+                post = "|r  |cffd08050not wired up yet \226\128\148 ignored|r"
+            else
+                pre = hex .. e.kind .. ":|r "
+                val = util.FormatMoney(e.value, true)
+                post = "  |cff8d7d5cper item|r"
+            end
+
+            -- Clip, never wrap -- a wrapped line in a fixed-height row is
+            -- worse than a clipped one, the rule everywhere else in this file.
+            -- The label carries no SetWidth, so an over-long clause runs past
+            -- the well's edge instead; measured here and shortened only when
+            -- it actually overflows, so the common case costs nothing.
+            row.label:SetText(pre .. val .. post)
+            local avail = (row:GetWidth() or 0) - 6
+            if avail > 40 and row.label:GetStringWidth() > avail then
+                -- Budget for the value = what is left once the decorations
+                -- have had their share. Measured with the escapes stripped by
+                -- setting the plain text and reading it back.
+                row.label:SetText(pre .. post)
+                local fixed = row.label:GetStringWidth() or 0
+                ui.SetTextClipped(row.label, val, avail - fixed)
+                row.label:SetText(pre .. (row.label:GetText() or "") .. post)
+            end
+            row:Show()
+        else
+            row:Hide()
+        end
+        i = i + 1
+    end
+    -- The hint belongs to the EMPTY state only.
+    --
+    -- It used to change with the clause count and stay on screen underneath
+    -- them, so a populated list carried a long centred sentence competing with
+    -- the clauses themselves -- and the concept has no such line. What it said
+    -- is worth keeping, so the stacking rule moved to a tooltip on the well
+    -- (see the OnEnter in ui.BuildFilterBuilder), where it is there when
+    -- wanted and is not permanent furniture.
+    if ui.fbPostHint then
+        if table.getn(list) == 0 then
+            ui.fbPostHint:SetText("Pick a component, type a value, press Enter.")
+            ui.fbPostHint:Show()
+        else
+            ui.fbPostHint:Hide()
+        end
+    end
 end
 
 -- Re-apply the class -> subclass -> slot gating, then repaint the preview.
@@ -2621,9 +5436,30 @@ function ui.RefreshBuilder()
     ui.fbSlot:SetEnabled(class ~= nil
         and table.getn(A.buy.SlotOptions(class, subclass)) > 0)
 
+    if table.getn(ui.fbComponent.options or {}) == 0 then
+        ui.fbComponent:SetOptions(BuilderComponentOptions())
+        ui.fbComponent:SetValue("tooltip", true)
+    end
+    -- A combinator takes no value, so dim the box to say so.
+    --
+    -- DIM, not disable: EditBox has no SetEnabled on 1.12 (that is a Button
+    -- method), and calling one would error the moment a combinator was
+    -- picked. SetTextColor comes from FontInstance and is safe here.
+    local compKind = ui.fbComponent:GetValue()
+    if ComponentTakesValue(compKind) then
+        ui.fbCompValue:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        ui.fbCompValue:SetTextColor(0.42, 0.38, 0.30)
+    end
+    -- The dropdown's selected text takes the component's own colour, so what
+    -- you are about to add is identifiable before you add it. That now rides
+    -- on the option's own `colour`, applied inside RepaintButton -- setting
+    -- the FontString here instead was wiped by the first mouseover, because
+    -- RepaintButton runs on every hover and press.
+    PaintPostFilter()
+
     local term = ui.BuilderTerm()
     local q = A.buy.TermToQuery(term)
-    ui.fbPreview:SetText(q ~= "" and q or "(everything)")
     if ui.fbSearchBtn then ui.fbSearchBtn:Enable() end
 
     ui.builderPainting = false
@@ -2631,7 +5467,13 @@ end
 
 function ui.BuilderSearch()
     local q = A.buy.TermToQuery(ui.BuilderTerm())
-    if ui.buyBox then ui.buyBox:SetText(q) end
+    -- Force ADVANCED before searching. The builder writes into the query box,
+    -- and only Advanced mode READS that box -- in default mode DoBuySearch
+    -- composes the term from the Name field instead and would silently run a
+    -- different search than the one on screen. The builder is only reachable
+    -- from Advanced in practice, but the two must not be able to disagree.
+    if ui.buyMode ~= "advanced" then ui.SetBuyMode("advanced") end
+    if ui.buyQueryBox then ui.buyQueryBox:SetText(q) end
     ui.SetBuyView("results")
     ui.DoBuySearch()
 end
@@ -2641,201 +5483,314 @@ end
 -- is how you assemble a multi-term query out of it.
 function ui.BuilderExport(orTerm)
     local q = A.buy.TermToQuery(ui.BuilderTerm())
-    if not ui.buyBox then return end
-    local cur = util.Trim(ui.buyBox:GetText() or "")
+    if not ui.buyQueryBox then return end
+    local cur = util.Trim(ui.buyQueryBox:GetText() or "")
     if orTerm and cur ~= "" and q ~= "" then
-        ui.buyBox:SetText(cur .. ";" .. q)
-        ui.fbNote:SetText("Appended as another OR term.")
+        ui.buyQueryBox:SetText(cur .. ";" .. q)
+        ui.BuilderNote("Appended as another OR term.")
     else
-        ui.buyBox:SetText(q)
-        ui.fbNote:SetText("Copied to the search box.")
+        ui.buyQueryBox:SetText(q)
+        ui.BuilderNote("Copied to the search box.")
     end
-    ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-end
 
--- Load the search box back into the form.
---
--- The builder edits ONE term, so a multi-term query loads its FIRST term and
--- SAYS so. Silently dropping the rest would be the worst option: you would
--- edit what looked like your query and export something narrower.
-function ui.BuilderImport()
-    if not ui.buyBox then return end
-    local text = util.Trim(ui.buyBox:GetText() or "")
-    local terms = A.buy.ParseQuery(text)
-    ui.BuilderSetTerm(terms[1])
-    local n = table.getn(terms)
-    if n > 1 then
-        ui.fbNote:SetText("Loaded term 1 of " .. n
-            .. " \226\128\148 the other " .. (n - 1)
-            .. " are not shown here, and 'To box' will replace them.")
-        ui.fbNote:SetTextColor(0.9, 0.6, 0.3)
-    else
-        ui.fbNote:SetText("Loaded from the search box.")
-        ui.fbNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    end
 end
 
 -- ---- sidebar model + paint ---------------------------------------------
 
-function ui.FlattenShopping()
-    local flat = {}
-    table.insert(flat, { kind = "hdr", text = "LISTS" })
-    local lists = A.buy and A.buy.Lists() or {}
-    local li = 1
-    while li <= table.getn(lists) do
-        local L = lists[li]
-        table.insert(flat, { kind = "list", index = li, name = L.name })
-        if ui.buyExpanded[li] then
-            local ii = 1
-            while ii <= table.getn(L.items) do
-                table.insert(flat, { kind = "item", listIndex = li,
-                    name = L.items[ii] })
-                ii = ii + 1
-            end
-            if table.getn(L.items) == 0 then
-                table.insert(flat, { kind = "note", text = "(empty)" })
-            end
-        end
-        li = li + 1
-    end
-    table.insert(flat, { kind = "hdr", text = "RECENT" })
-    local recent = A.buy and A.buy.Recent() or {}
-    local ri = 1
-    while ri <= table.getn(recent) do
-        table.insert(flat, { kind = "recent", name = recent[ri] })
-        ri = ri + 1
-    end
-    ui.buyFlat = flat
-end
-
-function ui.RefreshBuySidebar()
-    if not ui.buySideScroll then return end
-    -- In Categories mode this column belongs to the tree; painting here
-    -- would Show() sidebar rows straight over it.
-    if ui.buyLeft == "cats" then return end
-    ui.FlattenShopping()
-    ui.UpdateBuySidebar()
-end
-
-function ui.UpdateBuySidebar()
-    if not ui.buySideScroll then return end
-    if ui.buyLeft == "cats" then return end
-    local flat = ui.buyFlat or {}
-    local vis = ui.RowsFor(ui.buySideScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
-    ui.GrowBuySideRows(vis)
-    ui.SkinNewRows(ui.buySideRows)
-    FauxScrollFrame_Update(ui.buySideScroll, table.getn(flat), vis, SIDE_ROW_H)
-    local offset = FauxScrollFrame_GetOffset(ui.buySideScroll)
-    local i = 1
-    while i <= table.getn(ui.buySideRows) do
-        local row = ui.buySideRows[i]
-        local e = (i <= vis) and flat[i + offset] or nil
-        if e then
-            row.entry = e
-            row.ex:SetText("")
-            -- Clip, never wrap: the label has no width constraint (see
-            -- GrowBuySideRows), so a long query must be cut here or it runs
-            -- over the scrollbar and the rows beside it. When it IS cut,
-            -- remember the full text for the row's hover tooltip.
-            local LW = SIDE_W - 18
-            local function put(text, full)
-                ui.SetTextClipped(row.label, text, LW)
-                if row.label:GetText() ~= text then
-                    row.full = full or text
-                else
-                    row.full = nil
-                end
-            end
-            if e.kind == "hdr" then
-                put(e.text)
-                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-            elseif e.kind == "list" then
-                row.ex:SetText(ui.buyExpanded[e.index] and "-" or "+")
-                local mark = ""
-                if ui.buySelList == e.index then mark = "> " end
-                put(mark .. e.name, e.name)
-                if ui.buySelList == e.index then
-                    row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-                else
-                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-                end
-            elseif e.kind == "item" then
-                put("  " .. e.name, e.name)
-                row.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-            elseif e.kind == "recent" then
-                put(e.name)
-                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-            else
-                put("  " .. (e.text or ""), e.text)
-                row.label:SetTextColor(0.5, 0.5, 0.5)
-            end
-            row:Show()
-        else
-            row.entry = nil
-            row:Hide()
-        end
-        i = i + 1
-    end
-end
-
-function ui.OnBuySideClick(e)
-    if not e then return end
-    if e.kind == "list" then
-        ui.buySelList = e.index
-        ui.buyExpanded[e.index] = not ui.buyExpanded[e.index]
-        ui.RefreshBuySidebar()
-    elseif e.kind == "item" then
-        ui.buyBox:SetText(e.name)
-        ui.DoBuySearch()
-    elseif e.kind == "recent" then
-        ui.buyBox:SetText(e.name)
-        ui.DoBuySearch()
-    end
-end
-
 -- ---- category tree (ROADMAP 2e) ----------------------------------------
 
--- Switch the left column between the category tree ("cats") and the
--- Shopping Lists sidebar ("adv"), remembering the choice per character.
-function ui.SetBuyLeft(mode)
-    if mode ~= "adv" then mode = "cats" end
-    ui.buyLeft = mode
-    if A.db and A.db.char then
-        A.db.char.ui = A.db.char.ui or {}
-        A.db.char.ui.buyLeft = mode
+-- ---- Buy tab view mode (ROADMAP 2f) ------------------------------------
+--
+-- DEFAULT is the Blizzlike face: category tree on the left, the stock
+-- control strip (Name / Level Range / Min Quality / Usable / Search), and
+-- one extra button -- Advanced.
+--
+-- ADVANCED is the aux-style face: no tree, a full query box, and the
+-- Shopping Lists sidebar + Filter Builder.
+--
+-- Everything each mode owns is listed here rather than hidden ad hoc at the
+-- call sites, because the failure mode is a widget that belongs to one mode
+-- painting over the other -- which is exactly the bug 2e's sidebar guard had
+-- to fix. Rows are handled separately: their PAINT re-Shows them, so the
+-- paint functions are mode-guarded too.
+local function BitsFor(mode)
+    if mode == "advanced" then
+        return { ui.buyBackBtn, ui.buyQueryBox,
+                 ui.buyViewBtns and ui.buyViewBtns[1],
+                 ui.buyViewBtns and ui.buyViewBtns[2],
+                 ui.buyViewBtns and ui.buyViewBtns[3] }
     end
+    -- buyStripRule is DEFAULT-only. It separates the Blizzlike control strip
+    -- from the content below it, which is a job only that mode has: Advanced
+    -- puts its tab strip in the same band, and the rule drew straight through
+    -- it. The concept has no rule there.
+    return { ui.buyNameLbl, ui.buyBox, ui.buyLvlLbl, ui.buyMinLevel,
+             ui.buyLvlDash, ui.buyMaxLevel, ui.buyQualLbl,
+             ui.buyQuality and ui.buyQuality.button, ui.buyUsable,
+             ui.buyUsableLbl, ui.buyAdvBtn, ui.buyBrowseHdr,
+             ui.buyCatWell, ui.buyCatScroll, ui.buyStripRule }
+end
 
-    local adv = (mode == "adv")
+local function ShowBits(list, on)
     local i = 1
-    while i <= table.getn(ui.buyAdvBits or {}) do
-        local w = ui.buyAdvBits[i]
-        if w then if adv then w:Show() else w:Hide() end end
+    while i <= table.getn(list) do
+        local w = list[i]
+        if w then if on then w:Show() else w:Hide() end end
         i = i + 1
     end
+end
+
+function ui.SetBuyMode(mode)
+    if mode ~= "advanced" then mode = "default" end
+    ui.buyMode = mode
+    -- Filled HERE, not in BuildBuyTab: BuilderQualityOptions is a file-scope
+    -- local declared further down, so the name is not in scope inside
+    -- BuildBuyTab's body (it would resolve to a nil global). This function is
+    -- declared after it, and BuildBuyTab calls this on the way out.
+    if ui.buyQuality and table.getn(ui.buyQuality.options or {}) == 0 then
+        ui.buyQuality:SetOptions(BuilderQualityOptions())
+    end
+    if A.db and A.db.char then
+        A.db.char.ui = A.db.char.ui or {}
+        A.db.char.ui.buyMode = mode
+    end
+    local adv = (mode == "advanced")
+
+    -- Carry the search across the switch, in whichever direction. The term
+    -- is the shared currency: TermToQuery going out, ParseTerm coming back.
+    -- Without this, clicking Advanced would throw away what you had typed.
+    if adv then
+        if ui.buyQueryBox then
+            ui.buyQueryBox:SetText(A.buy.TermToQuery(ui.DefaultTerm()))
+        end
+    else
+        if ui.buyQueryBox then
+            local terms = A.buy.ParseQuery(
+                util.Trim(ui.buyQueryBox:GetText() or ""))
+            ui.DefaultSetTerm(terms[1])
+        end
+        ui.SetBuyView("results")
+    end
+
+    ShowBits(BitsFor("advanced"), adv)
+    ShowBits(BitsFor("default"), not adv)
+
+    -- The results table moves with the mode: Advanced has no category tree, so
+    -- the table starts at the panel margin and is wider. Search moves with it,
+    -- because the widget it hung off in default mode is not there any more.
+    if ui.AnchorSearchButton then ui.AnchorSearchButton() end
+    if ui.LayoutBuyTable then ui.LayoutBuyTable() end
+    if ui.LayoutViewTabs then ui.LayoutViewTabs() end
+    if ui.LayoutAdvColumns then ui.LayoutAdvColumns() end
+    if ui.LayoutBuilderForm then ui.LayoutBuilderForm() end
+
+    -- Rows of the column that is now hidden, put down explicitly.
     local ri = 1
-    while ri <= table.getn(ui.buySideRows or {}) do
-        if not adv then ui.buySideRows[ri]:Hide() end
-        ri = ri + 1
-    end
-    if ui.buyCatScroll then
-        if adv then ui.buyCatScroll:Hide() else ui.buyCatScroll:Show() end
-    end
-    ri = 1
     while ri <= table.getn(ui.buyCatRows or {}) do
         if adv then ui.buyCatRows[ri]:Hide() end
         ri = ri + 1
     end
-    if ui.buyLeftBtns then
-        if adv then
-            ui.buyLeftBtns.adv:LockHighlight()
-            ui.buyLeftBtns.cats:UnlockHighlight()
-        else
-            ui.buyLeftBtns.cats:LockHighlight()
-            ui.buyLeftBtns.adv:UnlockHighlight()
+
+    if not adv then ui.RefreshCatTree() end
+    ui.RefreshBuyMoney()
+    ui.RefreshBuyActionBar()
+end
+
+-- Whichever box the user is actually typing a search into right now. In the
+-- default view that is Blizzard's "Name" field; in Advanced it is the full
+-- query box. Everything that puts text in front of the user -- shift-click an
+-- item, tab-complete, click a recent search, the builder's Build button --
+-- goes through here so it lands where they can see it.
+function ui.ActiveSearchBox()
+    if ui.buyMode == "advanced" then return ui.buyQueryBox end
+    return ui.buyBox
+end
+
+-- The default view's whole search, as ONE term: the control strip plus
+-- whatever the category tree has selected. This is what makes "the search bar
+-- restricts to all categories or the currently selected category" true without
+-- any special casing -- the category is simply three more fields on the term,
+-- and the same buy.TermToQuery / buy.CompileTerm the typed language uses does
+-- the rest.
+function ui.DefaultTerm()
+    local function num(box)
+        if not box then return nil end
+        local n = tonumber(util.Trim(box:GetText() or ""))
+        if n and n >= 1 then return math.floor(n) end
+        return nil
+    end
+    local minL, maxL = num(ui.buyMinLevel), num(ui.buyMaxLevel)
+    -- One end alone is still a range; the parser stores both.
+    if minL and not maxL then maxL = minL end
+    if maxL and not minL then minL = maxL end
+    return {
+        name     = util.Trim((ui.buyBox and ui.buyBox:GetText()) or ""),
+        minLevel = minL,
+        maxLevel = maxL,
+        quality  = ui.buyQuality and ui.buyQuality:GetValue() or nil,
+        usable   = (ui.buyUsable and ui.buyUsable:GetChecked()) and true or false,
+        class    = ui.buyCatClass,
+        subclass = ui.buyCatSubclass,
+        slot     = ui.buyCatSlot,
+    }
+end
+
+-- ...and the reverse, for coming back from Advanced. Post-filters (tooltip,
+-- stack, buyout-only, exact) have no control in this view; they are dropped
+-- and SAID SO rather than silently carried, because a filter you cannot see
+-- but that still narrows your results is the worst of both.
+function ui.DefaultSetTerm(t)
+    t = t or {}
+    if ui.buyBox then ui.buyBox:SetText(t.name or "") end
+    if ui.buyMinLevel then
+        ui.buyMinLevel:SetText(t.minLevel and tostring(t.minLevel) or "")
+    end
+    if ui.buyMaxLevel then
+        ui.buyMaxLevel:SetText(t.maxLevel and tostring(t.maxLevel) or "")
+    end
+    if ui.buyQuality then ui.buyQuality:SetValue(t.quality, true) end
+    if ui.buyUsable then ui.buyUsable:SetChecked(t.usable and 1 or nil) end
+    ui.buyCatClass, ui.buyCatSubclass, ui.buyCatSlot = t.class, t.subclass, t.slot
+    ui.buyCatSel = ui.CatKey(t.class and {
+        kind = t.slot and "slot" or (t.subclass and "sub" or "class"),
+        class = t.class, subclass = t.subclass, slot = t.slot,
+    } or nil)
+
+    local dropped = table.getn(t.post or {}) > 0 or t.exact
+        or t.buyoutOnly or t.stackOnly or t.stackSize
+    if dropped and ui.buyStatus then
+        ui.buyStatus:SetText("Extra filters stay in Advanced \226\128\148 "
+            .. "this view searches without them.")
+    end
+end
+
+-- ---- row selection (Blizzlike: pick a row, act from the bottom bar) -----
+
+function ui.SelectBuyRow(entry)
+    ui.buySel = entry
+    -- Prefill the bid box with what this auction actually needs next, the way
+    -- the stock UI does -- so Bid is one click when you accept the minimum.
+    if entry and ui.buyBidBox then
+        SetMoneyBox(ui.buyBidBox, entry.nextBid or entry.minBid or 0)
+    end
+    ui.UpdateBuyList()
+    ui.RefreshBuyActionBar()
+end
+
+-- Is `entry` the selected row? Compared by auction index AND name: the page
+-- can be re-queried under us and a stale index would light up whatever slid
+-- into that slot. Same reasoning as buy.Verify guarding a purchase.
+function ui.IsBuySelected(entry)
+    local s = ui.buySel
+    if not s or not entry then return false end
+    return s.index == entry.index and s.name == entry.name
+end
+
+-- ---------------------------------------------------------------------------
+-- Ticked rows (multi-buyout)
+--
+-- Held as an ordered LIST of entries rather than a set of indices. An index is
+-- only meaningful against the page the client is holding right now, and this
+-- selection has to survive a re-query, a sort and a page turn -- the same
+-- reason buy.StartBatch works from fingerprints instead of indices.
+-- ---------------------------------------------------------------------------
+
+ui.buyChecked = {}
+
+function ui.IsBuyChecked(entry)
+    if not entry then return false end
+    local i = 1
+    while i <= table.getn(ui.buyChecked) do
+        local c = ui.buyChecked[i]
+        if c.index == entry.index and c.name == entry.name
+           and c.buyout == entry.buyout then
+            return true
         end
+        i = i + 1
+    end
+    return false
+end
+
+function ui.ToggleBuyCheck(entry)
+    if not entry or entry.mine then return end
+    local i = 1
+    while i <= table.getn(ui.buyChecked) do
+        local c = ui.buyChecked[i]
+        if c.index == entry.index and c.name == entry.name
+           and c.buyout == entry.buyout then
+            table.remove(ui.buyChecked, i)
+            ui.UpdateBuyList()
+            ui.RefreshBuyActionBar()
+            return
+        end
+        i = i + 1
+    end
+    table.insert(ui.buyChecked, entry)
+    ui.UpdateBuyList()
+    ui.RefreshBuyActionBar()
+end
+
+function ui.ClearBuyChecks()
+    ui.buyChecked = {}
+    ui.RefreshBuyActionBar()
+end
+
+function ui.RefreshBuyActionBar()
+    if not ui.buyBidBtn then return end
+    local nChecked = table.getn(ui.buyChecked or {})
+
+    -- Ticked rows take over the Buyout button. Bid stays single-target --
+    -- bidding a batch means nothing, since each auction needs its own amount.
+    if nChecked > 0 then
+        local total = A.buy.BatchCost(ui.buyChecked)
+        local money = GetMoney and GetMoney() or 0
+        local afford = total <= money
+        ui.buyBuyoutBtn:SetText("Buyout (" .. nChecked .. ")")
+        if afford then
+            ui.buyBuyoutBtn:Enable()
+        else
+            ui.buyBuyoutBtn:Disable()
+        end
+        if ui.buyCheckTotal then
+            if afford then
+                ui.buyCheckTotal:SetText(nChecked .. " selected \226\128\148 "
+                    .. util.FormatMoneyGold(total))
+            else
+                -- Say WHY it is disabled. A greyed button with no reason is
+                -- the thing this addon has shipped twice and both times it
+                -- read as broken.
+                ui.buyCheckTotal:SetText("|cffff5555" .. nChecked
+                    .. " selected \226\128\148 need "
+                    .. util.FormatMoney(total - money, false) .. " more|r")
+            end
+            ui.buyCheckTotal:Show()
+        end
+        ui.buyBidBtn:Disable()
+        return
     end
 
-    if adv then ui.RefreshBuySidebar() else ui.RefreshCatTree() end
+    if ui.buyCheckTotal then ui.buyCheckTotal:Hide() end
+    ui.buyBuyoutBtn:SetText("Buyout")
+    local s = ui.buySel
+    if s and s.mine then
+        -- Your own auction: the client refuses both, so say why by greying
+        -- rather than letting the server reject the click.
+        ui.buyBidBtn:Disable(); ui.buyBuyoutBtn:Disable()
+    elseif s then
+        ui.buyBidBtn:Enable()
+        if s.buyout and s.buyout > 0 then
+            ui.buyBuyoutBtn:Enable()
+        else
+            ui.buyBuyoutBtn:Disable()   -- bid-only auction
+        end
+    else
+        ui.buyBidBtn:Disable(); ui.buyBuyoutBtn:Disable()
+    end
+end
+
+function ui.RefreshBuyMoney()
+    if not ui.buyMoney then return end
+    ui.buyMoney:SetMoney(GetMoney and GetMoney() or 0)
 end
 
 -- Flatten the class > subclass > slot hierarchy into visible rows, honouring
@@ -2881,47 +5836,124 @@ function ui.FlattenCats()
 end
 
 function ui.RefreshCatTree()
-    if not ui.buyCatScroll or ui.buyLeft ~= "cats" then return end
+    if not ui.buyCatScroll or ui.buyMode == "advanced" then return end
     ui.FlattenCats()
     ui.UpdateCatTree()
 end
 
 function ui.UpdateCatTree()
-    if not ui.buyCatScroll or ui.buyLeft ~= "cats" then return end
+    if not ui.buyCatScroll or ui.buyMode == "advanced" then return end
     local flat = ui.buyCatFlat or {}
-    local vis = ui.RowsFor(ui.buyCatScroll, SIDE_ROW_H, SIDE_ROWS, SIDE_ROWS_MAX)
+    -- How many rows fit is not a division any more: plated and bare rows are
+    -- different heights, so it depends on WHICH rows are about to be shown.
+    -- The scroll offset is still counted in ROWS, which is what lets the
+    -- FauxScrollFrame maths keep working with a ragged list.
+    -- Same reason as the results table: measuring this frame returns whatever
+    -- height it was last laid out at, which is why the tree stopped at
+    -- "Quiver" on a window tall enough for all eleven categories.
+    local avail = ui.CatAreaAt(
+        (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0)
+    if avail <= 0 then avail = SIDE_ROWS * SIDE_ROW_H end
+    local offset = FauxScrollFrame_GetOffset(ui.buyCatScroll) or 0
+    local function HeightOf(e)
+        if e and (e.kind == "sub" or e.kind == "slot") then return SIDE_BARE_H end
+        return SIDE_ROW_H
+    end
+    local vis, used = 0, 0
+    while vis < SIDE_ROWS_MAX do
+        local e = flat[vis + 1 + offset]
+        if not e then break end
+        local h = HeightOf(e)
+        if used + h > avail then break end
+        used = used + h
+        vis = vis + 1
+    end
+    if vis < 1 then vis = 1 end
     ui.GrowCatRows(vis)
     ui.SkinNewRows(ui.buyCatRows)
     FauxScrollFrame_Update(ui.buyCatScroll, table.getn(flat), vis, SIDE_ROW_H)
-    local offset = FauxScrollFrame_GetOffset(ui.buyCatScroll)
     local i = 1
     while i <= table.getn(ui.buyCatRows) do
         local row = ui.buyCatRows[i]
         local e = (i <= vis) and flat[i + offset] or nil
         if e then
             row.entry = e
-            -- The +/- fold glyph and the depth indent live in the label
-            -- text itself: one FontString per row keeps the rows cheap.
-            local text
+            -- TOP-LEVEL rows get a plate, children are bare indented text,
+            -- and an EXPANDED row carries a minus glyph.
+            --
+            -- The glyphs were removed in ROADMAP 2l on the grounds that the
+            -- stock 1.12 list signals expansion by highlighting the parent
+            -- and showing its children. That works for ONE level. This tree
+            -- has three -- Armor > Leather > Chest -- and highlight-alone
+            -- cannot say which of two open levels you are in, or that Leather
+            -- is open at all while Chest is the selected leaf. 2l is reversed
+            -- here; see 2q.
+            --
+            -- Only EXPANDED rows are marked. A "+" on every collapsed row is
+            -- noise, and the mockup does not draw one.
+            local text, plated
             if e.kind == "all" then
-                text = e.name
+                text, plated = e.name, true
             elseif e.kind == "class" then
-                text = (e.expanded and "- " or "+ ") .. e.name
+                text, plated = e.name, true
+                if e.expanded then text = "- " .. e.name end
             elseif e.kind == "sub" then
-                if e.expandable then
-                    text = "   " .. (e.expanded and "- " or "+ ") .. e.name
-                else
-                    text = "   " .. e.name
-                end
+                text, plated = "    " .. e.name, false
+                if e.expanded then text = "  - " .. e.name end
             else
-                text = "      " .. e.name
+                text, plated = "         " .. e.name, false
             end
-            ui.SetTextClipped(row.label, text, SIDE_W - 8)
-            local key = ui.CatKey(e)
-            if key == ui.buyCatSel then
-                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            if plated then row.plate:Show() else row.plate:Hide() end
+
+            -- Height and position, both decided here because both depend on
+            -- what kind of row this is and what is above it.
+            row:SetHeight(HeightOf(e))
+            row:ClearAllPoints()
+            if i == 1 then
+                row:SetPoint("TOPLEFT", ui.buyCatScroll, "TOPLEFT", 0, 0)
             else
-                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
+            end
+
+            ui.SetTextClipped(row.label, text, SIDE_W - 14)
+
+            local key = ui.CatKey(e)
+            local selected = (key == ui.buyCatSel)
+            -- A parent also lights up while you are inside it, so the path
+            -- you are browsing reads at a glance rather than only the leaf.
+            if not selected and e.kind == "class" and e.expanded then
+                selected = (ui.buyCatClass == e.class)
+            end
+            -- A selected LEAF is plain bright text with no bar, which is what
+            -- the mockup shows for "Chest". The bar stays on plated rows,
+            -- where it reads as "this whole category is what you are
+            -- browsing" rather than as a highlight smeared across a word.
+            local function edges(on)
+                if not row.selEdge then return end
+                local k = 1
+                while k <= 4 do
+                    if on then row.selEdge[k]:Show() else row.selEdge[k]:Hide() end
+                    k = k + 1
+                end
+            end
+            if selected then
+                if plated then row.selTex:Show() else row.selTex:Hide() end
+                edges(selected and plated)
+                row.label:SetTextColor(1, 1, 1)
+            else
+                row.selTex:Hide()
+                edges(false)
+                -- Three dimming steps, as the mockup has: a plated top-level
+                -- row is warm off-white, a subcategory is dimmer, and a third
+                -- level (Head / Chest / Legs) dimmer still. One colour for
+                -- everything unplated flattened two levels into one.
+                if plated then
+                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                elseif e.kind == "sub" then
+                    row.label:SetTextColor(0.72, 0.66, 0.52)
+                else
+                    row.label:SetTextColor(0.55, 0.50, 0.40)
+                end
             end
             row:Show()
         else
@@ -2944,163 +5976,70 @@ function ui.OnCatClick(e)
     if not e then return end
     if e.kind == "class" then
         ui.buyCatExpanded[e.class] = not ui.buyCatExpanded[e.class]
-        ui.CatApply(e.class, nil, nil)
+        ui.CatApply(e.class, nil, nil, e.name)
     elseif e.kind == "sub" then
         if e.expandable then
             local skey = e.class .. ":" .. e.subclass
             ui.buyCatExpanded[skey] = not ui.buyCatExpanded[skey]
         end
-        ui.CatApply(e.class, e.subclass, nil)
+        ui.CatApply(e.class, e.subclass, nil, e.name)
     elseif e.kind == "slot" then
-        ui.CatApply(e.class, e.subclass, e.slot)
+        ui.CatApply(e.class, e.subclass, e.slot, e.name)
     else
-        ui.CatApply(nil, nil, nil)
+        ui.CatApply(nil, nil, nil, nil)
     end
     ui.buyCatSel = ui.CatKey(e)
     ui.RefreshCatTree()
 end
 
--- Feed a tree pick into the SAME engine the query box uses: rewrite the
--- box's first term with the picked class/subclass/slot and search. Name
--- text, quality, stack, tooltip -- every other filter the user already has
--- in the box -- survives, because the term is parsed, modified and
--- regenerated rather than replaced. Additional semicolon terms are
--- regenerated untouched; TermToQuery round-trips by value, so this loses
--- nothing.
-function ui.CatApply(class, subclass, slot)
-    if not (ui.buyBox and A.buy) then return end
-    local terms = A.buy.ParseQuery(util.Trim(ui.buyBox:GetText() or ""))
-    if table.getn(terms) == 0 then terms = { {} } end
-    terms[1].class = class
-    terms[1].subclass = subclass
-    terms[1].slot = slot
-    local parts = {}
-    local i = 1
-    while i <= table.getn(terms) do
-        table.insert(parts, A.buy.TermToQuery(terms[i]))
-        i = i + 1
-    end
-    ui.buyBox:SetText(table.concat(parts, ";"))
-    ui.DoBuySearch()
-end
-
--- ---- list management (via a name-entry popup) --------------------------
-
-StaticPopupDialogs["AEGIS_EXCHANGE_LISTNAME"] = {
-    text = "%s",
-    button1 = "OK",
-    button2 = "Cancel",
-    hasEditBox = 1,
-    maxLetters = 40,
-    OnAccept = function()
-        local eb = getglobal(this:GetParent():GetName() .. "EditBox")
-        ui.OnListNameEntered(eb and eb:GetText() or "")
-    end,
-    EditBoxOnEnterPressed = function()
-        local eb = this
-        ui.OnListNameEntered(eb:GetText() or "")
-        eb:GetParent():Hide()
-    end,
-    timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
-
-function ui.OnListNameEntered(text)
-    text = util.Trim(text or "")
-    if text == "" then return end
-    if ui.listNameMode == "add" then
-        local list = A.buy and A.buy.AddList(text)
-        if list then ui.buySelList = table.getn(A.buy.Lists()) end
-    elseif ui.listNameMode == "rename" and ui.buySelList then
-        if A.buy then A.buy.RenameList(ui.buySelList, text) end
-    end
-    ui.RefreshBuySidebar()
-end
-
-function ui.BuyAddList()
+-- A tree pick sets the category and re-runs the search.
+--
+-- The picked category is held as STATE rather than written into the Name
+-- box, because in the default view that box is Blizzard's "Name" field and
+-- nothing else. ui.DefaultTerm folds the two back together at search time,
+-- which is what makes the Name field mean "within the selected category"
+-- exactly as the stock UI does -- and why the level/quality/usable controls
+-- keep applying across a category change instead of being wiped by it.
+-- Set the browse selection. DOES NOT SEARCH.
+--
+-- It used to call DoBuySearch, so every click in the tree fired a full server
+-- query -- selecting "Weapon" pulled every weapon on the auction house, and
+-- merely EXPANDING a category did the same. Navigation should be free; the
+-- Search button is what costs a round trip.
+--
+-- The results already on screen are left alone rather than cleared: they are
+-- a real search someone asked for, and blanking the table on a fold click
+-- would be worse than leaving it. What is not acceptable is silence about it,
+-- so the status line says which selection is pending -- see ui.NotePendingCat.
+function ui.CatApply(class, subclass, slot, label)
     if not A.buy then return end
-    ui.listNameMode = "add"
-    StaticPopup_Show("AEGIS_EXCHANGE_LISTNAME", "Name for the new shopping list:")
+    ui.buyCatClass, ui.buyCatSubclass, ui.buyCatSlot = class, subclass, slot
+    ui.NotePendingCat(label)
 end
 
-function ui.BuyRenameList()
-    if not A.buy or not ui.buySelList then
-        ChatMsg("Aegis: select a list first.")
-        return
+-- Name the selection that Search would apply, so the rows above are not
+-- mistaken for it.
+-- `label` is the row's own display name, passed down from the click. The
+-- class/subclass/slot values are numeric INDICES into the client's category
+-- tables, so building a name from them here would print "1 selected".
+function ui.NotePendingCat(label)
+    if not ui.buyStatus then return end
+    ui.buyCatPending = true
+    if label and label ~= "" then
+        ui.buyStatus:SetText(label .. " selected \226\128\148 press Search")
+    else
+        ui.buyStatus:SetText("All categories selected \226\128\148 press Search")
     end
-    ui.listNameMode = "rename"
-    StaticPopup_Show("AEGIS_EXCHANGE_LISTNAME", "Rename this shopping list:")
 end
 
-function ui.BuyDeleteList()
-    if not A.buy or not ui.buySelList then
-        ChatMsg("Aegis: select a list first.")
-        return
-    end
-    A.buy.DeleteList(ui.buySelList)
-    ui.buySelList = nil
-    ui.RefreshBuySidebar()
-end
-
-function ui.BuyAddSearchToList()
-    if not A.buy then return end
-    if not ui.buySelList then
-        ChatMsg("Aegis: select a list on the left first.")
-        return
-    end
-    local term = util.Trim(ui.buyBox:GetText() or "")
-    if term == "" then
-        ChatMsg("Aegis: type an item name to add.")
-        return
-    end
-    if A.buy.AddItemToList(ui.buySelList, term) then
-        ChatMsg("Aegis: added '" .. term .. "' to the list.")
-    end
-    ui.buyExpanded[ui.buySelList] = true
-    ui.RefreshBuySidebar()
-end
-
--- Search each item in the selected list, one after another. Only the LAST
--- item's results stay on the AH page (and are buyable); the rest just warm the
--- price DB. A convenience for reviewing a whole list's prices.
-function ui.BuySearchList()
-    if not A.buy or not ui.buySelList then
-        ChatMsg("Aegis: select a list first.")
-        return
-    end
-    local list = A.buy.Lists()[ui.buySelList]
-    if not list or table.getn(list.items) == 0 then
-        ChatMsg("Aegis: that list is empty.")
-        return
-    end
-    ui.buyListQueue = {}
-    local i = 1
-    while i <= table.getn(list.items) do
-        table.insert(ui.buyListQueue, list.items[i])
-        i = i + 1
-    end
-    ui.BuyRunListQueue()
-end
-
-function ui.BuyRunListQueue()
-    if not ui.buyListQueue or table.getn(ui.buyListQueue) == 0 then
-        ui.buyListQueue = nil
-        return
-    end
-    local term = table.remove(ui.buyListQueue, 1)
-    ui.buyBox:SetText(term)
-    A.buy.Search(term, {
-        onResults = function(rows)
-            ui.buyResults = rows
-            ui.UpdateBuyList()
-            if ui.buyListQueue and table.getn(ui.buyListQueue) > 0 then
-                ui.BuyRunListQueue()   -- next item
-            else
-                ui.RefreshBuySidebar()
-            end
-        end,
-        onState = function() ui.RefreshBuyStatus() end,
-    })
-end
+-- ---- (shopping lists removed) -------------------------------------------
+--
+-- The Shopping Lists sidebar and its list-management popups are gone: the
+-- concept has no left column in Advanced, and every entry point into these
+-- functions went with the sidebar. The ENGINE side (buy.Lists / AddList /
+-- AddItemToList and friends in core/buy.lua) is deliberately left in place
+-- and still tested -- the saved data is untouched, so nothing a user built is
+-- lost, and re-homing the feature later costs a UI, not a rewrite.
 
 -- ---- search + results --------------------------------------------------
 
@@ -3109,8 +6048,9 @@ end
 -- always completes what you actually typed), then keeps cycling through the
 -- same candidate list on repeated presses without re-querying it each time.
 function ui.BuyAutocomplete()
-    if not ui.buyBox or not A.buy then return end
-    local cur = ui.buyBox:GetText() or ""
+    local acb = ui.ActiveSearchBox()
+    if not acb or not A.buy then return end
+    local cur = acb:GetText() or ""
     local ac = ui.buyAC
     if not ac or cur ~= ac.current then
         ac = { base = cur, candidates = A.buy.AutocompleteCandidates(cur),
@@ -3121,25 +6061,37 @@ function ui.BuyAutocomplete()
     if n == 0 then return end
     ac.index = math.mod(ac.index, n) + 1
     local pick = ac.candidates[ac.index]
-    ui.buyBox:SetText(pick)
+    acb:SetText(pick)
     ac.current = pick
-    if ui.buyBox.SetCursorPosition then
-        ui.buyBox:SetCursorPosition(string.len(pick))
+    if acb.SetCursorPosition then
+        acb:SetCursorPosition(string.len(pick))
     end
 end
 
 function ui.DoBuySearch()
-    if not ui.buyBox then return end
-    ui.buyBox:ClearFocus()
+    -- The pending-category note is answered by the search it was asking for.
+    ui.buyCatPending = nil
+    local sb = ui.ActiveSearchBox()
+    if not sb then return end
+    sb:ClearFocus()
     -- Any search shows its results. Running one while the form is up and
     -- leaving the form covering the answer would be its own small bug.
-    if ui.buyView == "builder" then ui.SetBuyView("results") end
+    if ui.buyView ~= "results" then ui.SetBuyView("results") end
     if not A.buy then
         ui.buyStatus:SetText("Buy engine not loaded \226\128\148 fully restart WoW.")
         return
     end
-    local name = util.Trim(ui.buyBox:GetText() or "")
+    -- DEFAULT mode searches the composed term (control strip + the category
+    -- the tree has selected); ADVANCED searches the query box verbatim.
+    local name
+    if ui.buyMode == "advanced" then
+        name = util.Trim((ui.buyQueryBox and ui.buyQueryBox:GetText()) or "")
+    else
+        name = A.buy.TermToQuery(ui.DefaultTerm())
+    end
     ui.buyResults = nil
+    ui.buySel = nil            -- the rows are about to be replaced
+    ui.RefreshBuyActionBar()
     ui.UpdateBuyList()
     local ok, err = A.buy.Search(name, {
         onResults = function(rows) ui.buyResults = rows; ui.UpdateBuyList() end,
@@ -3150,11 +6102,11 @@ function ui.DoBuySearch()
     else
         ui.buyStatus:SetText("Searching...")
     end
-    ui.RefreshBuySidebar()   -- recent search list changed
 end
 
 function ui.RefreshBuyStatus()
     if not ui.buyStatus or not A.buy then return end
+    if ui.buyView == "saved" or ui.buyView == "builder" then return end
     local phase = A.buy.state.phase
     if phase == "wait_query" or phase == "wait_results" then
         ui.buyStatus:SetText("Searching...")
@@ -3163,11 +6115,10 @@ end
 
 function ui.RefreshBuy()
     if not ui.buyBuilt then return end
-    if ui.buyLeft == "cats" then
+    if ui.buyMode ~= "advanced" then
         ui.RefreshCatTree()
     else
-        ui.RefreshBuySidebar()
-    end
+        end
     if ui.buyView == "builder" then
         -- The builder owns this space right now; repainting the results list
         -- would un-hide its rows over the top of the form.
@@ -3179,18 +6130,38 @@ end
 
 function ui.UpdateBuyList()
     if not ui.buyScroll then return end
+    -- The results table only ever paints while the RESULTS view owns the
+    -- space. Guarding the view SWITCH is not enough: a search fires
+    -- onResults/onState asynchronously, so rows arriving while Saved or
+    -- Builder is up would Show() straight through them -- two views'
+    -- rows interleaved on screen. Third time this shape has bitten (the
+    -- shopping sidebar, then the pager), so the guard lives in the paint.
+    if ui.buyView == "saved" or ui.buyView == "builder" then return end
     local all = ui.buyResults or {}
 
     -- Working copy (so sorting doesn't disturb the engine's row order), with
     -- the Max-price filter (per-unit) applied and the chosen column sort.
-    local maxUnit = ui.buyMax and util.ParseMoney(util.Trim(ui.buyMax:GetText() or ""))
+    --
+    -- Max belongs to ADVANCED mode. Reading it in the default view would let a
+    -- value typed there keep narrowing results after the box itself was
+    -- hidden -- an invisible filter, which is precisely the failure the empty
+    -- "No auctions found" fix exists to prevent. Advanced has `max-unit-buy`.
+    -- The Max box is gone (not in the concept). Its job is the
+    -- `max-unit-buy` post-filter component, which lives in the query where
+    -- it is visible and saveable rather than in a box you can leave set.
+    local maxUnit = nil
     local sortKey = ui.buySortKey or "unit"
     local dir = ui.buySortDir or "asc"
     local rows = ui.SortResults(all, sortKey, dir, maxUnit)
     ui.PaintSortHeaders(ui.buyHeaders, sortKey, dir)
 
     local total = table.getn(rows)
-    local vis = ui.RowsFor(ui.buyScroll, BUY_ROW_H, BUY_ROWS, BUY_ROWS_MAX)
+    -- Row count comes from the same arithmetic that POSITIONS the box, not
+    -- from measuring the scroll frame -- see ui.PanelHeightAt for why a
+    -- measurement is unreliable here. Whole rows only: nothing clips a
+    -- partial one, it would simply draw over the match-count line.
+    local vis = ui.TableRowsAt(
+        (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0)
     ui.GrowBuyRows(vis)
     ui.SkinNewRows(ui.buyRows)
     FauxScrollFrame_Update(ui.buyScroll, total, vis, BUY_ROW_H)
@@ -3200,7 +6171,10 @@ function ui.UpdateBuyList()
         local _, page, totalPages, totalAuctions, termIndex, totalTerms, stats =
             A.buy.GetResults()
         local unknown = stats and stats.unknownStack or 0
-        if ui.buyResults then
+        -- A pending category note owns the status line until the search it
+        -- asks for actually runs. Repainting the list must not answer a
+        -- question nobody has pressed Search on yet.
+        if ui.buyResults and not ui.buyCatPending then
             local usedPageMax = stats and stats.usedPageMax
             if table.getn(all) == 0 then
                 if unknown > 0 then
@@ -3310,6 +6284,76 @@ StaticPopupDialogs["AEGIS_EXCHANGE_BID"] = {
     OnAccept = function() ui.DoBid() end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
+
+-- ONE dialog for the whole batch, not one per item. A per-item prompt for a
+-- twelve-auction buyout trains you to click through without reading, which
+-- defeats the point of confirming at all.
+StaticPopupDialogs["AEGIS_EXCHANGE_BUYOUT_BATCH"] = {
+    text = "Buy %s?\n%s",
+    button1 = "Buy all", button2 = "Cancel",
+    OnAccept = function() ui.DoBatchBuyout() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmBatchBuyout()
+    local sel = ui.buyChecked or {}
+    local n = table.getn(sel)
+    if n == 0 then return end
+    local total, buyable = A.buy.BatchCost(sel)
+    if buyable == 0 then
+        ChatMsg("Aegis: nothing selected has a buyout price.")
+        return
+    end
+    local money = GetMoney and GetMoney() or 0
+    if total > money then
+        ChatMsg("Aegis: that selection costs "
+            .. util.FormatMoney(total) .. " and you have "
+            .. util.FormatMoney(money) .. ".")
+        return
+    end
+    -- Spell out the warning rather than relying on the button label. This
+    -- spends real gold on several auctions at once and cannot be undone.
+    local detail = string.format(
+        "Total %s, leaving %s.\n\nThis buys all %d immediately and cannot be undone.",
+        util.FormatMoney(total), util.FormatMoney(money - total), buyable)
+    StaticPopup_Show("AEGIS_EXCHANGE_BUYOUT_BATCH",
+        buyable .. " auction(s)", detail)
+end
+
+function ui.DoBatchBuyout()
+    local sel = ui.buyChecked or {}
+    if table.getn(sel) == 0 then return end
+    local ok, err = A.buy.StartBatch(sel,
+        function(bought, want, spent, reason)
+            -- Record what ACTUALLY completed, item by item, so the History
+            -- tab and the ledger agree with the gold that left the bag even
+            -- when the batch stopped early.
+            ui.ClearBuyChecks()
+            if reason then
+                ChatMsg("Aegis: bought " .. bought .. " of " .. want
+                    .. " \226\128\148 " .. reason)
+            else
+                ChatMsg("Aegis: bought " .. bought .. " auction(s) for "
+                    .. util.FormatMoney(spent) .. ".")
+            end
+            ui.UpdateBuyList()
+            ui.RefreshBuyActionBar()
+            ui.RefreshBuyMoney()
+            if ui.selectedSubTab == "History" then ui.RefreshHistory() end
+        end,
+        function(bought, want, name, price)
+            -- Booked per purchase, not once at the end: a batch that aborts
+            -- halfway has still spent the gold on what it did buy, and the
+            -- ledger has to match the bag.
+            if name then A.db.RecordTxn("buy", name, price) end
+            if ui.buyCheckTotal then
+                ui.buyCheckTotal:SetText("Buying " .. bought .. " / " .. want
+                    .. " \226\128\166")
+                ui.buyCheckTotal:Show()
+            end
+        end)
+    if not ok then ChatMsg("Aegis: " .. (err or "buyout failed.")) end
+end
 
 function ui.ConfirmBuyout(row)
     if row.mine then ChatMsg("Aegis: that's your own auction."); return end
@@ -3454,8 +6498,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftNetFS:SetWidth(CSIDE_W); ui.craftNetFS:SetJustifyH("LEFT")
 
     -- Fill the DB with a fresh price for the crafted item and every reagent.
-    local priceBtn = CreateFrame("Button", "AegisExchangeCraftPriceButton",
-        panel, "UIPanelButtonTemplate")
+    local priceBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPriceButton")
     priceBtn:SetWidth(CSIDE_W); priceBtn:SetHeight(18)
     priceBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 42)
     priceBtn:SetText("Price recipe")
@@ -3463,8 +6506,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftPriceBtn = priceBtn
 
     -- Delete the selected recipe.
-    local delBtn = CreateFrame("Button", "AegisExchangeCraftDelButton",
-        panel, "UIPanelButtonTemplate")
+    local delBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftDelButton")
     delBtn:SetWidth(CSIDE_W); delBtn:SetHeight(18)
     delBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
     delBtn:SetText("Remove recipe")
@@ -3490,16 +6532,14 @@ ui.GrowCraftSideRows = function(n)
 
     -- Search button sits to the RIGHT of the box (not below it), so the yellow
     -- label never lands on the "Item" column header underneath.
-    local searchBtn = CreateFrame("Button", "AegisExchangeCraftSearchButton",
-        panel, "UIPanelButtonTemplate")
+    local searchBtn = ui.MakeButton(panel, "primary", "AegisExchangeCraftSearchButton")
     searchBtn:SetWidth(64); searchBtn:SetHeight(20)
     searchBtn:SetPoint("LEFT", box, "RIGHT", 10, 0)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoCraftSearch() end)
 
     -- Pager (mirrors the Buy tab).
-    local nextBtn = CreateFrame("Button", "AegisExchangeCraftNextButton",
-        panel, "UIPanelButtonTemplate")
+    local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(20)
     nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -34)
     nextBtn:SetText(">")
@@ -3510,8 +6550,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftPageText:SetJustifyH("RIGHT")
     ui.craftPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    local prevBtn = CreateFrame("Button", "AegisExchangeCraftPrevButton",
-        panel, "UIPanelButtonTemplate")
+    local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPrevButton")
     prevBtn:SetWidth(24); prevBtn:SetHeight(20)
     prevBtn:SetPoint("RIGHT", ui.craftPageText, "LEFT", -6, 0)
     prevBtn:SetText("<")
@@ -3917,7 +6956,7 @@ end
 -- button. Save-original-and-replace only: no secure hooks on 1.12.
 function ui.AttachCraftButton(frame, name, anchorNames)
     if not frame or getglobal(name) then return end
-    local b = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
+    local b = ui.MakeButton(frame, "quiet", name)
     b:SetWidth(96); b:SetHeight(20)
     -- Anchor to the window's OWN Exit/Create button, not to the frame corner.
     -- Same principle as the pfUI header fix: anchor to something that moves
@@ -4093,16 +7132,14 @@ function ui.BuildAuctionsTab()
     ui.aucSummary:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.aucSummary:SetText("Your auctions")
 
-    local refresh = CreateFrame("Button", "AegisExchangeAucRefreshButton",
-        panel, "UIPanelButtonTemplate")
+    local refresh = ui.MakeButton(panel, "quiet", "AegisExchangeAucRefreshButton")
     refresh:SetWidth(72); refresh:SetHeight(20)
     refresh:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
     refresh:SetText("Refresh")
     refresh:SetScript("OnClick", function() ui.RefreshAuctions(true) end)
 
     -- Clear out everything you've been undercut on in one go.
-    local cancelAll = CreateFrame("Button", "AegisExchangeAucCancelAllButton",
-        panel, "UIPanelButtonTemplate")
+    local cancelAll = ui.MakeButton(panel, "quiet", "AegisExchangeAucCancelAllButton")
     cancelAll:SetWidth(132); cancelAll:SetHeight(20)
     cancelAll:SetPoint("RIGHT", refresh, "LEFT", -6, 0)
     cancelAll:SetText("Cancel all undercuts")
@@ -4171,7 +7208,7 @@ ui.GrowAucRows = function(n)
             row.stack = mk(ACX.stack, ACW.stack)
             row.time = mk(ACX.time, ACW.time)
             row.mkt  = mk(ACX.mkt, ACW.mkt)
-            local cancel = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+            local cancel = ui.MakeButton(row, "quiet")
             cancel:SetWidth(64); cancel:SetHeight(18)
             cancel:SetPoint("LEFT", row, "LEFT", ACX.cancel, 0)
             cancel:SetText("Cancel")
@@ -4461,7 +7498,7 @@ function ui.BuildHistoryTab()
     local prev = nil
     local pi = 1
     while pi <= table.getn(HIST_PERIODS) do
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(44); b:SetHeight(20)
         if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else b:SetPoint("LEFT", perLbl, "RIGHT", 8, 0) end
@@ -4476,7 +7513,7 @@ function ui.BuildHistoryTab()
         pi = pi + 1
     end
 
-    local clearBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local clearBtn = ui.MakeButton(panel, "quiet")
     clearBtn:SetWidth(100); clearBtn:SetHeight(20)
     clearBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -12)
     clearBtn:SetText("Clear history")
@@ -4557,12 +7594,7 @@ end
 function ui.RefreshHistory()
     if not ui.histBuilt then return end
     -- Highlight the active period button.
-    local pi = 1
-    while pi <= table.getn(ui.histPerBtns) do
-        local b = ui.histPerBtns[pi]
-        if b.idx == ui.histPeriod then b:LockHighlight() else b:UnlockHighlight() end
-        pi = pi + 1
-    end
+    ui.MarkChosen(ui.histPerBtns, function(b) return b.idx == ui.histPeriod end)
 
     local secs = HIST_PERIODS[ui.histPeriod].secs
     local since = (secs > 0) and (time() - secs) or nil
@@ -4802,7 +7834,7 @@ function ui.BuildSellTab()
     local di = 1
     while di <= table.getn(A.sell.DURATIONS) do
         local d = A.sell.DURATIONS[di]
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(44)
         b:SetHeight(20)
         if prev then
@@ -4832,7 +7864,7 @@ function ui.BuildSellTab()
     -- strategy -- the vendor figure is on the context line and the Vendor list
     -- still calls out items worth more to a merchant.
     local mkQuick = function(text, w, fn)
-        local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(panel, "quiet")
         b:SetWidth(w)
         b:SetHeight(20)
         b:SetText(text)
@@ -4901,8 +7933,7 @@ function ui.BuildSellTab()
     footEdge:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -SELL_FOOT_Y)
     footEdge:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_FOOT_Y)
 
-    local post = CreateFrame("Button", "AegisExchangeSellPostButton",
-        panel, "UIPanelButtonTemplate")
+    local post = ui.MakeButton(panel, "primary", "AegisExchangeSellPostButton")
     post:SetWidth(96)
     post:SetHeight(22)
     post:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -(SELL_FOOT_Y + 4))
@@ -4912,8 +7943,7 @@ function ui.BuildSellTab()
     end)
     ui.sellPostBtn = post
 
-    local skip = CreateFrame("Button", "AegisExchangeSellSkipButton",
-        panel, "UIPanelButtonTemplate")
+    local skip = ui.MakeButton(panel, "quiet", "AegisExchangeSellSkipButton")
     skip:SetWidth(60)
     skip:SetHeight(22)
     skip:SetPoint("RIGHT", post, "LEFT", -6, 0)
@@ -4962,8 +7992,7 @@ function ui.BuildSellTab()
     bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, 10)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
-    local vendListBtn = CreateFrame("Button", "AegisExchangeVendorListButton",
-        panel, "UIPanelButtonTemplate")
+    local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
     vendListBtn:SetWidth(56)
     vendListBtn:SetHeight(18)
     vendListBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -52, 18)
@@ -4971,7 +8000,7 @@ function ui.BuildSellTab()
     vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
     ui.sellVendorListBtn = vendListBtn
 
-    local scanAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    local scanAllBtn = ui.MakeButton(panel, "quiet")
     scanAllBtn:SetWidth(48)
     scanAllBtn:SetHeight(18)
     scanAllBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 18)
@@ -5490,12 +8519,8 @@ function ui.RefreshSell()
     if not ui.sellBuilt then return end
     local it = A.sell.GetItem()
 
-    local di = 1
-    while di <= table.getn(ui.sellDurBtns) do
-        local b = ui.sellDurBtns[di]
-        if b.minutes == ui.sellDuration then b:LockHighlight() else b:UnlockHighlight() end
-        di = di + 1
-    end
+    ui.MarkChosen(ui.sellDurBtns,
+        function(b) return b.minutes == ui.sellDuration end)
 
     local count = A.sell.OwnerCount()
     local atCap = count >= A.sell.CAP
@@ -5702,7 +8727,7 @@ function ui.BuildVendorList()
     title:SetText("Better at a vendor than on the AH")
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local closeBtn = ui.MakeButton(f, "quiet")
     closeBtn:SetWidth(60); closeBtn:SetHeight(20)
     closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -8)
     closeBtn:SetText("Close")
@@ -5714,7 +8739,7 @@ function ui.BuildVendorList()
     ui.vendNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     -- Mark-all / clear, so you can flag the whole list for the merchant.
-    local markAll = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local markAll = ui.MakeButton(f, "quiet")
     markAll:SetWidth(74); markAll:SetHeight(20)
     markAll:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
     markAll:SetText("Mark all")
@@ -5728,7 +8753,7 @@ function ui.BuildVendorList()
         ui.UpdateVendorList()
     end)
 
-    local clearMarks = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local clearMarks = ui.MakeButton(f, "quiet")
     clearMarks:SetWidth(74); clearMarks:SetHeight(20)
     clearMarks:SetPoint("RIGHT", markAll, "LEFT", -4, 0)
     clearMarks:SetText("Clear all")
@@ -5780,9 +8805,7 @@ function ui.BuildVendorList()
             return fs
         end
         -- Mark this item to sell at a merchant.
-        local chk = CreateFrame("CheckButton", "AegisExchangeVendCheck" .. i,
-            row, "UICheckButtonTemplate")
-        chk:SetWidth(20); chk:SetHeight(20)
+        local chk = ui.MakeCheckBox(row, 16, "AegisExchangeVendCheck" .. i)
         chk:SetPoint("LEFT", row, "LEFT", 4, 0)
         chk:SetScript("OnClick", function()
             if row.entry then
@@ -5896,8 +8919,7 @@ StaticPopupDialogs["AEGIS_EXCHANGE_VENDORSELL"] = {
 function ui.AttachMerchantButton()
     if not MerchantFrame then return end
     if not ui.merchantBtn then
-        local b = CreateFrame("Button", "AegisExchangeMerchantSellButton",
-            MerchantFrame, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(MerchantFrame, "quiet", "AegisExchangeMerchantSellButton")
         b:SetWidth(150); b:SetHeight(22)
         -- Sit in the tab row, to the right of Merchant / Buyback -- effectively
         -- a third tab position.
@@ -6114,6 +9136,16 @@ function ui.ConfirmPost()
         nStacks = nStacks, unitBuyout = unitBuy, unitBid = unitBid,
         minutes = ui.sellDuration,
     }
+    -- The Aegis tab can turn the confirmation off, which is what you want when
+    -- relisting a stack at a time. Same shape as ui.ConfirmCancelAuction.
+    --
+    -- The check goes AFTER pendingPost is filled and after every validation
+    -- above it: skipping the dialog must skip only the dialog, not the price
+    -- and stack checks that decide whether posting is sane at all.
+    if A.db.Setting("confirmPost") == false then
+        ui.DoPost()
+        return
+    end
     StaticPopup_Show("AEGIS_EXCHANGE_POST", it.name, detail)
 end
 
@@ -6382,10 +9414,8 @@ function ui.BuildCategoryPicker()
         end)
         row.expand = expand
 
-        local check = CreateFrame("CheckButton",
-            "AegisExchangePickerCheck" .. i, row, "UICheckButtonTemplate")
-        check:SetWidth(20)
-        check:SetHeight(20)
+        local check = ui.MakeCheckBox(row, 16,
+            "AegisExchangePickerCheck" .. i)
         check:SetPoint("LEFT", row, "LEFT", 20, 0)
         check:SetScript("OnClick", function()
             local entry = row.entry
@@ -6418,8 +9448,7 @@ function ui.BuildCategoryPicker()
     divider:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 10, 42)
     divider:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -10, 42)
 
-    local scanSel = CreateFrame("Button", "AegisExchangePickerScanButton",
-        picker, "UIPanelButtonTemplate")
+    local scanSel = ui.MakeButton(picker, "primary", "AegisExchangePickerScanButton")
     scanSel:SetWidth(150)
     scanSel:SetHeight(22)
     scanSel:SetPoint("BOTTOMLEFT", picker, "BOTTOMLEFT", 12, 12)
@@ -6429,8 +9458,7 @@ function ui.BuildCategoryPicker()
     end)
     ui.scanSelBtn = scanSel
 
-    local clear = CreateFrame("Button", "AegisExchangePickerClearButton",
-        picker, "UIPanelButtonTemplate")
+    local clear = ui.MakeButton(picker, "quiet", "AegisExchangePickerClearButton")
     clear:SetWidth(70)
     clear:SetHeight(22)
     clear:SetPoint("LEFT", scanSel, "RIGHT", 6, 0)
@@ -6439,8 +9467,7 @@ function ui.BuildCategoryPicker()
         ui.ClearChecks()
     end)
 
-    local closeBtn = CreateFrame("Button", "AegisExchangePickerCloseButton",
-        picker, "UIPanelButtonTemplate")
+    local closeBtn = ui.MakeButton(picker, "quiet", "AegisExchangePickerCloseButton")
     closeBtn:SetWidth(70)
     closeBtn:SetHeight(22)
     closeBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -12, 12)
@@ -6637,8 +9664,7 @@ function ui.HookAuctionFrame()
     -- the documented return path (README: "Aegis UI button (on the stock AH)").
     -- Everything else Aegis draws lives under UIParent.
     if not ui.blizSwapBtn then
-        local b = CreateFrame("Button", "AegisExchangeSwapButton",
-            AuctionFrame, "UIPanelButtonTemplate")
+        local b = ui.MakeButton(AuctionFrame, "quiet", "AegisExchangeSwapButton")
         b:SetWidth(70)
         b:SetHeight(19)
         local blizClose = getglobal("AuctionFrameCloseButton")
@@ -6740,7 +9766,8 @@ function ui.TryBuySearchFromBag(bag, slot)
         iname = n
     end
     if not iname then return false end
-    if ui.buyBox then ui.buyBox:SetText(iname) end
+    local b = ui.ActiveSearchBox()
+    if b then b:SetText(iname) end
     ui.DoBuySearch()
     return true
 end
@@ -6826,7 +9853,8 @@ function ui.HookItemShiftClick()
                 name = n
             end
             if name then
-                if ui.buyBox then ui.buyBox:SetText(name) end
+                local b = ui.ActiveSearchBox()
+                if b then b:SetText(name) end
                 ui.DoBuySearch()
                 return
             end

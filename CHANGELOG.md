@@ -12,6 +12,975 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.20.2]
+
+The Aegis tab's check boxes were losing their left edge to the scroll frame
+that holds them. `/reload`.
+
+### Fixed
+- **Check boxes on the Aegis tab were clipped down their left side.** The
+  settings block lives in a ScrollFrame — the only 1.12 widget that clips,
+  which is why overflow stays inside the window instead of spilling past the
+  bottom edge — and the clip line falls exactly on the block's left edge. The
+  block started at x=0, and the top-level check box column is nudged 2px
+  *further* left than the labels so the boxes line up under the text above
+  them, which put their left edge outside the frame. The labels got away with
+  it because a glyph carries its own side bearing; a solid 1px edge texture
+  does not, which is why the check boxes were the only thing that showed it.
+  The block is inset now, and the scroll frame moved the same distance the
+  other way so nothing shifted on screen.
+
+### Internal
+- The geometry suite walks the settings panel's **real anchor chain** out of
+  `ui/frame.lua` — every vertical link, with the offsets the file carries —
+  and requires the leftmost widget to land strictly inside the frame. It also
+  checks the chain genuinely steps left of its root, so the check cannot pass
+  for the wrong reason, and that nothing has resolved to a widget the walk
+  lost track of. Sabotage-tested from both directions: removing the inset, and
+  leaving the inset alone but nudging a widget further left than it covers.
+
+## [1.20.1]
+
+Two fixes to what 1.20.0 shipped — a settings panel drawing on top of itself,
+and pfUI button labels that the last attempt did not actually rescue.
+`/reload`.
+
+### Fixed
+- **The Aegis tab drew on top of itself.** 1.20.0's new "Ask before posting an
+  auction" checkbox went into the middle of the settings panel's anchor chain,
+  and the Scan pacing row below it was left anchored to the checkbox *above*
+  the new one. So the new checkbox, the pacing label, its two buttons, the
+  price-data line and Clear price data all landed in the same place. Inserting
+  a widget into a chain is two edits, and only one of them was made.
+- **pfUI button labels, properly this time.** 1.20.0 pushed pfUI's backdrop one
+  frame level behind its button, which was not enough: frame level orders
+  *siblings*, while "a child frame draws over its parent's regions" is a
+  separate rule. The scan strip's buttons — one frame under the window — came
+  out fine, and the Aegis settings buttons, three frames deep inside a scroll
+  child, stayed blank. The label is now rebuilt **on** the backdrop frame,
+  where the draw layer is the whole ordering rule and no level can get in
+  front of it.
+- **The same fix, in the four places it was missing.** Our buttons on other
+  addons' frames (the tradeskill and craft "Add to shopping list" buttons, the
+  merchant sell button, and the "Aegis UI" button on the Blizzard auction
+  house) were being handed to pfUI's generic button skinner rather than
+  treated as Aegis buttons, which gave them a second border and the same
+  buried label. They go through the same path as every other Aegis button now.
+
+### Internal
+- **New lint: `tests/lint/anchorchain.py`.** Two widgets anchored below the
+  same one is a fork in a vertical chain, and it is invisible to everything
+  else — the addon loads, every widget exists, nothing errors, the tab just
+  overlaps. It reads the chain relation only (`TOPLEFT` to a `BOTTOMLEFT`),
+  so sharing a container's corner — which is normal and everywhere — is not
+  flagged, and it skips reassigned loop cursors. Run by `tests/run.sh`, and
+  sabotage-tested against the exact bug above, through both the raw `SetPoint`
+  and the settings panel's `label()` helper.
+- `tests/sabotage.py` can now run a **lint** as a suite, not only a Lua unit
+  file. A lint makes a claim about the source and can be wrong about it the
+  same way an assertion can.
+
+## [1.20.0]
+
+Phase one of the feature batch: the window remembers where you put it, a post
+confirmation you can switch off, and selected buttons that actually look
+selected. `/reload`.
+
+### Added
+- **The window remembers its position.** It saved its size but not its point,
+  so it returned to centre every session. A restored point is checked against
+  the current screen first: the title bar is the only drag handle, so a window
+  saved near the edge of a large monitor and restored on a smaller one would
+  otherwise be stranded off-screen with no way back. If it would land
+  unreachable it centres instead and forgets the bad point.
+- **"Ask before posting an auction"** on the Aegis tab, alongside the existing
+  cancel toggle. Off posts on the first click, which is what you want when
+  relisting a stack at a time. The confirmation is all that is skipped — the
+  price and stack checks still run.
+
+### Fixed
+- **Selected buttons showed no selected state, in six places.** The chosen post
+  duration, sell mode, undercut mode, scan pacing, history period and Sell-tab
+  duration were all marked with `LockHighlight()`, which drives a *template*
+  highlight texture that `ui.MakeButton` does not have — so every one of those
+  calls was silently doing nothing and the chosen button looked exactly like
+  its neighbours. The selected one now takes the warm gold plate that Search
+  and Full Scan wear.
+
+  This is the same bug that was found and fixed for the Advanced view tabs in
+  1.15.1. It was fixed in one place and left in six others, so it is a shared
+  `ui.MarkChosen` now rather than a seventh copy of the loop.
+- **pfUI's backdrop could cover a button's label.** `CreateBackdrop` builds a
+  child frame, and a child draws above *all* of its parent's regions whatever
+  layer they are on — the same rule that puts the Filter Builder's text on a
+  child rather than on the well. The backdrop is pushed one frame level behind
+  its button now, so the label is always on top.
+
+## [1.19.4]
+
+The Filter Builder's form fits its box, and the saved lists fill theirs and
+scroll. `/reload`.
+
+### Fixed
+- **The Filter Builder's form overflowed its column at small window sizes.**
+  "Stack Size" was cut off by the well's border and the status note escaped
+  entirely, drawing across the money readout. The row offsets were ten
+  hand-written numbers ending at 276 in a column that is 254px tall at the
+  minimum window height — and nothing anywhere checked they fit. The three
+  options added in 1.19.0 are what pushed it over. Rows now come from a pitch
+  constant, and the suite asserts the last one fits.
+- **The Builder's status line moved to the action bar.** "Copied to the search
+  box." is a status message, not a form field; it never belonged inside the
+  column, and at the minimum height it landed outside it.
+- **Saved Searches and Recent stopped short of the bottom of their own well.**
+  The visible row count came from measuring the column — `GetHeight()` on a
+  frame anchored by two edges, which reports the size it was last laid out at,
+  i.e. the window's creation size. The third time this trap has bitten;
+  `ui.SavedRowsAt` derives from the window's height, like the results table.
+- **Neither saved list could scroll.** Anything past the visible count was
+  simply unreachable — with a dozen favourites and a short window the last few
+  did not exist as far as the UI was concerned. Both columns take the mouse
+  wheel now, independently, with the offset re-clamped on every repaint so
+  deleting an entry while scrolled to the bottom pulls the view back instead of
+  leaving an empty band.
+
+### Changed
+- `ui.RowsFor` carries a warning naming the trap and the three bugs it has
+  caused. Its remaining callers — Crafting, Auctions, History, the bag and list
+  pickers — have not been audited; if one of those lists is ever reported as
+  not filling its box, that is the first thing to look at.
+
+### Not changed, and why
+- **The two Filter Builder wells already end on the same line.** The right
+  column's clause box is inset from its own well on purpose — it is nested
+  inside it — which reads as a mismatch in a screenshot but is correct.
+
+## [1.19.3]
+
+Alignment and spacing across the Advanced view. `/reload`.
+
+### Fixed
+- **The tab row did not line up with the content under it.** It was centred on
+  the PANEL, but the content is not symmetric in the panel — it runs from 10 on
+  the left to 12 on the right — so the row landed 1–2px off the wells below,
+  and by a different amount at each window size because the rounding was thrown
+  away. Two pixels in at the smallest size, one pixel past at the largest. It
+  is centred on the CONTENT now.
+- **All three Advanced views now start on the same line.** Saved Searches and
+  the Filter Builder began at `ADVL.body_y`; the results table was still placed
+  from `BUYL.well_top` — a Blizzlike number measured against the *control*
+  strip, and 2px above where the tab strip ends. Search Results began ten
+  pixels higher than the other two.
+- **The footer rule was covered on Saved Searches and the Filter Builder.** The
+  rule sits 38px up and those wells stopped at 36, so they drew over it. Only
+  Search Results looked right, and by accident: its table stops at 82 to leave
+  room for the count and pager.
+- **Saved Searches and the Filter Builder were not the same size.** Each had
+  its own copy of the two-column split and the copies disagreed — a 16px gutter
+  measured off the frame against a 12px one measured off the window, so both
+  columns differed by 2px. That is the shift when clicking between the two
+  tabs. One `ui.SplitAdvColumns` places both now.
+
+### Changed
+- **The view tabs are sized to their labels and centred**, rather than
+  stretched to a third of the panel each. Three equal thirds made a 442px pill
+  for a 110px label on a wide window and was still 308px on the narrowest one;
+  a tab is now the same size wherever the window is.
+- **More air between the tab strip and the content below it** — 20px, up from
+  8.
+
+### Testing
+- `tests/units/geometry_test.lua` now extracts and RUNS `ui.LayoutViewTabs`
+  against stub buttons rather than restating its arithmetic, and reads every
+  layout constant out of `ui/frame.lua` instead of carrying its own copy. Both
+  changes exist because the first version of this suite would have passed a
+  build with the bug still in it.
+- `tests/lint/sharedlayout.py` is new: it checks that two views sharing a space
+  are placed by ONE function. That property is structural, not arithmetic — a
+  unit test on the numbers passes whether there is one copy of the split or
+  two — so it is checked structurally.
+
+## [1.19.2]
+
+Clipping and proportion pass over the Advanced view. `/reload`.
+
+### Fixed
+- **The Search button and the query box drew on top of each other, on all three
+  Advanced views.** Search hung off the *Advanced* button — a default-mode
+  widget that Advanced hides but which still carries a position — so it
+  inherited a slot 10px below the Advanced strip's own baseline and 102px in
+  from the edge. The query box's right margin was a constant that had to agree
+  with three numbers it could not see, and did not: 172 against a button whose
+  left edge is at 196. Search is now placed per mode, and the box's right edge
+  hangs off the button itself.
+- **The tab strip and the Filter Builder's columns were sized from a stale
+  width.** Both measured a frame anchored by two edges, which reports the width
+  it was *last laid out at* — in practice the window's creation size. The tab
+  strip filled 69% of a resized panel and the builder's left column came out at
+  29% where 41% was asked for. Both now derive from the window's own width,
+  which is set explicitly, through the new `ui.PanelWidthAt` — the horizontal
+  twin of `ui.PanelHeightAt`, which exists for exactly this reason.
+- **"Exact" and "Usable" drew on top of the POST FILTER panel.** Every control
+  was stretched to fill the left column, leaving no room for the checkbox
+  anchored to the Name box's right edge, so it landed in the gutter. The
+  concept has two widths, not one: the Name box and the level pair stop short
+  with their checkbox beside them, while the four dropdowns run the full width
+  past where that checkbox sits. The reserve is measured from the label, not
+  guessed.
+- **Long post-filter clauses ran past the well's edge.** They are clipped now —
+  but the value is clipped *before* the colour codes are spliced on, because
+  cutting a `|cffRRGGBB` in half prints garbage and leaks the colour into every
+  line after it.
+- **The `↵` in "adds" was an invisible character.** U+21B5 is not in the 1.12
+  font, so the hint read as a blank followed by "adds". It says "Enter adds".
+- **The saved-search context menu straddled the well's border.** Inset by the
+  well's own padding.
+
+### Changed
+- **The three view tabs are centred**, as well as filling the content width.
+  Anchoring the row from the left meant every rounding shortfall pooled into
+  one gap on the right; from the centre it splits evenly.
+- **The Filter Builder's columns are 50/50**, up from 41/59. The form is the
+  side with six labelled rows plus three options, and the clause lines clip
+  rather than wrap.
+- **The post-filter hint belongs to the empty state only.** It used to change
+  with the clause count and stay on screen underneath them, so a populated list
+  carried a long centred sentence competing with the clauses. The stacking rule
+  moved to a tooltip on the clause well.
+
+### Not changed, and why
+- **The Results view keeps Bid / Buyout / Close and no action row.** The 1.19.0
+  spec said it should also carry Search / Build / Import / Clear; having seen
+  it, that is wrong — Search is redundant beside the strip's own Search button,
+  and Import / Clear are Builder verbs. Recorded rather than left contradicting
+  the spec.
+- **The results table keeps its scrollbar.** Its arrow buttons sit outside the
+  table's right edge, which is inherent to `FauxScrollFrameTemplate`. The
+  BROWSE tree's bar was hidden in 1.17.0 because that list is short and the
+  mockup has none; a fifty-row results page genuinely needs the affordance, and
+  it is identical in the Blizzlike view.
+
+## [1.19.1]
+
+Hotfix: 1.19.0 would not open the auction house window at all. `/reload`.
+
+### Fixed
+- **`ui.LayoutBuyTable` read `BUYL` before it was declared.** Lua scopes a
+  `local` from its declaration onward, so a function defined 500 lines above it
+  does not close over it — the name resolves to a nil GLOBAL instead. That is
+  legal Lua and compiles cleanly, so it surfaced only at runtime, as
+  `attempt to index global 'BUYL' (a nil value)` on the first frame of
+  `BuildBuyTab`, which took the whole window down with it.
+
+  The function has moved below `BUYL`. **`tests/lint/scoping.py` is new and
+  catches this class**: it disassembles each file with `luac -l` and reports any
+  name that is both declared as a file-scope local and read via `GETGLOBAL`.
+  Verified against the exact file that shipped as 1.19.0 — `luac5.1 -p` passes
+  it and the lint names `BUYL`.
+
+  This is the fourth time this trap has caught this file (`ColumnsFitAt`,
+  `BUY_ROWS_MAX`, `SIDE_ROW_H`, now `BUYL`) and the first time anything but a
+  person in-game has found it.
+
+## [1.19.0]
+
+The Advanced view, brought to the approved concept: it reclaims the width the
+hidden category tree was still occupying, stops leaking the results table's
+furniture onto the other views, and the Filter Builder gains three options the
+query language always understood. `/reload`.
+
+### Fixed
+- **Advanced was drawing in the right-hand two-thirds of the window.** Its
+  search strip, tab row, Saved lists and Builder all anchored to the *results
+  column* origin — which sits right of the category tree, and exists only
+  because the tree is to its left. Advanced hides the tree, so that left about
+  300px of empty panel down the left of everything. All four now start at the
+  panel margin.
+- **The results table's column separators drew across the Saved and Builder
+  views.** Six 1px textures that belonged to no show/hide list, so nothing
+  ever put them down — the row of stray ticks above both panels. The "N
+  selected" line and the rule under the Blizzlike control strip had the same
+  problem.
+- **Saved-search rows were plated under pfUI.** They are Buttons, because a
+  row has to be clickable, and pfUI skins every Button — the same bug already
+  fixed for the category tree. Unskinned they were always correct, which is
+  why it took a skinned screenshot to see.
+- **The Post Filter's value box rendered as a bare `( )`.** It was the only
+  edit box in the window still using a raw `InputBoxTemplate`, whose rounded
+  end-caps are all that draws when nothing fills the middle. This had
+  previously been read as the box being clipped and "fixed" by anchoring both
+  edges.
+- **The Builder silently dropped `buyout` and `stack` flags.** `ui.BuilderTerm`
+  never read them, so importing `linen/buyout/stack/20`, pressing Build, and
+  searching ran a *wider* search than the one you loaded — with nothing to say
+  a filter had gone.
+
+### Added
+- **Buyout only, Full stacks only, and Stack Size** in the Builder's
+  auction-house form. The query language has always understood all three;
+  until now the form was the only place you could not reach them. Full stacks
+  and an explicit size are mutually exclusive — the term holds one or the
+  other — so setting either clears the other rather than letting the form
+  express something the query cannot spell.
+- **The Advanced results table fills the width it gains** from the hidden
+  tree, and the surplus goes to the Item column, which is the one that
+  actually runs out of room.
+
+### Changed
+- **The three view tabs span the content width** and are named in full —
+  Search Results, Saved Searches, Filter Builder. At 112px each they occupied
+  under a quarter of a wide panel and read as three unrelated buttons rather
+  than as the tab strip they are.
+- **Back is purple**, matching the Advanced button it is the counterpart of,
+  and **Build → is purple** rather than a plain `Build >`.
+- **Search, Build, Import and Clear appear on Saved Searches too**, with Build
+  greyed. That view previously showed nothing but Close.
+- **Filter Builder labels are left-aligned on a shared margin** and named as
+  the concept names them (Level Range, Item Class, Item Subclass, Item Slot,
+  Min Quality). **Exact now sits on the Name row and Usable on the Level
+  Range row**, which is two rows of height back.
+- **Two wells instead of one**, so the auction-house filter and the post-filter
+  builder read as the two different things they are, with the clause list in
+  its own recessed box.
+- **The component dropdown leads with `and` / `or` / `not`**, coloured red as
+  combinators rather than filters. Components that are not wired up yet are
+  greyed with a tooltip saying so, instead of carrying "(soon)" in the label.
+
+  All nine pending ones stay greyed, which is a deliberate deviation from the
+  concept: it shows the finished list, and a component that looks live but
+  narrows nothing is worse than one that admits it.
+- **Saved Searches matches the concept**: headings and their hints on one line
+  inside the well, a gold ★ on favourites, separators under recent rows, a
+  highlight band that stays lit while a row's context menu is open, and
+  ▲ / ▼ / × glyphs on that menu.
+
+### Not done yet
+- **Query-string syntax highlighting.** A 1.12 `EditBox` does not render `|c`
+  escapes — it prints them literally — so the coloured query in the concept
+  needs an overlay FontString swapped out on focus. Deliberately deferred
+  until the rest is confirmed on a real client, since a coloured string that
+  can desync from the box is worse than a plain one that cannot.
+
+## [1.18.0]
+
+Buy tab: the category tree stops searching on its own, the results table and
+the category list stop losing rows they had room for, and every check box in
+the addon is drawn by one helper. `/reload`.
+
+### Fixed
+- **Clicking a category no longer fires a search.** Picking "Weapons" searched
+  every weapon on the auction house; picking "Staves" underneath it
+  immediately searched again. Selecting is now just selecting — the status
+  line names what you picked and waits for Search. Results already on screen
+  are deliberately LEFT there rather than cleared: a click that blanked a
+  search you had just run would be worse than one that leaves it, and the
+  status line names the pending selection so the rows cannot be mistaken for
+  it.
+- **The empty band under the results, and the categories cut off at the
+  smallest window, were the same bug.** Both lists sized themselves from a
+  frame height that was 86 pixels wrong, so the results table drew fewer rows
+  than it had room for while the category list believed it had less room than
+  it did. Both now derive their height from the one number that is explicitly
+  set — the window's own — through `ui.PanelHeightAt`. At the minimum window
+  size all eleven top-level categories fit, which they did not before.
+- **Check boxes were not boxes.** A `SetBackdrop` whose `edgeSize` approaches
+  the frame size cannot draw a border — the two corner pieces are each
+  `edgeSize` square and physically will not fit across a 14px button — so the
+  result rows' tick boxes rendered as a garbled cross. Under pfUI they became
+  circles instead, because pfUI reskins anything reporting `CheckButton`.
+  There is now one helper (`ui.MakeCheckBox`) behind every check box in the
+  addon: result rows, "Usable items", the Filter Builder and the Settings tab.
+  Its border is four 1px textures, which stay square at any size, and it opts
+  out of the pfUI pass the same way the sort headers already do.
+- **A row you own now shows a dimmed tick box rather than no tick box.**
+  Hiding it punched a hole in the tick column, so an owned row read as a row
+  missing a cell instead of a row you are not allowed to buy.
+
+### Changed
+- **The three control-strip labels are placed by one rule instead of two.**
+  "Name" hung off the panel at a fixed y while "Level Range" and "Min Quality"
+  hung off their own controls, so nothing held the three in line — there was no
+  single number to adjust. Each label now sits on its own control's top edge,
+  and `BUYL.strip_lbl_gap` is the only place that air is set. The gap is wider,
+  which is what the labels sitting on top of the boxes needed.
+- **The Min Quality dropdown shows each quality in that quality's colour**, from
+  FrameXML's own `ITEM_QUALITY_COLORS` — the same table item links and the
+  results' Item column use, so a Rare here is exactly the blue a Rare is
+  everywhere else. The closed button shows the selection in its colour too.
+  "All" stays neutral: no quality filter is not a quality and must not borrow
+  one's colour.
+
+### Verified, not assumed
+- **Bid-only auctions sort last, in both directions.** A listing with no buyout
+  has no unit price, and "last" for a priceless row has to mean last whichever
+  way the arrow points — the alternative reads as "these are the most
+  expensive". `tests/sort_results.lua` pins it, and pins that the Bid column
+  does *not* sink them, since there they have a real value. The test extracts
+  `ui.SortResults` from `ui/frame.lua` at run time rather than copying it, so
+  it cannot pass against a stale duplicate. It is not in the `.toc` and the
+  client never loads it; run it with `lua5.1 tests/sort_results.lua`.
+
+## [1.17.0]
+
+Buy tab polish: alignment, clipping and colour. `/reload`.
+
+### Fixed
+- **The BROWSE scrollbar was drawn across the results table's left border.**
+  `FauxScrollFrameTemplate` hangs its scrollbar outward from the scroll
+  frame's right edge, which sat in the same eight pixels the results box
+  starts at. Its down-arrow also floated far below the category list, since
+  that frame runs to the panel bottom while the categories usually end
+  higher. The scrollbar is hidden — the mockup has none — and the mouse wheel
+  still scrolls the tree. Hiding it once was not enough: `FauxScrollFrame_Update`
+  re-shows the bar whenever content overflows.
+- **"N selected — <price>" no longer crowds the action buttons.** It sat
+  inside the band the Bid / Buyout / Close buttons occupy. It now shares the
+  action bar's baseline, to the right of the gold.
+
+### Changed
+- **The results table fills the height available to it.** It previously
+  stopped well short, leaving a dead band above the action bar — the mockup's
+  table ends high, but the mockup is one screenshot with five results and a
+  real page has fifty. Only whole rows are drawn: a row that would be clipped
+  by the bottom edge is dropped rather than half-shown, since rows are not the
+  scroll frame's scroll-child and nothing would clip it — it would simply draw
+  over the count line.
+
+  **This reverses the "table is the shorter column" decision** recorded in
+  ROADMAP 2r. That entry has been updated rather than left contradicting the
+  code.
+- **Your gold is left-aligned on the panel margin**, sharing the edge the Name
+  field, "BROWSE" and the category plates sit on. It used to be anchored by
+  its copper coin and grow leftwards, so that a total gaining a digit could
+  not shove the layout about; on the left margin there is nothing to its right
+  until the Bid row, so alignment is worth more than that. Because Blizzard
+  hides denominations above the value, the anchor moves to whichever
+  denomination is currently leftmost — otherwise 43 copper would leave a hole
+  where the gold and silver would have been.
+- **Column headings are warm tan rather than disabled grey**, so the header
+  band reads as headings instead of as something switched off.
+- **The control strip is raised, and every control in it shares one height and
+  one top edge.** The Min Quality dropdown was 20px against the others' 18 and
+  hung below the line; the three labels now sit the same distance above their
+  own controls.
+- **A rule under the control strip**, matching the one above the action bar.
+  The mockup has both; we had only the lower one, so the strip ran into the
+  BROWSE heading and the table with nothing between them.
+- The match count is plain grey rather than amber — it was one of the warmest
+  things on the tab and is the least important line in the column.
+
+### Not changed, and why
+- **`% Mkt` showing 100% on every row is correct arithmetic, not a broken
+  colour.** Market value is a weighted median of daily minimum unit prices, so
+  an item first seen in the scan you are looking at has a market value equal to
+  that page's own cheapest listing — the comparison is the number against
+  itself. The colour helper was verified again: below market green, exactly
+  market neutral, above market red. It will show the full range once the price
+  DB has history older than the current page.
+- **"Miscellaneous" listing first under Armor is the client's own order** —
+  it is Armor's subclass 0, and the stock auction house lists it there too.
+  Left alone deliberately, since this view is the Blizzlike one.
+
+---
+
+## [1.16.1]
+
+**Hotfix — 1.16.0 would not load.** `/reload`.
+
+### Fixed
+- **`too many upvalues (limit=32)` — the addon did not load at all.** Lua 5.0
+  allows a function to reference at most 32 file-scope locals, and each one it
+  reads costs an "upvalue". 1.16.0 added thirteen layout constants beside a
+  builder function that was already large, taking it to 36. The client refuses
+  to load a file containing such a function, so nothing in the addon ran.
+
+  The constants are now fields of one table, which costs a single upvalue
+  however many fields it carries. The function sits at 24 with room to spare.
+
+  **Why this was not caught before shipping.** Lua 5.1 — which both `luac5.1`
+  and the test harness use — allows 60 upvalues. The file compiled cleanly and
+  the whole suite passed against a file the 1.12 client would reject on sight.
+  `luac -l` reports the count per function, so the suite now asks it for every
+  file and fails if anything is above 32, with a second check at 30 so the
+  ceiling is noticed while there is still room to react. Recorded in
+  CLAUDE.md as a hard rule and added to the pre-commit checklist.
+
+---
+
+## [1.16.0]
+
+Buy tab default view rebuilt to the mockup's structure. `/reload`.
+
+### Changed
+- **The control strip spans the full width, at the panel's left edge.** It
+  used to begin to the *right* of the category sidebar, so the sidebar sat
+  beside it rather than beneath it. In the mockup the Name field, the
+  "BROWSE" heading and every category plate share one left edge, and both
+  columns hang below the strip. This was the single biggest structural
+  difference between what we shipped and the reference, and most of the
+  "it doesn't look like the concept" feeling came from it.
+- **The two columns are different lengths now, as the mockup has them.** The
+  results table is the shorter one and stops well above the action bar, with
+  the match count and pager directly beneath it; the category tree is the
+  longer one and runs on down to the action bar. Previously the table ran
+  almost to the bottom and the tree stopped halfway, leaving its lower half
+  empty.
+- **Alternating row shading in the results.** Keyed to a row's position in
+  the list rather than to the auction, so scrolling slides the data past
+  fixed banding instead of making the stripes crawl, and drawn beneath both
+  the selection tint and the "(yours)" dimming.
+- **The category tree has the mockup's rhythm.** Plated top-level rows are
+  taller than bare subcategory rows — one height for both is what made the
+  list look evenly spaced where the reference has structure. Three dimming
+  steps instead of two, so a third-level entry reads as deeper than a
+  subcategory. The browsed category is marked with a lighter plate and a gold
+  edge rather than the blue-green highlight bar, which appears nowhere in the
+  reference. "BROWSE" is letter-spaced caps.
+- **Smaller things**: the Min Quality dropdown has a caret, so it reads as a
+  dropdown; the pager uses triangle glyphs instead of `<` and `>`; Search and
+  Advanced no longer touch; the gold readout is larger, gold-coloured and set
+  tight against its coins; the match count is muted rather than gold, and is
+  centred on the pager rather than merely sharing its offset.
+
+### Fixed
+- **`% Mkt` at exactly 100% is neutral, not yellow.** Yellow reads as a
+  warning, and paying exactly market price is the unremarkable case — green
+  and red mean something precisely because the middle does not. Below and
+  above market were already correct.
+
+### Internal
+- `ui.ColumnsFitAt` and `ui.StripFitsAt` both re-derived. **The result
+  columns, not the control strip, now set the minimum window width.** Moving
+  the strip to the left edge handed it back ~190px and it fits the old 832
+  comfortably; the columns' floor is ~970, so `MIN_W` stays at 1000. It could
+  only go lower by narrowing the table, which would move away from the
+  mockup.
+- The category tree paints with variable row heights. `FauxScrollFrame`
+  assumes uniform rows, but its offset is counted in ROWS rather than pixels,
+  so a ragged list works as long as the visible count is derived by
+  accumulating heights rather than by dividing.
+
+---
+
+## [1.15.1]
+
+Buy tab default view, second pass against the mockup. `/reload`.
+
+### Fixed
+- **The results table no longer draws over the bottom of the window.** Rows
+  were spilling past the table and covering the match count, the pager, the
+  bid boxes and the Bid / Buyout / Close buttons.
+
+  `ui.RowsFor` treated its `minRows` argument as a floor on a *measured* fit,
+  so when rows grew from 20px to 26px in 1.15.0 it kept insisting on eleven
+  rows in a space that now held eight. Rows anchor to each other and are not
+  the scroll frame's scroll-child, so nothing clipped the surplus. `minRows`
+  now means only "the answer when the frame has no measurable height yet";
+  a real measurement always wins. **Every list in the addon shares that
+  function, so every list is fixed.**
+- **The scrollbar no longer sits on top of the last column.** The table's box
+  now stops exactly where the scroll frame ends, and the scrollbar hangs
+  outside it.
+
+### Changed
+- **The Seller column is gone**, deliberately and against the mockup.
+  `owner` is nil until the client resolves the name, so the column was blank
+  on nearly every row — worse than not having it. The field is still read: it
+  is what marks your own auctions, dims them and blocks them from a buyout
+  batch. The freed width went to the gap between Lvl and Time Left, which
+  were close enough to run together.
+- **One box around the table, headings included.** The box used to wrap only
+  the rows, leaving the column headings floating above it and the rule that
+  belongs under them stranded on the box's top edge. Rows have hairline
+  separators, the header cells have dividers, and a rule separates the action
+  bar from the table.
+- **Text fields are flat dark rectangles.** vanilla's `InputBoxTemplate` draws
+  a left cap, a right cap and a tiling middle, which reads as a rounded
+  trough at text-field width and as two brackets with a gap at the width of a
+  level box — the reported `( )` shapes. The template is kept for its cursor
+  and selection behaviour; only what it draws is replaced.
+- **No box around the category list.** The mockup boxes the results table and
+  nothing else, and a trough here fought with the plated rows inside it. A
+  selected subcategory is bright text rather than a highlight bar; the bar
+  stays on top-level rows, where it marks the whole category.
+- **Fold glyphs are back on expanded categories**, reversing ROADMAP 2l. That
+  entry argued the stock 1.12 list shows expansion by highlighting the parent,
+  which works for one level; this tree nests three (Armor > Leather > Chest)
+  and highlighting alone cannot say which of two open levels you are in.
+  Collapsed rows carry no glyph — a `+` on everything closed is noise.
+
+---
+
+## [1.15.0]
+
+The Buy tab's default view rebuilt to the design mockup, plus multi-buyout.
+`/reload`.
+
+### Added
+- **Tick several auctions and buy them all at once.** Each result row has a
+  checkbox; Buyout then acts on everything ticked, after a single confirmation
+  showing the count, the total, and what you will be left with. The total is
+  checked against your gold before anything is bought, and again before each
+  individual purchase — mail, repairs and vendors all move money while the
+  auction house is open.
+
+  **On buying the right auctions.** 1.12 has no bulk buy: each buyout is a
+  separate call against an *index* into the page the client currently holds,
+  and a purchase removes that auction and re-sends the page, shifting every
+  index after it. Walking a list of captured indices therefore buys the wrong
+  things from the second purchase onward. There is also no auction ID, so "the
+  same auction" cannot be re-found — and eleven identical Linen Bandages at 8c
+  are genuinely indistinguishable anyway.
+
+  So the batch is a multiset of *fingerprints* — item, stack size, buyout
+  price — with a remaining count each. Every step re-reads the live page,
+  finds an index whose fingerprint is still owed, and buys that one. Nothing
+  is ever bought against a remembered index. If something ticked is no longer
+  there, the batch stops and reports what completed rather than substituting
+  whatever slid into that slot.
+- **Four columns the table was missing**: Lvl, Time Left, Seller and Current
+  Bid. Time Left needs its own API call (it is not among the twelve values
+  `GetAuctionItemInfo` returns) and renders through the client's own
+  localized strings, so it reads correctly on a non-English client.
+
+### Changed
+- **The results table follows the mockup.** Eight columns in a bordered well
+  with a rule under the headers, taller rows, numeric columns right-aligned
+  under right-aligned headers, and money figures in gold with the unit letter
+  dimmed. The stack count moved onto the item name (`Thick Leather Tunic x2`),
+  which is what freed the width for the new columns. A row you own is dimmed
+  whole and labelled `(yours)`; an auction with no buyout shows a dash there
+  and `bid only` under Unit.
+- **The control strip is a fixed-width cluster on the left with the buttons
+  hard right** and the slack between them, rather than a Name box stretching
+  to fill the width. `Usable` is `Usable items` again.
+- **Advanced is purple again**, as its own button kind rather than the tint
+  removed in 1.14.0 — that tint sat over another button's plate and read as a
+  smudge. Search and Buyout are the mockup's warm brown-gold rather than the
+  deep red taken from the older concept PNG; where the two references
+  disagree, the newer mockup wins.
+- **The minimum window width is 1000, up from 832.** Eight columns and a
+  fixed-width strip do not fit in 832, and letting the window get that narrow
+  reproduces the overlap fixed in 1.14.1. A saved width below the new minimum
+  is raised to it, so an existing character gets a wider window rather than a
+  broken one.
+
+### Fixed
+- **The category tree no longer renders as a stack of buttons under pfUI.**
+  Its rows are Buttons because a row has to be clickable, so pfUI's button
+  skinner gave every one an identical plate — erasing the distinction between
+  plated top-level categories and bare indented subcategories. They opt out
+  the same way the sort headers already did.
+
+---
+
+## [1.14.1]
+
+Cleanup pass on 1.14.0, from screenshots. `/reload`.
+
+### Fixed
+- **The Search button no longer prints through the "Usable" checkbox.** The
+  filter strip was built as a chain growing rightwards from the Name box,
+  while Search and Advanced were pinned at a fixed distance from the right
+  edge — with nothing joining the two halves. At any window width where the
+  chain reached the buttons, they simply drew on top of each other. The strip
+  is now built from both ends and the Name box takes up the slack, so they
+  cannot meet.
+- **Saved Searches and the Filter Builder no longer leave a tall empty gap.**
+  Both stopped wherever their content ran out and left bare window below.
+  Each content area sits in a bordered well running the full height of the
+  view, so the empty space reads as an empty list rather than as a hole.
+- **Saved Searches shows more rows on a taller window.** The count was a
+  hardcoded 12 regardless of how much room there was; it is measured at paint
+  time now, like every other list in the addon.
+- **Results / Saved / Builder show which one you are in.** All three drew
+  identically in every view, so they read as three unrelated actions rather
+  than as a tab strip. The active one takes the primary plate.
+
+### Changed
+- **Button borders are dark rather than warm.** The concept edges both plates
+  with near-black; 1.14.0 used a warm brown on the quiet plate and a bright
+  red on the primary one, which is what made the unskinned buttons read as
+  outlined-in-brown. They are not literally the concept's `#14120f`, because
+  the concept's panel is *lighter* than its buttons and ours is darker — an
+  exactly-black edge would disappear against our panel instead of defining
+  the plate.
+
+---
+
+## [1.14.0]
+
+Every button in the addon is now drawn by Aegis rather than inherited from
+Blizzard's `UIPanelButtonTemplate`. `/reload`.
+
+### Changed
+- **New button art across all six tabs**, matching the design concept: flat
+  dark plates with a thin border, in two weights. The deep red plate with the
+  gold label marks the *one* action each area exists to perform — Search,
+  Post, Full Scan, Buyout, Scan Selected, and Buy on a listing row. Everything
+  beside it takes the quiet dark plate.
+
+  This reverses the decision recorded in 1.12.0, which kept the stock art on
+  the grounds that "the default view looks like the stock auction house" was
+  the point. That held while only the Buy tab was in question; carrying it
+  across the whole addon is what the concept always showed, and a half-
+  converted window looks like a bug rather than a choice.
+- **The purple tint is gone** from the Advanced and Build buttons. It existed
+  to mark them as the one non-stock addition to an otherwise Blizzlike strip.
+  With the strip no longer Blizzlike, a third colour on top of the new plates
+  just read as a smudge over the button — which is how it was reported.
+
+### Fixed
+- **Buttons now have a disabled look.** `UIPanelButtonTemplate` supplied one
+  for free and hand-drawn plates do not: without it a button that has been
+  disabled still looks live, and silently ignores the click. Disabled plates
+  and labels are dimmed, and they no longer light up on hover or press.
+- **A press dragged off a button no longer sticks.** The button never receives
+  the mouse-up in that case, so the pressed plate would stay dark until the
+  next hover.
+
+### Internal
+- `ui.MakeButton(parent, kind, name)` replaces the template at 56 call sites
+  and owns all four visual states. `ui.SetButtonKind` replaces `ui.TintButton`,
+  which vertex-coloured template textures that no longer exist and has been
+  removed.
+- Under pfUI the plates ride on pfUI's own backdrop, resolved at paint time
+  rather than at creation — pfUI's skin runs long after the window is built.
+  The generic `SkinButton` pass skips these, since a button that already has
+  a backdrop would come out double-bordered.
+
+---
+
+## [1.13.0]
+
+Buy tab fixes and layout, following the 1.12.0 polish pass. `/reload`.
+
+### Fixed
+- **A finishing scan painted the results list over Saved Searches and the
+  Filter Builder.** Switching away while a scan was in flight left the paint
+  guarded at the *switch*, not at the paint — so the reply, arriving a
+  moment later, drew rows straight through whichever overlay was open. Both
+  the list repaint and the status line now refuse to draw unless Results is
+  the visible view, which is the only place that cannot be wrong.
+- **Running a search from Saved Searches now brings Results forward.** It
+  only did so from the Builder, so a saved query appeared to do nothing.
+- **The default view was clipped at the bottom and along the right edge.**
+  The category well drew below its scroll frame and cut through the gold
+  total; the results column started inside the well's border. Both have room
+  now, and the Min Quality and Level Range labels no longer crowd their
+  controls.
+
+### Changed
+- **Your gold is shown in coins**, not the letters `g` / `s` / `c`. The
+  readout is anchored by its copper coin so the figure grows leftwards as it
+  gets larger, and denominations above the value are hidden — 43 copper
+  shows one coin, not three.
+- **`+ OR` is gone from the action row.** It wrote a bare combinator into the
+  clause list with nothing decided about what it joined; `and` / `or` /
+  `not` are chosen in the Component dropdown, next to the clause they apply
+  to. The row is now **Search / Build > / Import / Clear**.
+- **Bid, Buyout and the bid entry are hidden outside Results.** They act on a
+  selected auction, and there are no auctions on screen in Saved Searches or
+  the Builder. Clear takes the freed space, so the Builder's own actions sit
+  where the eye already is.
+- **The favourite context menu opens below its row**, inside the favourites
+  column — clear of both the row it acts on and the Recent list beside it.
+
+## [1.12.0]
+
+Concept-parity polish across the Buy tab. `/reload`.
+
+### Changed
+- **The Bid entry is the Sell tab's gold / silver / copper control**, coin
+  art and all, instead of one plain box that rendered as two stray brackets.
+  A price now reads the same everywhere in the window. The Sell widget is
+  reused rather than reimplemented, and it emulates the plain box's
+  interface, so every existing caller works against it untouched.
+- **The Browse tree looks like Blizzard's filter list.** Top-level categories
+  get a plate; subcategories are bare indented text beneath the expanded
+  parent; the whole list sits in a bordered well; the category you are
+  browsing carries the blue selection bar. **The `+` / `-` fold glyphs are
+  gone** — the stock list shows expansion by highlighting the parent and
+  showing its children, and so does this now.
+- **The Component dropdown no longer offers "All".** There is no such thing
+  as all components; the row only offered a way to pick nothing. Class,
+  Subclass, Slot and Quality keep it, where "no filter" is a real choice.
+- **The selected component's text takes that component's colour**, matching
+  its line in the Post Filter list. Both read the colour from one function,
+  so the dropdown and the list cannot disagree about what a tooltip clause
+  looks like.
+- **Clear empties the search bar too**, not just the form and the clause
+  list. Leaving the query behind meant the next Search ran something the form
+  in front of you no longer described.
+- **Import is back**, and the action row is **Search / Build > / + OR /
+  Import / Clear**, right-aligned on the window's action bar beside Bid /
+  Buyout / Close. It was dropped when the Builder was somewhere you only ever
+  left from; now that a shift-click in Saved Searches lands you in it, a
+  hand-typed query had no route into the form. A multi-term query loads its
+  first term and says so.
+
+### Fixed
+- **The component value box was clipped to a pair of brackets** at the right
+  edge — it had a fixed width that ran off the frame. Both edges are anchored
+  now, so it fills the space it is given at any window width.
+- **Saved Searches columns are equal halves that stretch with the window.**
+  They sat at fixed offsets, leaving a dead gap on a wide window. Rows fill
+  their column.
+- **The favourite context menu opened over the query it was acting on.** It
+  opens to the row's left now.
+- **Level Range boxes** in both the default strip and the Builder were tiny
+  stubs sitting badly against their dash; both are sized to the concept.
+
+### Note on button colour
+The warm red-brown plates are vanilla's own `UIPanelButtonTemplate` art —
+what every stock button looks like without a skin — not a bug or a stray
+tint. The concept's flat dark plates were CSS in an HTML mockup and no
+vanilla template produces them. Deliberate choice: **keep the stock art**,
+since the default view's whole premise is looking like the stock auction
+house, with a subtle accent only on **Advanced** and **Build >** so the two
+non-stock actions read as different.
+
+## [1.11.0]
+
+Layout pass over the Buy tab, against the approved concept. `/reload`.
+
+### Fixed
+- **The Results / Saved / Builder tabs were off the window entirely.** They
+  were anchored 232px right of the Search button — fine while Search sat on
+  the left, and clean off the frame the moment v1.9.0 moved Search to the
+  right edge. They hang off the panel now, under the search bar, so they
+  cannot follow another widget off screen again.
+- **The pager sat on top of the Advanced button**, which is where the stray
+  `< >` over it came from. Both were anchored to the panel's top-right. The
+  pager moved to the bottom of the results area, with the match count
+  opposite it on the left — where the concept puts them.
+- **"Usable items" crowded the Search button.** Shortened to "Usable", the
+  Name box and Quality dropdown gave back some width, and Search/Advanced
+  moved right.
+- **The `< Back` button and the query box** now have real padding between
+  them.
+
+### Changed
+- **Advanced has no left column at all.** The Builder and Saved views span
+  the full content width, which is what the concept shows and what stops the
+  form's headings being clipped by a column that had no business being there.
+- **The Shopping Lists sidebar is gone**, along with `+ Add` / `Rename` /
+  `Del` / `Search entire list` and the `Max` box and `Add to list` button
+  that floated under the Advanced search bar. Recent searches live in
+  **Saved**; `max-unit-buy` does the Max box's job inside a query, where it
+  is visible and saveable.
+
+  Your saved lists are **not deleted** — the storage and its API are
+  untouched, so re-homing the feature later is a UI job, not a rewrite.
+- **The Builder form lost its Query preview and its Buyout only / Full
+  stacks / Stack size controls.** Those filters are still in the query
+  language (`/buyout`, `/stack 20`); the built query is visible in the search
+  bar after **Build**.
+- **The Add button beside the component input is gone** — Enter appends, as
+  the concept intends.
+- **Bottom row is now Search / Build > / + OR / Clear**, on the window's
+  action bar beside Bid / Buyout / Close rather than floating inside the
+  builder frame. **Build >** is tinted to match Advanced.
+
+### Added
+- **The rest of the component list**: `item`, `min-level`, `max-level`,
+  `rarity`, `seller`, `percent`, `vendor-profit`, `left` and
+  `disenchant-profit`. These are **placeholders** — they parse, round-trip
+  and save, but they do not filter yet, so every one is labelled `(soon)` in
+  the dropdown and drawn dim with "not wired up yet — ignored" in the Post
+  Filter. A component that silently did nothing would be indistinguishable
+  from a broken filter, which is a mistake this addon has already made twice.
+
+## [1.10.0]
+
+Builds out the **Advanced** side: saved searches, and a post-filter system
+that can hold more than one clause. `/reload`.
+
+### Added
+- **Saved Searches**, a third view beside Results and Builder. *Recent* and
+  *Favorites*, side by side. **Right-click a recent** and it goes straight
+  into Favorites — no dialog. **Right-click a favorite** for **Move Up /
+  Move Down / Delete**. Left-click either to run it; **shift**-left-click
+  loads it into the Builder instead so you can edit before searching.
+
+  Favorites are yours to order, so nothing re-sorts them, promoting the same
+  query twice is a no-op rather than a reshuffle, and the order persists.
+- **A component / post-filter system in the Builder.** Pick a component, type
+  a value, press Enter, and the clause joins a list:
+
+  ```
+  tooltip: +3 stamina
+  tooltip: +3 agi
+  max-unit-buy: 5g
+  ```
+
+  **Stacked clauses must all hold** — that is one item carrying both stats,
+  under 5g, without typing a single operator. `or` between two clauses widens
+  instead; `not` before one excludes it. Evaluation is strictly left to right
+  with no precedence, so `A or B and C` is `(A or B) and C` and there is no
+  table to memorise. Click any line to remove it.
+- **`max-unit-buy` / `min-unit-buy`** as query components — a bound on the
+  price **per item**, so a stack of 20 compares honestly against a stack of 1.
+- **Stat abbreviations match either way round.** `agi` finds "Agility",
+  `Stamina` finds "stam", and the same for `str`, `int`, `spi`. The Post
+  Filter shows which other spelling it will look for, so you can see the
+  expansion landed before spending a scan on it.
+
+### Changed
+- **`tooltip` now takes exactly one token**, like `quality` and `level`,
+  instead of swallowing everything after it. That is what makes a second
+  tooltip clause possible at all — `tooltip/+3 stam/tooltip/+3 agi` used to
+  collapse into the single nonsense string `"+3 stam tooltip +3 agi"` and
+  match nothing.
+
+  Nothing else changes: tokens split on `/` only, so a multi-word value like
+  `tooltip/+3 stamina` is still one token, and `container/bag/tooltip/8`
+  behaves exactly as before. It also retires the old "tooltip must be emitted
+  last" rule in the query generator, since nothing can be swallowed any more.
+
+## [1.9.0]
+
+Redesigns the Buy tab around a **Blizzlike default view**, with everything
+that was there before moved behind one **Advanced** button. `/reload`.
+
+### Added
+- **The Buy tab now opens looking like the stock auction house.** Name, Level
+  Range, Min Quality, Usable items, Search; the category list down the left;
+  your gold and **Bid / Buyout / Close** along the bottom. Click a row to
+  select it and act from the bottom bar, exactly as the stock window does.
+
+  Two columns are kept from Aegis: **Unit** (price per item) and **% Mkt**
+  (against market value, green under / red over).
+
+  The Name field searches *within* the selected category, so the tree and the
+  text box compose instead of fighting. So does everything else on the strip —
+  clicking through categories keeps your name, level range, quality and usable
+  settings applied rather than resetting them.
+- **An "Advanced" button**, in the slot Blizzard used for "Display on
+  Character". It swaps in the full query box, the shopping-list sidebar and
+  the Filter Builder; **< Back** returns.
+
+  The switch carries your search **both ways**: Advanced inherits whatever the
+  simple view had, and Back rebuilds the controls from the query. Filters only
+  Advanced can express (a tooltip clause, an exact-match, a stack size) are
+  dropped on the way back **and the status line says so** — an invisible
+  filter that keeps narrowing your results is the one outcome worth ruling out.
+- **Bid and Buyout gate themselves visibly.** Your own auction greys both; an
+  auction with no buyout greys Buyout only; nothing selected greys both. The
+  bid box prefills with what the selected auction actually needs next.
+
+### Changed
+- **"To box" is now "Build"**, and **Import is gone** — the builder is for
+  building a query, and reading one back was the least-used direction. Editing
+  the query box directly still does it.
+- **Per-row Buy/Bid buttons are gone from the Buy tab** in favour of the
+  Blizzlike select-then-act model. The Crafting tab keeps its own row buttons
+  and is unchanged.
+- **The Max price box belongs to Advanced now.** It is no longer read while
+  the default view is up, so a value left there cannot keep filtering results
+  after its box is off screen. Advanced also has `max-unit-buy` for the same
+  job inside a query.
+
 ## [1.8.0]
 
 ### Added
@@ -844,6 +1813,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+[1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.20.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.20.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.19.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.19.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.19.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.19.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.19.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.18.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.17.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.16.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.16.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.15.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.15.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.14.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.14.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.13.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.12.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.11.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.10.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.9.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.8.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.7.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.6.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
