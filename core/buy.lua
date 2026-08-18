@@ -549,6 +549,54 @@ local function ParseFusedLevel(tok)
     return nil
 end
 
+-- Every token the term loop below recognises as something other than free
+-- text and that takes no leading value of its own. Kept as a table because
+-- buy.IsTermKeyword has to ask "is this word spoken for?" without running the
+-- loop's side effects.
+local BARE_KEYWORD = {
+    ["exact"] = true, ["usable"] = true, ["buyout"] = true, ["stack"] = true,
+    ["tooltip"] = true, ["and"] = true, ["or"] = true, ["not"] = true,
+    ["quality"] = true, ["level"] = true,
+    ["max-unit-buy"] = true, ["min-unit-buy"] = true,
+}
+
+-- Would `tok` (already lowercased and trimmed) be recognised by buy.ParseTerm
+-- as something OTHER than free text, given the categories `term` has resolved
+-- so far?
+--
+-- ONE function, TWO readers, and that is the point. The tooltip run-on in
+-- ParseTerm stops at the first keyword, and buy.TermToQuery asks the same
+-- question before it dares emit a needle in the short form. Written twice
+-- they would drift, and the drift would be silent: a query that round-trips
+-- into a DIFFERENT search.
+--
+-- The category half has to be asked in term order, because the loop resolves
+-- a subclass only once a class is known and a slot only after that -- so the
+-- same word is a keyword in one position and free text in another.
+function buy.IsTermKeyword(tok, term)
+    if not tok or tok == "" then return false end
+    if BARE_KEYWORD[tok] then return true end
+    if PENDING_COMPONENT[tok] then return true end
+    if ParseFusedQuality(tok) then return true end
+    if ParseFusedStack(tok) then return true end
+    if ParseFusedLevel(tok) then return true end
+
+    term = term or {}
+    local cats = buy.Categories()
+    if not term.class then
+        return ResolveCategory(cats.classes, tok) ~= nil
+    end
+    if not term.subclass
+        and ResolveCategory(cats.subclasses[term.class], tok) then
+        return true
+    end
+    if not term.slot
+        and ResolveCategory(SlotsFor(term.class, term.subclass), tok) then
+        return true
+    end
+    return false
+end
+
 -- Parse ONE slash-delimited term (already split out of the semicolon OR list)
 -- into its structured pieces. Never errors: an unrecognized token always falls
 -- back to becoming literal name/tooltip text, so a query never "breaks".
@@ -597,7 +645,7 @@ function buy.ParseTerm(text)
                 term.stackOnly = true
             end
         elseif tok == "tooltip" then
-            -- ONE token, like quality/level -- NOT the rest of the term.
+            -- One token per NEEDLE -- never the rest of the term.
             --
             -- It used to switch into a sticky mode that swallowed everything
             -- after it, which made a second tooltip clause impossible:
@@ -608,6 +656,34 @@ function buy.ParseTerm(text)
             local nxt = tokens[i + 1]
             if nxt and util.Trim(nxt) ~= "" then
                 addPost("tooltip", util.Trim(nxt)); i = i + 1
+                -- RUN-ON. Further plain tokens are more needles for the same
+                -- filter, so two stats read as
+                --     wristbands/tooltip/+3 stam/+3 agi
+                -- instead of repeating the keyword. Consecutive operands with
+                -- no combinator between them are ANDed (see buy.CompilePost),
+                -- which is exactly what the repeated spelling already meant --
+                -- so the two spellings parse to the SAME term, and every saved
+                -- search written the long way keeps working untouched.
+                --
+                -- It stops at the first token ParseTerm itself would claim,
+                -- which is what keeps "container/bag/tooltip/8" and
+                -- "cloak/tooltip/stamina/exact" meaning what they always did.
+                --
+                -- THE TRADE, plainly: a needle that IS a keyword can no longer
+                -- be written bare. "tooltip/Stamina/Weapon" filters tooltips
+                -- for Stamina and searches the Weapon CLASS. Repeat the
+                -- keyword to say otherwise --
+                --     tooltip/Stamina/tooltip/Weapon
+                -- -- which is the permanent escape hatch, and the form
+                -- buy.TermToQuery falls back to on its own.
+                while i < n do
+                    local more = util.Trim(tokens[i + 1])
+                    if more == ""
+                        or buy.IsTermKeyword(string.lower(more), term) then
+                        break
+                    end
+                    addPost("tooltip", more); i = i + 1
+                end
             else
                 appendWord(raw)
             end
@@ -749,7 +825,29 @@ function buy.TermToQuery(term)
         if e.kind == "and" or e.kind == "or" or e.kind == "not" then
             add(e.kind)
         elseif e.kind == "tooltip" then
-            add("tooltip/" .. tostring(e.value))
+            -- SHORT FORM for a run-on: a needle that follows another needle
+            -- with no combinator between them is emitted bare, so what you
+            -- typed is what you get back out of the builder and the saved
+            -- search list.
+            --
+            -- Two guards, and both are load-bearing. A needle that reads as a
+            -- keyword must keep its own "tooltip/" or the round trip would
+            -- quietly turn a filter into a class search -- and the previous
+            -- entry has to be a tooltip OPERAND, not a combinator, because
+            -- "tooltip/A/or/B" would leave B as name text.
+            --
+            -- The keyword question is asked against `term` because the
+            -- categories are emitted ABOVE this loop: whatever class,
+            -- subclass and slot the term carries are exactly what will be
+            -- resolved by the time a re-parse reaches this token.
+            local v = tostring(e.value)
+            local prev = term.post[pi - 1]
+            if v ~= "" and prev and prev.kind == "tooltip"
+                and not buy.IsTermKeyword(string.lower(v), term) then
+                add(v)
+            else
+                add("tooltip/" .. v)
+            end
         elseif e.kind == "max-unit-buy" or e.kind == "min-unit-buy" then
             add(e.kind .. "/" .. util.FormatMoney(e.value))
         elseif e.value and e.value ~= "" then
@@ -1067,7 +1165,22 @@ function buy.CompileTerm(term)
         name     = term.name or "",
         minLevel = term.minLevel and tostring(term.minLevel) or "",
         maxLevel = term.maxLevel and tostring(term.maxLevel) or "",
-        isUsable = term.usable and true or nil,
+        -- 1 or nil -- NEVER a boolean, and never 0.
+        --
+        -- This shipped as `and true or nil` and the Usable box did nothing.
+        -- The flag args are not booleans on 1.12: a CheckButton reports 1 or
+        -- nil, and the stock browse UI passes GetChecked() straight into this
+        -- slot, so `true` is a shape the client is never handed. It is
+        -- perfectly legal Lua, which is why nothing noticed.
+        --
+        -- 0 is NOT the way to say "off", however natural it looks next to a 1.
+        -- 0 is TRUTHY in Lua, so a client reading this slot as a flag rather
+        -- than a number would take it as "usable only" and silently narrow
+        -- EVERY search -- results that still look plausible, which is worse
+        -- than the bug being fixed. nil is right under either reading, it is
+        -- what CLAUDE.md rule 9 requires of every index/flag arg, and it is
+        -- what the stock UI and Auctionator both send.
+        isUsable = term.usable and 1 or nil,
         quality  = term.quality,
         class    = term.class,
         subclass = term.subclass,

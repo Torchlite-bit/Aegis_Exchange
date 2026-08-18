@@ -128,6 +128,7 @@ tests/
     builder_term_test.lua   the Filter Builder's form <-> term round trip
     geometry_test.lua       panel insets, row counts, tab and form layout
     window_point_test.lua   a restored window point you can still reach
+    taborder_test.lua       Tab traversal: wrap, hidden boxes, dead ends
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a

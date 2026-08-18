@@ -291,6 +291,31 @@ function QueryAuctionItems(name, minLevel, maxLevel, invType,
                .. type(maxLevel))
         assert(page == nil or (type(page) == "number" and page >= 0),
                "QueryAuctionItems: page is 0-indexed, got " .. tostring(page))
+
+        -- The index and flag args are NUMBERS or nil. Never booleans.
+        -- v1.21.0 sent `isUsable = true` and the Usable check box did
+        -- nothing: 1.12 CheckButtons report 1/nil and the stock browse UI
+        -- passes GetChecked() straight into that slot, so a Lua boolean is a
+        -- shape the client is never handed. It is legal Lua, the query still
+        -- goes out, and the only symptom is a filter that quietly does not
+        -- apply -- which is exactly the kind of fault this file exists to
+        -- catch, and did not.
+        local flags = { invType = invType, class = class,
+                        subclass = subclass, quality = quality }
+        for key, v in pairs(flags) do
+            assert(v == nil or type(v) == "number",
+                   "QueryAuctionItems: " .. key .. " must be a number or nil, "
+                   .. "got " .. type(v) .. " (" .. tostring(v) .. ")")
+        end
+
+        -- isUsable is tighter: 1 or nil, the only two values GetChecked()
+        -- produces. 0 is refused ON PURPOSE -- 0 is TRUTHY in Lua, so a
+        -- client reading this slot as a flag would take it as "usable only"
+        -- and silently narrow every search. nil is the only safe "off".
+        assert(isUsable == nil or isUsable == 1,
+               "QueryAuctionItems: isUsable must be 1 or nil (0 is TRUTHY in "
+               .. "Lua and would read as 'on'), got " .. type(isUsable)
+               .. " (" .. tostring(isUsable) .. ")")
     end
     table.insert(W.queries, {
         name = name, minLevel = minLevel, maxLevel = maxLevel,

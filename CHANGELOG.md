@@ -12,6 +12,115 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.21.1]
+
+The **Usable items** check box never actually filtered anything. `/reload`.
+
+Reported and diagnosed by **[@MarkuruThunderhoof](https://github.com/MarkuruThunderhoof)**.
+
+### Fixed
+- **"Usable items" did nothing** — ticking it changed no results, in either
+  the simple view or `usable` in a query. The box, the term and the query all
+  carried the flag correctly; the last step handed `QueryAuctionItems` a Lua
+  **boolean**, and that slot is not a boolean on 1.12. A CheckButton reports
+  `1` or `nil` there and the stock browse UI passes `GetChecked()` straight
+  through, so `true` is a shape the client is never given — the query still
+  went out, and the filter simply never applied.
+
+  **Present since v1.5.0**, the query language's first release.
+
+  It sends `1` or `nil` now. Not `1` or `0`: **0 is truthy in Lua**, so a
+  client reading that slot as a flag rather than a number would take "off" as
+  "usable only" and silently narrow every search — plausible-looking results,
+  which is worse than the bug being fixed. `nil` is correct under either
+  reading, is what CLAUDE.md rule 9 requires of every index/flag arg, and is
+  what both the stock UI and Auctionator send.
+
+### Internal
+- **The simulated client now asserts that slot.** It already checked that
+  `name` / `minLevel` / `maxLevel` are strings and that `page` is 0-indexed —
+  and said nothing at all about the flag args, which is why a boolean sat
+  there through every release since 1.5.0 with a green suite. The index args
+  must now be numbers or nil, and `isUsable` must be `1` or `nil`, with `0`
+  refused explicitly.
+- Three sabotages: the boolean that shipped, the `0` spelling that looks like
+  the obvious fix, and the flag inverted. All confirmed to fail `buy.term`.
+
+## [1.21.0]
+
+Tab moves between input boxes, and `tooltip` no longer needs repeating.
+`/reload`.
+
+### Added
+- **Tab moves to the next input box, Shift-Tab to the previous.** Wired down
+  the Sell tab (stack size → count → bid → buyout, a coin at a time), through
+  the Filter Builder's form, across the Buy tab's level pair and bid entry, and
+  the Aegis tab's undercut fields.
+
+  Boxes the current mode has **hidden are stepped over** — the money triplets
+  and the flat-amount fields come and go with the mode they belong to, and
+  tabbing into one that is not on screen puts the cursor somewhere you cannot
+  see it. A dead end leaves focus where it is rather than clearing it: losing
+  the cursor is a worse answer than not moving it.
+
+  The order is written out per form rather than derived from where the boxes
+  sit, so it matches what the eye expects and a layout change cannot silently
+  re-order it.
+
+- **THE ONE EXCEPTION, and it is deliberate: the two search boxes keep
+  autocomplete.** Tab in the Buy tab's **Name** field and in the Advanced
+  **query box** still completes item names and cycles the matches, as it always
+  has. That binding is older, already in people's fingers, and worth more on a
+  search box than stepping to the level fields — so it wins, and nothing else
+  on either box changes. Saying so here rather than leaving it to be
+  discovered.
+
+### Changed
+- **`tooltip` no longer needs repeating.** Keep listing what you are after and
+  each one is another thing the tooltip must say:
+
+  | Before | Now |
+  |---|---|
+  | `wristbands/tooltip/+3 stam/tooltip/+3 agi` | `wristbands/tooltip/+3 stam/+3 agi` |
+
+  Both spellings parse to **exactly the same term**, so every saved search and
+  every favourite written the long way keeps working untouched — stacked
+  clauses were always ANDed, which is what the run-on means.
+
+  The run ends at the first word the search claims for itself, so
+  `cloak/tooltip/stamina/exact` still applies *exact* and
+  `container/bag/tooltip/8` is unchanged.
+
+  **The trade, plainly:** a needle that *is* one of those words can no longer
+  be written bare. `tooltip/Stamina/Weapon` filters tooltips for Stamina and
+  searches the **Weapon class**. Repeat the keyword to say otherwise —
+  `tooltip/Stamina/tooltip/Weapon` — which stays supported permanently, and is
+  the form the Builder emits on its own when a needle would be misread.
+
+  Otherwise the Builder and the saved-search list hand back the **short**
+  form, so what you typed is what you get back.
+
+### Internal
+- **One function answers "is this word spoken for?", and both sides ask it.**
+  `buy.IsTermKeyword` is shared by the parser's run-on and by the query
+  emitter. Written twice they would drift, and the drift would be silent: a
+  query that round-trips into a *different* search. It takes the term as well
+  as the token, because a subclass is a keyword only once its class is known.
+- The term suite pins both spellings to the same parsed term, the long form on
+  its own (that is the assertion that says an upgrade cannot break saved data),
+  a run of three, and **every keyword ending the run** — each paired with a
+  check that the token really is part of the parser's vocabulary, so a list
+  that has drifted fails loudly instead of passing for the wrong reason.
+- New `taborder` suite. `ui.NextInputIn` is extracted from `ui/frame.lua` and
+  run against stub boxes rather than restated — the mistake that has already
+  let two bugs through here. It covers the wrap in both directions (`math.mod`
+  is `fmod` on Lua 5.0 and hands back a **negative** remainder, so Shift-Tab
+  off the front of a form would otherwise index nothing), runs of hidden
+  boxes, and the dead ends. It also reads the traversal chains out of the file
+  and fails if a search box is ever added to one, because that would cost it
+  autocomplete with nothing else noticing.
+- Nine sabotages added, all confirmed to fail the suite they name.
+
 ## [1.20.2]
 
 The Aegis tab's check boxes were losing their left edge to the scroll frame
@@ -1813,6 +1922,8 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1253,10 +1253,10 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
 
 ### 3a — Feature batch, phase one — ✅ **DONE** (v1.20.0)
 
-First of three phases. Phases two (Tab traversal, the `tooltip` run-on syntax)
-and three (the pending filter components, restyling Sell / Auctions / Crafting
-/ History) are NOT started — each waits on the previous one being confirmed in
-game.
+First of three phases. Phase two (Tab traversal, the `tooltip` run-on syntax)
+shipped in v1.21.0 — see 3b below. Phase three (the pending filter components,
+restyling Sell / Auctions / Crafting / History) is NOT started; each waits on
+the previous one being confirmed in game.
 
 - **A fix applied in one place and left in six others is not a fix.**
   `LockHighlight` drives a template highlight texture that `ui.MakeButton` has
@@ -1354,6 +1354,98 @@ Both items here are 1.20.0's own, not older faults it uncovered.
   tab. That is the standing division of labour, not a failure of the suite —
   but each one has since been converted into something automatic, which is the
   part that has to keep happening.
+
+### 3b — Feature batch, phase two — ✅ **DONE** (v1.21.0)
+
+Tab traversal and the `tooltip` run-on. Phase three (the pending filter
+components, restyling Sell / Auctions / Crafting / History) is NOT started and
+waits on this one being confirmed in game.
+
+- **A key that is already bound is a DECISION, not an obstacle.** Tab
+  autocompletes item names on the Buy tab's Name field and on the Advanced
+  query box, and traversal wanted the same key. Three ways out were on the
+  table; the one taken is that the two search boxes keep autocomplete and
+  nothing else does. Moving autocomplete elsewhere would have broken a binding
+  people already have in their fingers to gain consistency nobody asked for,
+  and "Tab completes when there is a completion pending, otherwise traverses"
+  is unpredictable in exactly the way that annoys. **The exception is in the
+  changelog and the README**, because an undocumented exception is
+  indistinguishable from a bug.
+- **The traversal order is written out per form, never derived from
+  positions.** Deriving it would hand the cursor to whichever box the layout
+  happens to place next — including one in a column the eye reads second — and
+  every layout change would silently re-order the form.
+- **Hidden boxes have to be stepped over, and that is most of the function.**
+  The Sell tab's money triplets, the settings panel's flat-amount fields and
+  the Buy tab's bid entry all come and go with their mode. Tabbing into one
+  that is not on screen puts the cursor where the eye cannot follow it and the
+  keystrokes go with it.
+- **A dead end must not clear focus.** Nothing else visible to move to means
+  stay put; losing the cursor is a worse answer than not moving it.
+- **`math.mod` is `fmod` on Lua 5.0** and returns a NEGATIVE remainder for a
+  negative left side, so Shift-Tab off the front of a form indexes nothing at
+  all. Biased positive, and sabotage-tested — this is the kind of fault that
+  passes every review because the forward direction works perfectly.
+
+#### The parser side
+
+- **Making one token consume more than one brings back the ambiguity that
+  one-token consumption was introduced to kill.** `tooltip/Stamina/Weapon` —
+  second needle, or the item class? The run stops at the first token
+  `ParseTerm` would claim for itself, which keeps
+  `cloak/tooltip/stamina/exact` and `container/bag/tooltip/8` meaning what
+  they always did. The trade is stated in the code, the changelog and the
+  README rather than left to be found: a needle that IS a keyword must be
+  written `tooltip/Stamina/tooltip/Weapon`, and that escape hatch is
+  permanent.
+- **Both spellings had to parse to the SAME term, and that fell out of the
+  existing design rather than being engineered.** Consecutive operands with no
+  combinator between them were already ANDed, which is exactly what the
+  repeated spelling meant — so every saved search and favourite on disk keeps
+  working with no migration. The suite asserts the long form on its own, which
+  is the assertion that says an upgrade cannot break stored data.
+- **ONE keyword predicate, two readers.** `buy.IsTermKeyword` is asked by the
+  parser's run-on and by `TermToQuery` before it dares emit a needle bare.
+  Written twice they would drift, and the drift would be silent: a query that
+  round-trips into a *different* search. It takes the term as well as the
+  token, because a subclass is a keyword only once its class is known — the
+  same word is a keyword in one position and free text in another.
+- **The emitter needs a second guard nobody would think to write.** A
+  combinator breaks the run, so a needle after `or` cannot go bare either;
+  `tooltip/A/or/B` would leave B as name text. Both guards have their own
+  sabotage.
+- **A keyword list in a test is only worth what proves it current.** Each
+  "the run stops here" assertion is paired with one that the token really is
+  part of the parser's vocabulary, so a list that has drifted fails loudly
+  rather than passing for the wrong reason.
+
+### 3b-fix — The Usable flag never reached the client — ✅ **DONE** (v1.21.1)
+
+Reported and diagnosed from outside the project, which is the part worth
+recording: the fault had survived sixteen releases of a suite that gets
+sabotage-tested.
+
+- **A wrong TYPE in an argument slot is invisible to every check here.**
+  `isUsable` was handed a Lua boolean. The addon loads, the query is sent, the
+  client accepts the call, and the only symptom is a filter that quietly does
+  not apply. It has been that way since **v1.5.0** — the release that added
+  the query language — and the box has been on the Buy tab the whole time.
+- **The harness asserted three of the nine args.** `name`, `minLevel`,
+  `maxLevel` and `page` were pinned because those are what the addon had
+  broken on before; the flag and index args were merely passed through and
+  recorded. A contract file that checks the arguments you already got wrong
+  is a regression test, not a contract. All nine are checked now.
+- **The obvious fix was the wrong one, and the reason is a language rule.**
+  The proposed change was `1 or 0`. **0 is TRUTHY in Lua**, so a client
+  reading that slot as a flag would take "off" as "usable only" and narrow
+  every search — and the results would still look plausible, so it would not
+  be reported as a bug for a long time. `nil` is right under either reading
+  and is what CLAUDE.md rule 9 already required. **The diagnosis was right and
+  the remedy was not**, which is the same shape as the pfUI backdrop fix in
+  3a-fix; both times the fix had to be re-derived from the diagnosis rather
+  than accepted with it.
+- The `0` spelling is now a sabotage in its own right, so the tempting version
+  cannot be reintroduced quietly.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

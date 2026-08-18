@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.20.2)
+# Aegis: Exchange (v1.21.1)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -75,7 +75,7 @@ changes. But the same box now takes a query language when you want one:
 | `mageweave/stack 20` | stacks of exactly 20 |
 | `mageweave/stack` | the biggest stacks |
 | `container/bag/tooltip/8` | bags whose tooltip mentions **8** |
-| `wristbands/tooltip/+3 stam/tooltip/+3 agi` | BOTH stats on one item |
+| `wristbands/tooltip/+3 stam/+3 agi` | BOTH stats on one item |
 | `wristbands/tooltip/+3 stam/or/tooltip/+3 agi` | either stat |
 | `boots/not/tooltip/soulbound` | excludes what the clause matches |
 | `silk cloth/max-unit-buy/5g` | at or under 5g **per item** |
@@ -98,6 +98,14 @@ and vanilla only reports that for items your client has already cached. Aegis
 remembers every maximum it learns, and when it still doesn't know one it falls
 back to the biggest stack of that item on the page, saying so in the status
 line. If you want a guarantee rather than a best guess, give the number.
+
+**`tooltip` doesn't need repeating.** Keep listing what you're after and each
+one is another thing the tooltip must say: `wristbands/tooltip/+3 stam/+3 agi`
+wants both. The run ends the moment a word means something else to the search —
+`cloak/tooltip/stamina/exact` still applies *exact* — so if what you're looking
+*for* is one of those words, say `tooltip` again:
+`tooltip/Stamina/tooltip/Weapon` searches tooltips for **Weapon**, while
+`tooltip/Stamina/Weapon` searches the Weapon *category*.
 
 Terms combine with `/`, and `;` runs several searches back to back — page past
 the end of one and it rolls straight into the next.
@@ -160,6 +168,13 @@ narrowing your results.
 for it, or **shift-click** any item *anywhere* — bags, a chat link, a tooltip —
 to drop its name in the box and go. **Tab** completes what you've typed from
 every item Aegis has ever seen, pressing it again to cycle through the matches.
+
+**Everywhere else, Tab moves to the next box** and **Shift-Tab** back — down
+the Sell tab's stack size, count and price fields, through the Builder's form,
+across the gold / silver / copper triplets a coin at a time. Boxes the current
+mode has hidden are stepped over. The two search boxes are the one exception:
+they keep autocomplete, which is worth more on a search box than stepping to
+the level fields.
 
 ### 💰 Sell — price it right the first time
 Drop an item in and Aegis scans the AH for *just that item*, shows you every
@@ -355,7 +370,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.20.2`) — quote it.
+1. Check the **version** in the window's title bar (`v1.21.1`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
