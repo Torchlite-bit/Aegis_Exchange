@@ -1502,6 +1502,9 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         fi = fi + 1
     end
     ui.setUndercutFlat = flat
+    -- Percent, then the three coins. Only one of the two is on screen at a
+    -- time -- ui.NextInputIn skips whichever the mode has hidden.
+    ui.LinkTabOrder({ uc, flat.g, flat.s, flat.c })
     local flatLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     flatLbl:SetPoint("LEFT", flat.c.tag, "RIGHT", 8, 0)
     flatLbl:SetText("below")
@@ -2027,6 +2030,81 @@ function ui.Refresh()
             ui.statusText:SetText("Last scan: never")
             ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
         end
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Tab traversal between input boxes
+-- ---------------------------------------------------------------------------
+
+-- The next box after `from` in `list`, wrapping past the end -- or the one
+-- before it when `back` is true.
+--
+-- HIDDEN BOXES ARE SKIPPED. The Sell tab's money triplets, the settings
+-- panel's flat-amount boxes and the Buy tab's bid entry all come and go with
+-- the mode they belong to, and tabbing into one that is not on screen puts
+-- the cursor somewhere the eye cannot follow it -- keystrokes land in a box
+-- nobody can see.
+--
+-- Returns nil when there is nowhere to go, which the caller reads as "stay
+-- put". Never clear focus on a dead end: losing the cursor is a worse answer
+-- than not moving it.
+function ui.NextInputIn(list, from, back)
+    local n = table.getn(list or {})
+    if n == 0 then return nil end
+
+    local at
+    local i = 1
+    while i <= n do
+        if list[i] == from then at = i end
+        i = i + 1
+    end
+    if not at then return nil end
+
+    local step = back and -1 or 1
+    local k = 1
+    while k <= n - 1 do
+        -- + n keeps the operand positive: math.mod is fmod on 5.0 and returns
+        -- a NEGATIVE remainder for a negative left side, so Shift-Tab off the
+        -- front of the list would index nothing.
+        local idx = math.mod(at - 1 + step * k + n, n) + 1
+        local box = list[idx]
+        if box and box:IsVisible() then return box end
+        k = k + 1
+    end
+    return nil
+end
+
+-- Bind Tab / Shift-Tab across an ORDERED list of edit boxes.
+--
+-- The order is written out by hand at each call site on purpose. Deriving it
+-- from frame positions would hand the cursor to whichever box the layout
+-- happens to place next -- including one in a column the eye reads second --
+-- and every layout change would silently re-order the form.
+--
+-- NOT BOUND on ui.buyBox or ui.buyQueryBox. Tab autocompletes item names
+-- there, which is older, more valuable and already in people's fingers; the
+-- two search boxes keep it and are the documented exception rather than
+-- something to be discovered.
+function ui.LinkTabOrder(list)
+    local n = table.getn(list or {})
+    local i = 1
+    while i <= n do
+        local box = list[i]
+        if box then
+            box:SetScript("OnTabPressed", function()
+                local back = IsShiftKeyDown and IsShiftKeyDown()
+                local nxt = ui.NextInputIn(list, box, back)
+                if nxt then
+                    nxt:SetFocus()
+                    -- Select what is there, so the next keystroke replaces a
+                    -- default rather than appending a digit to it -- these
+                    -- are stack counts and prices, and both arrive pre-filled.
+                    if nxt.HighlightText then nxt:HighlightText() end
+                end
+            end)
+        end
+        i = i + 1
     end
 end
 
@@ -3871,6 +3949,10 @@ function ui.BuildBuyTab()
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
+    -- THE EXCEPTION to Tab traversal, and a deliberate one: Tab completes item
+    -- names here. That binding is older than traversal and worth more on a
+    -- search box than stepping to the level fields, so the two search boxes
+    -- keep it and nothing else does. See ui.LinkTabOrder.
     box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
     ui.buyBox = box
     ui.buyNameLbl = stripLabel("Name", box)
@@ -3884,6 +3966,10 @@ function ui.BuildBuyTab()
     ui.buyLvlDash = lvlDash
     ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
     ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 7, 0)
+
+    -- The two level boxes tab between themselves. Name is NOT in the list --
+    -- it is one of the two autocomplete boxes.
+    ui.LinkTabOrder({ ui.buyMinLevel, ui.buyMaxLevel })
 
     ui.buyLvlLbl = stripLabel("Level Range", ui.buyMinLevel)
 
@@ -3958,6 +4044,8 @@ function ui.BuildBuyTab()
     ui.buyQueryBox:SetScript("OnEscapePressed", function()
         ui.buyQueryBox:ClearFocus()
     end)
+    -- The OTHER autocomplete box, and the other half of the traversal
+    -- exception. See ui.LinkTabOrder.
     ui.buyQueryBox:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
 
 
@@ -4229,6 +4317,7 @@ ui.GrowBuyRows = function(n)
     ui.buyBidEntryLbl = bidEntryLbl
     ui.buyBidBox = MakeMoneyGSC(panel, nil)
     ui.buyBidBox:Attach(bidEntryLbl, 6, 0)
+    ui.LinkTabOrder({ ui.buyBidBox.g, ui.buyBidBox.s, ui.buyBidBox.c })
 
     -- Your money, with the game's own coin art rather than "6g 75s 43c"
     -- text. Anchored by its COPPER coin, so the figure grows leftwards and a
@@ -4968,6 +5057,13 @@ function ui.BuildFilterBuilder(panel, advLeft)
     cvBox:SetScript("OnEscapePressed", function() cvBox:ClearFocus() end)
     cvBox:SetScript("OnEnterPressed", function() ui.BuilderAddComponent() end)
     ui.fbCompValue = cvBox
+
+    -- Tab down the left column in the order it is READ, then across to the
+    -- component value -- which is the last thing you fill in before pressing
+    -- Enter to add a clause. The dropdowns are not in the chain: they are
+    -- buttons, not edit boxes, and there is nothing to type into them.
+    ui.LinkTabOrder({ ui.fbName, ui.fbMinLevel, ui.fbMaxLevel,
+                      ui.fbStackSize, ui.fbCompValue })
 
     local pfLbl = contentR:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     pfLbl:SetPoint("TOPLEFT", colR, "TOPLEFT", FBL.pad, ui.FBRow(2))
@@ -7915,6 +8011,13 @@ function ui.BuildSellTab()
     local buyLabel = moneyRow("Buyout each", ROW3)
     ui.sellBuyout = MakeMoneyGSC(panel, function() ui.SyncSellPrices("unit") end)
     ui.sellBuyout:Attach(buyLabel, 6, 0)
+
+    -- Down the form as it reads: stack size, how many, then the two prices a
+    -- coin at a time. Posting is the one thing on this tab that commits, and
+    -- Tab now walks everything that feeds it without reaching for the mouse.
+    ui.LinkTabOrder({ ui.sellStackSize, ui.sellNumStacks,
+                      ui.sellBid.g, ui.sellBid.s, ui.sellBid.c,
+                      ui.sellBuyout.g, ui.sellBuyout.s, ui.sellBuyout.c })
 
     -- ------------------------------------------------------------------
     -- ACTION BAR -- status on the left, Post and Skip pinned right. Making

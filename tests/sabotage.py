@@ -168,6 +168,63 @@ SABOTAGES = [
     end""",
      "sort_results"),
 
+    # ---- the tooltip run-on ----------------------------------------------
+    # No run-on at all: the short form silently loses every needle after the
+    # first, so `tooltip/Stamina/Beastslaying` searches only Stamina.
+    ("tooltip-run-on-absent", "core/buy.lua",
+     """                while i < n do
+                    local more = util.Trim(tokens[i + 1])
+                    if more == ""
+                        or buy.IsTermKeyword(string.lower(more), term) then
+                        break
+                    end
+                    addPost("tooltip", more); i = i + 1
+                end""",
+     "",
+     "buy.term"),
+
+    # The 1.12-era bug, restored: swallow everything after a needle. Now the
+    # run cannot be stopped, so `cloak/tooltip/stamina/exact` loses its flag.
+    ("tooltip-run-on-never-stops", "core/buy.lua",
+     """                    if more == ""
+                        or buy.IsTermKeyword(string.lower(more), term) then
+                        break
+                    end""",
+     """                    if more == "" then break end""",
+     "buy.term"),
+
+    # The category half of the keyword test dropped. `tooltip/Stamina/Weapon`
+    # then eats the class instead of searching it.
+    ("keyword-ignores-categories", "core/buy.lua",
+     """    term = term or {}
+    local cats = buy.Categories()
+    if not term.class then
+        return ResolveCategory(cats.classes, tok) ~= nil
+    end""",
+     """    term = term or {}
+    local cats = buy.Categories()
+    if not term.class then
+        return false
+    end""",
+     "buy.term"),
+
+    # The emitter stops asking whether a bare needle would re-parse as a
+    # keyword. Round-tripping `tooltip/Stamina/tooltip/Weapon` then turns a
+    # tooltip filter into a class search -- silently, on the next Build.
+    ("short-form-ignores-keywords", "core/buy.lua",
+     """            if v ~= "" and prev and prev.kind == "tooltip"
+                and not buy.IsTermKeyword(string.lower(v), term) then""",
+     """            if v ~= "" and prev and prev.kind == "tooltip" then""",
+     "buy.term"),
+
+    # A combinator no longer breaks the run, so `tooltip/A/or/tooltip/B` comes
+    # back as `tooltip/A/or/B` and B degrades into name text.
+    ("short-form-crosses-a-combinator", "core/buy.lua",
+     """            local prev = term.post[pi - 1]""",
+     """            local prev = term.post[pi - 1]
+            if prev and prev.kind == "or" then prev = { kind = "tooltip" } end""",
+     "buy.term"),
+
     # ---- the Filter Builder's form <-> term round trip --------------------
     # The bug that shipped: BuilderTerm never read these, so Build dropped
     # them and the rebuilt query was quietly narrower than the one imported.
@@ -360,6 +417,38 @@ end""",
      '    cpChk:SetPoint("TOPLEFT", ccChk, "BOTTOMLEFT", 0, -6)',
      '    cpChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)',
      "anchorchain"),
+
+    # ---- Tab traversal -----------------------------------------------------
+    # math.mod is fmod on Lua 5.0 and hands back a NEGATIVE remainder for a
+    # negative left side, so without the bias Shift-Tab off the front of a
+    # form indexes nothing and the cursor just stops.
+    ("taborder-negative-wrap", "ui/frame.lua",
+     "        local idx = math.mod(at - 1 + step * k + n, n) + 1",
+     "        local idx = math.mod(at - 1 + step * k, n) + 1",
+     "taborder"),
+
+    # Tab into a box the current mode has hidden: the cursor lands somewhere
+    # the eye cannot follow and the keystrokes go with it.
+    ("taborder-lands-on-hidden", "ui/frame.lua",
+     "        if box and box:IsVisible() then return box end",
+     "        if box then return box end",
+     "taborder"),
+
+    # One step too many round the ring: with nothing else visible it returns
+    # the box you were already in, which reads as Tab being ignored.
+    ("taborder-returns-itself", "ui/frame.lua",
+     """    local k = 1
+    while k <= n - 1 do""",
+     """    local k = 1
+    while k <= n do""",
+     "taborder"),
+
+    # The documented exception, deleted: putting a search box in a traversal
+    # chain silently costs it item-name autocomplete.
+    ("taborder-eats-autocomplete", "ui/frame.lua",
+     "    ui.LinkTabOrder({ ui.buyMinLevel, ui.buyMaxLevel })",
+     "    ui.LinkTabOrder({ ui.buyBox, ui.buyMinLevel, ui.buyMaxLevel })",
+     "taborder"),
 ]
 
 SUITES = {
@@ -372,6 +461,7 @@ SUITES = {
     "builder.term": "tests/units/builder_term_test.lua",
     "geometry": "tests/units/geometry_test.lua",
     "window.point": "tests/units/window_point_test.lua",
+    "taborder": "tests/units/taborder_test.lua",
     # A lint is a suite too. It makes a claim about the source and can be
     # wrong about it the same way an assertion can, so it earns its place here
     # rather than being trusted because it printed "ok" once.

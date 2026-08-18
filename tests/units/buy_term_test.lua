@@ -96,6 +96,103 @@ H.eq("the tooltip clause holds only its own token",
      t.post[1].value, "stamina")
 
 -- ---------------------------------------------------------------------------
+H.section("tooltip does not need repeating")
+-- ---------------------------------------------------------------------------
+
+-- The run-on: plain tokens after a needle are MORE needles for the same
+-- filter. Consecutive operands with no combinator are ANDed, which is what the
+-- repeated spelling already meant -- so the two must parse to the same term.
+local function needles(term)
+    local out = {}
+    for i = 1, table.getn(term.post) do
+        if term.post[i].kind == "tooltip" then
+            table.insert(out, term.post[i].value)
+        end
+    end
+    return out
+end
+
+local long  = buy.ParseTerm("wristbands/tooltip/+3 stam/tooltip/+3 agi")
+local short = buy.ParseTerm("wristbands/tooltip/+3 stam/+3 agi")
+H.listEq("the short form collects both needles", needles(short),
+         { "+3 stam", "+3 agi" })
+H.check("both spellings parse to the SAME term",
+        buy.TermsEqual(long, short),
+        buy.TermToQuery(long) .. "  vs  " .. buy.TermToQuery(short))
+H.eq("the name is not eaten by the run-on", short.name, "wristbands")
+
+-- OLD SAVED SEARCHES. The long form is what every stored favourite and every
+-- recent search on disk is written in, and it has to keep working exactly --
+-- this is the one assertion that says an upgrade cannot break saved data.
+H.listEq("the long form still collects both needles", needles(long),
+         { "+3 stam", "+3 agi" })
+
+-- More than two, because "the second one works" and "it keeps going" are
+-- different claims.
+H.listEq("a run of three is all needles",
+         needles(buy.ParseTerm("cloak/tooltip/a/b/c")), { "a", "b", "c" })
+
+-- WHERE THE RUN-ON STOPS. Every one of these is a token ParseTerm claims for
+-- itself, and each must end the run rather than become a needle. The pairing
+-- is deliberate: the second assertion proves the token really is part of the
+-- parser's vocabulary, so a list that has drifted out of date fails loudly
+-- instead of passing for the wrong reason.
+local stoppers = {
+    "exact", "usable", "buyout", "stack", "tooltip",
+    "and", "or", "not", "quality", "level",
+    "max-unit-buy", "min-unit-buy",
+    "rarity", "seller", "percent", "left",          -- pending components
+    "quality3", "stack20", "level20",               -- fused spellings
+    "weapon",                                       -- a class name
+}
+for i = 1, table.getn(stoppers) do
+    local kw = stoppers[i]
+    local run = buy.ParseTerm("cloak/tooltip/keep/" .. kw)
+    H.listEq("the run-on stops at " .. kw, needles(run), { "keep" })
+    -- Asked against a BARE term, which is the state the run-on was in when it
+    -- stopped -- "cloak" is name text and resolves no category. Asking `run`
+    -- instead would be asking a different question, because a class the token
+    -- itself set is already recorded there.
+    H.check(kw .. " is really a keyword, not just an unrecognised word",
+            buy.IsTermKeyword(kw, {}), "IsTermKeyword said no")
+end
+
+-- A subclass is a keyword only once its class is known, so it has to be asked
+-- in position -- which is why IsTermKeyword takes the term.
+H.listEq("a subclass stops the run once its class is set",
+         needles(buy.ParseTerm("armor/tooltip/keep/cloth")), { "keep" })
+H.check("...and is NOT a keyword with no class resolved",
+        not buy.IsTermKeyword("cloth", {}), "claimed cloth outside a class")
+
+-- THE TRADE, asserted rather than only documented: a needle that is a keyword
+-- cannot be written bare any more.
+local claimed = buy.ParseTerm("tooltip/Stamina/Weapon")
+H.listEq("a keyword after a needle is NOT a second needle",
+         needles(claimed), { "Stamina" })
+H.eq("...it is parsed as the class it names", claimed.class, 1)
+
+-- ...and the escape hatch it leaves behind.
+H.listEq("repeating the keyword still says 'needle'",
+         needles(buy.ParseTerm("tooltip/Stamina/tooltip/Weapon")),
+         { "Stamina", "Weapon" })
+
+-- WHAT COMES BACK OUT. The short form is emitted so the builder and the saved
+-- search list hand back what was typed...
+H.eq("a run-on is emitted short",
+     buy.TermToQuery(buy.ParseTerm("wristbands/tooltip/+3 stam/+3 agi")),
+     "wristbands/tooltip/+3 stam/+3 agi")
+-- ...except where short would re-parse as something else, which is the whole
+-- reason the emitter has to ask the same keyword question the parser does.
+H.eq("a needle that reads as a keyword keeps its own tooltip/",
+     buy.TermToQuery(buy.ParseTerm("tooltip/Stamina/tooltip/Weapon")),
+     "tooltip/Stamina/tooltip/Weapon")
+-- A combinator breaks the run, so the needle after it cannot go bare either --
+-- "tooltip/A/or/B" would leave B as name text.
+H.eq("a needle after a combinator keeps its own tooltip/",
+     buy.TermToQuery(buy.ParseTerm("cloak/tooltip/a/or/tooltip/b")),
+     "cloak/tooltip/a/or/tooltip/b")
+
+-- ---------------------------------------------------------------------------
 H.section("Round trip: text -> term -> text -> term")
 -- ---------------------------------------------------------------------------
 
@@ -112,6 +209,9 @@ local cases = {
     "linen/quality/3",
     "sword/level/20-40",
     "cloak/tooltip/stamina",
+    "cloak/tooltip/stamina/beastslaying",
+    "cloak/tooltip/stamina/tooltip/weapon",
+    "cloak/tooltip/a/or/tooltip/b",
     "linen/exact/usable/buyout/quality/2",
 }
 for i = 1, table.getn(cases) do
