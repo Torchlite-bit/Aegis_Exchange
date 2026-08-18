@@ -1067,7 +1067,7 @@ function buy.CompileTerm(term)
         name     = term.name or "",
         minLevel = term.minLevel and tostring(term.minLevel) or "",
         maxLevel = term.maxLevel and tostring(term.maxLevel) or "",
-        isUsable = term.usable and true or nil,
+        isUsable = term.usable and 1 or 0,
         quality  = term.quality,
         class    = term.class,
         subclass = term.subclass,
