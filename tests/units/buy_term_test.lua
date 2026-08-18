@@ -274,4 +274,40 @@ end
 -- client shuts it, and nothing may query again until it reopens.
 H.eq("the client shut the gate after the query", CanSendAuctionQuery(), false)
 
+-- ---------------------------------------------------------------------------
+H.section("The `usable` flag reaches the client in a shape it understands")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED BUG, v1.21.0 and earlier: ticking "Usable items" did nothing. The
+-- term carried the flag correctly all the way to CompileTerm, which handed
+-- QueryAuctionItems a Lua BOOLEAN. Legal Lua, query still sent, filter simply
+-- never applied -- and every assertion in this file passed, because none of
+-- them looked at that slot.
+--
+-- CompileTerm is checked directly as well as through a sent query: the value
+-- is what matters, and reading it off the compiled term says so without
+-- depending on the driver having ticked.
+local plain = buy.CompileTerm(buy.ParseTerm("linen cloth"))
+H.isNil("no usable flag means the arg is ABSENT, not 0",
+        plain.blizz.isUsable)
+
+local usable = buy.CompileTerm(buy.ParseTerm("linen cloth/usable"))
+H.eq("a usable term sends 1", usable.blizz.isUsable, 1)
+H.neq("...a number, not a boolean", type(usable.blizz.isUsable), "boolean")
+
+-- 0 is the tempting spelling for "off" and it is WRONG: 0 is truthy in Lua,
+-- so a client reading the slot as a flag would take it as "usable only" and
+-- narrow every search. nil is the only safe off, and it is what CLAUDE.md
+-- rule 9 requires of every index/flag arg.
+H.neq("off is never 0", plain.blizz.isUsable, 0)
+
+-- And through the real path, because tests/support/wow.lua asserts the shape
+-- on the way in -- a wrong value fails the call itself.
+W.queries = {}
+W.queryOpen = true
+buy.Search("linen cloth/usable")
+W.TickUntil(buy.driver, function() return table.getn(W.queries) > 0 end, 50)
+local uq = W.queries[1]
+H.eq("the sent query carries isUsable = 1", uq and uq.isUsable, 1)
+
 os.exit(H.report("buy.term"))

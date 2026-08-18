@@ -1165,7 +1165,22 @@ function buy.CompileTerm(term)
         name     = term.name or "",
         minLevel = term.minLevel and tostring(term.minLevel) or "",
         maxLevel = term.maxLevel and tostring(term.maxLevel) or "",
-        isUsable = term.usable and true or nil,
+        -- 1 or nil -- NEVER a boolean, and never 0.
+        --
+        -- This shipped as `and true or nil` and the Usable box did nothing.
+        -- The flag args are not booleans on 1.12: a CheckButton reports 1 or
+        -- nil, and the stock browse UI passes GetChecked() straight into this
+        -- slot, so `true` is a shape the client is never handed. It is
+        -- perfectly legal Lua, which is why nothing noticed.
+        --
+        -- 0 is NOT the way to say "off", however natural it looks next to a 1.
+        -- 0 is TRUTHY in Lua, so a client reading this slot as a flag rather
+        -- than a number would take it as "usable only" and silently narrow
+        -- EVERY search -- results that still look plausible, which is worse
+        -- than the bug being fixed. nil is right under either reading, it is
+        -- what CLAUDE.md rule 9 requires of every index/flag arg, and it is
+        -- what the stock UI and Auctionator both send.
+        isUsable = term.usable and 1 or nil,
         quality  = term.quality,
         class    = term.class,
         subclass = term.subclass,

@@ -1419,6 +1419,34 @@ waits on this one being confirmed in game.
   part of the parser's vocabulary, so a list that has drifted fails loudly
   rather than passing for the wrong reason.
 
+### 3b-fix — The Usable flag never reached the client — ✅ **DONE** (v1.21.1)
+
+Reported and diagnosed from outside the project, which is the part worth
+recording: the fault had survived sixteen releases of a suite that gets
+sabotage-tested.
+
+- **A wrong TYPE in an argument slot is invisible to every check here.**
+  `isUsable` was handed a Lua boolean. The addon loads, the query is sent, the
+  client accepts the call, and the only symptom is a filter that quietly does
+  not apply. It has been that way since **v1.5.0** — the release that added
+  the query language — and the box has been on the Buy tab the whole time.
+- **The harness asserted three of the nine args.** `name`, `minLevel`,
+  `maxLevel` and `page` were pinned because those are what the addon had
+  broken on before; the flag and index args were merely passed through and
+  recorded. A contract file that checks the arguments you already got wrong
+  is a regression test, not a contract. All nine are checked now.
+- **The obvious fix was the wrong one, and the reason is a language rule.**
+  The proposed change was `1 or 0`. **0 is TRUTHY in Lua**, so a client
+  reading that slot as a flag would take "off" as "usable only" and narrow
+  every search — and the results would still look plausible, so it would not
+  be reported as a bug for a long time. `nil` is right under either reading
+  and is what CLAUDE.md rule 9 already required. **The diagnosis was right and
+  the remedy was not**, which is the same shape as the pfUI backdrop fix in
+  3a-fix; both times the fix had to be re-derived from the diagnosis rather
+  than accepted with it.
+- The `0` spelling is now a sabotage in its own right, so the tempting version
+  cannot be reintroduced quietly.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

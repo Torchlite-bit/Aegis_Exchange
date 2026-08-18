@@ -418,6 +418,29 @@ end""",
      '    cpChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)',
      "anchorchain"),
 
+    # ---- the isUsable flag arg ---------------------------------------------
+    # THE BUG THAT SHIPPED, restored. A Lua boolean in a slot the client reads
+    # as a number: the query still goes out and the Usable box silently does
+    # nothing. Nothing in the suite looked at that slot until it was reported.
+    ("usable-sent-as-boolean", "core/buy.lua",
+     "        isUsable = term.usable and 1 or nil,",
+     "        isUsable = term.usable and true or nil,",
+     "buy.term"),
+
+    # The tempting fix, and why it was not taken. 0 is TRUTHY in Lua, so a
+    # client reading this slot as a flag would take "off" as "usable only" and
+    # narrow every search -- results that still look plausible.
+    ("usable-off-sent-as-zero", "core/buy.lua",
+     "        isUsable = term.usable and 1 or nil,",
+     "        isUsable = term.usable and 1 or 0,",
+     "buy.term"),
+
+    # The flag inverted: ticking the box turns the filter OFF.
+    ("usable-flag-inverted", "core/buy.lua",
+     "        isUsable = term.usable and 1 or nil,",
+     "        isUsable = term.usable and nil or 1,",
+     "buy.term"),
+
     # ---- Tab traversal -----------------------------------------------------
     # math.mod is fmod on Lua 5.0 and hands back a NEGATIVE remainder for a
     # negative left side, so without the bias Shift-Tab off the front of a

@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.21.1]
+
+The **Usable items** check box never actually filtered anything. `/reload`.
+
+Reported and diagnosed by **[@MarkuruThunderhoof](https://github.com/MarkuruThunderhoof)**.
+
+### Fixed
+- **"Usable items" did nothing** — ticking it changed no results, in either
+  the simple view or `usable` in a query. The box, the term and the query all
+  carried the flag correctly; the last step handed `QueryAuctionItems` a Lua
+  **boolean**, and that slot is not a boolean on 1.12. A CheckButton reports
+  `1` or `nil` there and the stock browse UI passes `GetChecked()` straight
+  through, so `true` is a shape the client is never given — the query still
+  went out, and the filter simply never applied.
+
+  **Present since v1.5.0**, the query language's first release.
+
+  It sends `1` or `nil` now. Not `1` or `0`: **0 is truthy in Lua**, so a
+  client reading that slot as a flag rather than a number would take "off" as
+  "usable only" and silently narrow every search — plausible-looking results,
+  which is worse than the bug being fixed. `nil` is correct under either
+  reading, is what CLAUDE.md rule 9 requires of every index/flag arg, and is
+  what both the stock UI and Auctionator send.
+
+### Internal
+- **The simulated client now asserts that slot.** It already checked that
+  `name` / `minLevel` / `maxLevel` are strings and that `page` is 0-indexed —
+  and said nothing at all about the flag args, which is why a boolean sat
+  there through every release since 1.5.0 with a green suite. The index args
+  must now be numbers or nil, and `isUsable` must be `1` or `nil`, with `0`
+  refused explicitly.
+- Three sabotages: the boolean that shipped, the `0` spelling that looks like
+  the obvious fix, and the flag inverted. All confirmed to fail `buy.term`.
+
 ## [1.21.0]
 
 Tab moves between input boxes, and `tooltip` no longer needs repeating.
@@ -1888,6 +1922,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
