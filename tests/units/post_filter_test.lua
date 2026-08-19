@@ -149,6 +149,111 @@ H.check("...and excludes a short row",
         not kept("silk/left/medium/not/left/short", Row({ timeLeft = 1 })), "")
 
 -- ---------------------------------------------------------------------------
+H.section("percent and vendor-profit: the price DB decides")
+-- ---------------------------------------------------------------------------
+
+-- Seed the DB the way a scan would. RecordAuction keeps the daily MINIMUM and
+-- MarketValue is a weighted median over the days, so one recording on one day
+-- gives back exactly what went in.
+A.db.RecordAuction(101, 1000, "Priced Thing")
+A.db.SetVendor(102, 900)          -- a merchant pays 900 per unit
+local priced = Row({ itemId = 101, unit = 1000 })
+
+-- AT MOST this percentage of market. 1000 of 1000 is 100%.
+H.check("percent keeps a row at the bound", kept("silk/percent/100", priced), "")
+H.check("percent keeps a cheaper row",
+        kept("silk/percent/100", Row({ itemId = 101, unit = 500 })), "")
+H.check("percent drops a dearer one",
+        not kept("silk/percent/100", Row({ itemId = 101, unit = 1500 })), "")
+H.check("half price passes percent/50",
+        kept("silk/percent/50", Row({ itemId = 101, unit = 500 })), "")
+H.check("...and 51% of market does not",
+        not kept("silk/percent/50", Row({ itemId = 101, unit = 510 })), "")
+
+-- A ceiling composes: the other side is a `not` away.
+H.check("not/percent finds what is OVER the line",
+        kept("silk/not/percent/100", Row({ itemId = 101, unit = 1500 })), "")
+
+-- vendor-profit: buy at `unit`, vendor at 900, keep the difference.
+H.check("a 400-per-item margin passes vendor-profit/4s",
+        kept("silk/vendor-profit/4s", Row({ itemId = 102, unit = 500 })), "")
+H.check("...and exactly the asked-for margin passes too",
+        kept("silk/vendor-profit/4s", Row({ itemId = 102, unit = 500 })), "")
+H.check("a thinner margin does not",
+        not kept("silk/vendor-profit/4s", Row({ itemId = 102, unit = 600 })), "")
+H.check("nor does buying above vendor",
+        not kept("silk/vendor-profit/1c", Row({ itemId = 102, unit = 1200 })), "")
+
+-- Both figures are PER UNIT, which is the only comparison that survives
+-- different stack sizes: a stack of 20 at 500 each is the same deal as one.
+H.check("stack size does not change the answer",
+        kept("silk/vendor-profit/4s",
+             Row({ itemId = 102, unit = 500, count = 20, buyout = 10000 })), "")
+
+-- ---------------------------------------------------------------------------
+H.section("...and they confess what they do not know")
+-- ---------------------------------------------------------------------------
+
+-- An item the price DB has never seen cannot be judged. This is OUR ignorance,
+-- fixable by scanning, so it is counted -- unlike a bid-only row below.
+local unseen = Row({ itemId = 999, unit = 500 })
+local pk, pblind, pwho = keeps("silk/percent/50", unseen)
+H.check("an unpriced item does not match", not pk, "")
+H.eq("...it is counted", pblind, 1)
+H.eq("...and named", pwho, "percent")
+
+local vk2, vblind, vwho = keeps("silk/vendor-profit/1s", unseen)
+H.check("an item with no vendor price does not match", not vk2, "")
+H.eq("...it is counted", vblind, 1)
+H.eq("...and named", vwho, "vendor-profit")
+
+-- A row we CAN judge is never counted, or the note appears on every search.
+local _, none = keeps("silk/percent/100", priced)
+H.eq("a priced row is not counted", none, 0)
+
+-- THE DISTINCTION THIS TURNS ON. A bid-only auction has no unit price because
+-- the seller set no buyout -- a fact about the auction, visible on the row,
+-- that no amount of scanning changes. Confessing those would put the note on
+-- nearly every search and it would stop meaning anything. Same treatment
+-- max-unit-buy has always given them.
+local bidOnly = Row({ itemId = 101, unit = NIL, buyout = 0 })
+local bk, bblind = keeps("silk/percent/100", bidOnly)
+H.check("a bid-only row does not match percent", not bk, "")
+H.eq("...and is NOT confessed -- that is not our ignorance", bblind, 0)
+local bk2, bblind2 = keeps("silk/vendor-profit/1c", bidOnly)
+H.check("nor vendor-profit", not bk2, "")
+H.eq("...and is not confessed either", bblind2, 0)
+
+-- ---------------------------------------------------------------------------
+H.section("The advice offered is advice that WORKS")
+-- ---------------------------------------------------------------------------
+
+-- Telling someone to search again for a vendor price sends them round a loop
+-- that cannot succeed: 1.12's GetItemInfo has no sell price and the only
+-- source is standing at a merchant. So the remedy is per component.
+local function fixFor(query, row)
+    local compiled = buy.CompileTerm(buy.ParseTerm(query))
+    local stats = {}
+    compiled.filter(row, stats)
+    local _, _, fix = buy.UnansweredSummary(stats)
+    return fix
+end
+
+H.eq("an unresolved seller: search again",
+     fixFor("silk/seller/Bobby", Row({ owner = NIL })), "search again")
+H.eq("an unpriced item: scan for it",
+     fixFor("silk/percent/50", unseen), "scan to learn its price")
+H.eq("an unknown vendor price: go to a merchant",
+     fixFor("silk/vendor-profit/1s", unseen),
+     "vendor prices are learned at a merchant")
+
+-- Two kinds of ignorance with two different cures cannot be summed up in one
+-- clause, and picking either would tell half the readers the wrong thing.
+H.isNil("mixed causes offer NO advice rather than the wrong advice",
+        fixFor("silk/seller/Bobby/or/vendor-profit/1s",
+               Row({ owner = NIL, itemId = 999, unit = 500 })))
+
+-- ---------------------------------------------------------------------------
 H.section("A filter that cannot ANSWER says so")
 -- ---------------------------------------------------------------------------
 
@@ -235,6 +340,9 @@ local cases = {
     "silk/left/very long",
     "silk/min-level/40/max-level/60/rarity/3/left/medium",
     "silk/min-level/40/or/rarity/epic",
+    "silk/percent/80",
+    "silk/vendor-profit/5s",
+    "silk/percent/80/vendor-profit/1g",
 }
 for i = 1, table.getn(cases) do
     local original = buy.ParseTerm(cases[i])
@@ -272,6 +380,22 @@ H.eq("an unparseable rarity adds no clause",
      table.getn(buy.ParseTerm("silk/rarity/shiny").post), 0)
 H.eq("an unparseable time left adds no clause",
      table.getn(buy.ParseTerm("silk/left/eventually").post), 0)
+H.eq("an unparseable percentage adds no clause",
+     table.getn(buy.ParseTerm("silk/percent/cheap").post), 0)
+
+-- A trailing % is what people type, so it is taken and dropped -- the sign is
+-- punctuation, not data, and both spellings are the same clause.
+H.check("percent accepts a % sign",
+        buy.TermsEqual(buy.ParseTerm("silk/percent/80%"),
+                       buy.ParseTerm("silk/percent/80")),
+        buy.TermToQuery(buy.ParseTerm("silk/percent/80%")))
+H.eq("...and writes it back without one",
+     buy.TermToQuery(buy.ParseTerm("silk/percent/80%")), "silk/percent/80")
+-- A price keeps its own spelling, which is what proves the emitter asks the
+-- value table rather than calling tostring on everything.
+H.eq("vendor-profit is written back as a price",
+     buy.TermToQuery(buy.ParseTerm("silk/vendor-profit/5s")),
+     "silk/vendor-profit/5s")
 H.eq("a component with no value at all adds no clause",
      table.getn(buy.ParseTerm("silk/min-level").post), 0)
 
@@ -290,10 +414,11 @@ H.eq("...which parsed as its own clause", mins, 1)
 H.section("The still-pending components narrow nothing, on purpose")
 -- ---------------------------------------------------------------------------
 
--- item, percent, vendor-profit and disenchant-profit parse and round-trip so
--- a query carrying one survives an edit, but they must not filter -- an
--- always-false placeholder would empty the page.
-local pending = { "item", "percent", "vendor-profit", "disenchant-profit" }
+-- `item` and `disenchant-profit` parse and round-trip so a query carrying one
+-- survives an edit, but they must not filter -- an always-false placeholder
+-- would empty the page. (`percent` and `vendor-profit` graduated in v1.25.0
+-- and have their own section above.)
+local pending = { "item", "disenchant-profit" }
 for i = 1, table.getn(pending) do
     local p = pending[i]
     H.check(p .. " keeps every row", kept("silk/" .. p .. "/whatever"),

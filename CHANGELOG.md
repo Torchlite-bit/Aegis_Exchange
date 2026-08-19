@@ -12,6 +12,59 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.25.0]
+
+The two filter components that need the price database. `/reload`.
+
+### Added
+- **`percent`** — at most this percentage of market value.
+  `linen/percent/70` is "a third under the going rate or better", measured
+  against what Aegis has actually seen the item sell for.
+
+  A ceiling rather than a band, for the same reason `left` is a bound: it
+  answers the question people actually have, and `not/percent/70` still gives
+  the other side of it. A trailing `%` is taken and dropped, because that is
+  what people type.
+- **`vendor-profit`** — at least this much per item over what a merchant pays.
+  `linen/vendor-profit/50s` finds what you can buy and sell straight to a
+  vendor for 50s more each. Both figures are per unit, which is the only
+  comparison that survives different stack sizes.
+
+Both now appear in normal colour in the Builder's **Component** dropdown
+rather than dimmed, and the Post Filter list draws each one in its own terms —
+`70% of market, or less`, `50s per item, or more`.
+
+### Changed
+- **The status line now gives advice that works.** Rows a filter cannot judge
+  were already counted and named; the note ended `— search again`, which is
+  right for a seller name and **wrong for a vendor price**. There is no sell
+  price in 1.12's `GetItemInfo`; the only source is standing at a merchant, so
+  "search again" was sending people round a loop that cannot succeed.
+
+  Each cause carries its own remedy now — *search again*, *scan to learn its
+  price*, *vendor prices are learned at a merchant* — and when two causes want
+  two different cures, **no advice is offered at all** rather than advice that
+  is half wrong.
+
+### Not counted, on purpose
+- **A bid-only auction is not a row we failed to judge.** It has no unit price
+  because the seller set no buyout — a fact about the auction, visible on the
+  row, that no amount of scanning changes. Confessing those would put the note
+  on nearly every search until it stopped meaning anything. The count is for
+  data *we* are missing; this is the same treatment `max-unit-buy` has always
+  given them.
+
+### Still pending
+`item` needs the client's item cache. `disenchant-profit` needs a data source
+1.12 does not provide and remains unscheduled — deliberately alone.
+
+### Internal
+- Nine new sabotages, **89 caught in all**: `percent` as a floor, its ratio
+  inverted, the ×100 dropped, `vendor-profit` subtracting the wrong way round
+  and as a ceiling, unknown data hidden instead of confessed, the wrong remedy
+  offered for a vendor price, advice given for mixed causes, and a bid-only
+  row counted as ignorance.
+
 ## [1.24.0]
 
 Every column on every table sorts now. `/reload`.
@@ -2123,6 +2176,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

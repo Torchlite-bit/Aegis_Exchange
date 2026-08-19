@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.24.0)
+# Aegis: Exchange (v1.25.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -83,6 +83,8 @@ changes. But the same box now takes a query language when you want one:
 | `bracers/rarity/rare` | rares **only** — not the epics above them |
 | `linen/seller/Bob` | posted by anyone whose name contains *Bob* |
 | `linen/left/short` | about to expire |
+| `linen/percent/70` | at or under **70% of market** |
+| `linen/vendor-profit/50s` | vendor pays 50s **more** than it costs |
 | `linen;wool;silk` | all three, browsed as one list |
 
 **Categories are the game's own names** — whatever the auction house's own
@@ -118,11 +120,21 @@ what's about to expire, `left/long` is everything except the freshly posted;
 and because it's a bound it still composes, so `left/medium/not/left/short` is
 exactly medium.
 
-Two of these can't always answer. The seller's name arrives a moment after the
-page does, and some servers don't report time left at all — so rows they can't
-judge are **counted and named in the status line**, never dropped quietly.
-If you see `3 skipped (no seller data yet — search again)`, searching again is
-genuinely the fix.
+**`percent` is the deal filter and `vendor-profit` is the flipper's.**
+`percent/70` is "a third under the going rate or better", measured against
+what Aegis has actually seen the item sell for. `vendor-profit/50s` finds what
+you can buy and sell straight to a merchant for 50s more per item.
+
+Some of these can't always answer, and they say so rather than quietly
+returning nothing. The seller's name arrives a moment after the page does,
+some servers don't report time left, market value needs a scan, and a vendor
+price is only learned by standing at a merchant. Rows a filter can't judge are
+**counted and named in the status line, with the fix that actually works** —
+`3 skipped (no vendor-profit data — vendor prices are learned at a merchant)`.
+
+A **bid-only** auction isn't in that count. It has no buyout because the
+seller didn't set one; that's on the row for you to see, not something a
+rescan would fix.
 
 Terms combine with `/`, and `;` runs several searches back to back — page past
 the end of one and it rolls straight into the next.
@@ -392,7 +404,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.24.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.25.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

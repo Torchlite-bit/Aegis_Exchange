@@ -5458,8 +5458,6 @@ end
 -- UI follows the engine rather than being told twice.
 ui.PENDING_COMPONENTS = {
     ["item"]              = true,
-    ["percent"]           = true,
-    ["vendor-profit"]     = true,
     ["disenchant-profit"] = true,
 }
 
@@ -5594,7 +5592,15 @@ local function PaintPostFilter()
                 local vk = A.buy.ComponentValueKind(e.kind)
                 if vk == "money" then
                     val = util.FormatMoney(e.value, true)
-                    post = "  |cff8d7d5cper item|r"
+                    -- Both money components are per-unit, but they bound
+                    -- opposite ends: a price CAP versus a margin FLOOR.
+                    -- "per item" is true of both and tells you nothing about
+                    -- which way round this one reads.
+                    if e.kind == "vendor-profit" then
+                        post = "  |cff8d7d5cper item, or more|r"
+                    else
+                        post = "  |cff8d7d5cper item|r"
+                    end
                 elseif vk == "quality" then
                     -- Named back for the reader. The QUERY keeps the index
                     -- (see buy.ComponentValueText); a list you are reading
@@ -5604,6 +5610,13 @@ local function PaintPostFilter()
                 elseif vk == "timeleft" then
                     val = A.buy.ComponentValueText(e.kind, e.value)
                     post = "  |cff8d7d5cor less|r"
+                elseif vk == "percent" then
+                    -- The % goes back on for READING. The query stores a bare
+                    -- number (see buy.ComponentValueText) because that is what
+                    -- the comparison needs; a list you are reading can afford
+                    -- the sign.
+                    val = tostring(e.value) .. "%"
+                    post = "  |cff8d7d5cof market, or less|r"
                 else
                     val = A.buy.ComponentValueText(e.kind, e.value)
                     post = ""
@@ -6404,11 +6417,20 @@ function ui.UpdateBuyList()
         -- that does not answer for it. Same confession the unknown-stack path
         -- makes, and for the same reason -- an unexplained empty page reads as
         -- a broken filter.
-        local blind, blindWho = A.buy.UnansweredSummary(stats)
+        local blind, blindWho, blindFix = A.buy.UnansweredSummary(stats)
         local blindNote = ""
         if blind > 0 then
+            -- The REMEDY comes from the engine, per component. "Search again"
+            -- is right for a seller name and wrong for a vendor price -- that
+            -- one is only learned at a merchant, so the advice would send
+            -- someone round a loop that cannot succeed. When two causes want
+            -- two different cures, no advice is offered at all.
             blindNote = " \226\128\162 " .. blind .. " skipped (no "
-                .. blindWho .. " data yet \226\128\148 search again)"
+                .. blindWho .. " data"
+            if blindFix then
+                blindNote = blindNote .. " \226\128\148 " .. blindFix
+            end
+            blindNote = blindNote .. ")"
         end
         -- A pending category note owns the status line until the search it
         -- asks for actually runs. Repainting the list must not answer a

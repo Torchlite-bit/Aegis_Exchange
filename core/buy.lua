@@ -526,8 +526,7 @@ end
 -- Component names that are accepted by the parser but not yet implemented by
 -- CompileOperand. Kept next to the parser so the two lists cannot drift.
 local PENDING_COMPONENT = {
-    ["item"] = true, ["percent"] = true,
-    ["vendor-profit"] = true, ["disenchant-profit"] = true,
+    ["item"] = true, ["disenchant-profit"] = true,
 }
 
 local function ParseFusedStack(tok)
@@ -593,13 +592,15 @@ end
 -- produced the Saved-vs-Builder drift in 1.19.3. `tooltip` is deliberately
 -- absent: it has its own parse branch (the run-on) and its own draw branch.
 local COMPONENT_VALUE = {
-    ["min-level"]    = "number",
-    ["max-level"]    = "number",
-    ["rarity"]       = "quality",
-    ["seller"]       = "text",
-    ["left"]         = "timeleft",
-    ["max-unit-buy"] = "money",
-    ["min-unit-buy"] = "money",
+    ["min-level"]     = "number",
+    ["max-level"]     = "number",
+    ["rarity"]        = "quality",
+    ["seller"]        = "text",
+    ["left"]          = "timeleft",
+    ["max-unit-buy"]  = "money",
+    ["min-unit-buy"]  = "money",
+    ["percent"]       = "percent",
+    ["vendor-profit"] = "money",
 }
 
 -- "number" | "quality" | "timeleft" | "money" | "text", or nil for a token
@@ -631,6 +632,16 @@ function buy.ParseComponentValue(kind, raw)
         local m = util.ParseMoney(raw)
         if m and m > 0 then return m end
         return nil
+    elseif vk == "percent" then
+        -- A trailing "%" is what people type, so take it and drop it. Stored
+        -- as a plain number because that is what the comparison needs; the
+        -- sign is punctuation, not data.
+        local body = raw
+        local _, _, stripped = string.find(body, "^(.-)%%$")
+        if stripped then body = stripped end
+        local n = tonumber(util.Trim(body))
+        if n and n > 0 then return n end
+        return nil
     elseif vk == "text" then
         return raw
     end
@@ -656,6 +667,7 @@ end
 function buy.ComponentValueHint(kind)
     local vk = buy.ComponentValueKind(kind)
     if vk == "number"   then return "a level, like 40" end
+    if vk == "percent"  then return "a percentage, like 80" end
     if vk == "quality"  then return "a quality, like rare or 3" end
     if vk == "timeleft" then return "a time left, like short or 2" end
     if vk == "money"    then return "a price, like 5g or 50s" end
@@ -1199,26 +1211,47 @@ local function Unanswered(stats, kind)
     return false
 end
 
--- How many rows were dropped for want of data, and which components could not
--- answer -- "3", "seller" for a page whose owner names have not resolved yet.
+-- What actually FIXES each kind of ignorance. Getting this wrong is worse
+-- than saying nothing: telling someone to search again for a vendor price
+-- sends them round a loop that cannot succeed, because 1.12's GetItemInfo has
+-- no sell price and the only source is standing at a merchant.
+local UNANSWERED_FIX = {
+    ["seller"]        = "search again",
+    ["left"]          = "search again",
+    ["percent"]       = "scan to learn its price",
+    ["vendor-profit"] = "vendor prices are learned at a merchant",
+}
+
+-- How many rows were dropped for want of data, which components could not
+-- answer, and what would fix it -- "3", "seller", "search again" for a page
+-- whose owner names have not resolved yet.
 --
 -- Returns 0, "" when everything could be judged, so the caller appends
 -- nothing in the ordinary case. The component names are sorted, so the same
 -- page always produces the same sentence rather than one that reshuffles on
 -- every repaint.
+--
+-- The advice is only offered when every unanswered component wants the SAME
+-- remedy. Two kinds of ignorance with two different cures cannot be summed up
+-- in one clause, and picking either one would be telling half the people
+-- reading it to do the wrong thing.
 function buy.UnansweredSummary(stats)
     local counts = stats and stats.unanswered
     if not counts then return 0, "" end
-    local total, names = 0, {}
+    local total, names, fix, mixed = 0, {}, nil, false
     for kind, n in pairs(counts) do
         if n and n > 0 then
             total = total + n
             table.insert(names, kind)
+            local f = UNANSWERED_FIX[kind]
+            if fix and f ~= fix then mixed = true end
+            fix = f or fix
         end
     end
     if total == 0 then return 0, "" end
     table.sort(names)
-    return total, table.concat(names, "/")
+    if mixed then fix = nil end
+    return total, table.concat(names, "/"), fix
 end
 
 local function CompileOperand(e)
@@ -1285,6 +1318,50 @@ local function CompileOperand(e)
                 return Unanswered(stats, "seller")
             end
             return string.find(string.lower(row.owner), needle, 1, true) ~= nil
+        end
+    -- ---- filters that need the PRICE DB ---------------------------------
+    -- These two are the first components that can be defeated by our own
+    -- ignorance rather than by the auction. A row we have no market value or
+    -- no vendor price for is not a row that fails the test -- it is a row we
+    -- cannot test -- so it goes through Unanswered and gets confessed.
+    --
+    -- A BID-ONLY row is a different case and is NOT confessed. It has no unit
+    -- price because the seller did not set a buyout, which is a fact about
+    -- the auction that is visible on the row itself and that no amount of
+    -- scanning will change. Counting those would put the note on nearly every
+    -- search and it would stop meaning anything. Same treatment max-unit-buy
+    -- has always given them.
+    elseif e.kind == "percent" then
+        -- AT MOST this percentage of market value, so `percent/80` is
+        -- "a fifth under the going rate or better". A ceiling rather than a
+        -- band, for the same reason `left` is a bound: it answers the
+        -- question people actually have, and `not/percent/80` still gives
+        -- the other side of it.
+        local cap = e.value
+        return function(row, stats)
+            if not row.unit then return false end       -- bid-only
+            local m = row.itemId and A.db.MarketValue(row.itemId)
+            if not m or m <= 0 then return Unanswered(stats, "percent") end
+            return (row.unit / m) * 100 <= cap
+        end
+    elseif e.kind == "vendor-profit" then
+        -- AT LEAST this much per item over what a merchant pays, so
+        -- `vendor-profit/50s` finds what you can buy and vendor for 50s each.
+        -- Both figures are per unit, which is the only comparison that means
+        -- anything across different stack sizes.
+        --
+        -- Vendor prices are learned by standing at a merchant -- 1.12's
+        -- GetItemInfo has no sell price -- so an item you have never seen
+        -- sold is genuinely unanswerable, and re-scanning the auction house
+        -- will not help. The status line says so separately.
+        local floorV = e.value
+        return function(row, stats)
+            if not row.unit then return false end       -- bid-only
+            local v = row.itemId and A.db.GetVendor(row.itemId)
+            if not v or v <= 0 then
+                return Unanswered(stats, "vendor-profit")
+            end
+            return (v - row.unit) >= floorV
         end
     elseif e.kind == "left" then
         -- AT MOST this much time left: `left/short` is what is about to

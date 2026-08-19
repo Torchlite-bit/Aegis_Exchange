@@ -677,6 +677,77 @@ end""",
      """    return function() return false end""",
      "post_filter"),
 
+    # ---- the price-DB post filters -----------------------------------------
+    # percent as a FLOOR instead of a ceiling: `percent/50` returns everything
+    # at or above half market, which is every overpriced listing on the page
+    # and none of the deals.
+    ("percent-is-a-floor", "core/buy.lua",
+     "            return (row.unit / m) * 100 <= cap",
+     "            return (row.unit / m) * 100 >= cap",
+     "post_filter"),
+
+    # The ratio the wrong way up. Plausible-looking results, and the mistake
+    # this repo has now made once for real in the % Mkt sort.
+    ("percent-ratio-inverted", "core/buy.lua",
+     "            return (row.unit / m) * 100 <= cap",
+     "            return (m / row.unit) * 100 <= cap",
+     "post_filter"),
+
+    # The x100 dropped: every threshold is out by two orders of magnitude, so
+    # `percent/80` matches nothing at all.
+    ("percent-forgets-the-hundred", "core/buy.lua",
+     "            return (row.unit / m) * 100 <= cap",
+     "            return (row.unit / m) <= cap",
+     "post_filter"),
+
+    # vendor-profit subtracting the wrong way round: it finds the items you
+    # would LOSE money on, which look exactly as convincing.
+    ("vendor-profit-reversed", "core/buy.lua",
+     "            return (v - row.unit) >= floorV",
+     "            return (row.unit - v) >= floorV",
+     "post_filter"),
+
+    # A margin floor turned into a ceiling: the thinnest margins come back and
+    # the profitable ones are filtered out.
+    ("vendor-profit-is-a-ceiling", "core/buy.lua",
+     "            return (v - row.unit) >= floorV",
+     "            return (v - row.unit) <= floorV",
+     "post_filter"),
+
+    # Unknown market value treated as "does not match" rather than "cannot
+    # answer": the page empties for an unscanned item with no explanation.
+    ("percent-hides-its-ignorance", "core/buy.lua",
+     '            if not m or m <= 0 then return Unanswered(stats, "percent") end',
+     "            if not m or m <= 0 then return false end",
+     "post_filter"),
+
+    # THE ADVICE. "Search again" for a vendor price sends someone round a loop
+    # that cannot succeed -- 1.12 has no sell price in GetItemInfo and the only
+    # source is a merchant.
+    ("vendor-fix-says-search-again", "core/buy.lua",
+     '    ["vendor-profit"] = "vendor prices are learned at a merchant",',
+     '    ["vendor-profit"] = "search again",',
+     "post_filter"),
+
+    # Two causes with two different cures, summed up as one: half the people
+    # reading it are told the wrong thing.
+    ("mixed-causes-still-give-advice", "core/buy.lua",
+     "    if mixed then fix = nil end",
+     "",
+     "post_filter"),
+
+    # A bid-only row confessed as ignorance. It is not ours -- the seller set
+    # no buyout -- and counting them would put the note on nearly every search
+    # until it stopped meaning anything.
+    ("bid-only-counted-as-unanswered", "core/buy.lua",
+     """        return function(row, stats)
+            if not row.unit then return false end       -- bid-only
+            local m = row.itemId and A.db.MarketValue(row.itemId)""",
+     """        return function(row, stats)
+            if not row.unit then return Unanswered(stats, "percent") end
+            local m = row.itemId and A.db.MarketValue(row.itemId)""",
+     "post_filter"),
+
     # ---- the isUsable flag arg ---------------------------------------------
     # THE BUG THAT SHIPPED, restored. A Lua boolean in a slot the client reads
     # as a number: the query still goes out and the Usable box silently does

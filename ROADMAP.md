@@ -448,7 +448,7 @@ append to whatever's already there. No Auto Buy toggle (decided above).
 `and` / `or` / `not` shipped with the post-filter system in 2i, over the
 clause list rather than as prefix polish notation. `seller` and `left` (plus
 `min-level`, `max-level` and `rarity`) landed in 3c (v1.22.0). What remains
-here is `percent`, `vendor-profit` and stat-suffix matching — the combinator
+here is stat-suffix matching — the combinator
 work itself is done.
 
 ### 2d (original scope) — Full primitive set + boolean combinators
@@ -614,9 +614,9 @@ narrow nothing yet, so each is marked `(soon)` in the list and drawn dim with
 shipped a filter that silently matched nothing**, so an unimplemented
 component that quietly did nothing was not an option.
 
-> Superseded in part by **3c (v1.22.0)**: `min-level`, `max-level`, `rarity`,
-> `seller` and `left` are implemented and no longer dim. `item`, `percent`,
-> `vendor-profit` and `disenchant-profit` still are.
+> Superseded in part by **3c (v1.22.0)** and **3f (v1.25.0)**: `min-level`,
+> `max-level`, `rarity`, `seller`, `left`, `percent` and `vendor-profit` are
+> implemented and no longer dim. `item` and `disenchant-profit` still are.
 
 > ⚠️ **Import is absent from the bottom row on purpose.** The concept PNG
 > still shows it because that image predates the "you can remove the import
@@ -1463,7 +1463,8 @@ Five of the nine placeholder components implemented: `min-level`,
 so they answer on the first search for any item however cold the client is,
 and they add no per-item query to a loop HARD RULE 16 governs.
 
-Remaining: `percent` and `vendor-profit` (need the price DB — next), `item`
+Remaining after this one: `percent` and `vendor-profit` (shipped in 3f,
+v1.25.0), `item`
 (needs the item cache), `disenchant-profit` (needs a data source 1.12 does not
 provide; still unscheduled, and deliberately alone).
 
@@ -1636,6 +1637,43 @@ was folded into the shared one, and the quality-colour question was settled.
   would not colour existing history — and it is not worth it for a cosmetic
   gain. The decision is commented at the paint site so it is not "fixed"
   later.
+
+### 3f — The price-DB filters — ✅ **DONE** (v1.25.0)
+
+`percent` and `vendor-profit`. Seven of the nine placeholder components are
+implemented now; `item` (needs the client's item cache) and
+`disenchant-profit` (needs a data source 1.12 does not provide) remain.
+
+- **`percent` is a ceiling and `vendor-profit` is a floor**, and each is the
+  only useful direction for the question it answers: one finds deals, the
+  other finds flips. `not/` still gives the other side of either, which is why
+  neither needed a second component.
+- **Per UNIT on both sides.** Market value and vendor price are both stored
+  per unit and the row's `unit` is per unit, so a stack of 20 compares
+  honestly with a stack of one. Any other reading would make the filter agree
+  with itself only at stack size 1.
+- **The advice was wrong before this release, and that was worse than no
+  advice.** The unanswered note ended `— search again` for every cause. There
+  is no sell price in 1.12's `GetItemInfo`; a vendor price is learned by
+  standing at a merchant, so "search again" was a loop that cannot succeed.
+  Each cause carries its own remedy now, and **mixed causes get none** — two
+  cures cannot be summed up in one clause without telling half the readers to
+  do the wrong thing.
+
+#### The distinction that took the most thought
+
+- **A bid-only auction is NOT a row we failed to judge.** It has no unit price
+  because the seller set no buyout: a fact about the auction, visible on the
+  row, that no scanning changes. Our ignorance of a market value is a
+  different thing entirely, and only that gets confessed.
+- The rule is worth stating because the tempting version — confess anything
+  the predicate could not evaluate — would put the note on nearly every
+  search, at which point it stops being read. **A confession that fires
+  constantly is the same as no confession**, which is the failure mode
+  `unknownStack` was designed around in the first place.
+- `max-unit-buy` had already settled this, silently, by returning
+  `row.unit and row.unit <= cap`. Following an existing precedent rather than
+  inventing a rule is what made it obvious once found.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

@@ -142,7 +142,8 @@ local stoppers = {
     "and", "or", "not", "quality", "level",
     "max-unit-buy", "min-unit-buy",
     "min-level", "max-level", "rarity", "seller", "left",   -- row filters
-    "item", "percent", "vendor-profit",             -- still-pending ones
+    "percent", "vendor-profit",                     -- price-DB filters
+    "item", "disenchant-profit",                    -- still-pending ones
     "quality3", "stack20", "level20",               -- fused spellings
     "weapon",                                       -- a class name
 }
