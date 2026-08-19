@@ -12,6 +12,65 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.24.0]
+
+Every column on every table sorts now. `/reload`.
+
+### Added
+- **Auctions sorts.** Item, Qty, Unit, Buyout, Time and **vs market** are all
+  clickable. They were bare grey text before — not pressable at all, and the
+  grey read as a disabled band rather than as the table's headings.
+
+  *vs market* sorts by how far above the cheapest known listing each auction
+  sits, so descending puts the ones you have been undercut hardest on at the
+  top — which is the question that column exists to answer.
+- **History sorts.** When, Type, Item and Amount. It still opens most-recent
+  first; that is the sort's default now rather than a fixed reversal, which is
+  what makes it changeable at all.
+
+  *Amount* sorts by **size**, not by sign: the sign is already carried by
+  Sold/Bought in the Type column, and a 40g sale and a 40g purchase are the
+  same size of transaction.
+
+### Changed
+- **The Sell tab's listings headers go through the shared builder**, so they
+  are warm tan like every other table's instead of grey, and a numeric
+  column's header sits over the right edge of its cells.
+
+### Internal
+- **One nil rule, five tables.** `ui.SortByKey` holds the rule this addon has
+  already got wrong once: a row whose value is missing **always** sinks, in
+  both directions. Fold the guards into the direction branch instead and a
+  descending sort floats priceless rows to the top, where a bid-only auction
+  presents as the dearest listing on the page. It was one table's private
+  comparator; now every table borrows it, and it has its own assertions rather
+  than only being tested through the Buy tab.
+- **One direction rule.** `ui.NextSort` — same column flips, new column starts
+  ascending. There were three hand-written copies before Auctions and History
+  wanted a fourth and a fifth.
+- **The Sell tab's column x and widths were two disagreeing sets of numbers**
+  (panel-relative in the headers, row-relative in the rows, a few pixels apart
+  on every numeric column). One pair now, read by both.
+- **A sabotage found a hole it was not aiming at.** The entry meant to invert
+  Auctions' *vs market* ratio matched an identical line in the Buy tab's
+  *% Mkt* sort first — and the suite did not notice *that* either, because
+  nothing checked pct **ordering**, only that bid-only rows sank. Both
+  functions have their own sabotage now, and pct is asserted to be a ratio
+  rather than unit price wearing a different name.
+- One assertion was written against an **unstable sort's tie order** and
+  replaced. `table.sort` is not stable in Lua, so naming which of two equal
+  rows lands second pins an accident.
+- Ten new sabotages; **80 caught in all.**
+
+### Not changed, on purpose
+- **History's item names stay uncoloured.** The ledger stores a name and an
+  item id, never a quality, so colouring them would mean a `GetItemInfo` per
+  row inside a repaint that can run while the client is storming
+  `MAIL_INBOX_UPDATE` and resolving item data — exactly the shape HARD RULE 16
+  forbids, and what froze Courier. Every other table's item column is
+  quality-coloured already; the Type column carries the colour that matters
+  here and costs nothing.
+
 ## [1.23.0]
 
 Every table now looks like the Buy table, and six lists that stopped short of
@@ -2064,6 +2123,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

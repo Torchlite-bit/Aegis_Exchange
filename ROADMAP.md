@@ -1527,9 +1527,7 @@ provide; still unscheduled, and deliberately alone).
 ### 3d — Feature batch, phase three (the tables) — ✅ **DONE** (v1.23.0)
 
 The restyle's structural half: the row chrome shared by every table, and the
-`ui.RowsFor` audit. The headers half (sortable columns on Auctions and
-History, folding the Sell tab's hand-rolled copy into `ui.MakeSortHeaders`,
-quality colours where the data exists) is **not** started.
+`ui.RowsFor` audit. The headers half shipped in v1.24.0 — see 3e below.
 
 - **The `ui.RowsFor` warning was right about all six.** It named Crafting, the
   recipe tree, Auctions, History and the two Sell columns as unaudited, and
@@ -1588,6 +1586,56 @@ quality colours where the data exists) is **not** started.
 - **Deliberate removals are now expressible**, and the mechanism checks itself
   both ways: an entry naming something still defined is reported as stale, so
   the exemption list cannot quietly become a blanket one.
+
+### 3e — Feature batch, phase three (the headers) — ✅ **DONE** (v1.24.0)
+
+The restyle's second half, and the end of §8. Auctions and History gained
+clickable sort headers, the Sell tab's hand-rolled copy of the header builder
+was folded into the shared one, and the quality-colour question was settled.
+
+- **Three copies of a four-line rule is how tables start disagreeing.**
+  `SetBuySort`, `SetCraftSort` and `SetSellSort` each carried their own "same
+  column flips, new column starts ascending" — and Auctions and History wanted
+  a fourth and a fifth. `ui.NextSort` is one copy.
+- **The nil rule was one table's private comparator and is now everyone's.**
+  `ui.SortByKey` holds it: a missing value ALWAYS sinks, in both directions.
+  It had a suite of its own tested only THROUGH the Buy table; now the rule
+  itself is asserted, which matters because five tables borrow it.
+- **The Sell tab's columns were two disagreeing sets of numbers** — headers
+  panel-relative with their own widths, rows row-relative with different ones,
+  a few pixels apart on every numeric column. Nobody would have found that by
+  looking; it surfaced only when both were made to read one table.
+
+#### A sabotage that found the wrong bug, and was right to
+
+- **The entry meant to invert Auctions' `vs market` ratio matched an
+  identical line in the Buy tab's `% Mkt` sort first**, because `str.replace`
+  takes the first occurrence — and the suite did not notice THAT either.
+  Nothing checked pct ORDERING, only that bid-only rows sank, so the ratio
+  could have been upside down since it was written.
+- The lesson is about the sabotage, not the code: **a sabotage whose `find`
+  is not unique is testing a function you did not choose.** Both entries now
+  include enough context to name their own function, and pct has assertions
+  that a ratio is a ratio rather than unit price under another name.
+- **An assertion pinned an unstable sort's tie order** and was replaced.
+  `table.sort` is not stable in Lua, so naming which of two equal rows lands
+  second records an accident and fails on a different build rather than on a
+  real change.
+
+#### The quality-colour question, answered by NOT doing it
+
+- **History's item names stay uncoloured, deliberately.** Every other table's
+  item column is quality-coloured already, so "quality colours wherever the
+  data exists" turned out to be a finding rather than a task — except here,
+  where the ledger stores a name and an item id and no quality.
+- Colouring them would mean a `GetItemInfo` per row inside a repaint that
+  `ui.ScanMailSales` can trigger while the client is storming
+  `MAIL_INBOX_UPDATE` and resolving item data. That is exactly the shape HARD
+  RULE 16 forbids and what froze Courier. **Recording quality at log time**
+  would be the honest route if this is ever wanted — a data-model change that
+  would not colour existing history — and it is not worth it for a cosmetic
+  gain. The decision is commented at the paint site so it is not "fixed"
+  later.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

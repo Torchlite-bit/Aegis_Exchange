@@ -3020,6 +3020,50 @@ function ui.FillResultRow(row, r)
     row:Show()
 end
 
+-- Clicking a column header: the SAME column flips direction, a NEW column
+-- starts ascending. Returns the new key and direction.
+--
+-- One rule, five tables. There were three hand-written copies of this before
+-- Auctions and History wanted a fourth and a fifth -- and three copies of a
+-- four-line rule is how a table ends up flipping when its neighbour does not.
+function ui.NextSort(curKey, curDir, key)
+    if curKey == key then
+        return key, (curDir == "asc") and "desc" or "asc"
+    end
+    return key, "asc"
+end
+
+-- Order a copy of `all` by `keyOf`, ascending or descending.
+--
+-- THE NIL RULE IS THE WHOLE FUNCTION, and this addon has already got it
+-- wrong once: a row whose value is missing ALWAYS sinks, in BOTH directions.
+-- Folding the guards into the direction branch instead floats priceless rows
+-- to the TOP of a descending sort, where they read as the most expensive
+-- things on the page -- a bid-only auction presenting as the dearest listing.
+-- That is a claim about what the table MEANS, not about any one column, so it
+-- lives in one place and every table borrows it.
+--
+-- `keyOf` may return numbers or strings, but must be consistent within a
+-- column: Lua cannot order a number against a string. An empty string is a
+-- value and does not sink -- "" is truthy in Lua.
+function ui.SortByKey(all, keyOf, dir)
+    local rows = {}
+    local i = 1
+    while i <= table.getn(all or {}) do
+        table.insert(rows, all[i])
+        i = i + 1
+    end
+    table.sort(rows, function(a, b)
+        local av, bv = keyOf(a), keyOf(b)
+        if not av and not bv then return false end
+        if not av then return false end   -- no value -> always last
+        if not bv then return true end
+        if dir == "desc" then return av > bv end
+        return av < bv
+    end)
+    return rows
+end
+
 -- Sort a working copy of `all` by column key/direction, applying an optional
 -- per-unit Max filter. Shared by the Buy and Crafting result panes so both
 -- handle bid-only rows (no buyout) and % market the same way.
@@ -3033,15 +3077,13 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
         end
         k = k + 1
     end
-    -- Name sorts alphabetically; everything else numerically.
+    -- Name sorts alphabetically; everything else numerically. Both go
+    -- through ui.SortByKey -- a name is never nil here (it falls back to "",
+    -- which is truthy), so the sink rule simply never fires on this column.
     if sortKey == "name" then
-        table.sort(rows, function(a, b)
-            local an, bn = string.lower(a.name or ""), string.lower(b.name or "")
-            if an == bn then return false end
-            if dir == "desc" then return an > bn end
-            return an < bn
-        end)
-        return rows
+        return ui.SortByKey(rows, function(r)
+            return string.lower(r.name or "")
+        end, dir)
     end
 
     local function keyOf(r)
@@ -3064,15 +3106,7 @@ function ui.SortResults(all, sortKey, dir, maxUnit)
         end
         return r.unit
     end
-    table.sort(rows, function(a, b)
-        local av, bv = keyOf(a), keyOf(b)
-        if not av and not bv then return false end
-        if not av then return false end   -- no price -> always last
-        if not bv then return true end
-        if dir == "desc" then return av > bv end
-        return av < bv
-    end)
-    return rows
+    return ui.SortByKey(rows, keyOf, dir)
 end
 
 -- Build the clickable column headers for a results table. Every column sorts.
@@ -6473,12 +6507,8 @@ end
 -- Click a sortable header: same column toggles direction, a new column resets
 -- to ascending. Re-renders the current results.
 function ui.SetBuySort(key)
-    if ui.buySortKey == key then
-        ui.buySortDir = (ui.buySortDir == "asc") and "desc" or "asc"
-    else
-        ui.buySortKey = key
-        ui.buySortDir = "asc"
-    end
+    ui.buySortKey, ui.buySortDir =
+        ui.NextSort(ui.buySortKey, ui.buySortDir, key)
     ui.UpdateBuyList()
 end
 
@@ -7022,12 +7052,8 @@ function ui.RefreshCraftStatus()
 end
 
 function ui.SetCraftSort(key)
-    if ui.craftSortKey == key then
-        ui.craftSortDir = (ui.craftSortDir == "asc") and "desc" or "asc"
-    else
-        ui.craftSortKey = key
-        ui.craftSortDir = "asc"
-    end
+    ui.craftSortKey, ui.craftSortDir =
+        ui.NextSort(ui.craftSortKey, ui.craftSortDir, key)
     ui.UpdateCraftList()
 end
 
@@ -7333,6 +7359,18 @@ local AUC_ROWS_MAX = 32
 local ACX = { name = 2, qty = 176, unit = 216, stack = 300, time = 392,
               mkt = 452, cancel = 540 }
 local ACW = { name = 172, qty = 34, unit = 80, stack = 88, time = 56, mkt = 84 }
+-- Numeric columns are right-justified in the rows, so their headers sit over
+-- the RIGHT edge of the cells -- ui.MakeSortHeaders does that from `just`.
+-- Left-aligning the header of a right-aligned column is what makes a table
+-- look assembled rather than designed.
+local AUC_HEADER_DEFS = {
+    { key = "name",  text = "Item" },
+    { key = "qty",   text = "Qty" },
+    { key = "unit",  text = "Unit" },
+    { key = "stack", text = "Buyout" },
+    { key = "time",  text = "Time" },
+    { key = "mkt",   text = "vs market" },
+}
 
 function ui.BuildAuctionsTab()
     local panel = ui.panels["Auctions"]
@@ -7364,21 +7402,15 @@ function ui.BuildAuctionsTab()
     ui.aucStatus:SetJustifyH("LEFT")
     ui.aucStatus:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    -- Column headers.
+    -- Column headers -- CLICKABLE, through the same builder the Buy and
+    -- Crafting tables use. They were bare grey text before, which read as a
+    -- disabled band rather than as the table's headings and could not be
+    -- pressed at all.
+    ui.aucSortKey = "unit"
+    ui.aucSortDir = "asc"
     local rowLeft = 6
-    local hdr = function(cx, text, just)
-        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -54)
-        fs:SetText(text)
-        if just then fs:SetJustifyH(just) end
-        return fs
-    end
-    hdr(ACX.name, "Item")
-    hdr(ACX.qty, "Qty")
-    hdr(ACX.unit, "Unit")
-    hdr(ACX.stack, "Buyout")
-    hdr(ACX.time, "Time")
-    hdr(ACX.mkt, "vs market")
+    ui.aucHeaders = ui.MakeSortHeaders(panel, rowLeft, -54, ACX, ACW,
+        function(key) ui.SetAucSort(key) end, AUC_HEADER_DEFS)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeAucScroll",
         panel, "FauxScrollFrameTemplate")
@@ -7457,6 +7489,36 @@ ui.GrowAucRows = function(n)
     ui.GrowAucRows(AUC_ROWS)
 end
 
+function ui.SetAucSort(key)
+    ui.aucSortKey, ui.aucSortDir =
+        ui.NextSort(ui.aucSortKey, ui.aucSortDir, key)
+    ui.UpdateAuctionsList()
+end
+
+-- Order your own auctions by the chosen column.
+--
+-- `mkt` sorts by how far ABOVE the cheapest known listing each one is, so
+-- ascending puts the auctions that are still lowest first and descending puts
+-- the ones you have been undercut hardest on at the top -- which is the
+-- question this column exists to answer. An item the price DB has never seen
+-- has no answer and sinks, the same way a bid-only row does.
+function ui.SortAuctions(all, sortKey, dir)
+    local function keyOf(r)
+        if sortKey == "name" then return string.lower(r.name or "")
+        elseif sortKey == "qty" then return r.count
+        elseif sortKey == "stack" then
+            return (r.buyout and r.buyout > 0) and r.buyout or nil
+        elseif sortKey == "time" then return r.timeLeft
+        elseif sortKey == "mkt" then
+            local m = r.itemId and A.db.MinBuyout(r.itemId)
+            if m and m > 0 and r.unit then return r.unit / m end
+            return nil
+        end
+        return r.unit
+    end
+    return ui.SortByKey(all, keyOf, dir)
+end
+
 -- Read the owner list into ui.aucAuctions; `request` also pings the server.
 function ui.RefreshAuctions(request)
     if not ui.aucBuilt then return end
@@ -7467,7 +7529,10 @@ end
 
 function ui.UpdateAuctionsList()
     if not ui.aucScroll then return end
-    local rows = ui.aucAuctions or {}
+    local sortKey = ui.aucSortKey or "unit"
+    local dir = ui.aucSortDir or "asc"
+    local rows = ui.SortAuctions(ui.aucAuctions or {}, sortKey, dir)
+    ui.PaintSortHeaders(ui.aucHeaders, sortKey, dir)
     local total = table.getn(rows)
 
     local cap = A.sell.CAP or 120
@@ -7652,6 +7717,19 @@ end
 -- with totals over a selectable window.
 -- ---------------------------------------------------------------------------
 
+-- Row-relative column x / width, at file scope because the headers, the row
+-- cells and the sort all have to agree about them. They were three separate
+-- sets of numbers -- a local HCX for the headers, literal widths in the row
+-- builder, and no sort at all.
+local HCX = { when = 2, kind = 92, item = 176, amount = 470 }
+local HCW = { when = 86, kind = 80, item = 290, amount = 96 }
+local HIST_HEADER_DEFS = {
+    { key = "when",   text = "When" },
+    { key = "kind",   text = "Type" },
+    { key = "item",   text = "Item" },
+    { key = "amount", text = "Amount", just = "RIGHT" },
+}
+
 local HIST_ROWS, HIST_ROW_H = 12, 20
 local HIST_ROWS_MAX = 34
 -- Period options: label + window seconds (0 = all time).
@@ -7750,21 +7828,17 @@ function ui.BuildHistoryTab()
     ui.histNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
 
-    -- Column headers.
-    local rowLeft = 6
-    local HCX = { when = 2, kind = 92, item = 176, amount = 470 }
+    -- Column headers -- clickable, through the shared builder.
+    --
+    -- The default is `when` DESCENDING, which is the order the list has
+    -- always been built in (most recent first). Making it the sort's default
+    -- rather than a fixed reversal is what lets it be changed at all.
     ui.histCols = HCX
-    local hdr = function(cx, text, just)
-        local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, -84)
-        fs:SetText(text)
-        if just then fs:SetJustifyH(just) end
-        return fs
-    end
-    hdr(HCX.when, "When")
-    hdr(HCX.kind, "Type")
-    hdr(HCX.item, "Item")
-    hdr(HCX.amount, "Amount", "RIGHT")
+    local rowLeft = 6
+    ui.histSortKey = "when"
+    ui.histSortDir = "desc"
+    ui.histHeaders = ui.MakeSortHeaders(panel, rowLeft, -84, HCX, HCW,
+        function(key) ui.SetHistSort(key) end, HIST_HEADER_DEFS)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
         panel, "FauxScrollFrameTemplate")
@@ -7800,10 +7874,10 @@ ui.GrowHistRows = function(n)
                 fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
                 return fs
             end
-            row.when   = mk(HCX.when, 86)
-            row.kind   = mk(HCX.kind, 80)
-            row.item   = mk(HCX.item, 290)
-            row.amount = mk(HCX.amount, 96, "RIGHT")
+            row.when   = mk(HCX.when, HCW.when)
+            row.kind   = mk(HCX.kind, HCW.kind)
+            row.item   = mk(HCX.item, HCW.item)
+            row.amount = mk(HCX.amount, HCW.amount, "RIGHT")
             row:Hide()
             ui.histRows[i] = row
             i = i + 1
@@ -7828,23 +7902,52 @@ function ui.RefreshHistory()
         .. "   Spent " .. util.FormatMoney(spend, true)
         .. "   Net " .. netColor .. util.FormatMoney(math.abs(net), true) .. "|r")
 
-    -- Build the display list (most recent first) within the window.
+    -- Build the display list within the window, in LEDGER order. The reversal
+    -- that used to live here is now the sort's default (`when` descending), so
+    -- clicking a header can actually change the order -- reversing here as
+    -- well would have fought it.
     local led = A.db.Ledger()
     ui.histView = {}
-    local i = table.getn(led)
-    while i >= 1 do
+    local i = 1
+    while i <= table.getn(led) do
         local e = led[i]
         if not since or (e.t and e.t >= since) then
             table.insert(ui.histView, e)
         end
-        i = i - 1
+        i = i + 1
     end
     ui.UpdateHistoryList()
 end
 
+function ui.SetHistSort(key)
+    ui.histSortKey, ui.histSortDir =
+        ui.NextSort(ui.histSortKey, ui.histSortDir, key)
+    ui.UpdateHistoryList()
+end
+
+-- Order the ledger view by the chosen column.
+--
+-- `amount` sorts by MAGNITUDE, which is what the column shows: the sign is
+-- carried by Sold/Bought in the Type column, and mixing a 40g sale with a 40g
+-- purchase into +40 and -40 would put the two furthest apart when they are
+-- the same size of transaction.
+function ui.SortHistory(all, sortKey, dir)
+    local function keyOf(e)
+        if sortKey == "kind" then return string.lower(e.kind or "")
+        elseif sortKey == "item" then return string.lower(e.item or "")
+        elseif sortKey == "amount" then return e.amount
+        end
+        return e.t
+    end
+    return ui.SortByKey(all, keyOf, dir)
+end
+
 function ui.UpdateHistoryList()
     if not ui.histScroll then return end
-    local rows = ui.histView or {}
+    local sortKey = ui.histSortKey or "when"
+    local dir = ui.histSortDir or "desc"
+    local rows = ui.SortHistory(ui.histView or {}, sortKey, dir)
+    ui.PaintSortHeaders(ui.histHeaders, sortKey, dir)
     local total = table.getn(rows)
     local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.hist,
         HIST_ROW_H, HIST_ROWS_MAX)
@@ -7868,6 +7971,14 @@ function ui.UpdateHistoryList()
                 row.kind:SetTextColor(0.90, 0.55, 0.35)
                 row.amount:SetText("-" .. util.FormatMoney(e.amount, true))
             end
+            -- DELIBERATELY NOT QUALITY-COLOURED, unlike every other table's
+            -- item column. The ledger stores a NAME and an item id, never a
+            -- quality, so colouring here would mean a GetItemInfo per row --
+            -- inside a repaint that ui.ScanMailSales can trigger while the
+            -- client is storming MAIL_INBOX_UPDATE and resolving item data.
+            -- That is precisely the shape HARD RULE 16 exists to forbid, and
+            -- it is what froze Courier. The Type column carries the colour
+            -- that matters here (Sold green, Bought orange) and costs nothing.
             row.item:SetText(e.item or "?")
             row.item:SetTextColor(C.text[1], C.text[2], C.text[3])
             row:Show()
@@ -7900,6 +8011,27 @@ StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {
 
 local BAG_ROWS,  BAG_ROW_H  = 9, 19
 local BAG_ROWS_MAX  = 36
+-- Row-relative column x / width for the Sell tab's listings table. ONE pair,
+-- read by the row cells and by the headers.
+--
+-- They were two sets before: the headers carried panel-relative x values and
+-- their own widths, the rows carried row-relative ones, and the two disagreed
+-- by a few pixels on every numeric column. The scroll frame starts at
+-- LISTBOX.sellList's x, which is what ui.MakeSortHeaders' `rowLeft` is for.
+--
+-- 4px in, not flush with the row's left edge: at 0 the price sat against the
+-- row border -- and against the highlight box under the pfUI skin -- which
+-- read as clipped.
+local SCX = { unit = 4, avail = 92, stack = 252, pct = 392, you = 446 }
+local SCW = { unit = 84, avail = 156, stack = 136, pct = 50, you = 44 }
+local SELL_HEADER_DEFS = {
+    { key = "unit",  text = "Unit price" },
+    { key = "avail", text = "Available" },
+    { key = "stack", text = "Stack price" },
+    { key = "pct",   text = "% mkt" },
+    { key = "you",   text = "You?" },
+}
+
 local LIST_ROWS, LIST_ROW_H = 9, 19
 local LIST_ROWS_MAX = 36
 
@@ -8327,36 +8459,14 @@ ui.GrowBagRows = function(n)
     ui.listHeader:SetText("Select an item to see its listings")
     ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
-    -- Column header labels.
-    -- Every listing column sorts too. Bare clickable text (aegisNoSkin) so the
-    -- pfUI skin doesn't box each header and make them overlap.
+    -- Column headers, through the SHARED builder. This tab carried its own
+    -- copy of it -- same idea, its own font, its own widths, and no support
+    -- for right-aligning a numeric column -- which is why the listings
+    -- headers were grey where every other table's are warm tan.
     ui.sellSortKey = "unit"
     ui.sellSortDir = "asc"
-    local colX = { unit = 200, avail = 292, stack = 452, pct = 592, you = 646 }
-    ui.sellHeaders = {}
-    local mkCol = function(x, text, key, width)
-        local b = CreateFrame("Button", nil, panel)
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -(SELL_TOP_H + 21))
-        b:SetHeight(16)
-        b.aegisNoSkin = true
-        local fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
-        fs:SetJustifyH("LEFT")
-        fs:SetText(text)
-        local w = fs:GetStringWidth() + 12
-        if w > width then w = width end
-        b:SetWidth(w)
-        b.label = fs
-        b.baseText = text
-        b:SetScript("OnClick", function() ui.SetSellSort(key) end)
-        ui.sellHeaders[key] = b
-        return b
-    end
-    mkCol(colX.unit + 4, "Unit price", "unit", 84)   -- +4: matches the row inset
-    mkCol(colX.avail, "Available",   "avail", 156)
-    mkCol(colX.stack, "Stack price", "stack", 136)
-    mkCol(colX.pct,   "% mkt",       "pct",   50)
-    mkCol(colX.you,   "You?",        "you",   44)
+    ui.sellHeaders = ui.MakeSortHeaders(panel, 200, -(SELL_TOP_H + 21),
+        SCX, SCW, function(key) ui.SetSellSort(key) end, SELL_HEADER_DEFS)
 
     local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
         panel, "FauxScrollFrameTemplate")
@@ -8398,14 +8508,11 @@ ui.GrowListRows = function(n)
                 fs:SetJustifyH(just or "LEFT")
                 return fs
             end
-            -- 4px in, not flush with the row's left edge: at 0 the price sat
-            -- against the row border (and against the highlight box under the pfUI
-            -- skin), which read as clipped. The header below is inset to match.
-            row.unit  = mkCell(4, 84)
-            row.avail = mkCell(92, 158)
-            row.stack = mkCell(252, 130)
-            row.pct   = mkCell(392, 48)
-            row.you   = mkCell(446, 40)
+            row.unit  = mkCell(SCX.unit,  SCW.unit)
+            row.avail = mkCell(SCX.avail, SCW.avail)
+            row.stack = mkCell(SCX.stack, SCW.stack)
+            row.pct   = mkCell(SCX.pct,   SCW.pct)
+            row.you   = mkCell(SCX.you,   SCW.you)
             row:SetScript("OnClick", function()
                 local g = row.group
                 if g and g.unit then
@@ -8638,23 +8745,13 @@ end
 -- Click a listings header: same column toggles direction, a new column starts
 -- ascending. Mirrors the Buy / Crafting behaviour.
 function ui.SetSellSort(key)
-    if ui.sellSortKey == key then
-        ui.sellSortDir = (ui.sellSortDir == "asc") and "desc" or "asc"
-    else
-        ui.sellSortKey = key
-        ui.sellSortDir = "asc"
-    end
+    ui.sellSortKey, ui.sellSortDir =
+        ui.NextSort(ui.sellSortKey, ui.sellSortDir, key)
     ui.UpdateListingsList()
 end
 
 -- Sort a copy of the grouped listings by the chosen column.
 function ui.SortSellGroups(all, sortKey, dir)
-    local rows = {}
-    local i = 1
-    while i <= table.getn(all) do
-        table.insert(rows, all[i])
-        i = i + 1
-    end
     local function keyOf(g)
         if sortKey == "avail" then return g.num
         elseif sortKey == "stack" then
@@ -8663,15 +8760,7 @@ function ui.SortSellGroups(all, sortKey, dir)
         elseif sortKey == "you" then return g.mine and 1 or 0 end
         return g.unit
     end
-    table.sort(rows, function(a, b)
-        local av, bv = keyOf(a), keyOf(b)
-        if not av and not bv then return false end
-        if not av then return false end   -- unpriced sinks
-        if not bv then return true end
-        if dir == "desc" then return av > bv end
-        return av < bv
-    end)
-    return rows
+    return ui.SortByKey(all, keyOf, dir)
 end
 
 function ui.UpdateListingsList()

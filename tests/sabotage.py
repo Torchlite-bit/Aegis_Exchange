@@ -141,24 +141,9 @@ SABOTAGES = [
      "buy.page"),
 
     # ---- ui.SortResults --------------------------------------------------
-    # Nil guards folded INTO the direction branch: a descending sort floats
-    # priceless rows to the top, where they read as the most expensive.
-    ("sort-nil-guards-direction-aware", "ui/frame.lua",
-     """        if not av and not bv then return false end
-        if not av then return false end   -- no price -> always last
-        if not bv then return true end
-        if dir == "desc" then return av > bv end
-        return av < bv""",
-     """        if not av and not bv then return false end
-        if dir == "desc" then
-            if not av then return true end
-            if not bv then return false end
-            return av > bv
-        end
-        if not av then return false end
-        if not bv then return true end
-        return av < bv""",
-     "sort_results"),
+    # The nil-guard sabotage that used to live here moved with the code: the
+    # rule is ui.SortByKey's now, and the entry is
+    # `sortbykey-nil-guards-direction-aware` below. One bug, one sabotage.
 
     # Treating a missing unit price as zero -- the other tempting shortcut.
     ("sort-missing-unit-as-zero", "ui/frame.lua",
@@ -417,6 +402,101 @@ end""",
      '    cpChk:SetPoint("TOPLEFT", ccChk, "BOTTOMLEFT", 0, -6)',
      '    cpChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)',
      "anchorchain"),
+
+    # ---- the shared sort rules ---------------------------------------------
+    # THE ORIGINAL FAULT, now in the one place five tables read: nil guards
+    # folded into the direction branch, so a descending sort floats valueless
+    # rows to the TOP, where a bid-only auction reads as the dearest listing.
+    ("sortbykey-nil-guards-direction-aware", "ui/frame.lua",
+     """        if not av and not bv then return false end
+        if not av then return false end   -- no value -> always last
+        if not bv then return true end
+        if dir == "desc" then return av > bv end
+        return av < bv""",
+     """        if not av and not bv then return false end
+        if dir == "desc" then
+            if not av then return true end
+            if not bv then return false end
+            return av > bv
+        end
+        if not av then return false end
+        if not bv then return true end
+        return av < bv""",
+     "sort_results"),
+
+    # Sorting the caller's list in place. Auctions and History keep an
+    # unsorted model that other code reads -- ui.UndercutAuctions walks
+    # ui.aucAuctions directly.
+    ("sortbykey-sorts-in-place", "ui/frame.lua",
+     """    local rows = {}
+    local i = 1
+    while i <= table.getn(all or {}) do
+        table.insert(rows, all[i])
+        i = i + 1
+    end
+    table.sort(rows, function(a, b)""",
+     """    local rows = all or {}
+    table.sort(rows, function(a, b)""",
+     "sort_results"),
+
+    # A new column inherits the last one's direction, so the first click on
+    # a fresh column sorts backwards.
+    ("nextsort-keeps-the-old-direction", "ui/frame.lua",
+     '    return key, "asc"',
+     "    return key, curDir",
+     "sort_results"),
+
+    # The same column no longer toggles: clicking it repeatedly does nothing.
+    ("nextsort-never-toggles", "ui/frame.lua",
+     '        return key, (curDir == "asc") and "desc" or "asc"',
+     '        return key, curDir',
+     "sort_results"),
+
+    # Auctions' vs-market column compares against the wrong end, so the
+    # auctions you have been undercut hardest on sort to the bottom.
+    #
+    # MinBuyout is in the `find` on purpose: the ratio line is character-for-
+    # character identical in ui.SortResults' pct branch, and the first draft
+    # of this entry silently sabotaged that one instead -- which the suite
+    # then failed to notice, because nothing checked pct ORDERING. Both are
+    # covered now, and each targets its own function.
+    ("auction-mkt-ratio-inverted", "ui/frame.lua",
+     """            local m = r.itemId and A.db.MinBuyout(r.itemId)
+            if m and m > 0 and r.unit then return r.unit / m end""",
+     """            local m = r.itemId and A.db.MinBuyout(r.itemId)
+            if m and m > 0 and r.unit then return m / r.unit end""",
+     "sort_results"),
+
+    # The Buy/Crafting % Mkt column, the same way up. This is the one that
+    # got through.
+    ("pct-ratio-inverted", "ui/frame.lua",
+     """            local m = r.itemId and A.db.MarketValue(r.itemId)
+            if m and m > 0 and r.unit then return r.unit / m end""",
+     """            local m = r.itemId and A.db.MarketValue(r.itemId)
+            if m and m > 0 and r.unit then return m / r.unit end""",
+     "sort_results"),
+
+    # % Mkt quietly degraded into a second unit-price column: the ordering
+    # looks plausible and stops answering the question the column is for.
+    ("pct-is-really-unit-price", "ui/frame.lua",
+     """        elseif sortKey == "pct" then
+            local m = r.itemId and A.db.MarketValue(r.itemId)
+            if m and m > 0 and r.unit then return r.unit / m end
+            return nil""",
+     """        elseif sortKey == "pct" then
+            return r.unit""",
+     "sort_results"),
+
+    # History's default order reversed: the ledger reads oldest-first, which
+    # is the opposite of what it has always shown.
+    ("history-default-order-flipped", "ui/frame.lua",
+     """        elseif sortKey == "amount" then return e.amount
+        end
+        return e.t""",
+     """        elseif sortKey == "amount" then return e.amount
+        end
+        return -e.t""",
+     "sort_results"),
 
     # ---- list row counts ---------------------------------------------------
     # THE FAULT THIS RELEASE REMOVED, put back: measure the scroll frame

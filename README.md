@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.23.0)
+# Aegis: Exchange (v1.24.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -233,6 +233,9 @@ Every auction you have out, with time left, current bid, and the thing you
 actually care about: **have I been undercut?** Green means you're still the
 cheapest. Red means someone slid under you. Cancel anything with one click.
 
+Every column sorts — click **vs market** and the auctions you've been undercut
+hardest on come to the top.
+
 ### 🔨 Crafting — is this even worth making?
 Open a profession, pick a recipe, hit **Add to Aegis**. The Crafting tab then
 lists every reagent — click one to shop for it like any other item. And it does
@@ -247,11 +250,13 @@ click through recipes. It reads saved prices, so it works with the AH closed.
 Sales get logged **straight from your mailbox** — open your mail and Aegis
 records every "Auction successful" for you. Purchases get logged when you buy.
 Then it tells you **Income · Spent · Net** over the last 24h, 7d, 30d, or all
-time.
+time. Sort by when, type, item or amount — newest first unless you say
+otherwise.
 
 ### 🪟 Resize it — or scale it
-Drag the grip in the bottom-right corner. The lists re-fit as you let go, so a
-taller window shows **more rows** rather than more blank space. Vanilla frames
+Drag the grip in the bottom-right corner. **Every** list re-fits — Buy, Sell,
+Auctions, Crafting and History — so a taller window shows **more rows** rather
+than more blank space. Vanilla frames
 never reflow, so that's all size can do — for *bigger*, there's a **window
 scale** on the Aegis tab (70%–150%). Both are remembered per character.
 
@@ -387,7 +392,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.23.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.24.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
