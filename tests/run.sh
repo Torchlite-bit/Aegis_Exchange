@@ -54,6 +54,11 @@ python3 tests/lint/scoping.py || fail=1
 
 # ---------------------------------------------------------------------------
 step "Top-level definitions still present"
+# Its own self-test first, for the same reason lua50.py has one: this lint
+# spent its whole life asking whether a NAME appeared anywhere in the file,
+# so a rename passed as a substring and a deletion passed when a comment
+# mentioned it. A lint that never fires is worse than none.
+python3 tests/lint/definitions.py --selftest || fail=1
 # Skipped when the tree is dirty against no useful ref, or outside a git repo.
 if git rev-parse --git-dir >/dev/null 2>&1; then
     python3 tests/lint/definitions.py HEAD >/dev/null || {

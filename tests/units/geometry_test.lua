@@ -717,4 +717,141 @@ H.check("the chain does step left of its root, so the inset is load-bearing",
         worst ~= nil and worst < SET_INSET,
         "root " .. SET_INSET .. ", leftmost " .. tostring(worst))
 
+-- ---------------------------------------------------------------------------
+H.section("Every list fills its own box at every window height")
+-- ---------------------------------------------------------------------------
+
+-- THE FAULT THIS REPLACES. Until v1.23.0 six lists -- Crafting, its recipe
+-- tree, Auctions, History, and the Sell tab's bag and listings columns --
+-- counted their rows with ui.RowsFor, which measured the scroll frame. Every
+-- one of those frames is anchored by two corners, so GetHeight() reports the
+-- height it was last LAID OUT at, which is the window's CREATION size. Drag
+-- the window taller and the box grew with its anchors while the list kept the
+-- count it worked out at startup.
+--
+-- That is the same trap that took the Buy table, the Advanced widths and the
+-- Saved Searches columns. It is arithmetic on the window's own height now,
+-- and the numbers come out of the file rather than being restated here --
+-- every one of them is also a SetPoint offset.
+
+-- LISTBOX is loaded and RUN, not re-typed: `bag` and `sellList` are written
+-- as SELL_TOP_H plus a gap, and a copy here would not notice SELL_TOP_H
+-- moving.
+SELL_TOP_H = constant("SELL_TOP_H")
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local body, grabbing = {}, false
+    for line in f:lines() do
+        if not grabbing then
+            if string.find(line, "^local LISTBOX = {") then
+                grabbing = true
+                table.insert(body, "LISTBOX = {")
+            end
+        else
+            table.insert(body, line)
+            if string.find(line, "^}") then break end
+        end
+    end
+    f:close()
+    if not grabbing then error("did not find: local LISTBOX = {") end
+    local fn, err = loadstring(table.concat(body, "\n"), "LISTBOX")
+    if not fn then error("LISTBOX will not compile: " .. tostring(err)) end
+    fn()
+end
+
+do
+    local fn, err = loadstring(extract("function ui.ListRowsAt("), "ListRowsAt")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- `local NAME, NAME_H = n, n` -- the paired form the row constants use, which
+-- `constant` cannot read.
+local function pairConst(a, b)
+    local f = assert(io.open(SRC, "r"))
+    local x, y
+    for line in f:lines() do
+        local _, _, u, v = string.find(line,
+            "^local " .. a .. "%s*,%s*" .. b .. "%s*=%s*(%d+)%s*,%s*(%d+)")
+        if u then x, y = tonumber(u), tonumber(v); break end
+    end
+    f:close()
+    if not y then error("did not find: local " .. a .. ", " .. b) end
+    return x, y
+end
+
+local LISTS = {}
+do
+    local _, h
+    _, h = pairConst("CSIDE_ROWS", "CSIDE_ROW_H")
+    table.insert(LISTS, { name = "craft recipe tree", box = LISTBOX.craftSide,
+                          rowH = h, max = constant("CSIDE_ROWS_MAX") })
+    _, h = pairConst("CRAFT_ROWS", "CRAFT_ROW_H")
+    table.insert(LISTS, { name = "Crafting", box = LISTBOX.craft,
+                          rowH = h, max = constant("CRAFT_ROWS_MAX") })
+    _, h = pairConst("AUC_ROWS", "AUC_ROW_H")
+    table.insert(LISTS, { name = "Auctions", box = LISTBOX.auc,
+                          rowH = h, max = constant("AUC_ROWS_MAX") })
+    _, h = pairConst("HIST_ROWS", "HIST_ROW_H")
+    table.insert(LISTS, { name = "History", box = LISTBOX.hist,
+                          rowH = h, max = constant("HIST_ROWS_MAX") })
+    _, h = pairConst("BAG_ROWS", "BAG_ROW_H")
+    table.insert(LISTS, { name = "Sell bags", box = LISTBOX.bag,
+                          rowH = h, max = constant("BAG_ROWS_MAX") })
+    _, h = pairConst("LIST_ROWS", "LIST_ROW_H")
+    table.insert(LISTS, { name = "Sell listings", box = LISTBOX.sellList,
+                          rowH = h, max = constant("LIST_ROWS_MAX") })
+end
+
+H.eq("every list is accounted for", table.getn(LISTS), 6)
+
+for _, L in ipairs(LISTS) do
+    local function area(winH)
+        return ui.PanelHeightAt(winH) - L.box.top - L.box.bot
+    end
+
+    -- A box with no room at the smallest allowed window is a list with a
+    -- minimum size nobody wrote down.
+    H.check(L.name .. ": its box has room at MIN_H", area(MIN_H) >= L.rowH,
+            "area " .. area(MIN_H) .. ", row " .. L.rowH)
+
+    for _, winH in ipairs({ MIN_H, 600, 700, MAX_H }) do
+        local n = ui.ListRowsAt(winH, L.box, L.rowH, L.max)
+        H.check(L.name .. ": at least one row at " .. winH, n >= 1, n)
+        -- Nothing hangs out of the box. These rows are not the scroll
+        -- frame's scroll child, so nothing clips one -- it draws over
+        -- whatever is below it.
+        H.check(L.name .. ": " .. n .. " rows fit the box at " .. winH,
+                n * L.rowH <= area(winH),
+                n .. " x " .. L.rowH .. " > " .. area(winH))
+        -- ...and no whole row of empty space is left, which is the visible
+        -- half of the bug: a full-height box with a half-full list.
+        H.check(L.name .. ": no wasted row at " .. winH,
+                n == L.max or (n + 1) * L.rowH > area(winH),
+                n .. " rows in " .. area(winH) .. "px of " .. L.rowH)
+    end
+
+    -- THE REGRESSION ITSELF. The measuring version returned the same count
+    -- however tall the window was; this assertion is the one a revert fails.
+    H.check(L.name .. ": a taller window shows MORE rows",
+            ui.ListRowsAt(MAX_H, L.box, L.rowH, L.max)
+                > ui.ListRowsAt(MIN_H, L.box, L.rowH, L.max),
+            ui.ListRowsAt(MIN_H, L.box, L.rowH, L.max) .. " -> "
+                .. ui.ListRowsAt(MAX_H, L.box, L.rowH, L.max))
+
+    -- The cap is a cap.
+    H.eq(L.name .. ": the row pool ceiling holds",
+         ui.ListRowsAt(100000, L.box, L.rowH, L.max), L.max)
+end
+
+-- Degenerate input must not produce a zero or negative row count: a list that
+-- draws no rows at all reads as a broken tab, and this runs before UIParent
+-- has been measured on some logins.
+H.eq("an unmeasured window still shows a row",
+     ui.ListRowsAt(0, LISTBOX.auc, 21, 32), 1)
+H.eq("...and so does a nonsense one",
+     ui.ListRowsAt(-500, LISTBOX.auc, 21, 32), 1)
+H.eq("a missing box is survivable", ui.ListRowsAt(MAX_H, nil, 21, 32), 1)
+H.eq("...and a zero row height", ui.ListRowsAt(MAX_H, LISTBOX.auc, 0, 32), 1)
+
 os.exit(H.report("geometry"))

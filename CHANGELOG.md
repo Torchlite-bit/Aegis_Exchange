@@ -12,6 +12,73 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.23.0]
+
+Every table now looks like the Buy table, and six lists that stopped short of
+their own boxes now fill them. `/reload`.
+
+### Fixed
+- **Six lists kept the row count they worked out when the window was
+  created.** Crafting, its recipe tree, Auctions, History, and the Sell tab's
+  bag and listings columns all counted their rows by measuring their scroll
+  frame — and every one of those frames is anchored by two corners, so
+  `GetHeight()` reports the height it was last *laid out* at. Drag the window
+  taller and the box grew with its anchors while the list did not: a
+  full-height box with a half-full list, and empty space below the last row.
+
+  This is the same trap that took the Buy results table, the Advanced column
+  widths and the Saved Searches lists. Those three were each fixed in place;
+  this is the audit that finished the job. Row counts are arithmetic on the
+  window's own height now — which is set explicitly, so it is true the moment
+  it is read — and **the measuring version has been deleted rather than left
+  available**. A trap four separate bugs walked into does not want a
+  convenient spelling.
+
+### Changed
+- **The Sell, Auctions, Crafting and History tables wear the Buy table's
+  chrome**: the faint zebra banding, the hairline rule between rows, and the
+  selection tint where rows can be picked. Previously the Buy table had the
+  only copy, which is exactly why every other tab read as a different addon.
+
+  The banding is keyed to a row's **position**, never to the entry it is
+  showing, so scrolling slides data past fixed stripes instead of making them
+  crawl along with it.
+
+  History gets no selection tint and no tick column: a ledger line is a
+  record, and there is nothing to select one *for*.
+
+### Internal
+- **One function, five tables.** `ui.AddRowChrome` builds all three textures
+  in the one order that works — stripe, then hairline, then tint. They share
+  the BACKGROUND layer, where creation order *is* draw order, so any other
+  order is a silent visual bug: nothing errors, every row still draws, and a
+  selected row wears a hairline scar or reads as striped-and-selected. That
+  order is now asserted directly, by running the real function against a row
+  that records what it was asked to make.
+- The suite also checks there is exactly **one** copy of each chrome colour in
+  the file, because four tabs each growing their own is the shape that
+  produced the Saved-vs-Builder drift in 1.19.3.
+- **`tests/lint/definitions.py` had been inert for its whole life.** It asked
+  whether a name appeared *anywhere in the file text*, so a rename passed as a
+  substring (`ui.TableRowsAt` is inside `ui.TableRowsAtNew`) and a deletion
+  passed whenever a comment happened to mention the name — which is precisely
+  how it waved through the `ui.RowsFor` removal above.
+
+  It compares definition *sets* now. It also **fails when it compared
+  nothing**: without a git repo every file is skipped as "new" and the run
+  exited 0 having checked nothing at all, which is indistinguishable from a
+  clean pass. It has a `--selftest` mode pinning both misses, run before it
+  every time — the same guard `lua50.py` has had all along.
+
+  This repo has met this failure before, in `sharedlayout.py`: a checker
+  fooled by its own documentation is worse than none.
+- Deliberate removals are expressible: `REMOVED_ON_PURPOSE` names them and
+  their reason, and an entry naming something still defined is reported as
+  stale, so the list cannot quietly become a blanket exemption.
+- Nine new sabotages across the row counts and the chrome; **73 caught in
+  all.** Two written for this pass were deleted rather than papered over — a
+  sabotage that cannot fail proves as little as a test that cannot.
+
 ## [1.22.0]
 
 Five of the nine placeholder filter components are real filters now.
@@ -1997,6 +2064,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

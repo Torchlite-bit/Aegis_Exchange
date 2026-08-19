@@ -1226,6 +1226,9 @@ bump and no CHANGELOG entry. `./tests/run.sh`; see `tests/README.md`.
   carries a warning naming all three. **Six callers on other tabs are
   unaudited** — Crafting, Auctions, History, the bag and list pickers — and any
   "list does not fill its box" report should start there.
+
+  > Audited in **3d (v1.23.0)**: all six were carrying the fault, and
+  > `ui.RowsFor` has been deleted rather than left available.
 - **A capped list needs an OFFSET, not just a count.** `SAVED_ROWS` was a pool
   ceiling and `fit` a visible count, and nothing carried a position — so a
   thirteenth favourite could not be reached at all. Both columns scroll on the
@@ -1520,6 +1523,71 @@ provide; still unscheduled, and deliberately alone).
   row that had an owner. Caught only because the sabotage-first habit made the
   "does not match" assertion fail loudly rather than pass vacuously. A
   sentinel is the only way to say "absent" through a table.
+
+### 3d — Feature batch, phase three (the tables) — ✅ **DONE** (v1.23.0)
+
+The restyle's structural half: the row chrome shared by every table, and the
+`ui.RowsFor` audit. The headers half (sortable columns on Auctions and
+History, folding the Sell tab's hand-rolled copy into `ui.MakeSortHeaders`,
+quality colours where the data exists) is **not** started.
+
+- **The `ui.RowsFor` warning was right about all six.** It named Crafting, the
+  recipe tree, Auctions, History and the two Sell columns as unaudited, and
+  every single one was carrying the fault — each measured a scroll frame
+  anchored by two corners, so each kept the row count it computed at the
+  window's creation size. Fourth, fifth, sixth, seventh, eighth and ninth
+  instances of the same trap, found by reading the warning rather than by a
+  report.
+- **The measuring function is DELETED, not kept as a shim.** A trap four
+  separate bugs walked into does not want a convenient spelling. `ui.RowsFor`
+  is gone and `ui.ListRowsAt` derives from the window's height.
+- **The insets live in ONE table that both readers use.** `LISTBOX` carries
+  each list's top and bottom inset, and the `SetPoint` that positions the box
+  reads the same fields the row count does. Before this the second reader did
+  not exist at all — which is how a box and its contents could disagree.
+- **A test that reads a number cannot detect that number changing**, and one
+  sabotage written for this pass was deleted for exactly that. The geometry
+  suite reads `LISTBOX` out of the file on purpose, so nudging an inset moves
+  both sides of the comparison. The assertion that DOES bite is
+  "a taller window shows more rows" — that is the one a revert fails.
+
+#### The chrome
+
+- **The Buy table had the only copy, and that is why every other tab read as a
+  different addon.** One `ui.AddRowChrome` now serves five tables. Four copies
+  would have been the Saved-vs-Builder drift of 1.19.3 all over again, in a
+  place where the difference is visible on every row.
+- **Creation order is the whole function.** All three textures share the
+  BACKGROUND layer, where draw order IS creation order: stripe, then hairline,
+  then tint. Any other order is a silent visual bug — nothing errors, every row
+  still draws, and a selected row wears a hairline scar or reads as
+  striped-and-selected.
+- **That order is testable, and the look is not.** The function is extracted
+  and RUN against a row that records what it was asked to make, so the
+  ordering rule is an assertion rather than a comment. This is the division of
+  labour the last three releases kept discovering: the visible result needs a
+  person, the rule underneath it does not.
+
+#### The lint that had never worked
+
+- **`definitions.py` asked whether a NAME appeared anywhere in the file
+  text.** So a rename passed as a substring (`ui.TableRowsAt` is inside
+  `ui.TableRowsAtNew`) and a deletion passed whenever a comment mentioned the
+  name — which is exactly how it waved through the `ui.RowsFor` removal in
+  this very release. It compares definition SETS now.
+- **It also reported ok having compared nothing.** With no git repo every file
+  is skipped as "new" and the run exits 0, which is indistinguishable from a
+  clean pass — and is how it sat in `sabotage.py`'s suite list looking green
+  while being completely inert. It fails on an empty comparison now, and it
+  is not a sabotage suite (the throwaway copy has no `.git`); it proves itself
+  with `--selftest`, the way `lua50.py` always has.
+- **This is the second checker in this repo fooled by its own documentation.**
+  `sharedlayout.py` was the first. The rule earns restating: when a lint reads
+  source text, it must strip or exclude the places where a name can appear
+  without meaning anything.
+- **Deliberate removals are now expressible**, and the mechanism checks itself
+  both ways: an entry naming something still defined is reported as stale, so
+  the exemption list cannot quietly become a blanket one.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

@@ -888,19 +888,15 @@ end
 -- to this function with arithmetic on the WINDOW's height, which is set
 -- explicitly and is therefore true the moment it is read.
 --
--- Only use this on a frame whose height was set with SetHeight. The remaining
--- callers -- Crafting, Auctions, History, the bag and list pickers -- have not
--- been audited; if one of those lists is ever reported as not filling its box,
--- this is the first thing to look at.
-function ui.RowsFor(scroll, rowH, minRows, maxRows)
-    if not scroll then return minRows end
-    local h = scroll:GetHeight() or 0
-    if h <= 0 then return minRows end     -- never laid out; use the fallback
-    local n = math.floor(h / rowH)
-    if n < 1 then n = 1 end
-    if n > maxRows then n = maxRows end
-    return n
-end
+-- THE AUDIT IS DONE AND THIS FUNCTION IS GONE. The remaining six callers --
+-- Crafting, its recipe tree, Auctions, History, and the Sell tab's bag and
+-- listings lists -- every one anchored its scroll frame by two corners, so
+-- every one of them was carrying the fault. They derive from the window's
+-- height through ui.ListRowsAt now, and there is no measuring version left to
+-- reach for.
+--
+-- ui.RowsFor is deliberately NOT kept as a shim. A trap that four separate
+-- bugs walked into does not want a convenient spelling.
 
 -- A sub-tab button: a dark pill with a centered label, recoloured on select.
 local function MakeSubTab(parent, name)
@@ -2699,6 +2695,65 @@ local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 -- `selectable` (Buy tab only) builds a Blizzlike row: no per-row Buy/Bid
 -- buttons, click to select, and the window's bottom bar acts on the selection.
 -- The Crafting tab passes nothing and keeps its own per-row buttons.
+-- The chrome every results row wears: a zebra stripe, a hairline separator,
+-- and -- where rows can be picked -- a selection tint.
+--
+-- ONE function, five tables. The Buy table had the only copy of this, which
+-- is exactly why every other table read as a different addon; four tabs each
+-- growing their own copy instead is the shape that produced the
+-- Saved-vs-Builder drift in 1.19.3.
+--
+-- CREATION ORDER IS THE WHOLE THING. All three are BACKGROUND textures, and
+-- within one layer the draw order IS the creation order:
+--   zebra     first -- bottom-most, so a selected odd row reads as selected
+--                      rather than as striped-and-selected;
+--   separator next  -- above the stripe, so it survives on a banded row;
+--   selection last  -- so it covers the separator on the picked row instead
+--                      of letting it show through as a scar.
+-- Any other order is a silent visual bug: nothing errors, every row still
+-- draws, and the fault is only visible to a person looking at the tab. The
+-- cells are FontStrings on OVERLAY, so they sit above all three whenever they
+-- are created.
+--
+-- The stripe is keyed to the row's POSITION IN THE POOL, never to the entry
+-- it happens to be showing. Set once here and never touched by any paint,
+-- which is what makes scrolling slide the data past fixed banding instead of
+-- making the stripes crawl with it.
+function ui.AddRowChrome(row, i, selectable)
+    if not row then return row end
+
+    local zebra = row:CreateTexture(nil, "BACKGROUND")
+    zebra:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+    zebra:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+    if math.mod(i, 2) == 0 then
+        zebra:SetTexture(1, 1, 1, 0.022)
+    else
+        -- Fully transparent rather than absent, so every row owns a stripe
+        -- texture and the banding cannot depend on which rows exist.
+        zebra:SetTexture(0, 0, 0, 0)
+    end
+    row.zebra = zebra
+
+    local sep = row:CreateTexture(nil, "BACKGROUND")
+    sep:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+    sep:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+    sep:SetHeight(1)
+    sep:SetTexture(0.28, 0.24, 0.15, 0.55)
+    row.sep = sep
+
+    if selectable then
+        -- Under the text (BACKGROUND) so it TINTS the row rather than
+        -- covering the numbers.
+        local sel = row:CreateTexture(nil, "BACKGROUND")
+        sel:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+        sel:Hide()
+        row.selTex = sel
+    end
+    return row
+end
+
 local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(rowH)
@@ -2709,6 +2764,9 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         row:SetPoint("TOPLEFT", store[i - 1], "BOTTOMLEFT", 0, 0)
         row:SetPoint("TOPRIGHT", store[i - 1], "BOTTOMRIGHT", 0, 0)
     end
+    -- Before any cell, so the stripe, the hairline and the selection tint are
+    -- created in that order and nothing else is between them.
+    ui.AddRowChrome(row, i, selectable)
     local mkCell = function(x, w, just)
         local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         fs:SetPoint("LEFT", row, "LEFT", x, 0)
@@ -2729,35 +2787,6 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
             if row.entry then ui.ToggleBuyCheck(row.entry) end
         end)
         row.check = cb
-
-        -- Zebra stripe. Created FIRST, so within the BACKGROUND layer it
-        -- draws beneath both the separator and the selection tint -- a
-        -- selected odd row must read as selected, not as striped-and-
-        -- selected.
-        --
-        -- Keyed to the row's POSITION in the pool, never to the auction, so
-        -- scrolling slides the data past a fixed banding instead of making
-        -- the stripes crawl. It is set once here and never touched by the
-        -- paint, which is what guarantees that.
-        local zebra = row:CreateTexture(nil, "BACKGROUND")
-        zebra:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-        zebra:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
-        if math.mod(i, 2) == 0 then
-            zebra:SetTexture(1, 1, 1, 0.022)
-        else
-            zebra:SetTexture(0, 0, 0, 0)
-        end
-        row.zebra = zebra
-
-        -- Hairline between rows, as the mockup has. BACKGROUND layer so the
-        -- selection tint (also BACKGROUND, drawn after) covers it on the
-        -- selected row rather than showing through as a scar.
-        local sep = row:CreateTexture(nil, "BACKGROUND")
-        sep:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
-        sep:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
-        sep:SetHeight(1)
-        sep:SetTexture(0.28, 0.24, 0.15, 0.55)
-        row.sep = sep
 
         local icon = row:CreateTexture(nil, "ARTWORK")
         icon:SetWidth(16); icon:SetHeight(16)
@@ -2785,16 +2814,7 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         row.stack = mkCell(RCX.stack, RCW.stack)
         row.pct   = mkCell(RCX.pct, RCW.pct)
     end
-    if selectable then
-        -- Selection highlight, drawn UNDER the text (BACKGROUND layer) so it
-        -- tints the row rather than covering the numbers.
-        local sel = row:CreateTexture(nil, "BACKGROUND")
-        sel:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-        sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
-        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
-        sel:Hide()
-        row.selTex = sel
-    else
+    if not selectable then
         -- Buy is the primary plate and Bid the quiet one, exactly as the
         -- concept has them: on a row of listings the buyout is the action,
         -- and a bid is the hedge.
@@ -3553,6 +3573,61 @@ function ui.TableRowsAt(h)
     if n < 1 then n = 1 end
     if n > BUY_ROWS_MAX then n = BUY_ROWS_MAX end
     return n
+end
+
+-- Scroll-frame insets for every list OUTSIDE the Buy results table, in ONE
+-- place per list, because two things have to agree about each pair: the
+-- SetPoint that positions the box, and the arithmetic that decides how many
+-- rows go in it. When those were separate numbers the second did not exist at
+-- all -- every one of these lists measured its own frame instead.
+--
+-- `top` is the inset from the top of the PANEL, `bot` from the bottom, which
+-- is exactly what each SetPoint already carried. Two of them start below the
+-- Sell tab's fixed upper block, so they are written as SELL_TOP_H plus their
+-- own gap rather than as a total nobody could check.
+--
+-- A table rather than twelve file-scope locals: thirteen constants as
+-- thirteen locals cost thirteen upvalues (HARD RULE 12a), and ui.BuildSellTab
+-- is already a large function.
+local LISTBOX = {
+    craftSide = { top = 28,  bot = 132 },
+    craft     = { top = 94,  bot = 10 },
+    auc       = { top = 70,  bot = 10 },
+    hist      = { top = 100, bot = 10 },
+    bag       = { top = SELL_TOP_H + 26, bot = 10 },
+    sellList  = { top = SELL_TOP_H + 36, bot = 10 },
+}
+ui.LISTBOX = LISTBOX     -- read by the geometry suite
+
+-- How many WHOLE rows a list shows at a given WINDOW height.
+--
+-- THIS REPLACES ui.RowsFor, WHICH MEASURED THE SCROLL FRAME. Every one of its
+-- six callers anchored that frame by two corners, so GetHeight() reported the
+-- height it was last LAID OUT at -- the window's creation size -- and the list
+-- kept that row count however tall the window was dragged. Same trap that took
+-- the Buy table (ui.PanelHeightAt), the Advanced widths (ui.PanelWidthAt) and
+-- the Saved Searches columns (ui.SavedRowsAt); this is the fourth, fifth,
+-- sixth, seventh, eighth and ninth instance of it, all at once.
+--
+-- The window's own height is set explicitly, so it is true the moment it is
+-- read. `box` is one entry of LISTBOX above.
+--
+-- Whole rows only. A row hanging past the bottom of its box is worse than the
+-- gap it would have filled: these rows are not the scroll frame's scroll
+-- child, so nothing clips one -- it simply draws over whatever is below.
+function ui.ListRowsAt(h, box, rowH, maxRows)
+    if not box or not rowH or rowH <= 0 then return 1 end
+    local area = ui.PanelHeightAt(h) - box.top - box.bot
+    local n = math.floor(area / rowH)
+    if n < 1 then n = 1 end
+    if maxRows and n > maxRows then n = maxRows end
+    return n
+end
+
+-- The window height every one of those lists is measured against. One reader,
+-- so a list cannot accidentally ask a frame instead.
+function ui.WindowH()
+    return (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0
 end
 
 -- Usable height of the BROWSE column at a given window height.
@@ -6569,8 +6644,9 @@ function ui.BuildCraftTab()
 
     local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftSideScroll",
         panel, "FauxScrollFrameTemplate")
-    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
-    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 132)
+    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -LISTBOX.craftSide.top)
+    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10,
+        LISTBOX.craftSide.bot)
     sideScroll:SetWidth(CSIDE_W)
     sideScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CSIDE_ROW_H, ui.UpdateCraftTree)
@@ -6712,8 +6788,8 @@ ui.GrowCraftSideRows = function(n)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeCraftScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -94)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.craft.top)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.craft.bot)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CRAFT_ROW_H, ui.UpdateCraftList)
     end)
@@ -6777,8 +6853,8 @@ end
 function ui.UpdateCraftTree()
     if not ui.craftSideScroll then return end
     local flat = ui.craftFlat or {}
-    local vis = ui.RowsFor(ui.craftSideScroll, CSIDE_ROW_H, CSIDE_ROWS,
-        CSIDE_ROWS_MAX)
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.craftSide,
+        CSIDE_ROW_H, CSIDE_ROWS_MAX)
     ui.GrowCraftSideRows(vis)
     ui.SkinNewRows(ui.craftSideRows)
     FauxScrollFrame_Update(ui.craftSideScroll, table.getn(flat),
@@ -7021,7 +7097,8 @@ function ui.UpdateCraftList()
     ui.PaintSortHeaders(ui.craftHeaders, sortKey, dir)
 
     local total = table.getn(rows)
-    local vis = ui.RowsFor(ui.craftScroll, CRAFT_ROW_H, CRAFT_ROWS, CRAFT_ROWS_MAX)
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.craft,
+        CRAFT_ROW_H, CRAFT_ROWS_MAX)
     ui.GrowCraftRows(vis)
     ui.SkinNewRows(ui.craftRows)
     FauxScrollFrame_Update(ui.craftScroll, total, vis, CRAFT_ROW_H)
@@ -7305,8 +7382,8 @@ function ui.BuildAuctionsTab()
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeAucScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -70)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.auc.top)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.auc.bot)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(AUC_ROW_H, ui.UpdateAuctionsList)
     end)
@@ -7328,6 +7405,10 @@ ui.GrowAucRows = function(n)
                 row:SetPoint("TOPLEFT", ui.aucRows[i - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.aucRows[i - 1], "BOTTOMRIGHT", 0, 0)
             end
+            -- Before the cells: the chrome is BACKGROUND and creation order
+            -- is draw order within a layer. No selection tint -- an auction
+            -- row is acted on by its own Cancel button, not by being picked.
+            ui.AddRowChrome(row, i)
             local mk = function(cx, w, just)
                 local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 fs:SetPoint("LEFT", row, "LEFT", cx, 0)
@@ -7411,7 +7492,8 @@ function ui.UpdateAuctionsList()
             .. "  Undercut = someone is cheaper than you.")
     end
 
-    local vis = ui.RowsFor(ui.aucScroll, AUC_ROW_H, AUC_ROWS, AUC_ROWS_MAX)
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.auc,
+        AUC_ROW_H, AUC_ROWS_MAX)
     ui.GrowAucRows(vis)
     ui.SkinNewRows(ui.aucRows)
     FauxScrollFrame_Update(ui.aucScroll, total, vis, AUC_ROW_H)
@@ -7686,8 +7768,8 @@ function ui.BuildHistoryTab()
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -100)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 10)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.hist.top)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.hist.bot)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -7709,6 +7791,9 @@ ui.GrowHistRows = function(n)
                 row:SetPoint("TOPLEFT", ui.histRows[i - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.histRows[i - 1], "BOTTOMRIGHT", 0, 0)
             end
+            -- No selection tint and no tick column: a ledger line is a
+            -- record, and there is nothing to select one FOR.
+            ui.AddRowChrome(row, i)
             local mk = function(cx, w, just)
                 local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 fs:SetPoint("LEFT", row, "LEFT", cx, 0)
@@ -7761,7 +7846,8 @@ function ui.UpdateHistoryList()
     if not ui.histScroll then return end
     local rows = ui.histView or {}
     local total = table.getn(rows)
-    local vis = ui.RowsFor(ui.histScroll, HIST_ROW_H, HIST_ROWS, HIST_ROWS_MAX)
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.hist,
+        HIST_ROW_H, HIST_ROWS_MAX)
     ui.GrowHistRows(vis)
     ui.SkinNewRows(ui.histRows)
     FauxScrollFrame_Update(ui.histScroll, total, vis, HIST_ROW_H)
@@ -8128,11 +8214,11 @@ function ui.BuildSellTab()
 
     local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
         panel, "FauxScrollFrameTemplate")
-    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -(SELL_TOP_H + 26))
+    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -LISTBOX.bag.top)
     -- Right edge pulled well in (168) so the FauxScrollFrame's scrollbar, which
     -- sits just OUTSIDE this edge, clears the listings column that starts at
     -- x=200 -- otherwise the bar overlaps the price info.
-    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, 10)
+    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, LISTBOX.bag.bot)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
     local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
@@ -8274,8 +8360,9 @@ ui.GrowBagRows = function(n)
 
     local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
         panel, "FauxScrollFrameTemplate")
-    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -(SELL_TOP_H + 36))
-    listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26, 10)
+    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -LISTBOX.sellList.top)
+    listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26,
+        LISTBOX.sellList.bot)
     listScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(LIST_ROW_H, ui.UpdateListingsList)
     end)
@@ -8300,6 +8387,10 @@ ui.GrowListRows = function(n)
                 row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)
             end
             row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+            -- The highlight above is HOVER, which is a different thing from
+            -- selection: these rows are pressed to copy a price, never left
+            -- in a chosen state. So chrome without a selection tint.
+            ui.AddRowChrome(row, li)
             local mkCell = function(x, w, just)
                 local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
                 fs:SetPoint("LEFT", row, "LEFT", x, 0)
@@ -8368,7 +8459,8 @@ end
 function ui.UpdateBagList()
     if not ui.bagScroll then return end
     local flat = ui.bagFlat or {}
-    local vis = ui.RowsFor(ui.bagScroll, BAG_ROW_H, BAG_ROWS, BAG_ROWS_MAX)
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.bag,
+        BAG_ROW_H, BAG_ROWS_MAX)
     ui.GrowBagRows(vis)
     ui.SkinNewRows(ui.bagRows)
     FauxScrollFrame_Update(ui.bagScroll, table.getn(flat), vis, BAG_ROW_H)
@@ -8589,7 +8681,8 @@ function ui.UpdateListingsList()
         ui.sellSortKey or "unit", ui.sellSortDir or "asc")
     ui.PaintSortHeaders(ui.sellHeaders,
         ui.sellSortKey or "unit", ui.sellSortDir or "asc")
-    local vis = ui.RowsFor(ui.listScroll, LIST_ROW_H, LIST_ROWS, LIST_ROWS_MAX)
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.sellList,
+        LIST_ROW_H, LIST_ROWS_MAX)
     ui.GrowListRows(vis)
     ui.SkinNewRows(ui.listRows)
     FauxScrollFrame_Update(ui.listScroll, table.getn(groups), vis, LIST_ROW_H)

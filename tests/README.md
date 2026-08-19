@@ -114,6 +114,9 @@ tests/
     upvalues.py       the 32-upvalue ceiling (hard rule 12a)
     scoping.py        no file-scope local read above its declaration
     definitions.py    every top-level definition still present vs a git ref
+                      (compares definition SETS -- it used to ask whether the
+                      name appeared in the text, which a comment satisfied;
+                      `--selftest` pins that)
     modebits.py       every Buy-tab widget accounted for by every view
     sharedlayout.py   views sharing a space are placed by ONE function
     anchorchain.py    no two widgets hang off the same anchor
@@ -131,6 +134,8 @@ tests/
     taborder_test.lua       Tab traversal: wrap, hidden boxes, dead ends
     post_filter_test.lua    min-level/max-level/rarity/seller/left, and what
                             a filter does when it cannot answer
+    rowchrome_test.lua      the shared zebra/hairline/selection chrome, and
+                            the creation order that makes it draw right
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a

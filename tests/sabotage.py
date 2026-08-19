@@ -418,6 +418,91 @@ end""",
      '    cpChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)',
      "anchorchain"),
 
+    # ---- list row counts ---------------------------------------------------
+    # THE FAULT THIS RELEASE REMOVED, put back: measure the scroll frame
+    # instead of deriving from the window. Six lists then keep the row count
+    # they worked out at the window's creation size, however tall it is
+    # dragged. Nothing errors; the lists just stop short of their boxes.
+    ("list-rows-measured-not-derived", "ui/frame.lua",
+     "    local area = ui.PanelHeightAt(h) - box.top - box.bot",
+     "    local area = 300 - box.top - box.bot",
+     "geometry"),
+
+    # A partial row admitted. These rows are not the scroll frame's scroll
+    # child, so nothing clips one -- it draws over whatever is below it.
+    ("list-rows-round-up", "ui/frame.lua",
+     "    local n = math.floor(area / rowH)\n    if n < 1 then n = 1 end\n    if maxRows and n > maxRows then n = maxRows end",
+     "    local n = math.ceil(area / rowH)\n    if n < 1 then n = 1 end\n    if maxRows and n > maxRows then n = maxRows end",
+     "geometry"),
+
+    # The pool ceiling ignored: a tall window asks for more rows than the
+    # builder will ever create, and the list silently ends early.
+    ("list-rows-ignore-the-cap", "ui/frame.lua",
+     "    if maxRows and n > maxRows then n = maxRows end",
+     "",
+     "geometry"),
+
+    # A zero row count on an unmeasured window -- which is the state some
+    # logins are in -- draws a tab with no rows at all.
+    ("list-rows-can-be-zero", "ui/frame.lua",
+     "    local n = math.floor(area / rowH)\n    if n < 1 then n = 1 end",
+     "    local n = math.floor(area / rowH)",
+     "geometry"),
+
+    # ---- the shared row chrome ---------------------------------------------
+    # Creation order is draw order within a layer. Making the selection tint
+    # BEFORE the separator leaves a hairline scar across every selected row --
+    # nothing errors and every row still draws.
+    ("chrome-tint-under-the-separator", "ui/frame.lua",
+     """    local sep = row:CreateTexture(nil, "BACKGROUND")
+    sep:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+    sep:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+    sep:SetHeight(1)
+    sep:SetTexture(0.28, 0.24, 0.15, 0.55)
+    row.sep = sep
+
+    if selectable then""",
+     """    if selectable then""",
+     "rowchrome"),
+
+    # The stripe keyed to nothing: every row banded the same, so the table
+    # loses its banding entirely.
+    ("chrome-stripe-does-not-alternate", "ui/frame.lua",
+     "    if math.mod(i, 2) == 0 then",
+     "    if true then",
+     "rowchrome"),
+
+    # A selection tint that starts visible paints every row as chosen the
+    # moment the table is built.
+    ("chrome-tint-starts-visible", "ui/frame.lua",
+     """        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+        sel:Hide()""",
+     """        sel:SetTexture(0.6, 0.45, 0.10, 0.34)""",
+     "rowchrome"),
+
+    # A second copy of the stripe grown on one tab -- the drift this function
+    # exists to prevent, and the exact shape of the 1.19.3 Saved-vs-Builder
+    # fault.
+    ("chrome-second-copy-of-the-stripe", "ui/frame.lua",
+     """            ui.AddRowChrome(row, i)
+            local mk = function(cx, w, just)
+                local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+                fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+                return fs
+            end
+            local icon = row:CreateTexture(nil, "ARTWORK")""",
+     """            local ownZebra = row:CreateTexture(nil, "BACKGROUND")
+            ownZebra:SetTexture(1, 1, 1, 0.022)
+            local mk = function(cx, w, just)
+                local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+                fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+                return fs
+            end
+            local icon = row:CreateTexture(nil, "ARTWORK")""",
+     "rowchrome"),
+
     # ---- the row-data post filters -----------------------------------------
     # A bound flipped. Both directions matter and both look plausible in a
     # diff, which is why each gets its own sabotage rather than one standing
@@ -580,6 +665,13 @@ SUITES = {
     "window.point": "tests/units/window_point_test.lua",
     "taborder": "tests/units/taborder_test.lua",
     "post_filter": "tests/units/post_filter_test.lua",
+    "rowchrome": "tests/units/rowchrome_test.lua",
+    # definitions.py is deliberately ABSENT. It compares against a git ref and
+    # the throwaway copy below has no .git, so every file is skipped as "new"
+    # and the lint exits 0 having checked nothing -- it looked green here
+    # while being completely inert. It proves itself with
+    # `definitions.py --selftest` instead, the same way lua50.py uses
+    # selftest.py.
     # A lint is a suite too. It makes a claim about the source and can be
     # wrong about it the same way an assertion can, so it earns its place here
     # rather than being trusted because it printed "ok" once.
