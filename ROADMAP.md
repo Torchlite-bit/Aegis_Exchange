@@ -446,9 +446,10 @@ append to whatever's already there. No Auto Buy toggle (decided above).
 
 ### 2d — Full primitive set + boolean combinators — partly **DONE** (v1.10.0)
 `and` / `or` / `not` shipped with the post-filter system in 2i, over the
-clause list rather than as prefix polish notation. What remains here is the
-rest of aux's primitive set (`percent`, `vendor-profit`, `seller`, `left`,
-stat-suffix matching) — the combinator work itself is done.
+clause list rather than as prefix polish notation. `seller` and `left` (plus
+`min-level`, `max-level` and `rarity`) landed in 3c (v1.22.0). What remains
+here is `percent`, `vendor-profit` and stat-suffix matching — the combinator
+work itself is done.
 
 ### 2d (original scope) — Full primitive set + boolean combinators
 Everything from 2a's primitive set generalized under full `and`/`or`/`not`
@@ -612,6 +613,10 @@ narrow nothing yet, so each is marked `(soon)` in the list and drawn dim with
 "not wired up yet — ignored" in the Post Filter. **This addon has twice
 shipped a filter that silently matched nothing**, so an unimplemented
 component that quietly did nothing was not an option.
+
+> Superseded in part by **3c (v1.22.0)**: `min-level`, `max-level`, `rarity`,
+> `seller` and `left` are implemented and no longer dim. `item`, `percent`,
+> `vendor-profit` and `disenchant-profit` still are.
 
 > ⚠️ **Import is absent from the bottom row on purpose.** The concept PNG
 > still shows it because that image predates the "you can remove the import
@@ -1446,6 +1451,75 @@ sabotage-tested.
   than accepted with it.
 - The `0` spelling is now a sabotage in its own right, so the tempting version
   cannot be reintroduced quietly.
+
+### 3c — Feature batch, phase three (first group) — ✅ **DONE** (v1.22.0)
+
+Five of the nine placeholder components implemented: `min-level`,
+`max-level`, `rarity`, `seller`, `left`. These are the group that needs
+**nothing but the page** — every field is one `buy.ReadPage` already captured,
+so they answer on the first search for any item however cold the client is,
+and they add no per-item query to a loop HARD RULE 16 governs.
+
+Remaining: `percent` and `vendor-profit` (need the price DB — next), `item`
+(needs the item cache), `disenchant-profit` (needs a data source 1.12 does not
+provide; still unscheduled, and deliberately alone).
+
+- **`rarity` is EXACT, and choosing that was the whole design decision.** The
+  server-side `quality/N` is already the minimum — it is literally the form's
+  Min Quality dropdown — so a post-filter minimum would have been a second
+  spelling of a thing that already had one. Exact is the sentence you could
+  not otherwise write: "rares, and not the epics above them." A component that
+  duplicates its neighbour is worse than an absent one, because both look
+  like they work.
+- **`left` is a BOUND, not an exact match, and the reason is composition.**
+  "At most this much time left" answers the question people actually have
+  (what is ending soon), and exactly-medium is still reachable as
+  `left/medium/not/left/short`. An exact match would have answered a narrower
+  question and lost the common one.
+- **Two of the five cannot always ANSWER, and that is a third state, not a
+  non-match.** `owner` is nil until the client resolves the name (rule 8) and
+  `timeLeft` is guarded because a server may not report it. The row is dropped
+  — a positive filter cannot honestly keep what it cannot verify — but it is
+  counted and named in the status line. **This addon has twice shipped a
+  filter that silently matched nothing**, and the confession is the only
+  reason bare `stack`'s fault was reportable rather than merely annoying.
+- **A short-circuited AND counts only what it asked, and that is correct.**
+  `buy.CompilePost` skips operands the running result already decides — the
+  thing that keeps an or-chain from running a tooltip scan it does not need —
+  so the note describes what was evaluated, not what might have been. Asserted
+  rather than discovered later.
+
+#### One table, four readers
+
+- **`COMPONENT_VALUE` says what each component's value is made of**, and the
+  parser, the query writer, the Builder's Enter key and the Post Filter list
+  all ask it. Four hand-written copies of "min-level takes a number" is
+  exactly the shape that produced the Saved-vs-Builder drift in 1.19.3.
+- **It surfaced a latent fault immediately.** The Builder assumed every
+  non-`tooltip` component took MONEY — true only while the price bounds were
+  the only implemented ones — so a level typed into that box would have been
+  parsed as a price. The same assumption sat in the Post Filter list's
+  drawing code. Neither was reachable before this release, which is why
+  neither had been noticed.
+- **A value that does not parse is not a clause.** `min-level/soon` leaves the
+  words as name text, the rule `quality` and `level` already follow. Accepting
+  it would build a clause that can never match, which is the failure mode this
+  repo keeps returning to.
+- **Time left goes back into the query as a WORD and quality as an INDEX**, and
+  the inconsistency is deliberate: `left/1` is unreadable in a saved search,
+  while `rarity/3` matches the `quality/2` its neighbour already emits. The
+  English time-left keys are the language and never the client's localized
+  strings, or a saved search would stop meaning the same thing on a German
+  client.
+
+#### What the tests learned
+
+- **`Row({ owner = nil })` sets no key at all.** A table constructor with a
+  nil value stores nothing, so `pairs()` never sees it and the default
+  survived — four assertions about unresolved owners were passing against a
+  row that had an owner. Caught only because the sabotage-first habit made the
+  "does not match" assertion fail loudly rather than pass vacuously. A
+  sentinel is the only way to say "absent" through a table.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

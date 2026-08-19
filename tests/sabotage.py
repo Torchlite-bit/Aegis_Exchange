@@ -418,6 +418,100 @@ end""",
      '    cpChk:SetPoint("TOPLEFT", pfChk, "BOTTOMLEFT", 0, -6)',
      "anchorchain"),
 
+    # ---- the row-data post filters -----------------------------------------
+    # A bound flipped. Both directions matter and both look plausible in a
+    # diff, which is why each gets its own sabotage rather than one standing
+    # in for the pair.
+    ("min-level-is-a-maximum", "core/buy.lua",
+     "            return row.level >= floorV",
+     "            return row.level <= floorV",
+     "post_filter"),
+
+    ("max-level-is-a-minimum", "core/buy.lua",
+     "            return row.level <= cap",
+     "            return row.level >= cap",
+     "post_filter"),
+
+    # rarity as a MINIMUM, which is the thing the server-side quality filter
+    # already does -- so this one is not just wrong, it is redundant with the
+    # filter beside it and would read as working.
+    ("rarity-becomes-a-minimum", "core/buy.lua",
+     "            return row.quality == want",
+     "            return row.quality >= want",
+     "post_filter"),
+
+    # seller matched as a PATTERN: a name containing "." or "-" turns into a
+    # wildcard, so `seller/Mr.X` quietly matches sellers it should not.
+    ("seller-needle-is-a-pattern", "core/buy.lua",
+     "            return string.find(string.lower(row.owner), needle, 1, true) ~= nil",
+     "            return string.find(string.lower(row.owner), needle) ~= nil",
+     "post_filter"),
+
+    # Case folding dropped on one side: every mixed-case seller stops
+    # matching, and the failure looks like "the filter finds nothing".
+    ("seller-case-sensitive", "core/buy.lua",
+     "            return string.find(string.lower(row.owner), needle, 1, true) ~= nil",
+     "            return string.find(row.owner, needle, 1, true) ~= nil",
+     "post_filter"),
+
+    ("left-bound-inverted", "core/buy.lua",
+     "            return row.timeLeft <= cap",
+     "            return row.timeLeft >= cap",
+     "post_filter"),
+
+    # THE ONE THIS SUITE EXISTS FOR. Rows that cannot be judged are dropped
+    # SILENTLY -- the filter still "works", it just quietly empties a page for
+    # a reason nobody is told. This is how bare `stack` was reported.
+    ("unanswered-rows-dropped-in-silence", "core/buy.lua",
+     """local function Unanswered(stats, kind)
+    if not stats then return false end
+    stats.unanswered = stats.unanswered or {}
+    stats.unanswered[kind] = (stats.unanswered[kind] or 0) + 1
+    return false
+end""",
+     """local function Unanswered(stats, kind)
+    return false
+end""",
+     "post_filter"),
+
+    # A blind row kept instead of dropped: `seller/Bob` returns auctions whose
+    # seller is not known to be Bob.
+    ("unanswered-rows-kept", "core/buy.lua",
+     """            if not row.owner or row.owner == "" then
+                return Unanswered(stats, "seller")
+            end""",
+     """            if not row.owner or row.owner == "" then
+                return true
+            end""",
+     "post_filter"),
+
+    # An unparseable value accepted as a clause anyway. The clause can never
+    # match, so the search silently returns nothing -- the exact failure the
+    # fall-back-to-name-text rule exists to prevent.
+    ("bad-component-value-becomes-a-clause", "core/buy.lua",
+     """            local v = nxt and buy.ParseComponentValue(tok, nxt)
+            if v ~= nil then""",
+     """            local v = nxt and util.Trim(nxt)
+            if v ~= nil and v ~= "" then""",
+     "post_filter"),
+
+    # The emitter stops asking the value table and tostring()s everything:
+    # `left/2` and `max-unit-buy/50000` come back out, and only one of them
+    # still parses to the same thing.
+    ("emitter-ignores-the-value-table", "core/buy.lua",
+     '            add(e.kind .. "/" .. buy.ComponentValueText(e.kind, e.value))',
+     '            add(e.kind .. "/" .. tostring(e.value))',
+     "post_filter"),
+
+    # A component that is still pending starts filtering. An always-false
+    # placeholder empties the page for a token we do not implement.
+    ("pending-component-narrows", "core/buy.lua",
+     """    -- Unknown component: never narrows the search. Refusing to match would
+    -- empty the page for a token we simply do not implement yet.
+    return function() return true end""",
+     """    return function() return false end""",
+     "post_filter"),
+
     # ---- the isUsable flag arg ---------------------------------------------
     # THE BUG THAT SHIPPED, restored. A Lua boolean in a slot the client reads
     # as a number: the query still goes out and the Usable box silently does
@@ -485,6 +579,7 @@ SUITES = {
     "geometry": "tests/units/geometry_test.lua",
     "window.point": "tests/units/window_point_test.lua",
     "taborder": "tests/units/taborder_test.lua",
+    "post_filter": "tests/units/post_filter_test.lua",
     # A lint is a suite too. It makes a claim about the source and can be
     # wrong about it the same way an assertion can, so it earns its place here
     # rather than being trusted because it printed "ok" once.

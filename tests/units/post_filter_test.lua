@@ -1,0 +1,305 @@
+-- Aegis: Exchange -- tests/units/post_filter_test.lua
+--
+-- The post-filter components that narrow on data the PAGE already carries:
+-- min-level, max-level, rarity, seller and left. Each is a predicate over a
+-- row buy.ReadPage has already built, so every one of them is exercised
+-- through the real compile path -- buy.ParseTerm -> buy.CompileTerm -> the
+-- filter closure -- rather than by calling an internal.
+--
+-- WHAT THIS SUITE IS REALLY FOR. Two of these can fail to ANSWER: `owner` is
+-- nil until the client resolves the name (CLAUDE.md rule 8) and `timeLeft` is
+-- guarded because a server may not report it. A filter that throws those rows
+-- away in silence is indistinguishable from a broken filter -- which is
+-- exactly how bare `stack` was reported -- so "counted and confessed" is
+-- asserted here as hard as the matching itself.
+
+package.path = "tests/support/?.lua;" .. package.path
+local W = require("wow")
+local H = require("harness")
+
+W.Reset()
+local A = W.LoadCore()
+W.FireAddonLoaded(A)
+local buy = A.buy
+
+-- "Override this field to nil."
+--
+-- `Row({ owner = nil })` sets no key at all -- a table constructor with a nil
+-- value stores nothing, so pairs() never sees it and the default survives
+-- untouched. The first draft of this file did exactly that, and the four
+-- assertions about unresolved owners passed against a row that HAD one. A
+-- sentinel is the only way to say "absent" through a table.
+local NIL = {}
+
+-- A page row, shaped as buy.ReadPage builds one. Overrides are merged so each
+-- case names only the field it is about.
+local function Row(over)
+    local r = {
+        index = 1, name = "Silk Cloth", count = 1,
+        quality = 3, level = 45, owner = "Bobby", timeLeft = 2,
+        buyout = 1000, unit = 1000, minBid = 900, bidAmount = 0,
+    }
+    for k, v in pairs(over or {}) do
+        if v == NIL then r[k] = nil else r[k] = v end
+    end
+    return r
+end
+
+-- Run a query's filter over one row. Returns whether it kept the row, plus
+-- the unanswered tally, because for half these components those are the same
+-- question asked twice.
+local function keeps(query, row)
+    local compiled = buy.CompileTerm(buy.ParseTerm(query))
+    local stats = {}
+    local kept = compiled.filter(row or Row(), stats) and true or false
+    local blind, who = buy.UnansweredSummary(stats)
+    return kept, blind, who
+end
+
+local function kept(query, row) local k = keeps(query, row); return k end
+
+-- ---------------------------------------------------------------------------
+H.section("min-level / max-level bound the row's own level")
+-- ---------------------------------------------------------------------------
+
+H.check("min-level keeps a row at the bound", kept("silk/min-level/45"), "")
+H.check("min-level keeps a row above it", kept("silk/min-level/40"), "")
+H.check("min-level drops a row below it",
+        not kept("silk/min-level/50"), "level 45 survived min-level/50")
+
+H.check("max-level keeps a row at the bound", kept("silk/max-level/45"), "")
+H.check("max-level keeps a row below it", kept("silk/max-level/60"), "")
+H.check("max-level drops a row above it",
+        not kept("silk/max-level/40"), "level 45 survived max-level/40")
+
+-- The pair is what makes a band, and a band is the thing the server-side
+-- level filter cannot be OR'd or negated into.
+H.check("the pair brackets a range",
+        kept("silk/min-level/40/max-level/50"), "")
+H.check("...and excludes what falls outside it",
+        not kept("silk/min-level/40/max-level/44"), "")
+
+-- Level 0 is a real value (no requirement), not a missing one.
+H.check("a level-0 row passes min-level/0",
+        kept("silk/min-level/0", Row({ level = 0 })), "")
+H.check("...and is dropped by min-level/1",
+        not kept("silk/min-level/1", Row({ level = 0 })), "")
+
+-- ---------------------------------------------------------------------------
+H.section("rarity is EXACT, and that is the whole point of it")
+-- ---------------------------------------------------------------------------
+
+-- The server-side `quality/N` is already the minimum -- the form's own "Min
+-- Quality" -- so a post-filter minimum would be a second spelling of a thing
+-- that already had one. Exact is what cannot otherwise be said.
+H.check("rarity matches its own quality", kept("silk/rarity/rare"), "")
+H.check("rarity does NOT match better than itself",
+        not kept("silk/rarity/rare", Row({ quality = 4 })),
+        "an epic passed rarity/rare -- that is a minimum, not an exact match")
+H.check("rarity does not match worse either",
+        not kept("silk/rarity/rare", Row({ quality = 2 })), "")
+
+-- The same vocabulary as `quality`, because two spellings for one concept is
+-- how a language starts to need a manual.
+H.check("rarity takes an index too", kept("silk/rarity/3"), "")
+H.check("...and poor is 0, not 'missing'",
+        kept("silk/rarity/poor", Row({ quality = 0 })), "")
+
+-- ---------------------------------------------------------------------------
+H.section("seller matches a substring of the owner, case-insensitively")
+-- ---------------------------------------------------------------------------
+
+H.check("the whole name matches", kept("silk/seller/Bobby"), "")
+H.check("a prefix matches", kept("silk/seller/Bob"), "")
+H.check("case is ignored", kept("silk/seller/bOBbY"), "")
+H.check("a different seller does not match",
+        not kept("silk/seller/Alice"), "")
+
+-- Plain find, never a pattern: a seller called "Mr.X" must not be a regex,
+-- and "." must not match "Mrs".
+H.check("the needle is plain text, not a pattern",
+        not kept("silk/seller/B.bby"), "'.' was treated as a wildcard")
+H.check("...and a real dotted name still matches itself",
+        kept("silk/seller/Mr.X", Row({ owner = "Mr.Xavier" })), "")
+
+-- ---------------------------------------------------------------------------
+H.section("left is a bound: at most this much time remaining")
+-- ---------------------------------------------------------------------------
+
+-- 1..4 is Short / Medium / Long / Very Long, exactly as
+-- GetAuctionItemTimeLeft reports it.
+H.check("a medium row passes left/medium", kept("silk/left/medium"), "")
+H.check("...and left/long", kept("silk/left/long"), "")
+H.check("...but not left/short",
+        not kept("silk/left/short"), "medium survived left/short")
+H.check("a short row passes left/short",
+        kept("silk/left/short", Row({ timeLeft = 1 })), "")
+
+-- The English keys are the language and do not vary by locale -- a saved
+-- search has to mean the same thing on a German client.
+H.check("the index spelling works too", kept("silk/left/2"), "")
+H.check("'very long' is one token", kept("silk/left/very long"), "")
+H.check("...and so is 'verylong'", kept("silk/left/verylong"), "")
+
+-- A bound composes, which is why it was chosen over an exact match: exactly
+-- medium is still reachable.
+H.check("exactly-medium is expressible",
+        kept("silk/left/medium/not/left/short"), "")
+H.check("...and excludes a short row",
+        not kept("silk/left/medium/not/left/short", Row({ timeLeft = 1 })), "")
+
+-- ---------------------------------------------------------------------------
+H.section("A filter that cannot ANSWER says so")
+-- ---------------------------------------------------------------------------
+
+-- THE CASE THIS EXISTS FOR. owner is nil until the name resolves, so a fresh
+-- page can hand `seller` fifty rows it cannot judge. Dropping them is right --
+-- a positive filter cannot honestly keep what it cannot verify -- but doing
+-- it silently would present as "seller finds nothing".
+local blindOwner = Row({ owner = NIL })
+local k, blind, who = keeps("silk/seller/Bobby", blindOwner)
+H.check("an unresolved owner does not match", not k, "")
+H.eq("...it is COUNTED", blind, 1)
+H.eq("...and named", who, "seller")
+
+k, blind, who = keeps("silk/left/short", Row({ timeLeft = NIL }))
+H.check("an unreported time left does not match", not k, "")
+H.eq("...it is counted", blind, 1)
+H.eq("...and named", who, "left")
+
+-- An empty owner string is the same case as nil, not a seller named "".
+local _, blindEmpty = keeps("silk/seller/Bobby", Row({ owner = "" }))
+H.eq("an empty owner counts as unanswered", blindEmpty, 1)
+
+-- A row it CAN judge is never counted, or the note would appear on every
+-- search and stop meaning anything.
+local _, none = keeps("silk/seller/Bobby", Row())
+H.eq("a row that can be judged is not counted", none, 0)
+local _, noneLvl = keeps("silk/min-level/40", Row())
+H.eq("...nor is a filter that never fails to answer", noneLvl, 0)
+
+-- Two blind components that BOTH get asked name both, in a stable order -- a
+-- sentence that reshuffles between repaints reads as a different problem each
+-- time. `or` is used here because it is the shape that runs both.
+local stats = {}
+local both = buy.CompileTerm(buy.ParseTerm("silk/seller/Bobby/or/left/short"))
+both.filter(Row({ owner = NIL, timeLeft = NIL }), stats)
+local n2, who2 = buy.UnansweredSummary(stats)
+H.eq("both blind components are counted", n2, 2)
+H.eq("...and named in sorted order", who2, "left/seller")
+
+-- A STACKED pair counts only the first, and that is correct rather than a
+-- miscount: buy.CompilePost short-circuits, so a false `and` operand means
+-- the next one is never asked. That skip is what keeps an or-chain from
+-- running a tooltip scan it does not need, and the confession describes what
+-- was actually evaluated rather than what might have been.
+local andStats = {}
+local chain = buy.CompileTerm(buy.ParseTerm("silk/seller/Bobby/left/short"))
+chain.filter(Row({ owner = NIL, timeLeft = NIL }), andStats)
+local n3, who3 = buy.UnansweredSummary(andStats)
+H.eq("a short-circuited AND asks only the first", n3, 1)
+H.eq("...and names only what it asked", who3, "seller")
+
+H.eq("nothing to confess reports nothing", buy.UnansweredSummary({}), 0)
+local _, emptyWho = buy.UnansweredSummary(nil)
+H.eq("...and a missing stats table is not an error", emptyWho, "")
+
+-- ---------------------------------------------------------------------------
+H.section("The components compose with the combinators")
+-- ---------------------------------------------------------------------------
+
+-- Stacked clauses AND, which is the default nobody has to type.
+H.check("two stacked clauses both have to hold",
+        kept("silk/min-level/40/rarity/rare"), "")
+H.check("...and one failing drops the row",
+        not kept("silk/min-level/50/rarity/rare"), "")
+
+H.check("or widens", kept("silk/min-level/50/or/rarity/rare"), "")
+H.check("not excludes", not kept("silk/not/rarity/rare"), "")
+H.check("...and keeps what it does not name",
+        kept("silk/not/rarity/epic"), "")
+
+-- ---------------------------------------------------------------------------
+H.section("Values round-trip through the query string")
+-- ---------------------------------------------------------------------------
+
+-- By VALUE, not by spelling: `rarity/rare` is stored as 3 and comes back as
+-- `rarity/3`, the same index the server-side `quality/2` already emits.
+local cases = {
+    "silk/min-level/40",
+    "silk/max-level/60",
+    "silk/rarity/rare",
+    "silk/rarity/3",
+    "silk/seller/Bobby",
+    "silk/left/short",
+    "silk/left/very long",
+    "silk/min-level/40/max-level/60/rarity/3/left/medium",
+    "silk/min-level/40/or/rarity/epic",
+}
+for i = 1, table.getn(cases) do
+    local original = buy.ParseTerm(cases[i])
+    local text     = buy.TermToQuery(original)
+    local reparsed = buy.ParseTerm(text)
+    H.check("round trip preserves meaning: " .. cases[i],
+            buy.TermsEqual(original, reparsed),
+            cases[i] .. "  ->  " .. text)
+end
+
+-- Time left goes back as a WORD. `left/1` round-trips perfectly well and is
+-- unreadable in a saved search list, which is a cost paid by a person.
+H.eq("left is written back in words",
+     buy.TermToQuery(buy.ParseTerm("silk/left/2")), "silk/left/medium")
+-- Money keeps its own spelling, which is the case that proves the emitter is
+-- asking the value table rather than calling tostring on everything.
+H.eq("a price is still written as a price",
+     buy.TermToQuery(buy.ParseTerm("silk/max-unit-buy/5g")),
+     "silk/max-unit-buy/5g")
+
+-- ---------------------------------------------------------------------------
+H.section("A value that does not parse is not a clause")
+-- ---------------------------------------------------------------------------
+
+-- It becomes NAME TEXT, exactly as `quality` and `level` already do. Silently
+-- accepting it would build a clause that cannot mean anything, and a filter
+-- matching nothing for an unexplained reason is the failure this addon keeps
+-- having to fix.
+local junk = buy.ParseTerm("silk/min-level/soon")
+H.eq("an unparseable level adds no clause", table.getn(junk.post), 0)
+H.check("...and the words survive as a name",
+        string.find(junk.name, "min-level", 1, true) ~= nil, junk.name)
+
+H.eq("an unparseable rarity adds no clause",
+     table.getn(buy.ParseTerm("silk/rarity/shiny").post), 0)
+H.eq("an unparseable time left adds no clause",
+     table.getn(buy.ParseTerm("silk/left/eventually").post), 0)
+H.eq("a component with no value at all adds no clause",
+     table.getn(buy.ParseTerm("silk/min-level").post), 0)
+
+-- The components still stop the tooltip run-on, which is what keeps
+-- "tooltip/stamina/min-level/40" meaning both things.
+local run = buy.ParseTerm("cloak/tooltip/stamina/min-level/40")
+local needles, mins = 0, 0
+for i = 1, table.getn(run.post) do
+    if run.post[i].kind == "tooltip" then needles = needles + 1 end
+    if run.post[i].kind == "min-level" then mins = mins + 1 end
+end
+H.eq("the run-on stopped at the component", needles, 1)
+H.eq("...which parsed as its own clause", mins, 1)
+
+-- ---------------------------------------------------------------------------
+H.section("The still-pending components narrow nothing, on purpose")
+-- ---------------------------------------------------------------------------
+
+-- item, percent, vendor-profit and disenchant-profit parse and round-trip so
+-- a query carrying one survives an edit, but they must not filter -- an
+-- always-false placeholder would empty the page.
+local pending = { "item", "percent", "vendor-profit", "disenchant-profit" }
+for i = 1, table.getn(pending) do
+    local p = pending[i]
+    H.check(p .. " keeps every row", kept("silk/" .. p .. "/whatever"),
+            "a pending component narrowed the search")
+    H.eq(p .. " still records a clause",
+         table.getn(buy.ParseTerm("silk/" .. p .. "/whatever").post), 1)
+end
+
+os.exit(H.report("post_filter"))

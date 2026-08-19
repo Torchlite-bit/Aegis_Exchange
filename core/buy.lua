@@ -526,9 +526,8 @@ end
 -- Component names that are accepted by the parser but not yet implemented by
 -- CompileOperand. Kept next to the parser so the two lists cannot drift.
 local PENDING_COMPONENT = {
-    ["item"] = true, ["min-level"] = true, ["max-level"] = true,
-    ["rarity"] = true, ["seller"] = true, ["percent"] = true,
-    ["vendor-profit"] = true, ["left"] = true, ["disenchant-profit"] = true,
+    ["item"] = true, ["percent"] = true,
+    ["vendor-profit"] = true, ["disenchant-profit"] = true,
 }
 
 local function ParseFusedStack(tok)
@@ -547,6 +546,120 @@ local function ParseFusedLevel(tok)
     local _, _, single = string.find(tok, "^level(%d+)$")
     if single then local n = tonumber(single); return n, n end
     return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- What each post-filter component's VALUE is
+-- ---------------------------------------------------------------------------
+
+-- Time left is 1..4, exactly as GetAuctionItemTimeLeft reports it.
+--
+-- The English keys ARE the query language and do not vary by locale: a saved
+-- search has to mean the same thing on a German client, so `left/short` is
+-- spelled the same everywhere. The client's own localized strings are
+-- accepted on the way IN as a convenience -- the same courtesy QualityNames()
+-- extends to ITEM_QUALITY*_DESC -- but never emitted.
+local TIME_LEFT_KEY = { "short", "medium", "long", "very long" }
+local timeLeftByName
+local function TimeLeftNames()
+    if timeLeftByName then return timeLeftByName end
+    timeLeftByName = {}
+    local i = 1
+    while i <= 4 do
+        timeLeftByName[TIME_LEFT_KEY[i]] = i
+        local desc = getglobal("AUCTION_TIME_LEFT" .. i)
+        if desc and desc ~= "" then timeLeftByName[string.lower(desc)] = i end
+        i = i + 1
+    end
+    timeLeftByName["verylong"] = 4      -- typed without the space
+    return timeLeftByName
+end
+
+-- "short" or "2" -> 1..4, or nil if neither parses.
+local function ParseTimeLeftValue(tok)
+    local named = TimeLeftNames()[tok]
+    if named then return named end
+    local n = tonumber(tok)
+    if n and n >= 1 and n <= 4 then return math.floor(n) end
+    return nil
+end
+
+-- THE one table that says what a component's value is made of. Four readers
+-- ask it and none of them keeps its own copy: buy.ParseTerm reads the value,
+-- buy.TermToQuery writes it back, the Filter Builder's Enter key validates
+-- what was typed, and the Post Filter list draws it.
+--
+-- Four hand-written copies of "min-level takes a number" is the shape that
+-- produced the Saved-vs-Builder drift in 1.19.3. `tooltip` is deliberately
+-- absent: it has its own parse branch (the run-on) and its own draw branch.
+local COMPONENT_VALUE = {
+    ["min-level"]    = "number",
+    ["max-level"]    = "number",
+    ["rarity"]       = "quality",
+    ["seller"]       = "text",
+    ["left"]         = "timeleft",
+    ["max-unit-buy"] = "money",
+    ["min-unit-buy"] = "money",
+}
+
+-- "number" | "quality" | "timeleft" | "money" | "text", or nil for a token
+-- that is not a valued post-filter component.
+function buy.ComponentValueKind(kind)
+    if not kind then return nil end
+    if PENDING_COMPONENT[kind] then return "text" end
+    return COMPONENT_VALUE[kind]
+end
+
+-- Raw typed text -> the value the term stores, or nil when it does not parse.
+--
+-- Storing the PARSED value (3, not "rare") is what makes the round trip work
+-- by value rather than by spelling, which is the rule this file already
+-- follows for quality and level.
+function buy.ParseComponentValue(kind, raw)
+    raw = util.Trim(raw or "")
+    if raw == "" then return nil end
+    local vk = buy.ComponentValueKind(kind)
+    if vk == "number" then
+        local n = tonumber(raw)
+        if n and n >= 0 then return math.floor(n) end
+        return nil
+    elseif vk == "quality" then
+        return ParseQualityValue(string.lower(raw))
+    elseif vk == "timeleft" then
+        return ParseTimeLeftValue(string.lower(raw))
+    elseif vk == "money" then
+        local m = util.ParseMoney(raw)
+        if m and m > 0 then return m end
+        return nil
+    elseif vk == "text" then
+        return raw
+    end
+    return nil
+end
+
+-- The value written back into a query string. Money and time left both have a
+-- spelling that is not their stored form -- 50000 is not "5g", and `left/1`
+-- means nothing to a reader.
+--
+-- Quality is NOT named here: it goes back as its index, matching the
+-- `quality/2` the server-side filter already emits. One spelling for one
+-- concept beats a prettier one that disagrees with its neighbour.
+function buy.ComponentValueText(kind, value)
+    local vk = buy.ComponentValueKind(kind)
+    if vk == "money" then return util.FormatMoney(value) end
+    if vk == "timeleft" then return TIME_LEFT_KEY[value] or tostring(value) end
+    return tostring(value)
+end
+
+-- What to say when the Builder cannot make sense of what was typed. Phrased
+-- as an example, because "invalid value" tells you only that you were wrong.
+function buy.ComponentValueHint(kind)
+    local vk = buy.ComponentValueKind(kind)
+    if vk == "number"   then return "a level, like 40" end
+    if vk == "quality"  then return "a quality, like rare or 3" end
+    if vk == "timeleft" then return "a time left, like short or 2" end
+    if vk == "money"    then return "a price, like 5g or 50s" end
+    return "a value"
 end
 
 -- Every token the term loop below recognises as something other than free
@@ -577,6 +690,7 @@ function buy.IsTermKeyword(tok, term)
     if not tok or tok == "" then return false end
     if BARE_KEYWORD[tok] then return true end
     if PENDING_COMPONENT[tok] then return true end
+    if COMPONENT_VALUE[tok] then return true end
     if ParseFusedQuality(tok) then return true end
     if ParseFusedStack(tok) then return true end
     if ParseFusedLevel(tok) then return true end
@@ -689,6 +803,25 @@ function buy.ParseTerm(text)
             end
         elseif tok == "and" or tok == "or" or tok == "not" then
             addPost(tok)
+        elseif COMPONENT_VALUE[tok] then
+            -- Every valued post-filter component reads exactly ONE token, the
+            -- way quality and level do, and what that token means is decided
+            -- by COMPONENT_VALUE rather than by a branch per component --
+            -- `min-level/40`, `rarity/rare`, `seller/Bob`, `left/short`,
+            -- `max-unit-buy/5g` all arrive here.
+            --
+            -- A value that does not parse leaves the component as NAME TEXT
+            -- rather than becoming a clause that cannot mean anything. That
+            -- is what `quality` and `level` already do, and the reason is the
+            -- same: a filter quietly matching nothing is the worst outcome
+            -- available, and this addon has shipped it twice.
+            local nxt = tokens[i + 1]
+            local v = nxt and buy.ParseComponentValue(tok, nxt)
+            if v ~= nil then
+                addPost(tok, v); i = i + 1
+            else
+                appendWord(raw)
+            end
         elseif PENDING_COMPONENT[tok] then
             -- Reserved component names. They parse and round-trip so a query
             -- containing one survives an edit, but they narrow nothing yet --
@@ -700,16 +833,6 @@ function buy.ParseTerm(text)
                 addPost(tok, util.Trim(nxt)); i = i + 1
             else
                 addPost(tok, "")
-            end
-        elseif tok == "max-unit-buy" or tok == "min-unit-buy" then
-            -- Per-UNIT price bound, so a stack of 20 compares against a
-            -- stack of 1 honestly. Values are money text ("5g", "50s").
-            local nxt = tokens[i + 1]
-            local money = nxt and util.ParseMoney(util.Trim(nxt))
-            if money and money > 0 then
-                addPost(tok, money); i = i + 1
-            else
-                appendWord(raw)
             end
         elseif tok == "quality" then
             local nxt = tokens[i + 1]
@@ -848,10 +971,11 @@ function buy.TermToQuery(term)
             else
                 add("tooltip/" .. v)
             end
-        elseif e.kind == "max-unit-buy" or e.kind == "min-unit-buy" then
-            add(e.kind .. "/" .. util.FormatMoney(e.value))
-        elseif e.value and e.value ~= "" then
-            add(e.kind .. "/" .. tostring(e.value))
+        elseif e.value ~= nil and e.value ~= "" then
+            -- The value's spelling comes from the SAME table the parser read
+            -- it with, so a component cannot be written in a form its own
+            -- parser will not take back.
+            add(e.kind .. "/" .. buy.ComponentValueText(e.kind, e.value))
         else
             add(e.kind)
         end
@@ -1058,6 +1182,45 @@ function buy.TooltipNeedles(text)
 end
 
 -- Turn one post-filter entry into a predicate(row, stats).
+-- A component could not JUDGE this row, which is not the same as the row not
+-- matching: the data it needs is not there.
+--
+-- The row is dropped -- a positive filter cannot honestly keep what it cannot
+-- verify -- but never SILENTLY. Counted here, confessed by the status line
+-- through buy.UnansweredSummary. An unexplained empty page is
+-- indistinguishable from a broken filter, which is precisely how bare `stack`
+-- got reported, and the same confession is why that report was actionable.
+--
+-- Returns false so a predicate can end with `return Unanswered(...)`.
+local function Unanswered(stats, kind)
+    if not stats then return false end
+    stats.unanswered = stats.unanswered or {}
+    stats.unanswered[kind] = (stats.unanswered[kind] or 0) + 1
+    return false
+end
+
+-- How many rows were dropped for want of data, and which components could not
+-- answer -- "3", "seller" for a page whose owner names have not resolved yet.
+--
+-- Returns 0, "" when everything could be judged, so the caller appends
+-- nothing in the ordinary case. The component names are sorted, so the same
+-- page always produces the same sentence rather than one that reshuffles on
+-- every repaint.
+function buy.UnansweredSummary(stats)
+    local counts = stats and stats.unanswered
+    if not counts then return 0, "" end
+    local total, names = 0, {}
+    for kind, n in pairs(counts) do
+        if n and n > 0 then
+            total = total + n
+            table.insert(names, kind)
+        end
+    end
+    if total == 0 then return 0, "" end
+    table.sort(names)
+    return total, table.concat(names, "/")
+end
+
 local function CompileOperand(e)
     if e.kind == "tooltip" then
         local needles = buy.TooltipNeedles(e.value)
@@ -1075,6 +1238,69 @@ local function CompileOperand(e)
     elseif e.kind == "min-unit-buy" then
         local floorV = e.value
         return function(row) return row.unit and row.unit >= floorV end
+
+    -- ---- filters over data the page already carries ---------------------
+    -- Every one of these reads a field buy.ReadPage captured from
+    -- GetAuctionItemInfo (plus GetAuctionItemTimeLeft). No item query, no
+    -- price DB, no client cache -- so they answer on the first search for any
+    -- item, however cold the client is, and they cost nothing per row.
+    --
+    -- The `level` and `quality` the SERVER filters on are still there and
+    -- still preferable when they will do. These exist because a server-side
+    -- filter is part of the query and cannot be OR'd or negated: only a
+    -- post-filter can say "level 40 or over, but not epics".
+    elseif e.kind == "min-level" then
+        local floorV = e.value
+        return function(row, stats)
+            if not row.level then return Unanswered(stats, "min-level") end
+            return row.level >= floorV
+        end
+    elseif e.kind == "max-level" then
+        local cap = e.value
+        return function(row, stats)
+            if not row.level then return Unanswered(stats, "max-level") end
+            return row.level <= cap
+        end
+    elseif e.kind == "rarity" then
+        -- EXACTLY this quality, not "this or better".
+        --
+        -- The server-side `quality/N` is already the minimum -- it is the
+        -- form's own "Min Quality" -- so a post-filter minimum would be a
+        -- second way to say a thing that already had one. Exact is what you
+        -- cannot otherwise express: "rares, and not the epics above them".
+        local want = e.value
+        return function(row, stats)
+            if not row.quality then return Unanswered(stats, "rarity") end
+            return row.quality == want
+        end
+    elseif e.kind == "seller" then
+        -- Case-insensitive SUBSTRING, so a partial name works the way the
+        -- name search does. Plain find (the 4th arg), never a pattern: a
+        -- seller called "Mr.X" would otherwise be a regex.
+        local needle = string.lower(tostring(e.value or ""))
+        return function(row, stats)
+            -- owner is nil until the name resolves -- CLAUDE.md rule 8. That
+            -- is a "cannot answer", not a "does not match".
+            if not row.owner or row.owner == "" then
+                return Unanswered(stats, "seller")
+            end
+            return string.find(string.lower(row.owner), needle, 1, true) ~= nil
+        end
+    elseif e.kind == "left" then
+        -- AT MOST this much time left: `left/short` is what is about to
+        -- expire, `left/long` is everything except the freshly posted.
+        --
+        -- A bound rather than an exact match because the question people
+        -- actually have is "what is ending soon", and because a bound
+        -- composes -- exactly-medium is still reachable as
+        -- `left/medium/not/left/short`.
+        local cap = e.value
+        return function(row, stats)
+            -- Guarded in ReadPage, so a server that does not answer
+            -- GetAuctionItemTimeLeft costs the filter, not the scan.
+            if not row.timeLeft then return Unanswered(stats, "left") end
+            return row.timeLeft <= cap
+        end
     end
     -- Unknown component: never narrows the search. Refusing to match would
     -- empty the page for a token we simply do not implement yet.

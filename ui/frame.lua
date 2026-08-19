@@ -5344,15 +5344,13 @@ function ui.ComponentColor(kind)
     return C.text[1], C.text[2], C.text[3]
 end
 
+-- Shrinking this table is what un-greys a component: the dropdown's colour,
+-- its tooltip and the Post Filter list's "ignored" label all read it, so the
+-- UI follows the engine rather than being told twice.
 ui.PENDING_COMPONENTS = {
     ["item"]              = true,
-    ["min-level"]         = true,
-    ["max-level"]         = true,
-    ["rarity"]            = true,
-    ["seller"]            = true,
     ["percent"]           = true,
     ["vendor-profit"]     = true,
-    ["left"]              = true,
     ["disenchant-profit"] = true,
 }
 
@@ -5413,13 +5411,17 @@ function ui.BuilderAddComponent()
             ui.BuilderNote("'" .. kind .. "' needs a value.", true)
             return
         end
-        if kind == "tooltip" or ui.PENDING_COMPONENTS[kind] then
+        if kind == "tooltip" then
             value = raw
         else
-            value = util.ParseMoney(raw)
-            if not value or value <= 0 then
-                ui.BuilderNote("'" .. kind
-                    .. "' needs a price, like 5g or 50s.", true)
+            -- ONE parser, the engine's. The form used to assume every
+            -- non-tooltip component took MONEY, which was true only while
+            -- money bounds were the only ones wired up -- a level or a
+            -- quality typed here would have been read as a price.
+            value = A.buy.ParseComponentValue(kind, raw)
+            if value == nil then
+                ui.BuilderNote("'" .. kind .. "' needs "
+                    .. A.buy.ComponentValueHint(kind) .. ".", true)
                 return
             end
         end
@@ -5473,9 +5475,30 @@ local function PaintPostFilter()
                 pre, val = hex .. e.kind .. ": ", tostring(e.value)
                 post = "|r  |cffd08050not wired up yet \226\128\148 ignored|r"
             else
+                -- The value's SHAPE comes from the engine, not from an
+                -- assumption made here. This branch used to format every
+                -- remaining component as money and tack "per item" on --
+                -- correct only while the price bounds were the only ones
+                -- implemented, and quietly wrong the moment a level or a
+                -- quality reached it.
                 pre = hex .. e.kind .. ":|r "
-                val = util.FormatMoney(e.value, true)
-                post = "  |cff8d7d5cper item|r"
+                local vk = A.buy.ComponentValueKind(e.kind)
+                if vk == "money" then
+                    val = util.FormatMoney(e.value, true)
+                    post = "  |cff8d7d5cper item|r"
+                elseif vk == "quality" then
+                    -- Named back for the reader. The QUERY keeps the index
+                    -- (see buy.ComponentValueText); a list you are reading
+                    -- can afford the word.
+                    val = A.scan.QUALITY_NAMES[e.value] or tostring(e.value)
+                    post = "  |cff8d7d5cexactly|r"
+                elseif vk == "timeleft" then
+                    val = A.buy.ComponentValueText(e.kind, e.value)
+                    post = "  |cff8d7d5cor less|r"
+                else
+                    val = A.buy.ComponentValueText(e.kind, e.value)
+                    post = ""
+                end
             end
 
             -- Clip, never wrap -- a wrapped line in a fixed-height row is
@@ -6267,6 +6290,17 @@ function ui.UpdateBuyList()
         local _, page, totalPages, totalAuctions, termIndex, totalTerms, stats =
             A.buy.GetResults()
         local unknown = stats and stats.unknownStack or 0
+        -- Rows a post-filter could not JUDGE, as opposed to rows that did not
+        -- match: seller before the owner names resolve, time left on a server
+        -- that does not answer for it. Same confession the unknown-stack path
+        -- makes, and for the same reason -- an unexplained empty page reads as
+        -- a broken filter.
+        local blind, blindWho = A.buy.UnansweredSummary(stats)
+        local blindNote = ""
+        if blind > 0 then
+            blindNote = " \226\128\162 " .. blind .. " skipped (no "
+                .. blindWho .. " data yet \226\128\148 search again)"
+        end
         -- A pending category note owns the status line until the search it
         -- asks for actually runs. Repainting the list must not answer a
         -- question nobody has pressed Search on yet.
@@ -6289,6 +6323,11 @@ function ui.UpdateBuyList()
                     -- may still hold matches.
                     local t = "0 match(es) (of " .. totalAuctions .. ") \226\128\162 "
                         .. "filters removed this page's rows"
+                    -- WHICH filter, when it was one that could not answer.
+                    -- "filters removed this page's rows" is true but useless
+                    -- if the real reason is that no owner name had arrived
+                    -- yet and searching again would fix it.
+                    t = t .. blindNote
                     if totalPages and totalPages > 1 then
                         t = t .. " \226\128\162 try the next page"
                     end
@@ -6322,6 +6361,7 @@ function ui.UpdateBuyList()
                     shown = shown .. " \226\128\162 " .. unknown
                         .. " skipped (stack size unknown)"
                 end
+                shown = shown .. blindNote
                 ui.buyStatus:SetText(headline .. " \226\128\162 "
                     .. sortKey .. " " .. order .. shown)
             end

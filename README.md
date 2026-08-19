@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.21.1)
+# Aegis: Exchange (v1.22.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -79,6 +79,10 @@ changes. But the same box now takes a query language when you want one:
 | `wristbands/tooltip/+3 stam/or/tooltip/+3 agi` | either stat |
 | `boots/not/tooltip/soulbound` | excludes what the clause matches |
 | `silk cloth/max-unit-buy/5g` | at or under 5g **per item** |
+| `sword/min-level/40/max-level/50` | required level 40–50 |
+| `bracers/rarity/rare` | rares **only** — not the epics above them |
+| `linen/seller/Bob` | posted by anyone whose name contains *Bob* |
+| `linen/left/short` | about to expire |
 | `linen;wool;silk` | all three, browsed as one list |
 
 **Categories are the game's own names** — whatever the auction house's own
@@ -106,6 +110,19 @@ wants both. The run ends the moment a word means something else to the search �
 *for* is one of those words, say `tooltip` again:
 `tooltip/Stamina/tooltip/Weapon` searches tooltips for **Weapon**, while
 `tooltip/Stamina/Weapon` searches the Weapon *category*.
+
+**`rarity` means exactly that quality, and `left` means "at most this long".**
+The **Min Quality** dropdown already gives you "rare *and better*", so
+`rarity/rare` is the other thing — rares and nothing else. `left/short` is
+what's about to expire, `left/long` is everything except the freshly posted;
+and because it's a bound it still composes, so `left/medium/not/left/short` is
+exactly medium.
+
+Two of these can't always answer. The seller's name arrives a moment after the
+page does, and some servers don't report time left at all — so rows they can't
+judge are **counted and named in the status line**, never dropped quietly.
+If you see `3 skipped (no seller data yet — search again)`, searching again is
+genuinely the fix.
 
 Terms combine with `/`, and `;` runs several searches back to back — page past
 the end of one and it rolls straight into the next.
@@ -370,7 +387,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.21.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.22.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

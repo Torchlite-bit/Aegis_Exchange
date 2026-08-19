@@ -12,6 +12,81 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.22.0]
+
+Five of the nine placeholder filter components are real filters now.
+`/reload`.
+
+### Added
+- **`min-level` and `max-level`** — bound the listing's own required level.
+  `sword/min-level/40/max-level/50` is a band, which is the thing the
+  server-side `level/40-50` cannot be: a query filter is part of the query and
+  cannot be OR'd or negated, so `min-level/40/or/rarity/epic` needs the
+  post-filter version.
+- **`rarity`** — **exactly** that quality, not "that or better".
+
+  The server-side `quality/N` is already the minimum — it *is* the form's
+  **Min Quality** dropdown — so a post-filter minimum would be a second way to
+  spell something that already had one. Exact is what you could not otherwise
+  say: `bracers/rarity/rare` is rares and none of the epics above them. Same
+  vocabulary as `quality`, so `rarity/rare` and `rarity/3` are the same
+  clause.
+- **`seller`** — case-insensitive substring of the seller's name, so
+  `linen/seller/Bob` finds Bobby and Bobson. Matched as plain text, never as a
+  pattern: a seller called `Mr.X` is a name, not a wildcard.
+- **`left`** — **at most** this much time remaining. `left/short` is what is
+  about to expire; `left/long` is everything except the freshly posted. Takes
+  a word or an index (`short`, `medium`, `long`, `very long`, or `1`–`4`), and
+  your client's own wording is accepted too.
+
+  A bound rather than an exact match because the question people actually have
+  is "what is ending soon" — and because a bound still composes:
+  `left/medium/not/left/short` is exactly medium.
+
+- **A filter that cannot ANSWER now says so.** The seller's name arrives a
+  moment after the page does, and some servers do not report time left at all.
+  Rows those filters cannot judge are dropped — a positive filter cannot
+  honestly keep what it cannot verify — but they are **counted and named** in
+  the status line: `3 skipped (no seller data yet — search again)`.
+
+  This is the same confession bare `stack` makes, for the same reason: an
+  unexplained empty page is indistinguishable from a broken filter, and that
+  is exactly how the `stack` fault got reported in the first place.
+
+All five now appear in normal colour in the Builder's **Component** dropdown
+rather than dimmed, and the Post Filter list draws each one's value in its own
+terms — a quality by name, a time left as "or less", a price as "per item".
+
+### Still pending
+`item`, `percent`, `vendor-profit` and `disenchant-profit` remain placeholders
+and stay dimmed. `percent` and `vendor-profit` need the price DB and are next;
+`item` needs the client's item cache; `disenchant-profit` needs a data source
+that does not exist on 1.12 and is not scheduled.
+
+### Internal
+- **One table decides what a component's value IS**, and four readers ask it:
+  the parser, the query writer, the Builder's Enter key and the Post Filter
+  list. Four hand-written copies of "min-level takes a number" is the shape
+  that produced the Saved-vs-Builder drift in 1.19.3.
+
+  It also fixed a latent fault: the Builder assumed every non-`tooltip`
+  component took **money**, which was true only while the price bounds were
+  the only ones wired up. A level typed into that box would have been read as
+  a price.
+- **A value that does not parse is not a clause.** `silk/min-level/soon`
+  leaves the words as name text instead of building a clause that can never
+  match — the rule `quality` and `level` already follow.
+- New `post_filter` suite (76 checks) driving every predicate through the real
+  `ParseTerm → CompileTerm → filter` path. Eleven sabotages, each confirmed to
+  fail it: both bounds inverted, `rarity` turned back into a minimum, the
+  seller needle treated as a pattern and as case-sensitive, unanswered rows
+  dropped silently and kept wrongly, a bad value accepted as a clause, the
+  emitter bypassing the value table, and a pending component that filters.
+- The suite's own row helper caught a Lua trap worth naming: `Row({ owner =
+  nil })` sets **no key at all**, so `pairs()` never sees it and the default
+  survived. Four assertions about unresolved owners were passing against a row
+  that had one. A sentinel is the only way to say "absent" through a table.
+
 ## [1.21.1]
 
 The **Usable items** check box never actually filtered anything. `/reload`.
@@ -1922,6 +1997,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
