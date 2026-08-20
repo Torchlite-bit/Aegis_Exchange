@@ -247,7 +247,9 @@ Aegis_Exchange/
   core/itemlevel.lua     -- [itemId] = itemLevel. SHIPS EMPTY on purpose; read
                          -- its header before filling it in
   core/disenchant.lua    -- the disenchant RULE (item level + quality + slot ->
-                         -- materials). Constants generated, not typed
+                         -- materials). Constants generated, not typed. Its
+                         -- last section is the ONE impure part: it watches the
+                         -- player disenchant things and records what it sees
   core/scan.lua          -- page-by-page auction scanner state machine
   core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut),
                          -- owned auctions, vendor list

@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.31.0)
+# Aegis: Exchange (v1.32.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -321,6 +321,13 @@ not typed by hand; epics and anything above item level 65 are deliberately
 left unanswered, because the data there isn't good enough to trust. See
 `tools/README.md` if you want the workings.
 
+**And it learns.** Disenchant something and Aegis records what came out —
+nothing to switch on. That's the only way it can ever answer for Turtle's
+custom items, and because it's evidence from the server you're actually on, it
+**outranks** the shipped item levels. It won't guess from a single result
+though: an essence pins an item down, a dust leaves two or three
+possibilities, so it keeps quiet until a second break settles it.
+
 ---
 
 ## Using pfUI?
@@ -441,7 +448,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.31.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.32.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

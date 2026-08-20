@@ -12,6 +12,60 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.32.0]
+
+Aegis now learns what things disenchant into by watching you do it. `/reload`.
+
+### Added
+- **Disenchanting an item teaches Aegis about it.** No configuration, nothing
+  to turn on. This is the only source that can ever answer for the two thirds
+  of Turtle's custom items the shipped table has never heard of — and it is
+  evidence from the server you actually play on, so it **outranks** the
+  shipped item levels rather than filling gaps around them.
+
+- **Evidence accumulates; it is not believed on the first result.** An essence
+  names an item's band outright, but a dust does not — Strange Dust belongs to
+  bands 15, 20 and 25, whose yields differ by more than double. Of the 30
+  material/quality combinations the table can produce, 21 pin a band and 9
+  leave two or three open. Until the evidence narrows to one, Aegis keeps
+  saying nothing rather than picking.
+
+### How it knows what you disenchanted
+1.12 never reports it: a spell is cast, a bag item is clicked, and neither step
+names the item. Aegis remembers what the click landed on and attributes a loot
+window to it only when **all four** hold — a spell was awaiting an item target,
+the item can actually be disenchanted, the loot arrived within 15 seconds, and
+**every** loot slot is an enchanting reagent.
+
+That last one is what makes it work without reading a spell name (which is
+localised, and would have needed an answer about Turtle's cast bar that the
+client source does not give). The second is what stops a lockbox being
+"learned" from the shard you picked out of it.
+
+Cost is one table write per bag click and a read of one or two loot slots —
+nothing walks your bags, so HARD RULE 16 holds by construction.
+
+### Corrected
+- A claim in ROADMAP 3k that "one disenchant identifies the band for 46 of 53
+  material signatures" was **wrong** — it conflated a full signature (every
+  material an item can yield, which takes many breaks) with a single
+  observation (one material). The measured figure is 21 of 30 combinations.
+  Corrected in place rather than quietly dropped.
+
+### Notes
+- **Observations only** are saved. No band, no item level, no guess is ever
+  written — everything above the counts is derived at read time, every time. A
+  derived value stored beside real evidence becomes indistinguishable from it a
+  month later, and there is no way back from that. A test asserts the store
+  holds nothing else.
+- Observations are per realm, because what an item breaks into is server
+  behaviour.
+- New suite (34 checks) and eight sabotages, most of them about cases where
+  **nothing** should be recorded — a false observation is permanent, so those
+  matter more than the happy path.
+
+---
+
 ## [1.31.0]
 
 **The disenchant line actually appears now.** `/reload` — no new files, because
@@ -2570,6 +2624,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.32.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.31.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.30.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.30.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1087,8 +1087,8 @@ end
      """    if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end
-    local ilvl, source = de.ItemLevel(itemId)""",
-     """    local ilvl, source = de.ItemLevel(itemId)""",
+    local ilvl, source = de.ItemLevel(itemId, info.quality)""",
+     """    local ilvl, source = de.ItemLevel(itemId, info.quality)""",
      "disenchant"),
 
     # 4.7% truncating to "4%" understates every shard line, and the shard is
@@ -1160,6 +1160,73 @@ end
      "A.ilvlData = {\n",
      "A.ilvlData = {} local DISCARDED = {\n",
      "disenchant"),
+    # ---- disenchant, phase 3 (learning) ----------------------------------
+    # Without the spell gate EVERY bag click becomes a disenchant. The DB
+    # fills with nonsense within a minute of ordinary play, and a false
+    # observation outranks the shipped table forever afterwards.
+    ("de-learn-no-spell-gate", "core/disenchant.lua",
+     "    if not watch.armed or not watch.link then return end",
+     "    if not watch.link then return end",
+     "disenchant.learn"),
+
+    # The window is what separates this loot window from the next one.
+    ("de-learn-window-removed", "core/disenchant.lua",
+     "    if now - watch.at > WINDOW then return Forget() end",
+     "    if false then return Forget() end",
+     "disenchant.learn"),
+
+    # Loot that is not entirely enchanting reagents did not come from a
+    # disenchant. This check is what lets the whole thing work without
+    # reading a localised spell name.
+    ("de-learn-accepts-non-reagent", "core/disenchant.lua",
+     "        if not matId or not REAGENT[matId] then return Forget() end",
+     "        if not matId then return Forget() end",
+     "disenchant.learn"),
+
+    # Recording as the loop goes leaves a PARTIAL observation behind when a
+    # later slot turns out to disqualify the whole window -- and a partial
+    # write is indistinguishable from a real one afterwards.
+    ("de-learn-partial-write", "core/disenchant.lua",
+     """        local _, _, quantity = GetLootSlotInfo(i)
+        table.insert(found, { matId, quantity or 1 })""",
+     """        local _, _, quantity = GetLootSlotInfo(i)
+        A.db.RecordDisenchant(itemId, matId, quantity or 1)""",
+     "disenchant.learn"),
+
+    # Without this a lockbox is "learned" from the shard picked out of it --
+    # the item clicked while Pick Lock was targeting IS the lockbox.
+    ("de-learn-target-need-not-be-disenchantable", "core/disenchant.lua",
+     """    if not info or not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
+        return Forget()
+    end""",
+     """    if not info then return Forget() end""",
+     "disenchant.learn"),
+
+    # One loot window, one record. The client fires LOOT_OPENED more than
+    # once, so forgetting is what stops a single break counting twice.
+    ("de-learn-double-counts", "core/disenchant.lua",
+     """        A.db.RecordDisenchant(itemId, found[f][1], found[f][2])
+        f = f + 1
+    end
+    Forget()""",
+     """        A.db.RecordDisenchant(itemId, found[f][1], found[f][2])
+        f = f + 1
+    end""",
+     "disenchant.learn"),
+
+    # An ambiguous observation is not a weak answer to round off: the bands
+    # either side of a dust differ by more than double in yield.
+    ("de-band-accepts-ambiguous", "core/disenchant.lua",
+     "        if band and count == 1 then return band, \"observed\" end",
+     "        if band then return band, \"observed\" end",
+     "disenchant.learn"),
+
+    # The candidate test is a SUBSET test: every material seen must be one
+    # the band can produce. Inverted, every band matches everything.
+    ("de-band-subset-inverted", "core/disenchant.lua",
+     "                if not set[matId] then ok = false end",
+     "                if set[matId] then ok = ok end",
+     "disenchant.learn"),
 ]
 
 SUITES = {
@@ -1179,6 +1246,7 @@ SUITES = {
     "sellslot": "tests/units/sellslot_test.lua",
     "disenchant": "tests/units/disenchant_test.lua",
     "tooltip": "tests/units/tooltip_test.lua",
+    "disenchant.learn": "tests/units/disenchant_learn_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

@@ -216,8 +216,23 @@ end
 -- nothing". Flip with W.itemInfoShape.
 W.itemInfoShape = "vanilla"          -- or "later"
 
-function GetItemInfo(key)
+-- The client resolves an item from an id, a name, or ANY well-formed link --
+-- the colour code in front of a link is decoration, not identity. Keying only
+-- on the exact string a test happened to build made a hand-written link miss
+-- while the generated one hit, which looks exactly like a bug in the addon.
+local function ItemRec(key)
     local r = W.items[key]
+    if r then return r end
+    if type(key) == "string" then
+        local _, _, id = string.find(key, "Hitem:(%d+)")
+        if not id then _, _, id = string.find(key, "^item:(%d+)") end
+        if id then return W.items[tonumber(id)] end
+    end
+    return nil
+end
+
+function GetItemInfo(key)
+    local r = ItemRec(key)
     if not r then return nil end
     if W.itemInfoShape == "later" then
         return r.name, r.link, r.quality or 1, r.itemLevel or 55,
@@ -480,6 +495,10 @@ function W.Reset()
     W.tooltipLines  = {}
     W.money         = 500000
     W.now           = 1700000000
+    W.uptime        = 1000
+    W.spellTargeting = false
+    W.loot          = {}
+    W.equipped      = {}
     AegisExchangeDB     = nil
     AegisExchangeCharDB = nil
 end
@@ -519,6 +538,50 @@ function W.LoadCore(upTo)
     end
     return AegisExchange
 end
+
+-- ---------------------------------------------------------------------------
+-- Clock, spell targeting, loot
+-- ---------------------------------------------------------------------------
+
+-- A clock the test drives, so a time WINDOW can actually be tested rather
+-- than assumed. Real GetTime is seconds since LOGIN, and is a different clock
+-- from time()'s epoch seconds -- kept separate here for that reason, and
+-- because advancing one to test a timeout must not silently move the calendar
+-- the price DB buckets its dailies by.
+W.uptime = 1000
+function GetTime() return W.uptime end
+function W.Advance(seconds) W.uptime = W.uptime + seconds end
+
+-- True while a spell is waiting for the player to click an item -- what
+-- Disenchant, Enchant and Pick Lock all do. This is the signal that separates
+-- "clicked a bag item" from "clicked a bag item AT something".
+W.spellTargeting = false
+function SpellIsTargeting() return W.spellTargeting end
+
+-- The open loot window: { { link = , quantity = , money = } , ... }
+W.loot = {}
+function W.SetLoot(rows) W.loot = rows or {} end
+
+function GetNumLootItems() return table.getn(W.loot) end
+function LootSlotIsItem(i)
+    local r = W.loot[i]
+    return (r and not r.money) and 1 or nil
+end
+function GetLootSlotLink(i)
+    local r = W.loot[i]
+    return r and r.link or nil
+end
+function GetLootSlotInfo(i)
+    local r = W.loot[i]
+    if not r then return nil end
+    return "icon", r.name or "loot", r.quantity or 1, r.quality or 1, nil
+end
+
+function GetInventoryItemLink(unit, slot)
+    local r = W.equipped and W.equipped[slot]
+    return r and r.link or nil
+end
+W.equipped = {}
 
 -- Load a ui/ module on top of the core ones.
 --

@@ -1902,11 +1902,34 @@ reading their source.
   gated on `tipDisenchant`. Silent wherever the rule cannot answer. Added
   `de.Resolve` / `de.YieldOf` / `de.ValueOf` as the single resolution layer,
   and `W.LoadUI` so `ui/` modules are testable at all.
-- **§3 — learning from play.** The O(1) hook chain above, storing
-  **observations only**. Its payoff: one disenchant identifies the band for
-  **46 of 53** material signatures, so a single break of an unknown Turtle item
-  yields a full expected value backed by 8.8M samples — rather than one sample
-  out of the hundreds an item-keyed model would need.
+- **§3 — learning from play. v1.32.0. DONE.** Stores **observations only**;
+  every band and level above them is derived at read time.
+
+  **A correction to what this entry used to claim.** It said one disenchant
+  identifies the band for "46 of 53 material signatures". That conflated a
+  *full* signature — every material an item can yield, which takes many breaks
+  to establish — with a *single* observation, which yields one material. The
+  real figure, measured against the shipped table: of the **30**
+  material/quality combinations it can produce, **21 pin a band exactly and 9
+  leave two or three candidates**. An essence names its band outright; a dust
+  does not (Strange Dust spans bands 15, 20 and 25, whose yields differ by
+  more than double). So `de.BandCandidates` returns a candidate COUNT and
+  `de.ItemLevel` accepts the answer only at one — evidence accumulates rather
+  than being believed on the first result.
+
+  It is still a far better trade than an item-keyed model, where one break is
+  one sample out of hundreds. Here one or two breaks give a full expected
+  value backed by 8.8M samples.
+
+  **Attribution reads no spell name.** Enchantrix gates on `SPELLCAST_START`
+  matching the localised name of Disenchant; we do not, because the name is
+  localised and whether Turtle produces a cast at all is not answerable from
+  the client source. Instead all four must hold: the click happened while a
+  spell awaited an item target (`SpellIsTargeting`), the item clicked **can**
+  be disenchanted, a loot window arrived inside 15s, and **every** loot slot is
+  an enchanting reagent. The last is the discriminator — enchanting opens no
+  loot window, a lockbox yields non-reagents — and the second is what stops a
+  lockbox being "learned" from the shard picked out of it.
 - **§4 — the filters.** `disenchant-profit` stops being pending;
   `disenchant-percent` joins it. Unknown items go through the `UNANSWERED_FIX`
   path §7a already built — that is this case exactly.

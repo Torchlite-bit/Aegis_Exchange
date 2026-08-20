@@ -244,6 +244,53 @@ function db.Items()
     return bucket.items
 end
 
+-- Observed disenchant results for the current realm, created on demand.
+--
+-- Realm-scoped for the same reason prices are: what an item breaks into is
+-- SERVER behaviour, and this addon's whole reason for learning it is that
+-- Turtle adds items the shipped table has never heard of. Pooling two servers'
+-- observations would be pooling two rulesets.
+function db.Disenchanted()
+    if not db.account then return nil end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.disenchants then bucket.disenchants = {} end
+    return bucket.disenchants
+end
+
+-- Record ONE observed disenchant: `itemId` produced `quantity` of `matId`.
+--
+-- OBSERVATIONS ONLY. Nothing derived is ever written here -- not a band, not
+-- an item level, not a guess from required level. A derived value stored
+-- beside real observations becomes indistinguishable from one a month later,
+-- and there is no way back from that. Everything above this reads these counts
+-- and derives at call time, every time.
+function db.RecordDisenchant(itemId, matId, quantity)
+    if not itemId or not matId then return end
+    quantity = tonumber(quantity) or 1
+    if quantity < 1 then return end
+    local all = db.Disenchanted()
+    if not all then return end
+    local rec = all[itemId]
+    if not rec then rec = {}; all[itemId] = rec end
+    local m = rec[matId]
+    if not m then m = { n = 0, total = 0 }; rec[matId] = m end
+    m.n = m.n + 1
+    m.total = m.total + quantity
+end
+
+-- What we have seen `itemId` break into: { [matId] = { n = , total = } }, or
+-- nil when it has never been disenchanted on this realm.
+function db.Disenchants(itemId)
+    if not itemId then return nil end
+    local all = db.Disenchanted()
+    if not all then return nil end
+    return all[itemId]
+end
+
 -- v2 -> v3. Old saves pooled EVERY realm's prices into one account-wide
 -- `items` table, with the vendor price stored inside each item record.
 --

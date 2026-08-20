@@ -40,10 +40,15 @@
 --     predicts. Turtle will have its own entries and only a failed disenchant
 --     reveals them.
 --
--- Everything here is a pure function of its arguments -- no globals read, no
--- DB, no client API. `de.Value` takes the pricer as a parameter for that
--- reason: it is testable without either, and a caller that needs a stricter
--- price source can pass one.
+-- THE RULE is a pure function of its arguments -- no globals read, no DB, no
+-- client API. `de.Value` takes the pricer as a parameter for that reason: it
+-- is testable without either, and a caller that needs a stricter price source
+-- can pass one.
+--
+-- The LAST SECTION of this file is not pure, and is fenced off accordingly:
+-- it watches the player disenchant things and writes what it sees to the DB.
+-- That is the only source of item levels that works for Turtle content the
+-- shipped table has never heard of, so it lives beside the rule it feeds.
 
 local A = AegisExchange
 A.de = {}
@@ -403,7 +408,22 @@ end
 -- phases add sources ABOVE this one -- a disenchant the player performed
 -- names the band directly and is always preferred, because it is evidence
 -- from the server they are actually on rather than from vanilla in 2006.
-function de.ItemLevel(itemId)
+function de.ItemLevel(itemId, quality)
+    -- What the player has actually SEEN outranks anything shipped. It is
+    -- evidence from the server they are playing on, where the shipped table
+    -- is vanilla data with a partial view of Turtle's items -- and it is the
+    -- only thing that can ever answer for the two thirds of Turtle's custom
+    -- items the table has never heard of.
+    --
+    -- Accepted only when the evidence names ONE band. Two candidates is not a
+    -- weak answer worth rounding off: the bands either side of a dust differ
+    -- by more than double in yield, so picking one would be a coin flip
+    -- dressed as a measurement. It stays unanswered until another disenchant
+    -- separates them.
+    if quality then
+        local band, count = de.BandFromObservation(itemId, quality)
+        if band and count == 1 then return band, "observed" end
+    end
     if not itemId or not A.ilvlData then return nil end
     local lvl = A.ilvlData[itemId]
     if type(lvl) ~= "number" or lvl < 1 then return nil end
@@ -434,7 +454,7 @@ function de.Resolve(itemId)
     if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end
-    local ilvl, source = de.ItemLevel(itemId)
+    local ilvl, source = de.ItemLevel(itemId, info.quality)
     if not ilvl then return nil end
     return ilvl, source, info.quality, info.equipLoc
 end
@@ -518,4 +538,228 @@ function de.ParseReportArgs(rest)
     local _, _, only = string.find(rest, "^%s*(%d+)%s*$")
     if only then return tonumber(only), nil end
     return nil, nil
+end
+
+-- ---------------------------------------------------------------------------
+-- The inverse: materials seen -> which band the item is in
+-- ---------------------------------------------------------------------------
+
+-- Every material a (quality, band) can produce, DERIVED from BANDS itself and
+-- cached on first use.
+--
+-- Derived rather than written out, because a second hand-kept map of "which
+-- materials come from which band" is precisely the kind of duplicate that goes
+-- stale in silence -- regenerate BANDS and the copy still looks plausible
+-- while answering for a table that no longer exists.
+local MATSET = nil
+local function MaterialSets()
+    if MATSET then return MATSET end
+    MATSET = {}
+    for quality, byBand in pairs(BANDS) do
+        local perBand = {}
+        for band, rec in pairs(byBand) do
+            local set, lists, li = {}, { rec.a, rec.w }, 1
+            while li <= 2 do
+                local rows = lists[li]
+                if rows then
+                    local i, n = 1, table.getn(rows)
+                    while i <= n do
+                        set[rows[i][1]] = true
+                        i = i + 1
+                    end
+                end
+                li = li + 1
+            end
+            perBand[band] = set
+        end
+        MATSET[quality] = perBand
+    end
+    return MATSET
+end
+
+-- Which bands are still consistent with the materials seen so far.
+--
+-- Returns the LOWEST consistent band and HOW MANY are consistent. The count is
+-- the point: one disenchant is often not enough. An essence names its band
+-- outright, but a dust covers two or three -- Strange Dust spans bands 15, 20
+-- and 25. Of the 30 material/quality combinations this table can produce, 21
+-- pin a band on their own and 9 do not, so evidence has to accumulate rather
+-- than be believed on the first result.
+function de.BandCandidates(quality, seen)
+    if not quality or not seen then return nil, 0 end
+    local sets = MaterialSets()[quality]
+    if not sets then return nil, 0 end
+    local best, count, i, n = nil, 0, 1, table.getn(LADDER)
+    while i <= n do
+        local band = LADDER[i]
+        local set = sets[band]
+        if set then
+            local ok, any = true, false
+            for matId in pairs(seen) do
+                any = true
+                if not set[matId] then ok = false end
+            end
+            if ok and any then
+                count = count + 1
+                if not best then best = band end
+            end
+        end
+        i = i + 1
+    end
+    return best, count
+end
+
+-- The same question, asked of what this realm has actually observed.
+function de.BandFromObservation(itemId, quality)
+    if not itemId or not A.db or not A.db.Disenchants then return nil, 0 end
+    local rec = A.db.Disenchants(itemId)
+    if not rec then return nil, 0 end
+    local seen, any = {}, false
+    for matId in pairs(rec) do
+        seen[matId] = true
+        any = true
+    end
+    if not any then return nil, 0 end
+    return de.BandCandidates(quality, seen)
+end
+
+-- ---------------------------------------------------------------------------
+-- Learning from play -- NOT pure; see the note in the header
+-- ---------------------------------------------------------------------------
+
+-- The 24 enchanting reagents. A disenchant produces exactly one stack of one
+-- of these and nothing else, which is the fact attribution leans on hardest.
+--
+-- Written out rather than derived from BANDS because BANDS has no epics, and
+-- so cannot name Nexus Crystal -- and an epic disenchant is exactly the kind
+-- of observation worth keeping even while we decline to VALUE epics.
+local REAGENT = {
+    [10940] = true, [11083] = true, [11137] = true, [11176] = true,
+    [16204] = true,
+    [10938] = true, [10939] = true, [10998] = true, [11082] = true,
+    [11134] = true, [11135] = true, [11174] = true, [11175] = true,
+    [16202] = true, [16203] = true,
+    [10978] = true, [11084] = true, [11138] = true, [11139] = true,
+    [11177] = true, [11178] = true, [14343] = true, [14344] = true,
+    [20725] = true,
+}
+
+-- How long a loot window may arrive after the click and still be attributed.
+local WINDOW = 15
+
+-- What the last item-targeted click was aimed at.
+local watch = { link = nil, at = 0, armed = false }
+
+-- HOW THIS KNOWS WHAT WAS DISENCHANTED, and why it does not read the spell.
+--
+-- 1.12 reports no "you disenchanted X". The item is never named: a spell is
+-- cast and then a bag item is clicked, and neither step says what it was. The
+-- only handle is the click, so `PickupContainerItem` / `PickupInventoryItem`
+-- are hooked to remember what the click landed on. Verified against the real
+-- 1.12.1 ContainerFrame.lua: a plain left click is `PickupContainerItem` at
+-- line 580, and there is no `SpellCanTargetItem` branch on this client -- that
+-- arrived later.
+--
+-- Enchantrix gates this on SPELLCAST_START matching the localised spell name.
+-- We deliberately do NOT, for two reasons: the name is localised, and whether
+-- Turtle's Disenchant produces a cast at all is not something the client
+-- source answers. Instead attribution requires all four of:
+--
+--   1. the click happened while a spell was awaiting an item target
+--      (`SpellIsTargeting`), which is true of Disenchant and of nothing the
+--      player does by accident;
+--   2. the item clicked is one that CAN be disenchanted -- which is what stops
+--      a lockbox being "learned" from the shard someone picked out of it;
+--   3. a loot window inside WINDOW seconds;
+--   4. EVERY loot slot is an enchanting reagent.
+--
+-- (4) is the discriminator. Enchanting a bracer opens no loot window at all;
+-- a lockbox yields things that are not reagents. Together these need no spell
+-- name and work whether or not a cast bar exists.
+--
+-- Cost: O(1) per click, and bounded by loot-slot count on LOOT_OPENED, which
+-- is one or two. Nothing here walks bags or calls GetItemInfo per item, so
+-- HARD RULE 16 is satisfied by construction rather than by a dirty flag.
+local function RememberTarget(link)
+    watch.link  = link
+    watch.at    = (GetTime and GetTime()) or 0
+    -- Read BEFORE the original runs -- the client consumes the pending spell
+    -- inside it, so afterwards this is always false.
+    watch.armed = (SpellIsTargeting and SpellIsTargeting()) and true or false
+end
+
+local function Forget()
+    watch.link, watch.armed = nil, false
+end
+
+-- LOOT_OPENED: attribute the loot to the remembered item, or do nothing.
+function de.OnLootOpened()
+    if not watch.armed or not watch.link then return end
+    local now = (GetTime and GetTime()) or 0
+    if now - watch.at > WINDOW then return Forget() end
+
+    local itemId = util and util.ItemIdFromLink(watch.link)
+    local info = itemId and util.ItemInfo(watch.link)
+    if not info or not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
+        return Forget()
+    end
+
+    local slots = (GetNumLootItems and GetNumLootItems()) or 0
+    if slots < 1 then return Forget() end
+
+    -- Collected first, recorded only once EVERY slot has passed. A partial
+    -- write from a loot window that turns out not to be a disenchant would be
+    -- indistinguishable from a real observation afterwards.
+    local found, i = {}, 1
+    while i <= slots do
+        if not (LootSlotIsItem and LootSlotIsItem(i)) then return Forget() end
+        local link = GetLootSlotLink and GetLootSlotLink(i)
+        local matId = link and util.ItemIdFromLink(link)
+        if not matId or not REAGENT[matId] then return Forget() end
+        local _, _, quantity = GetLootSlotInfo(i)
+        table.insert(found, { matId, quantity or 1 })
+        i = i + 1
+    end
+
+    local f, n = 1, table.getn(found)
+    while f <= n do
+        A.db.RecordDisenchant(itemId, found[f][1], found[f][2])
+        f = f + 1
+    end
+    Forget()
+end
+
+-- Save-and-replace hooks (HARD RULE 7 -- no hooksecurefunc on 1.12).
+--
+-- We call PickupContainerItem ourselves in sell.PlaceFromBag, so this sees our
+-- own calls too. They are harmless: no spell is targeting during a post, so
+-- `armed` is false and nothing is ever attributed. There is a test for that
+-- specifically, because it is the kind of interaction that bites a year later.
+function de.InstallHooks()
+    if de.hooked then return end
+    de.hooked = true
+
+    local origContainer = PickupContainerItem
+    PickupContainerItem = function(bag, slot)
+        RememberTarget(GetContainerItemLink and GetContainerItemLink(bag, slot))
+        return origContainer(bag, slot)
+    end
+
+    local origInventory = PickupInventoryItem
+    PickupInventoryItem = function(slot)
+        RememberTarget(GetInventoryItemLink
+            and GetInventoryItemLink("player", slot))
+        return origInventory(slot)
+    end
+end
+
+if A.RegisterEvent then
+    A.RegisterEvent("LOOT_OPENED", function() de.OnLootOpened() end)
+    -- A cast that never completed disenchanted nothing. Harmless if this
+    -- client never fires them -- attribution does not depend on it.
+    A.RegisterEvent("SPELLCAST_FAILED", Forget)
+    A.RegisterEvent("SPELLCAST_INTERRUPTED", Forget)
+end
+if A.OnLoad then
+    A.OnLoad(function() de.InstallHooks() end)
 end
