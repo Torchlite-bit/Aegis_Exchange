@@ -1842,6 +1842,87 @@ The stated top priority of the report, and the last of the Sell-tab restyle.
   and the sabotage system doing exactly what they were built for, on the very
   mistake they were built for.
 
+### 3k — Disenchant breakdown: FEASIBILITY SPIKE — ❌ **NOT BUILDING**
+
+Asked for as a tooltip line showing what an item will likely disenchant into,
+so you can decide between posting it and breaking it for mats. The spike was
+to answer **where the data comes from** before designing a schema. The answer
+is: nowhere we trust. Recorded in full so it is not re-asked every few
+releases.
+
+#### What 1.12 gives us
+
+- **There is no disenchant API.** No `GetDisenchantLoot` or equivalent. The
+  only mechanism in the client is casting the spell and reading the loot.
+- **The formula's key input is missing.** Vanilla's disenchant table is
+  bucketed by **item level**, quality and type. `GetItemInfo` on 1.12 returns
+  **no item level at all** — this repo already documents that at length in
+  `util.ItemInfo`, which anchors on the last numeric field precisely because
+  later clients insert `itemLevel` at slot 4 and vanilla does not have it.
+  Vanilla tooltips do not print item level either.
+- **Required level is NOT a substitute.** `minLevel` is what the item needs to
+  equip, and it diverges from item level by a lot and inconsistently. The
+  disenchant buckets are only 5–10 levels wide, so landing in the wrong bucket
+  does not give a slightly wrong answer — it gives **the wrong material tier**,
+  Strange Dust where it should be Soul Dust. A confidently wrong answer about
+  what an item breaks into is worse than none, and this addon's whole posture
+  is to say when it cannot answer.
+
+#### The three ways to get it anyway, and what each costs
+
+1. **Ship a static table keyed by ITEM ID.** This is what the era's addons
+   actually did — Enchantrix and its descendants harvested it from players —
+   and it sidesteps the item-level problem entirely, because the id is the
+   key. The costs are real: thousands of entries, so a new `.lua` file, a
+   `.toc` edit and a **restart** release; and we would be shipping data we
+   have not verified onto servers (the Turtle / Octo / Capy family) that
+   **add custom items and can change drop tables**. An entry that is wrong for
+   this server is indistinguishable from one that is right, and it goes stale
+   silently. **That is the disqualifying part**, not the size.
+2. **Learn it from the player's own disenchants.** Accurate for the server
+   they are actually on, and needs no shipped data — which is why it is the
+   one that fits this addon. `CHAT_MSG_LOOT` is parseable and there is already
+   a model for exactly this shape in `ui.ScanMailSales` (observe, dedup, store
+   in the DB, never claim more than was seen).
+
+   **The blocker is the other half: knowing WHAT was disenchanted.** Vanilla
+   reports no "you disenchanted X" — the spell is cast and then a bag item is
+   clicked, and neither step names the item. The only route is snapshotting
+   the bags on `SPELLCAST_START` for the Disenchant spell and diffing them
+   afterwards to see what left. That is a bag walk hung off a spell event,
+   which is HARD RULE 16 territory, for a feature that pays nothing until the
+   player has disenchanted a great deal — which is exactly when they least
+   need to be told what things break into.
+3. **Both** — ship (1) as a prior and refine from (2). Inherits the provenance
+   problem of the first and the machinery of the second.
+
+#### Decision
+
+**Not building.** Left pending and deliberately alone, as it already was. What
+this spike changes is that the dropdown now says **why**: `PENDING_COMPONENTS`
+carries a REASON per entry rather than `true`, because "not wired up yet" is
+true of both remaining components and useful about neither — `item` is
+*unbuilt*, `disenchant-profit` is *unbuildable with what the client provides*.
+Those are different answers and deserve different sentences.
+
+**What would unblock it**, in order of how much it would take:
+
+- A server that exposes item level through `GetItemInfo`, or any addon-visible
+  source for it. That makes the formula approach possible and everything else
+  moot.
+- An owner decision to accept a shipped table's provenance — that is a call
+  about trusting data, not a technical one, and it is the owner's to make
+  rather than mine.
+- Someone who wants option 2 badly enough to accept a bag diff on a spell
+  event. It is buildable; it is just a poor trade today.
+
+**And a note on the tooltip half, for whoever picks this up.** A disenchant
+breakdown in the tooltip must not do per-item work on a stormable path.
+`ui/tooltip.lua` hooks the `GameTooltip` OBJECT rather than the widget
+metatable, deliberately, so our own scanning tooltips do not re-enter the
+price-line code — read the corollary under HARD RULE 16 before touching that
+file.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
@@ -1862,9 +1943,11 @@ The stated top priority of the report, and the last of the Sell-tab restyle.
   `Texture` pixels vs. a `StatusBar`-based sparkline) before committing to
   an approach. **Phase 0.3 is settled (v1.4.0)**, so this is unblocked; read
   its note about plotting a median before designing the axes.
-- **Disenchant value** in the tooltip — needs a feasibility check first
-  (is a disenchant-value source even available via 1.12 API); not committed
-  until that's answered.
+- **Disenchant value** in the tooltip — **answered, and the answer is no.**
+  See 3k: 1.12 exposes no disenchant API and no item level to derive one
+  from, and every way of getting the data anyway costs more than the feature
+  is worth today. Not committed, and not to be re-asked without one of the
+  three unblockers named there.
 
 ---
 

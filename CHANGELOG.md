@@ -12,6 +12,43 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.28.1]
+
+A feasibility answer, and the small change that records it. `/reload`.
+
+### Not building: the disenchant breakdown
+Asked for as a tooltip line predicting what an item will disenchant into. The
+answer is **no, and not for want of effort** — 1.12 exposes no disenchant API,
+and the formula's key input is missing: vanilla's `GetItemInfo` returns **no
+item level**, which this addon already knows because `util.ItemInfo` is built
+around that gap. Required level is not a substitute; the disenchant buckets are
+narrow enough that guessing wrong gives the wrong *material tier*, not a
+slightly wrong answer.
+
+Shipping a static table keyed by item id would sidestep that — it is what the
+era's addons did — but it means shipping thousands of unverified entries onto
+servers that add their own items and can change drop tables, where a wrong
+entry is indistinguishable from a right one. Learning it from your own
+disenchants fits this addon far better, but vanilla never says *which* item was
+disenchanted, so it needs a bag diff hung off a spell event to find out.
+
+Written up in full in `ROADMAP.md` (3k), including the three things that would
+unblock it, so the question does not get re-asked from scratch.
+
+### Changed
+- **The greyed-out components in the Builder now say WHY.** "Not wired up yet"
+  was true of both remaining ones and useful about neither: `item` is
+  *unbuilt*, `disenchant-profit` is *unbuildable* with what the client
+  provides. Each carries its own reason in its dropdown tooltip.
+
+### Internal
+- The engine's pending list and the UI's are **two tables in two files**, and
+  nothing made them agree — a component implemented in one and still listed in
+  the other either works while looking broken or looks fine while doing
+  nothing. The suite now reads the UI's list out of the source and checks it
+  against what the parser actually leaves inert, **in both directions**.
+- Three sabotages for that pairing; **112 caught in all.**
+
 ## [1.28.0]
 
 Three Sell-tab flow fixes. `/reload`.
@@ -2359,6 +2396,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.28.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.28.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.27.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.26.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

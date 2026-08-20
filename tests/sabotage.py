@@ -502,6 +502,31 @@ end""",
         return -e.t""",
      "sort_results"),
 
+    # ---- the two pending lists agree ----------------------------------------
+    # core/buy.lua decides what the PARSER leaves inert; ui/frame.lua decides
+    # what the Builder draws dim. Two tables, two files, nothing making them
+    # agree -- so a component can filter correctly while being labelled
+    # "ignored", or look like a working filter while doing nothing.
+    ("ui-still-calls-percent-pending", "ui/frame.lua",
+     '    ["item"]              = "needs the client',
+     '    ["percent"] = "x",\n    ["item"]              = "needs the client',
+     "post_filter"),
+
+    # ...and the other direction: the engine leaves disenchant-profit inert
+    # while the Builder shows it as a working filter.
+    ("ui-forgets-a-pending-component", "ui/frame.lua",
+     '    ["disenchant-profit"] = "1.12 has no disenchant API',
+     '    ["disenchant-profit-x"] = "1.12 has no disenchant API',
+     "post_filter"),
+
+    # The reasons collapsed back to `true`. `item` is unbuilt and
+    # disenchant-profit is UNBUILDABLE with what 1.12 provides; one sentence
+    # for both is how the disenchant question gets asked again every release.
+    ("pending-reasons-collapsed", "ui/frame.lua",
+     '    ["item"]              = "needs the client',
+     '    ["item"]              = true, ["itemx"] = "needs the client',
+     "post_filter"),
+
     # ---- the sell slot and the cursor --------------------------------------
     # THE REPORTED BUG, restored. ClickAuctionSellItemButton SWAPS, so placing
     # a second item while the first is still slotted hands the first one back

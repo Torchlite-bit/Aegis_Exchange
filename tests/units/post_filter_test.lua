@@ -427,4 +427,67 @@ for i = 1, table.getn(pending) do
          table.getn(buy.ParseTerm("silk/" .. p .. "/whatever").post), 1)
 end
 
+-- ---------------------------------------------------------------------------
+H.section("The UI's pending list agrees with the engine's")
+-- ---------------------------------------------------------------------------
+
+-- TWO TABLES IN TWO FILES. core/buy.lua's PENDING_COMPONENT decides what the
+-- parser treats as inert; ui.PENDING_COMPONENTS decides what the Builder
+-- draws dim and labels "ignored". They are not the same table and nothing
+-- makes them agree, so a component implemented in one and still listed in the
+-- other either works while looking broken or looks fine while doing nothing.
+--
+-- Read out of the source rather than restated: this is a claim ABOUT the two
+-- lists, and a copy here would be a third one to drift.
+local uiPending = {}
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run from the repo root")
+    local inside = false
+    for line in f:lines() do
+        if not inside then
+            if string.find(line, "^ui%.PENDING_COMPONENTS = {") then
+                inside = true
+            end
+        else
+            if string.find(line, "^}") then break end
+            local _, _, key, rhs = string.find(line,
+                '^%s*%["([%w%-]+)%"%]%s*=%s*(.*)$')
+            if key then uiPending[key] = rhs or "" end
+        end
+    end
+    f:close()
+end
+
+-- Every name the UI dims must really narrow nothing...
+local dimmed = 0
+for kind, rhs in pairs(uiPending) do
+    dimmed = dimmed + 1
+    H.check(kind .. " is dimmed AND really inert",
+            kept("silk/" .. kind .. "/whatever"),
+            "the Builder draws it dim while it actually filters")
+    -- ...and each carries its own REASON rather than a bare `true`. The two
+    -- remaining ones are not the same kind of pending -- `item` is unbuilt,
+    -- `disenchant-profit` is unbuildable with what 1.12 provides -- and one
+    -- sentence for both is how the disenchant question gets asked again every
+    -- few releases. See ROADMAP 3k.
+    H.check(kind .. " explains WHY it is pending",
+            string.find(rhs, '^"') ~= nil,
+            "value is `" .. rhs .. "`, not a reason")
+end
+H.eq("the UI dims exactly the components the engine leaves inert",
+     dimmed, table.getn(pending))
+for i = 1, table.getn(pending) do
+    H.check(pending[i] .. " is in the UI's list too", uiPending[pending[i]],
+            "the engine ignores it but the Builder shows it as working")
+end
+
+-- ...and nothing that WORKS is listed. Checked from the other direction,
+-- because the loop above cannot see a live component wrongly added.
+local live = { "min-level", "max-level", "rarity", "seller", "left",
+               "percent", "vendor-profit", "max-unit-buy", "min-unit-buy" }
+for i = 1, table.getn(live) do
+    H.check(live[i] .. " is NOT listed as pending", not uiPending[live[i]],
+            "an implemented component is drawn dim and labelled ignored")
+end
+
 os.exit(H.report("post_filter"))

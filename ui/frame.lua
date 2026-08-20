@@ -5540,9 +5540,19 @@ end
 -- Shrinking this table is what un-greys a component: the dropdown's colour,
 -- its tooltip and the Post Filter list's "ignored" label all read it, so the
 -- UI follows the engine rather than being told twice.
+-- The value is the REASON, and the two remaining reasons are not the same
+-- kind of thing. `item` is unbuilt; `disenchant-profit` is UNBUILDABLE with
+-- what 1.12 provides, and saying both with one sentence invites the question
+-- to be asked again every few releases. See ROADMAP 3k for the spike.
+--
+-- Still a set: every reader tests these for truthiness, so a string works
+-- exactly where `true` did.
 ui.PENDING_COMPONENTS = {
-    ["item"]              = true,
-    ["disenchant-profit"] = true,
+    ["item"]              = "needs the client's item cache, which only answers "
+                            .. "for items it has already seen",
+    ["disenchant-profit"] = "1.12 has no disenchant API and no item level to "
+                            .. "derive one from \226\128\148 there is no data "
+                            .. "source we trust",
 }
 
 -- The concept's order: the three COMBINATORS first, then the filters. They
@@ -5567,9 +5577,14 @@ local function BuilderComponentOptions()
         -- "(soon)" glued onto the label -- which made every pending row wider
         -- than the working ones and read as part of the component's name. The
         -- dim entry still needs to explain itself, so it carries a tooltip.
-        if ui.PENDING_COMPONENTS[kind] then
-            tip = "Not wired up yet \226\128\148 this parses and round-trips, "
-                .. "but it narrows nothing."
+        -- The dim entry explains ITSELF, with its own reason. "Not wired up
+        -- yet" is true of both remaining ones and useful about neither: one
+        -- is waiting to be written and the other is waiting on data that does
+        -- not exist.
+        local why = ui.PENDING_COMPONENTS[kind]
+        if why then
+            tip = "Not wired up \226\128\148 this parses and round-trips, but "
+                .. "it narrows nothing. " .. why .. "."
         end
         table.insert(out, {
             value = kind, text = kind, colour = { r, g, b }, tip = tip,
