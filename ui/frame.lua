@@ -3648,6 +3648,38 @@ function ui.TableRowsAt(h)
     return n
 end
 
+-- The Sell tab's geometry, in ONE place: the two columns' horizontal
+-- positions and the listings table's vertical bands.
+--
+-- `bag_right` is the bag column's right edge and `list_x` where the listings
+-- column starts; both were literals (168, and 200 repeated at three call
+-- sites), which is how a column and the thing beside it drift apart. The bag
+-- column was 156px wide, which truncated most item names to "Pattern: Fine
+-- Leather Bo...". A FauxScrollFrame's scrollbar sits just OUTSIDE its right
+-- edge, so the gutter between the two columns has to clear it -- that is what
+-- `list_x - bag_right` buys.
+--
+-- The vertical bands mirror BUYL's, because the listings table is now drawn
+-- the same way: ONE box around the headings AND the rows, a rule under the
+-- headings, and the status line hanging below the box rather than floating
+-- above it. Same spacing as the Buy table -- 6 from the box's top to the
+-- headings, a 22px heading band, 8 below the rule to the first row.
+local SELLL = {
+    bag_x      = 12,
+    bag_right  = 238,
+    list_x     = 270,
+    list_right = 26,
+
+    well_top   = SELL_TOP_H + 10,
+    hdr_top    = SELL_TOP_H + 16,
+    hdr_h      = 22,
+    rows_top   = SELL_TOP_H + 40,
+    -- Room under the box for the status line. Smaller than the Buy tab's 82
+    -- because nothing follows it: the Sell tab has no action bar and the
+    -- listings need no pager (one scan, one item, one page).
+    table_bot  = 26,
+}
+
 -- Scroll-frame insets for every list OUTSIDE the Buy results table, in ONE
 -- place per list, because two things have to agree about each pair: the
 -- SetPoint that positions the box, and the arithmetic that decides how many
@@ -3668,7 +3700,7 @@ local LISTBOX = {
     auc       = { top = 70,  bot = 10 },
     hist      = { top = 100, bot = 10 },
     bag       = { top = SELL_TOP_H + 26, bot = 10 },
-    sellList  = { top = SELL_TOP_H + 36, bot = 10 },
+    sellList  = { top = SELLL.rows_top, bot = SELLL.table_bot },
 }
 ui.LISTBOX = LISTBOX     -- read by the geometry suite
 
@@ -8088,15 +8120,24 @@ local BAG_ROWS_MAX  = 36
 -- read as clipped.
 local SCX = { unit = 4, avail = 92, stack = 252, pct = 392, you = 446 }
 local SCW = { unit = 84, avail = 156, stack = 136, pct = 50, you = 44 }
+-- Numeric columns are RIGHT-justified, which is the difference between a
+-- table that reads as designed and one that reads as assembled. Every column
+-- here was left-aligned -- the money ran ragged down the page while the Buy
+-- table's lined up on its decimal point.
+--
+-- ui.MakeSortHeaders puts a right-aligned column's HEADING over the right
+-- edge of its cells from the same flag, so the two halves cannot disagree.
 local SELL_HEADER_DEFS = {
-    { key = "unit",  text = "Unit price" },
+    { key = "unit",  text = "Unit price",   just = "RIGHT" },
     { key = "avail", text = "Available" },
-    { key = "stack", text = "Stack price" },
-    { key = "pct",   text = "% mkt" },
+    { key = "stack", text = "Stack price",  just = "RIGHT" },
+    { key = "pct",   text = "% mkt",        just = "RIGHT" },
     { key = "you",   text = "You?" },
 }
 
-local LIST_ROWS, LIST_ROW_H = 9, 19
+-- 26, the Buy table's row height. At 19 the listings table read as a packed
+-- list beside a window whose every other table had breathing room.
+local LIST_ROWS, LIST_ROW_H = 9, 26
 local LIST_ROWS_MAX = 36
 
 -- Text budget for the "Your Bags" rows. The bag scroll's right edge sits at
@@ -8105,22 +8146,6 @@ local LIST_ROWS_MAX = 36
 -- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
 -- straight past the list into the listings table -- these are what they get
 -- clipped to. See ui.SetTextClipped.
--- The Sell tab's two columns, in ONE place. `bag_right` is the bag column's
--- right edge and `list_x` where the listings column starts; both were literals
--- (168 and a 200 repeated at three call sites), which is how a column and the
--- thing beside it drift apart.
---
--- The bag column was 156px wide, which truncated most item names to
--- "Pattern: Fine Leather Bo...". The scrollbar of a FauxScrollFrame sits just
--- OUTSIDE its right edge, so the gutter between the two columns has to clear
--- it -- that is what `list_x - bag_right` buys.
-local SELLL = {
-    bag_x      = 12,
-    bag_right  = 238,
-    list_x     = 270,
-    list_right = 26,
-}
-
 local BAG_ITEM_TEXT_W = 176
 local BAG_CAT_TEXT_W  = 210
 
@@ -8550,13 +8575,6 @@ ui.GrowBagRows = function(n)
     ui.GrowBagRows(BAG_ROWS)
 
     -- ---- Bottom-right: listings table ----------------------------------
-    ui.listHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.listHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.list_x,
-        -(SELL_TOP_H + 4))
-    ui.listHeader:SetJustifyH("LEFT")
-    ui.listHeader:SetText("Select an item to see its listings")
-    ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-
     -- Column headers, through the SHARED builder. This tab carried its own
     -- copy of it -- same idea, its own font, its own widths, and no support
     -- for right-aligning a numeric column -- which is why the listings
@@ -8564,7 +8582,7 @@ ui.GrowBagRows = function(n)
     ui.sellSortKey = "unit"
     ui.sellSortDir = "asc"
     ui.sellHeaders = ui.MakeSortHeaders(panel, SELLL.list_x,
-        -(SELL_TOP_H + 21),
+        -SELLL.hdr_top,
         SCX, SCW, function(key) ui.SetSellSort(key) end, SELL_HEADER_DEFS)
 
     local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
@@ -8577,6 +8595,60 @@ ui.GrowBagRows = function(n)
         FauxScrollFrame_OnVerticalScroll(LIST_ROW_H, ui.UpdateListingsList)
     end)
     ui.listScroll = listScroll
+
+    -- ONE box around the headings AND the rows, exactly as the Buy table
+    -- draws it. This table had no box at all: the headings and rows sat on
+    -- the bare panel, so the tab read as a list of text rather than a table.
+    --
+    -- Anchored explicitly rather than through ui.MakeWell, for the same two
+    -- reasons the Buy table's is: the box has to reach UP past the scroll
+    -- frame to enclose the header row, and its right edge has to stop AT the
+    -- scroll frame's -- FauxScrollFrameTemplate hangs its scrollbar OUTWARD
+    -- from that line, so any positive offset puts the box under the bar.
+    local listWell = CreateFrame("Frame", nil, panel)
+    listWell:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.list_x - 6,
+        -SELLL.well_top)
+    listWell:SetPoint("BOTTOMRIGHT", listScroll, "BOTTOMRIGHT", 0, -6)
+    listWell:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    listWell:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    listWell:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    ui.sellListWell = listWell
+
+    -- The rule goes UNDER the headings, not at the top of the box.
+    local listRule = panel:CreateTexture(nil, "ARTWORK")
+    listRule:SetPoint("TOPLEFT", listWell, "TOPLEFT", 6, -SELLL.hdr_h)
+    listRule:SetPoint("TOPRIGHT", listWell, "TOPRIGHT", -6, -SELLL.hdr_h)
+    listRule:SetHeight(1)
+    listRule:SetTexture(0.45, 0.38, 0.22, 0.85)
+
+    -- Thin separators between the header cells, as the Buy table has. The
+    -- first column needs none -- there is a box edge to its left already.
+    local sellTickKeys = { "avail", "stack", "pct", "you" }
+    local sti = 1
+    while sti <= table.getn(sellTickKeys) do
+        local tk = panel:CreateTexture(nil, "ARTWORK")
+        tk:SetWidth(1)
+        tk:SetPoint("TOPLEFT", listWell, "TOPLEFT",
+            6 + SCX[sellTickKeys[sti]] - 8, -6)
+        tk:SetPoint("BOTTOMLEFT", listWell, "TOPLEFT",
+            6 + SCX[sellTickKeys[sti]] - 8, -SELLL.hdr_h)
+        tk:SetTexture(0.35, 0.30, 0.18, 0.7)
+        sti = sti + 1
+    end
+
+    -- The status line hangs BELOW the box now, the way the Buy table's count
+    -- does. It used to float above the headings, where it competed with them
+    -- for the same eye and left the table looking unanchored at the top.
+    ui.listHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.listHeader:SetPoint("TOPLEFT", listWell, "BOTTOMLEFT", 6, -6)
+    ui.listHeader:SetJustifyH("LEFT")
+    ui.listHeader:SetText("Select an item to see its listings")
+    ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     ui.listRows = {}
 ui.GrowListRows = function(n)
@@ -8608,10 +8680,10 @@ ui.GrowListRows = function(n)
                 fs:SetJustifyH(just or "LEFT")
                 return fs
             end
-            row.unit  = mkCell(SCX.unit,  SCW.unit)
+            row.unit  = mkCell(SCX.unit,  SCW.unit,  "RIGHT")
             row.avail = mkCell(SCX.avail, SCW.avail)
-            row.stack = mkCell(SCX.stack, SCW.stack)
-            row.pct   = mkCell(SCX.pct,   SCW.pct)
+            row.stack = mkCell(SCX.stack, SCW.stack, "RIGHT")
+            row.pct   = mkCell(SCX.pct,   SCW.pct,   "RIGHT")
             row.you   = mkCell(SCX.you,   SCW.you)
             row:SetScript("OnClick", function()
                 local g = row.group

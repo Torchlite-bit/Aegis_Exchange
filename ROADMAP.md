@@ -1771,6 +1771,35 @@ silently doing the same item two and three times over.
   It read as "the table moved" rather than "the table is formatted
   differently", which is the worst kind of wrong error.
 
+### 3i — The listings table, drawn like the Buy table — ✅ **DONE** (v1.27.0)
+
+The stated top priority of the report, and the last of the Sell-tab restyle.
+
+- **The table had no BOX**, which was the difference the screenshots were
+  actually showing. Zebra banding and warm-tan sortable headings had already
+  landed (1.23.0, 1.24.0) and were visible in the "current" capture — what was
+  missing was the border around the headings and rows together, the rule under
+  the headings, and the ticks between header cells.
+- **The Buy table's construction was copied in its REASONING, not its
+  numbers.** The box is anchored explicitly rather than through `ui.MakeWell`
+  for the two reasons already recorded there: it has to reach up past the
+  scroll frame to enclose the headings, and its right edge must stop AT the
+  scroll frame's, because FauxScrollFrameTemplate hangs its scrollbar outward
+  from that line.
+- **Every numeric column was LEFT-aligned**, which is the single thing that
+  made the table read as assembled rather than designed. `ui.MakeSortHeaders`
+  has taken a `just` flag since it was written and this tab never passed one;
+  the heading follows the cells from the same flag, so the two halves cannot
+  disagree.
+- **The status line was above the headings** and is below the box now, where
+  the Buy table's count sits. A caption above a table competes with its own
+  column headings.
+- Four vertical numbers have to stay in step — box top, heading top, heading
+  band height, first row — and getting any wrong leaves headings outside the
+  box or a rule across its top edge. That is what the Buy table did before
+  v1.15.0, so the suite asserts the relationships rather than the values,
+  including that the gap from box to headings MATCHES the Buy table's.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

@@ -578,6 +578,41 @@ end""",
      "local BAG_ROWS,  BAG_ROW_H  = 9, 19",
      "geometry"),
 
+    # ---- the listings table's box -------------------------------------------
+    # The box no longer reaches up past the scroll frame, so the headings
+    # float on the panel ABOVE it and the rule lands on its top edge. Exactly
+    # what the Buy table did before v1.15.0.
+    ("listings-box-misses-its-headings", "ui/frame.lua",
+     "    well_top   = SELL_TOP_H + 10,",
+     "    well_top   = SELL_TOP_H + 20,",
+     "geometry"),
+
+    # The first row starts ON the rule instead of under it, so the top row is
+    # drawn through by a hairline.
+    ("listings-first-row-on-the-rule", "ui/frame.lua",
+     "    rows_top   = SELL_TOP_H + 40,",
+     "    rows_top   = SELL_TOP_H + 30,",
+     "geometry"),
+
+    # No room left under the box, so the status line draws over the last row.
+    ("listings-status-line-has-no-room", "ui/frame.lua",
+     "    table_bot  = 26,",
+     "    table_bot  = 4,",
+     "geometry"),
+
+    # The scroll frame and the row count stop reading the same top: the box
+    # says the rows start in one place and the count assumes another.
+    ("listings-scroll-and-count-disagree", "ui/frame.lua",
+     "    sellList  = { top = SELLL.rows_top, bot = SELLL.table_bot },",
+     "    sellList  = { top = SELLL.rows_top + 12, bot = SELLL.table_bot },",
+     "geometry"),
+
+    # Back to the packed 19px rows.
+    ("listings-rows-back-to-19", "ui/frame.lua",
+     "local LIST_ROWS, LIST_ROW_H = 9, 26",
+     "local LIST_ROWS, LIST_ROW_H = 9, 19",
+     "geometry"),
+
     # ---- the size the window OPENS at --------------------------------------
     # THE BUG THAT SHIPPED, restored: the frame created at the size it used
     # before MIN_W was raised. Every fresh install opens 168px under the

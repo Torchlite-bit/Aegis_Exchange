@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.27.0]
+
+The Sell tab's listings table, drawn the way the Buy table is. `/reload`.
+
+### Changed
+- **The listings table has a box.** One border around the column headings AND
+  the rows, a rule under the headings, and separators between the header
+  cells — exactly the Buy table's construction. It had no box at all before:
+  headings and rows sat on the bare panel, so the tab read as a list of text
+  rather than as a table.
+- **The status line moved BELOW the box.** It used to float above the
+  headings, competing with them for the same eye and leaving the table
+  unanchored at its top.
+- **26px rows**, the Buy table's height, instead of 19.
+- **Numeric columns are right-aligned** — Unit price, Stack price and % mkt.
+  Every column was left-aligned, so the money ran ragged down the page while
+  the Buy table's lined up. The headings follow automatically: a right-aligned
+  column's heading sits over the right edge of its cells, from the same flag.
+
+### Internal
+- The Sell tab's vertical bands join its horizontal ones in `SELLL`, and
+  `LISTBOX.sellList` reads them rather than carrying its own copy — so the box,
+  the scroll frame and the row count cannot disagree about where the table
+  starts or stops.
+- The geometry suite asserts the four numbers that have to stay in step: the
+  box starts above the headings *by the same gap the Buy table uses*, the
+  headings fit above the rule, the first row clears it, and there is room
+  under the box for the status line — plus that the whole thing still holds
+  rows at the smallest window.
+- Its table-loader now runs a layout table's real literal instead of parsing
+  fields one at a time, which is what lets `SELLL`'s bands be arithmetic on
+  `SELL_TOP_H` and `LISTBOX` read `SELLL`.
+- Five new sabotages; **106 caught in all.**
+
 ## [1.26.0]
 
 The Sell tab's bag list: one row per item, and the Buy table's look.
@@ -2273,6 +2307,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.27.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.26.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.25.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

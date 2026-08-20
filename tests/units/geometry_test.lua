@@ -746,14 +746,21 @@ H.section("Every list fills its own box at every window height")
 -- as SELL_TOP_H plus a gap, and a copy here would not notice SELL_TOP_H
 -- moving.
 SELL_TOP_H = constant("SELL_TOP_H")
-do
+
+-- Load a `local NAME = { ... }` layout table by RUNNING the real literal, so
+-- fields written as arithmetic on another constant come out right. SELLL's
+-- vertical bands are SELL_TOP_H plus a gap, and LISTBOX.sellList reads SELLL
+-- -- a copy here would not notice either of them moving.
+--
+-- ORDER MATTERS: a table that reads another must be loaded after it.
+local function loadTable(name)
     local f = assert(io.open(SRC, "r"), "run this from the repo root")
     local body, grabbing = {}, false
     for line in f:lines() do
         if not grabbing then
-            if string.find(line, "^local LISTBOX = {") then
+            if string.find(line, "^local " .. name .. " = {") then
                 grabbing = true
-                table.insert(body, "LISTBOX = {")
+                table.insert(body, name .. " = {")
             end
         else
             table.insert(body, line)
@@ -761,11 +768,14 @@ do
         end
     end
     f:close()
-    if not grabbing then error("did not find: local LISTBOX = {") end
-    local fn, err = loadstring(table.concat(body, "\n"), "LISTBOX")
-    if not fn then error("LISTBOX will not compile: " .. tostring(err)) end
+    if not grabbing then error("did not find: local " .. name .. " = {") end
+    local fn, err = loadstring(table.concat(body, "\n"), name)
+    if not fn then error(name .. " will not compile: " .. tostring(err)) end
     fn()
 end
+
+loadTable("SELLL")
+loadTable("LISTBOX")
 
 do
     local fn, err = loadstring(extract("function ui.ListRowsAt("), "ListRowsAt")
@@ -987,11 +997,10 @@ H.section("The Sell tab's two columns fit beside each other")
 -- All of it read out of the file. SELLL's fields are also SetPoint offsets and
 -- SCX/SCW are also the row cells' geometry, so a copy here would pass against
 -- a layout that had moved.
-local function sellField(f) return field("SELLL", f) end
-local BAG_X      = sellField("bag_x")
-local BAG_RIGHT  = sellField("bag_right")
-local LIST_X     = sellField("list_x")
-local LIST_RIGHT = sellField("list_right")
+local BAG_X      = SELLL.bag_x
+local BAG_RIGHT  = SELLL.bag_right
+local LIST_X     = SELLL.list_x
+local LIST_RIGHT = SELLL.list_right
 
 H.check("the bag column starts inside the panel", BAG_X > 0, BAG_X)
 H.check("...and has width", BAG_RIGHT > BAG_X, BAG_RIGHT .. " <= " .. BAG_X)
@@ -1030,5 +1039,53 @@ H.check("...and still fits inside the column it is drawn in",
 local _, bagRowH = pairConst("BAG_ROWS", "BAG_ROW_H")
 local _, buyRowH = pairConst("BUY_ROWS", "BUY_ROW_H")
 H.eq("bag rows are as tall as the Buy table's", bagRowH, buyRowH)
+local _, listRowH = pairConst("LIST_ROWS", "LIST_ROW_H")
+H.eq("...and so are the listings table's", listRowH, buyRowH)
+
+-- ---------------------------------------------------------------------------
+H.section("The listings table's box encloses its own headings")
+-- ---------------------------------------------------------------------------
+
+-- The table is drawn the way the Buy table is now: ONE box around the
+-- headings AND the rows, a rule under the headings, the status line hanging
+-- below. Four numbers have to stay in step for that to hold together, and
+-- getting any of them wrong leaves headings floating outside the box or a
+-- rule drawn across its top edge -- which is what the Buy table did before
+-- v1.15.0 and is recorded in the ROADMAP.
+
+H.check("the box starts above the headings",
+        SELLL.well_top < SELLL.hdr_top,
+        SELLL.well_top .. " >= " .. SELLL.hdr_top)
+H.check("...with the same gap the Buy table uses",
+        SELLL.hdr_top - SELLL.well_top == field("BUYL", "hdr_top")
+                                        - field("BUYL", "well_top"),
+        "gap " .. (SELLL.hdr_top - SELLL.well_top))
+
+-- The rule sits at well_top + hdr_h, and the first row must clear it.
+local ruleAt = SELLL.well_top + SELLL.hdr_h
+H.check("the headings fit above the rule",
+        SELLL.hdr_top < ruleAt, SELLL.hdr_top .. " >= " .. ruleAt)
+H.check("the first row starts BELOW the rule",
+        SELLL.rows_top > ruleAt,
+        "rows at " .. SELLL.rows_top .. ", rule at " .. ruleAt)
+H.check("...with room to breathe",
+        SELLL.rows_top - ruleAt >= 6,
+        "only " .. (SELLL.rows_top - ruleAt) .. "px under the rule")
+
+-- The scroll frame and the row count read the SAME top, or the box and its
+-- contents disagree about where the table begins.
+H.eq("the scroll frame's top is the row band's top",
+     LISTBOX.sellList.top, SELLL.rows_top)
+H.eq("...and its bottom leaves room for the status line",
+     LISTBOX.sellList.bot, SELLL.table_bot)
+H.check("that room is enough for a line of text",
+        SELLL.table_bot >= 20, SELLL.table_bot .. "px")
+
+-- And the whole thing still fits at the smallest window: the box's top is
+-- fixed, so a table_bot that grew past the panel would leave no rows at all.
+local listArea = ui.PanelHeightAt(MIN_H) - SELLL.rows_top - SELLL.table_bot
+H.check("the listings table has room for rows at MIN_H",
+        listArea >= listRowH,
+        "area " .. listArea .. ", row " .. listRowH)
 
 os.exit(H.report("geometry"))
