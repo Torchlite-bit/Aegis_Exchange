@@ -12,6 +12,44 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.25.1]
+
+The window opened smaller than it was designed for on a fresh install.
+`/reload`.
+
+### Fixed
+- **The window opened clipped until you touched the resize grip.** The frame
+  was created at a literal **832 × 460** — the size it used back when `MIN_W`
+  was 832 — and those literals were left behind when the minimum rose to
+  **1000 × 492**. Anyone with a saved size was clamped up on login and never
+  saw it; anyone **without** one got a window 168px narrower than its own
+  declared minimum, with the Buy table's right-hand columns running off the
+  panel. `ui.ColumnsFitAt` puts the true column floor at ~970.
+
+  It hid behind the grip: `SetMinResize` snaps the frame to the minimum the
+  instant sizing starts, and releasing saves that size — so **one drag fixed
+  it permanently**, and nobody who had ever resized the window could reproduce
+  it.
+
+  Reported by two people on different setups. **Neither screen resolution nor
+  pfUI had anything to do with it** — the common factor was simply never
+  having dragged the window, which a clean settings reset guarantees.
+
+  The window is created at the minimum now, and the size is clamped into range
+  on every restore rather than only when there is a saved size to restore —
+  so the next drift in a default cannot ship as a clipped window again.
+
+### Internal
+- `ui.ClampWindowSize` is split out as pure arithmetic so "the window is never
+  below the minimum" is an assertion rather than a comment. The geometry suite
+  now also reads the frame's **creation** size out of the source and requires
+  it to sit inside the range, and requires the result columns to fit at it —
+  paired with a check that the old 832 genuinely fails, so the pair cannot
+  pass for the wrong reason.
+- Four sabotages: the old default restored whole, the height alone put back
+  (half the bug, and far more innocent in a diff), the unsaved-size case
+  skipped, and the lower clamp dropped. **93 caught in all.**
+
 ## [1.25.0]
 
 The two filter components that need the price database. `/reload`.
@@ -2176,6 +2214,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.25.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

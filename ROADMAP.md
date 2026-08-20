@@ -1675,6 +1675,48 @@ implemented now; `item` (needs the client's item cache) and
   `row.unit and row.unit <= cap`. Following an existing precedent rather than
   inventing a rule is what made it obvious once found.
 
+### 3g — The window opened below its own minimum — ✅ **DONE** (v1.25.1)
+
+Two users reported the window clipping; neither could be helped by anything
+about their setup, and the reporter could not reproduce it at all. The cause
+was in the source and needed no reproduction once the right question was asked.
+
+- **`f:SetWidth(832) / f:SetHeight(460)` were the size the window used when
+  `MIN_W` was 832.** When the minimum rose to 1000 × 492 those literals stayed,
+  and `ui.ColumnsFitAt` puts the true column floor at ~970 — so a window that
+  opened at 832 had the Buy table's right-hand columns off the panel.
+- **The note above `MIN_W` reasoned about the SAVED size and never about its
+  absence.** "A saved width below the minimum is clamped UP by
+  RestoreWindowSize, so an existing character just gets a wider window on first
+  login" — true, and it is exactly why the fault was invisible to everyone who
+  had ever dragged the window. `RestoreWindowSize` then returned early when
+  there was no `ui` table at all, which is every fresh install.
+- **"Fixed by the resize grip" was the whole diagnosis.** `SetMinResize` snaps
+  the frame to the minimum the moment sizing begins and `OnMouseUp` saves it,
+  so a single drag cured it permanently. A bug that a user action silently and
+  permanently repairs is a bug almost nobody will report twice — and the two
+  who did looked like they had nothing in common.
+- **Neither reported environment detail mattered.** 4K, 2560×1600, pfUI, UI
+  scale, a renamed `WTF` — the only common factor was never having dragged the
+  window, which a settings reset guarantees. **The clean-room test that was
+  meant to eliminate variables was in fact the thing that created the
+  symptom**, and it read as the opposite.
+
+#### What the tests learned
+
+- **Nothing checked the size the window OPENS at.** Every layout assertion in
+  the geometry suite is written "at MIN_H" or "at MIN_W", which is correct and
+  which the code satisfied — while the frame quietly started life below both.
+  A floor that everything is measured against, and that nothing verifies the
+  window actually starts at, is a floor in name only.
+- The creation size is read out of the source and required to sit in range,
+  and the result columns are required to fit **at it**. Paired with an
+  assertion that the old 832 genuinely fails `ColumnsFitAt`, so the check
+  cannot pass for the wrong reason.
+- `ui.ClampWindowSize` was split out as pure arithmetic. The clamp existed
+  before; it was welded to `SetWidth`/`SetHeight` and therefore untestable, and
+  the branch that skipped it entirely was the bug.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

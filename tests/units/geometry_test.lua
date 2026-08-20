@@ -854,4 +854,116 @@ H.eq("...and so does a nonsense one",
 H.eq("a missing box is survivable", ui.ListRowsAt(MAX_H, nil, 21, 32), 1)
 H.eq("...and a zero row height", ui.ListRowsAt(MAX_H, LISTBOX.auc, 0, 32), 1)
 
+-- ---------------------------------------------------------------------------
+H.section("The window OPENS at a size it was designed for")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR, and it shipped for several releases. The frame was
+-- created with literal `SetWidth(832) / SetHeight(460)` -- the size it used
+-- when MIN_W was 832 -- and those literals stayed put when MIN_W rose to 1000
+-- and MIN_H to 492. Every character who had ever dragged the window had a
+-- saved size and was fine; every FRESH INSTALL opened 168px under the minimum
+-- and the Buy table's right-hand columns ran off the panel.
+--
+-- It hid behind the resize grip: SetMinResize snaps the frame to MIN the
+-- moment sizing begins and OnMouseUp saves that, so one drag fixed it forever
+-- and nobody who had ever resized could reproduce it. Two users reported it;
+-- neither screen resolution nor pfUI had anything to do with it.
+--
+-- Read out of the source, both sides, because a copy of either number here
+-- would pass against a default that had drifted again.
+local function creationSize()
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local w, h
+    for line in f:lines() do
+        local _, _, wv = string.find(line, "^%s*f:SetWidth%(([%w_]+)%)")
+        if wv and not w then w = wv end
+        local _, _, hv = string.find(line, "^%s*f:SetHeight%(([%w_]+)%)")
+        if hv and not h then h = hv end
+        if w and h then break end
+    end
+    f:close()
+    if not w or not h then error("did not find the frame's SetWidth/SetHeight") end
+    -- Either a bare number or the name of a constant this file already knows.
+    local function value(tok)
+        local n = tonumber(tok)
+        if n then return n end
+        if tok == "MIN_W" then return MIN_W end
+        if tok == "MIN_H" then return MIN_H end
+        if tok == "MAX_W" then return MAX_W end
+        if tok == "MAX_H" then return MAX_H end
+        error("unrecognised size token: " .. tok)
+    end
+    return value(w), value(h)
+end
+
+-- ColumnsFitAt reads BUYL's gutters and BUY_COLS_END; extract it here with
+-- those fields filled in from the file rather than restated.
+BUYL.gut_w    = field("BUYL", "gut_w")
+BUYL.gutter_w = field("BUYL", "gutter_w")
+BUY_COLS_END  = constant("BUY_COLS_END")
+do
+    local fn, err = loadstring(extract("function ui.ColumnsFitAt("),
+                               "ColumnsFitAt")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+local defW, defH = creationSize()
+H.check("the window is not created narrower than its own minimum",
+        defW >= MIN_W, defW .. " < MIN_W " .. MIN_W)
+H.check("...nor shorter than it", defH >= MIN_H,
+        defH .. " < MIN_H " .. MIN_H)
+H.check("...nor wider than its maximum", defW <= MAX_W,
+        defW .. " > MAX_W " .. MAX_W)
+H.check("...nor taller", defH <= MAX_H, defH .. " > MAX_H " .. MAX_H)
+
+-- The consequence, spelled out: the result columns have to fit at whatever
+-- size the window opens at. This is the assertion that actually describes the
+-- clipping, rather than describing the number that caused it.
+H.check("the result columns fit at the size the window opens at",
+        ui.ColumnsFitAt(defW), "columns overflow at " .. defW)
+
+-- ...and the old default really did fail it, so the check above cannot be
+-- passing for the wrong reason.
+H.check("the 832 the window used to open at does NOT fit",
+        not ui.ColumnsFitAt(832),
+        "832 fits, so this pair of assertions proves nothing")
+
+-- ---------------------------------------------------------------------------
+H.section("...and it can never be dragged or restored outside that range")
+-- ---------------------------------------------------------------------------
+
+do
+    local fn, err = loadstring(extract("function ui.ClampWindowSize("),
+                               "ClampWindowSize")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+local cw, ch = ui.ClampWindowSize(MIN_W - 200, MIN_H - 100)
+H.eq("a width under the minimum comes back at it", cw, MIN_W)
+H.eq("...and a height", ch, MIN_H)
+
+cw, ch = ui.ClampWindowSize(MAX_W + 500, MAX_H + 500)
+H.eq("a width over the maximum comes back at it", cw, MAX_W)
+H.eq("...and a height", ch, MAX_H)
+
+cw, ch = ui.ClampWindowSize(1200, 700)
+H.eq("a size already in range is left alone", cw, 1200)
+H.eq("...both of it", ch, 700)
+
+-- NO SAVED SIZE is the case that shipped broken: a character who has never
+-- resized has no stored width at all, and returning early there is what let
+-- the window open at 832.
+cw, ch = ui.ClampWindowSize(nil, nil)
+H.eq("no saved width falls back to the minimum", cw, MIN_W)
+H.eq("...and no saved height", ch, MIN_H)
+
+-- Each axis independently, because a half-written saved table is a real state.
+H.eq("a saved width with no height keeps the width",
+     ui.ClampWindowSize(1200, nil), 1200)
+local _, onlyH = ui.ClampWindowSize(nil, 700)
+H.eq("...and the reverse keeps the height", onlyH, 700)
+
 os.exit(H.report("geometry"))

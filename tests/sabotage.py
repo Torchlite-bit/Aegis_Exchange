@@ -498,6 +498,37 @@ end""",
         return -e.t""",
      "sort_results"),
 
+    # ---- the size the window OPENS at --------------------------------------
+    # THE BUG THAT SHIPPED, restored: the frame created at the size it used
+    # before MIN_W was raised. Every fresh install opens 168px under the
+    # minimum with the result table's right-hand columns off the panel, and
+    # one drag of the resize grip hides it forever.
+    ("window-opens-below-its-minimum", "ui/frame.lua",
+     "    f:SetWidth(MIN_W)\n    f:SetHeight(MIN_H)",
+     "    f:SetWidth(832)\n    f:SetHeight(460)",
+     "geometry"),
+
+    # Only the width put back, because half of it is just as broken and looks
+    # far more innocent in a diff.
+    ("window-opens-too-short", "ui/frame.lua",
+     "    f:SetHeight(MIN_H)",
+     "    f:SetHeight(460)",
+     "geometry"),
+
+    # The early return that hid the whole thing: a character who has never
+    # resized has no saved size, and skipping the clamp for them is exactly
+    # the case the window opened wrong in.
+    ("clamp-skips-the-unsaved-case", "ui/frame.lua",
+     """    w = w or MIN_W
+    h = h or MIN_H""",
+     "",
+     "geometry"),
+
+    ("clamp-lets-the-window-go-under", "ui/frame.lua",
+     "    if w < MIN_W then w = MIN_W end",
+     "",
+     "geometry"),
+
     # ---- list row counts ---------------------------------------------------
     # THE FAULT THIS RELEASE REMOVED, put back: measure the scroll frame
     # instead of deriving from the window. Six lists then keep the row count

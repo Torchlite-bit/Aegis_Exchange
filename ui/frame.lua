@@ -712,24 +712,46 @@ function ui.PointIsReachable(point, relPoint, x, y, screenW, screenH,
     return true
 end
 
+-- The window's size, held inside the range it is designed for.
+--
+-- Pure arithmetic, split out from the frame calls so the invariant "the window
+-- is never below MIN" can be asserted rather than only commented. nil means
+-- "no saved size", which is the case that shipped a clipped window.
+function ui.ClampWindowSize(w, h)
+    w = w or MIN_W
+    h = h or MIN_H
+    if w < MIN_W then w = MIN_W end
+    if h < MIN_H then h = MIN_H end
+    if w > MAX_W then w = MAX_W end
+    if h > MAX_H then h = MAX_H end
+    return w, h
+end
+
 function ui.RestoreWindowSize()
     if not ui.frame or not A.db or not A.db.char then return end
     -- Scale first, and unconditionally: it is stored independently of the size,
     -- so someone who scaled the window but never dragged it bigger has no saved
     -- width to restore -- and would otherwise lose their scale every login.
     ui.ApplyWindowScale()
-    local s = A.db.char.ui
-    if not s then return end
+    -- NOT `if not s then return end`. A character who has never resized has no
+    -- `ui` table at all, and that is exactly the case this function most needs
+    -- to run for -- returning early there is what let a fresh install open
+    -- below MIN_W. An empty stand-in gives the clamp below something to read
+    -- and costs nothing: there is no saved point to clear either.
+    local s = A.db.char.ui or {}
 
-    if s.width and s.height then
-        local w, h = s.width, s.height
-        if w < MIN_W then w = MIN_W end
-        if h < MIN_H then h = MIN_H end
-        if w > MAX_W then w = MAX_W end
-        if h > MAX_H then h = MAX_H end
-        ui.frame:SetWidth(w)
-        ui.frame:SetHeight(h)
-    end
+    -- Clamped UNCONDITIONALLY, not only when there is a size to restore.
+    --
+    -- The `if s.width and s.height` guard used to wrap this whole block, so
+    -- with nothing saved the frame kept whatever CreateFrame had given it --
+    -- and that literal had been left behind at 832 x 460 when MIN_W rose to
+    -- 1000. Reading the frame's own size and clamping it makes "the window is
+    -- never below MIN" true however it got here, so the next drift in a
+    -- default cannot ship as a clipped window again.
+    local w, h = ui.ClampWindowSize(s.width or ui.frame:GetWidth(),
+                                    s.height or ui.frame:GetHeight())
+    ui.frame:SetWidth(w)
+    ui.frame:SetHeight(h)
 
     -- Put it back where it was left -- but only if that is somewhere it can
     -- still be dragged from. See ui.PointIsReachable: the title bar is the
@@ -928,8 +950,25 @@ function ui.BuildWindow()
     if ui.frame then return end
 
     local f = CreateFrame("Frame", "AegisExchangeFrame", UIParent)
-    f:SetWidth(832)
-    f:SetHeight(460)
+    -- THE DEFAULT IS THE MINIMUM, and it must be, because nothing in this
+    -- window is laid out for anything smaller.
+    --
+    -- This was 832 x 460 -- the size the window was created at back when
+    -- MIN_W was 832 -- and it stayed a literal when MIN_W went to 1000 and
+    -- MIN_H to 492. The note above MIN_W reasoned about the SAVED size
+    -- ("clamped UP by RestoreWindowSize") and never about the case with no
+    -- saved size at all, which is every fresh install: the window opened
+    -- 168px narrower than its own declared minimum, `ui.ColumnsFitAt` puts
+    -- the true column floor at ~970, and the result table's right-hand
+    -- columns ran off the panel.
+    --
+    -- It presented as "the window is clipped until you touch the resize
+    -- grip", because SetMinResize snaps the frame to MIN the instant sizing
+    -- starts and OnMouseUp saves that size -- so one drag fixed it forever
+    -- and nobody who had ever resized could reproduce it. Screen resolution
+    -- and pfUI had nothing to do with it either way.
+    f:SetWidth(MIN_W)
+    f:SetHeight(MIN_H)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     f:SetFrameStrata("HIGH")
     f:SetToplevel(true)
