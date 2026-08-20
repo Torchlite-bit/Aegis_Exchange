@@ -5552,9 +5552,6 @@ end
 ui.PENDING_COMPONENTS = {
     ["item"]              = "needs the client's item cache, which only answers "
                             .. "for items it has already seen",
-    ["disenchant-profit"] = "1.12 has no disenchant API and no item level to "
-                            .. "derive one from \226\128\148 there is no data "
-                            .. "source we trust",
 }
 
 -- The concept's order: the three COMBINATORS first, then the filters. They
@@ -5565,7 +5562,7 @@ local COMPONENT_ORDER = {
     "and", "or", "not",
     "tooltip", "item", "min-level", "max-level", "rarity", "seller",
     "max-unit-buy", "min-unit-buy", "percent", "vendor-profit",
-    "left", "disenchant-profit",
+    "left", "disenchant-profit", "disenchant-percent",
 }
 
 local function BuilderComponentOptions()

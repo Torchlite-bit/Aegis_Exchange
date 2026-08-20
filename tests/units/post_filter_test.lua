@@ -411,14 +411,130 @@ H.eq("the run-on stopped at the component", needles, 1)
 H.eq("...which parsed as its own clause", mins, 1)
 
 -- ---------------------------------------------------------------------------
+H.section("disenchant-profit / disenchant-percent")
+-- ---------------------------------------------------------------------------
+
+-- These are the first components that need something OUTSIDE the page and
+-- outside the price DB: the disenchant rule, which needs the item's level and
+-- its materials' prices. Two ways to be ignorant, one remedy line.
+--
+-- The VALUATION is core/disenchant.lua's job and is tested to death there, so
+-- what is asserted here is the COMPARISON -- that the filter puts the value on
+-- the right side of the operator, in the right units.
+local DE_ITEM = 5501
+W.AddItem(DE_ITEM, { name = "Test Chest", quality = 2,
+                     equipLoc = "INVTYPE_CHEST" })
+W.AddItem(11176, { name = "Dream Dust" })
+W.AddItem(11175, { name = "Greater Nether Essence" })
+W.AddItem(11178, { name = "Large Radiant Shard" })
+A.ilvlData = A.ilvlData or {}
+A.ilvlData[DE_ITEM] = 48                 -- band 50
+A.db.RecordAuction(11176, 10000, "Dream Dust")
+A.db.RecordAuction(11175, 10000, "Greater Nether Essence")
+A.db.RecordAuction(11178, 10000, "Large Radiant Shard")
+
+local deValue = A.de.ValueOf(DE_ITEM, A.de.MarketPrice)
+H.check("the fixture really is valuable", deValue and deValue > 0,
+        "tostring(deValue) = " .. tostring(deValue))
+
+local function deRow(unit)
+    return Row({ itemId = DE_ITEM, unit = unit, quality = 2 })
+end
+
+-- AT LEAST this much per item over the buyout.
+H.check("a penny of headroom passes disenchant-profit/1c",
+        kept("silk/disenchant-profit/1c", deRow(deValue - 1)), "")
+H.check("paying exactly the disenchant value does not",
+        not kept("silk/disenchant-profit/1c", deRow(deValue)),
+        "zero profit satisfied a 1c floor")
+H.check("paying over it certainly does not",
+        not kept("silk/disenchant-profit/1c", deRow(deValue + 5000)), "")
+H.check("a big margin passes a big floor",
+        kept("silk/disenchant-profit/50s", deRow(deValue - 5000)), "")
+H.check("...and a thin one does not",
+        not kept("silk/disenchant-profit/50s", deRow(deValue - 4999)), "")
+
+-- Both figures are PER UNIT. A disenchant value is per ITEM -- each break
+-- rolls the table again -- and row.unit is per item, so a stack must not
+-- change the answer.
+H.check("stack size does not change disenchant-profit",
+        kept("silk/disenchant-profit/50s",
+             Row({ itemId = DE_ITEM, unit = deValue - 5000, count = 20,
+                   buyout = (deValue - 5000) * 20 })), "")
+
+-- AT MOST this percentage of what it breaks into.
+H.check("paying the full value is exactly 100%",
+        kept("silk/disenchant-percent/100", deRow(deValue)), "")
+H.check("paying double is not",
+        not kept("silk/disenchant-percent/100", deRow(deValue * 2)), "")
+H.check("half price passes disenchant-percent/50",
+        kept("silk/disenchant-percent/50",
+             deRow(math.floor(deValue / 2))), "")
+H.check("...and three quarters does not",
+        not kept("silk/disenchant-percent/50",
+                 deRow(math.floor(deValue * 0.75))), "")
+H.check("a ceiling composes with not/",
+        kept("silk/not/disenchant-percent/100", deRow(deValue * 2)), "")
+
+-- ---------------------------------------------------------------------------
+H.section("...and the disenchant filters confess what they cannot value")
+-- ---------------------------------------------------------------------------
+
+-- AN UNKNOWN VALUE IS NOT ZERO. Treating it as zero would make
+-- `disenchant-profit/1g` silently reject every item Aegis has not learned,
+-- which reads as "nothing here is profitable" -- the most misleading answer
+-- available, and indistinguishable from a working filter.
+local dk, dblind, dwho = keeps("silk/disenchant-profit/1c",
+                               Row({ itemId = 4242424, unit = 500 }))
+H.check("an item we cannot value is dropped", not dk, "")
+H.eq("...and counted", dblind, 1)
+H.eq("...and named", dwho, "disenchant-profit")
+
+-- Known item, unpriced materials: the other half of the ignorance. Band 15's
+-- materials are deliberately not in the DB.
+W.AddItem(5502, { name = "Cheap Shirt", quality = 2,
+                  equipLoc = "INVTYPE_CHEST" })
+A.ilvlData[5502] = 10
+local uk, ublind, uwho = keeps("silk/disenchant-profit/1c",
+                               Row({ itemId = 5502, unit = 100 }))
+H.check("an item whose materials have no price is dropped", not uk, "")
+H.eq("...and counted too", ublind, 1)
+
+-- Both components must offer the SAME remedy, or a query using both trips the
+-- mixed-causes guard and the advice disappears from the status line.
+local _, bothBlind, bothWho, bothFix =
+    (function()
+        local compiled = buy.CompileTerm(
+            buy.ParseTerm("silk/disenchant-profit/1c/or/disenchant-percent/50"))
+        local stats = {}
+        compiled.filter(Row({ itemId = 4242424, unit = 500 }), stats)
+        local n, who, fix = buy.UnansweredSummary(stats)
+        return nil, n, who, fix
+    end)()
+H.check("using both still yields advice", bothFix ~= nil,
+        "two disenchant components tripped the mixed-causes guard")
+H.check("...naming both ways of learning it",
+        string.find(bothFix, "disenchant", 1, true) ~= nil
+        and string.find(bothFix, "scan", 1, true) ~= nil, bothFix)
+
+-- A BID-ONLY row has no unit price because the seller set no buyout. That is
+-- a fact about the auction, not our ignorance, and no amount of disenchanting
+-- or scanning changes it -- so it is dropped WITHOUT being confessed, exactly
+-- as percent and vendor-profit treat it.
+local bk, bblind = keeps("silk/disenchant-profit/1c",
+                         Row({ itemId = DE_ITEM, unit = NIL, buyout = 0 }))
+H.check("a bid-only row is dropped", not bk, "")
+H.eq("...and NOT counted as unanswered", bblind, 0)
+
+-- ---------------------------------------------------------------------------
 H.section("The still-pending components narrow nothing, on purpose")
 -- ---------------------------------------------------------------------------
 
--- `item` and `disenchant-profit` parse and round-trip so a query carrying one
--- survives an edit, but they must not filter -- an always-false placeholder
--- would empty the page. (`percent` and `vendor-profit` graduated in v1.25.0
--- and have their own section above.)
-local pending = { "item", "disenchant-profit" }
+-- `item` parses and round-trips so a query carrying it survives an edit, but
+-- it must not filter -- an always-false placeholder would empty the page.
+-- (`percent` and `vendor-profit` graduated in v1.25.0; `disenchant-profit`
+-- and `disenchant-percent` in v1.33.0. Each has its own section above.)
+local pending = { "item" }
 for i = 1, table.getn(pending) do
     local p = pending[i]
     H.check(p .. " keeps every row", kept("silk/" .. p .. "/whatever"),
@@ -465,11 +581,11 @@ for kind, rhs in pairs(uiPending) do
     H.check(kind .. " is dimmed AND really inert",
             kept("silk/" .. kind .. "/whatever"),
             "the Builder draws it dim while it actually filters")
-    -- ...and each carries its own REASON rather than a bare `true`. The two
-    -- remaining ones are not the same kind of pending -- `item` is unbuilt,
-    -- `disenchant-profit` is unbuildable with what 1.12 provides -- and one
-    -- sentence for both is how the disenchant question gets asked again every
-    -- few releases. See ROADMAP 3k.
+    -- ...and each carries its own REASON rather than a bare `true`. That
+    -- started when there were two pending components meaning two different
+    -- things, and it stays now there is one: "not wired up yet" invites the
+    -- question to be asked again every few releases, which is exactly what
+    -- happened to the disenchant components before ROADMAP 3k was rewritten.
     H.check(kind .. " explains WHY it is pending",
             string.find(rhs, '^"') ~= nil,
             "value is `" .. rhs .. "`, not a reason")
@@ -484,7 +600,8 @@ end
 -- ...and nothing that WORKS is listed. Checked from the other direction,
 -- because the loop above cannot see a live component wrongly added.
 local live = { "min-level", "max-level", "rarity", "seller", "left",
-               "percent", "vendor-profit", "max-unit-buy", "min-unit-buy" }
+               "percent", "vendor-profit", "max-unit-buy", "min-unit-buy",
+               "disenchant-profit", "disenchant-percent" }
 for i = 1, table.getn(live) do
     H.check(live[i] .. " is NOT listed as pending", not uiPending[live[i]],
             "an implemented component is drawn dim and labelled ignored")

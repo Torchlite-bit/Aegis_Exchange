@@ -525,9 +525,7 @@ end
 -- the obvious thing to type works whichever way you reach for it.
 -- Component names that are accepted by the parser but not yet implemented by
 -- CompileOperand. Kept next to the parser so the two lists cannot drift.
-local PENDING_COMPONENT = {
-    ["item"] = true, ["disenchant-profit"] = true,
-}
+local PENDING_COMPONENT = { ["item"] = true }
 
 local function ParseFusedStack(tok)
     local _, _, digits = string.find(tok, "^stack%s*(%d+)$")
@@ -601,6 +599,8 @@ local COMPONENT_VALUE = {
     ["min-unit-buy"]  = "money",
     ["percent"]       = "percent",
     ["vendor-profit"] = "money",
+    ["disenchant-profit"]  = "money",
+    ["disenchant-percent"] = "percent",
 }
 
 -- "number" | "quality" | "timeleft" | "money" | "text", or nil for a token
@@ -1220,6 +1220,14 @@ local UNANSWERED_FIX = {
     ["left"]          = "search again",
     ["percent"]       = "scan to learn its price",
     ["vendor-profit"] = "vendor prices are learned at a merchant",
+    -- Two causes, one remedy line. A disenchant value needs the item's LEVEL
+    -- (which a disenchant teaches) and its materials' PRICES (which a scan
+    -- teaches), and the filter cannot tell a caller which half it was missing
+    -- without inventing a component name for it. Naming both is honest; the
+    -- two strings are identical so the two components still combine into one
+    -- sentence rather than tripping the mixed-causes guard.
+    ["disenchant-profit"]  = "disenchant one, or scan its materials",
+    ["disenchant-percent"] = "disenchant one, or scan its materials",
 }
 
 -- How many rows were dropped for want of data, which components could not
@@ -1362,6 +1370,49 @@ local function CompileOperand(e)
                 return Unanswered(stats, "vendor-profit")
             end
             return (v - row.unit) >= floorV
+        end
+    -- ---- filters that need the DISENCHANT rule --------------------------
+    -- These cost one GetItemInfo per row, which nothing else in this list
+    -- does -- the rest read page data the client already holds. That is
+    -- affordable because it happens only when one of these components is in
+    -- the term, on a page the user explicitly asked to filter this way, and
+    -- because the `tooltip` component beside them already scans a whole
+    -- tooltip per row. It is not affordable to make it unconditional, so do
+    -- not "helpfully" hoist it into ReadPage.
+    --
+    -- A row we cannot value is UNANSWERED, never a zero. Treating an unknown
+    -- disenchant value as nothing would make `disenchant-profit/1g` quietly
+    -- reject every item Aegis has not learned yet, which looks exactly like
+    -- "there is nothing profitable" -- the most misleading answer available.
+    elseif e.kind == "disenchant-profit" then
+        -- AT LEAST this much per item over the buyout, so
+        -- `disenchant-profit/50s` finds what you can buy, break, and come out
+        -- 50s ahead on. Both figures are per unit: a disenchant value is per
+        -- ITEM (each break rolls the table again), and row.unit is per item,
+        -- so they are already the same currency.
+        local floorV = e.value
+        return function(row, stats)
+            if not row.unit then return false end       -- bid-only
+            local value = row.itemId
+                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
+            if not value then
+                return Unanswered(stats, "disenchant-profit")
+            end
+            return (value - row.unit) >= floorV
+        end
+    elseif e.kind == "disenchant-percent" then
+        -- AT MOST this percentage of what it disenchants for, mirroring
+        -- `percent` against market value: `disenchant-percent/70` is "costs
+        -- at most 70% of what breaking it yields".
+        local cap = e.value
+        return function(row, stats)
+            if not row.unit then return false end       -- bid-only
+            local value = row.itemId
+                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
+            if not value or value <= 0 then
+                return Unanswered(stats, "disenchant-percent")
+            end
+            return (row.unit / value) * 100 <= cap
         end
     elseif e.kind == "left" then
         -- AT MOST this much time left: `left/short` is what is about to

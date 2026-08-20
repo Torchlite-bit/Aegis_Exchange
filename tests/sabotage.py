@@ -512,16 +512,20 @@ end""",
      '    ["percent"] = "x",\n    ["item"]              = "needs the client',
      "post_filter"),
 
-    # ...and the other direction: the engine leaves disenchant-profit inert
-    # while the Builder shows it as a working filter.
+    # ...and the other direction: the engine still leaves `item` inert while
+    # the Builder stops dimming it and shows it as a working filter. Renaming
+    # the key is how that happens in practice -- a typo during an edit, not a
+    # deliberate removal.
     ("ui-forgets-a-pending-component", "ui/frame.lua",
-     '    ["disenchant-profit"] = "1.12 has no disenchant API',
-     '    ["disenchant-profit-x"] = "1.12 has no disenchant API',
+     '    ["item"]              = "needs the client',
+     '    ["itemm"]             = "needs the client',
      "post_filter"),
 
-    # The reasons collapsed back to `true`. `item` is unbuilt and
-    # disenchant-profit is UNBUILDABLE with what 1.12 provides; one sentence
-    # for both is how the disenchant question gets asked again every release.
+    # The reasons collapsed back to `true`. This started when there were two
+    # pending components meaning two different things; it matters just as much
+    # with one, because "not wired up yet" is how the question gets asked
+    # again every few releases -- which is exactly what happened to the
+    # disenchant components before ROADMAP 3k was rewritten.
     ("pending-reasons-collapsed", "ui/frame.lua",
      '    ["item"]              = "needs the client',
      '    ["item"]              = true, ["itemx"] = "needs the client',
@@ -1227,6 +1231,54 @@ end
      "                if not set[matId] then ok = false end",
      "                if set[matId] then ok = ok end",
      "disenchant.learn"),
+    # ---- disenchant, phase 4 (the filters) -------------------------------
+    # AN UNKNOWN VALUE IS NOT ZERO. As zero, disenchant-profit/1g silently
+    # rejects every item Aegis has not learned yet, which reads as "nothing
+    # here is profitable" -- indistinguishable from a working filter.
+    ("de-filter-unknown-counts-as-zero", "core/buy.lua",
+     """            if not value then
+                return Unanswered(stats, "disenchant-profit")
+            end""",
+     """            value = value or 0""",
+     "post_filter"),
+
+    ("de-profit-inverted", "core/buy.lua",
+     "            return (value - row.unit) >= floorV",
+     "            return (row.unit - value) >= floorV",
+     "post_filter"),
+
+    ("de-percent-inverted", "core/buy.lua",
+     "            return (row.unit / value) * 100 <= cap",
+     "            return (value / row.unit) * 100 <= cap",
+     "post_filter"),
+
+    # A bid-only row has no unit price because the seller set no buyout --
+    # a fact about the auction, not our ignorance. Confessing it would put
+    # the note on nearly every search until it stopped meaning anything.
+    ("de-filter-confesses-bid-only", "core/buy.lua",
+     """            if not row.unit then return false end       -- bid-only
+            local value = row.itemId
+                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
+            if not value then
+                return Unanswered(stats, "disenchant-profit")
+            end""",
+     """            if not row.unit then
+                return Unanswered(stats, "disenchant-profit")
+            end
+            local value = row.itemId
+                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
+            if not value then
+                return Unanswered(stats, "disenchant-profit")
+            end""",
+     "post_filter"),
+
+    # The two disenchant components must offer the SAME remedy. Different
+    # strings trip UnansweredSummary's mixed-causes guard, and a query using
+    # both silently loses its advice line.
+    ("de-filter-remedies-differ", "core/buy.lua",
+     '    ["disenchant-percent"] = "disenchant one, or scan its materials",',
+     '    ["disenchant-percent"] = "scan to learn its price",',
+     "post_filter"),
 ]
 
 SUITES = {

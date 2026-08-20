@@ -1930,9 +1930,12 @@ reading their source.
   an enchanting reagent. The last is the discriminator — enchanting opens no
   loot window, a lockbox yields non-reagents — and the second is what stops a
   lockbox being "learned" from the shard picked out of it.
-- **§4 — the filters.** `disenchant-profit` stops being pending;
-  `disenchant-percent` joins it. Unknown items go through the `UNANSWERED_FIX`
-  path §7a already built — that is this case exactly.
+- **§4 — the filters. v1.33.0. DONE.** `disenchant-profit` and
+  `disenchant-percent`, both per item, both confessing through the
+  `UNANSWERED_FIX` path §7a built. `ui.PENDING_COMPONENTS` is down to `item`
+  alone. The two share one remedy string on purpose: `UnansweredSummary`
+  withholds advice when components disagree about the cure, so a query using
+  both would otherwise lose its advice line.
 - **§5 — the `reqlevel` fallback. Conditional.** Measure the disagreement rate
   first (`de.Band(shipped ilvl)` vs `de.Band(minLevel)` across cached items).
   ~5% and it earns a place, **filters only**; 30%+ and *unanswered* absorbs it.

@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.32.0)
+# Aegis: Exchange (v1.33.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -85,6 +85,8 @@ changes. But the same box now takes a query language when you want one:
 | `linen/left/short` | about to expire |
 | `linen/percent/70` | at or under **70% of market** |
 | `linen/vendor-profit/50s` | vendor pays 50s **more** than it costs |
+| `wristbands/disenchant-profit/1g` | worth **1g more** broken than bought |
+| `wristbands/disenchant-percent/70` | costs at most **70%** of what it breaks into |
 | `linen;wool;silk` | all three, browsed as one list |
 
 **Categories are the game's own names** — whatever the auction house's own
@@ -125,10 +127,17 @@ exactly medium.
 what Aegis has actually seen the item sell for. `vendor-profit/50s` finds what
 you can buy and sell straight to a merchant for 50s more per item.
 
+**`disenchant-profit` and `disenchant-percent` are the enchanter's.**
+`disenchant-profit/1g` finds gear worth at least a gold more in mats than it
+costs; `disenchant-percent/70` is the same question as a ratio. Both are per
+item, because each disenchant rolls the table again — a stack of five is five
+separate breaks, not five times one number.
+
 Some of these can't always answer, and they say so rather than quietly
 returning nothing. The seller's name arrives a moment after the page does,
-some servers don't report time left, market value needs a scan, and a vendor
-price is only learned by standing at a merchant. Rows a filter can't judge are
+some servers don't report time left, market value needs a scan, a vendor
+price is only learned by standing at a merchant, and a disenchant value needs
+both the item's level and its materials' prices. Rows a filter can't judge are
 **counted and named in the status line, with the fix that actually works** —
 `3 skipped (no vendor-profit data — vendor prices are learned at a merchant)`.
 
@@ -448,7 +457,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.32.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.33.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

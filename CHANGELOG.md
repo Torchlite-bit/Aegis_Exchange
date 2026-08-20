@@ -12,6 +12,50 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.33.0]
+
+`disenchant-profit` stops being pending, and brings a sibling. `/reload`.
+
+### Added
+- **`disenchant-profit/<price>`** — gear worth at least that much more broken
+  than bought. `wristbands/disenchant-profit/1g`.
+- **`disenchant-percent/<n>`** — the same question as a ratio: at most `n`%
+  of what it breaks into. `wristbands/disenchant-percent/70`.
+
+Both are **per item**, because each disenchant rolls the table again — a stack
+of five is five separate breaks, not five times one number.
+
+`ui.PENDING_COMPONENTS` is down to a single entry (`item`), which is the first
+time since the Builder was written that almost everything in it works.
+
+### An unknown value is not zero
+A row Aegis cannot value is **counted and confessed**, never silently dropped.
+Treating an unknown disenchant value as zero would make
+`disenchant-profit/1g` quietly reject every item Aegis has not learned yet —
+which reads as "nothing here is profitable", the most misleading answer
+available and indistinguishable from a filter that works.
+
+The status line says which remedy applies: *"disenchant one, or scan its
+materials"*. Both components deliberately share that wording, because
+`UnansweredSummary` withholds advice when two components want different
+remedies, and a query using both would otherwise lose its advice line
+entirely.
+
+A **bid-only** auction still is not in that count. It has no buyout because
+the seller set none; that is a fact about the auction, not our ignorance, and
+no amount of scanning or disenchanting changes it.
+
+### Notes
+- These are the first components that cost a `GetItemInfo` per row — everything
+  else reads page data the client already holds. Affordable because it happens
+  only when one of them is in the term, and because the `tooltip` component
+  beside them already scans a whole tooltip per row. It is **not** affordable
+  unconditionally, so it must not be hoisted into `ReadPage`.
+- Five new sabotages, including both operators inverted and the unknown-as-zero
+  shortcut. 140 caught in total.
+
+---
+
 ## [1.32.0]
 
 Aegis now learns what things disenchant into by watching you do it. `/reload`.
@@ -2624,6 +2668,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.33.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.32.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.31.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.30.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
