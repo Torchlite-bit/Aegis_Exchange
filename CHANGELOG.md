@@ -12,6 +12,74 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.29.0] — **restart**
+
+The disenchant rule. **Adds two `.lua` files, so this one needs a full client
+restart, not `/reload`.**
+
+Nothing is visible in the window yet — this release is the arithmetic that
+later ones stand on, plus one slash command to look at it.
+
+### What 1.28.1 got wrong
+The previous entry said a disenchant breakdown was not buildable. Two of its
+three reasons were mistaken, and this release exists because of what turned up
+when they were checked properly:
+
+- *"There is no item level and no way to get one."* True of the client, and
+  still true. But a **shipped lookup** is an addon-visible source, and 1.28.1
+  named exactly that as an unblocker before dismissing it.
+- *"Learning it from play needs a bag walk on a spell event."* Simply wrong.
+  The way the era's addons did it costs **one** call — remember the item the
+  click landed on, gate it behind the Disenchant cast, read the loot. Every
+  step is O(1). That is a later phase, but it is not the obstacle it was
+  written up as.
+
+What survives is the part that mattered least to the decision: item level is
+missing from `GetItemInfo` and has to come from somewhere.
+
+### The rule
+There is no disenchant table. There is a **rule** — item level, quality and
+weapon-or-armour fully determine what an item breaks into — and the whole
+problem is knowing the item level.
+
+The constants behind it are **generated**, not typed: `tools/gen_disenchant.py`
+derives them from **8.8 million observed disenchants**, and the band boundaries
+land exactly on vanilla's 5-wide ladder with no fuzz. The armour/weapon split
+is read off the data too (~82/17), which is close to but not the same as the
+75/20 the era's addons hand-typed.
+
+### What it will not answer, and why that is the point
+- **Item level above 65.** The observations thin to a few dozen there and stop
+  being monotone, while Turtle's item levels run to 99.
+- **Epics.** The source data holds nine epic items, with yields no real item
+  produces (4.14 Large Brilliant Shards per disenchant). Dropped entirely.
+- **Weapons in a few bands.** Where no usable weapon data survives, the band
+  ships armour only rather than lending armour's numbers to weapons — armour
+  is dust-led, weapons essence-led, so borrowing would be confidently wrong
+  instead of roughly right.
+
+Each of those returns "I do not know" rather than a plausible number.
+
+### `core/itemlevel.lua` ships empty, on purpose
+The obvious source of item levels is another addon's database that carries **no
+licence at all**. That is a decision about someone else's work, so it is the
+owner's to make rather than something to do quietly. The file is in the `.toc`
+from today so data can be dropped in later **without a second restart release**,
+and learning item levels from your own disenchants — a later phase — fills it
+from the server you actually play on, which is better than any 2006 table.
+
+### Also
+- `/aex de <item link> [item level]` prints the breakdown for one item. A
+  verification hook, not a feature.
+- `tests/support/wow.lua` now reads `Aegis_Exchange.toc` and refuses to run if
+  its own load order has drifted from it — two copies of one order is how a
+  file gets added to the addon but never to the tests.
+- New suite (441 checks) and six sabotages. One of those immediately caught a
+  real fault: the new suite printed its failures but exited zero, so nothing
+  downstream would ever have noticed a regression in it.
+
+---
+
 ## [1.28.1]
 
 A feasibility answer, and the small change that records it. `/reload`.
@@ -2396,6 +2464,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.29.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.28.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.28.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.27.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

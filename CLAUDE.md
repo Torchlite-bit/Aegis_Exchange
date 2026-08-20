@@ -244,6 +244,10 @@ Aegis_Exchange/
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
   core/db.lua            -- SavedVariables price DB (daily-min + weighted-median
                          -- market), settings, ledger, vendor prices
+  core/itemlevel.lua     -- [itemId] = itemLevel. SHIPS EMPTY on purpose; read
+                         -- its header before filling it in
+  core/disenchant.lua    -- the disenchant RULE (item level + quality + slot ->
+                         -- materials). Constants generated, not typed
   core/scan.lua          -- page-by-page auction scanner state machine
   core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut),
                          -- owned auctions, vendor list
@@ -258,13 +262,19 @@ Aegis_Exchange/
                          -- and NOT loaded by us; it just calls A.skin.Apply()
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
                          -- never ported to Lua verbatim, NEVER in the .toc
+  tools/                 -- build-time generators. NOTHING here ships and
+                         -- nothing is in the .toc; adding a file is never a
+                         -- restart release and never a version bump
   CLAUDE.md              -- this file
   ROADMAP.md             -- phased, dependency-ordered plan; check before
                          -- starting a large feature
 ```
 
-Load order is fixed by the `.toc`: `init` → `util` → `db` → `scan` → `sell` →
-`buy` → `frame` → `skin` → `tooltip`. `init.lua` must load first (it creates
+Load order is fixed by the `.toc`: `init` → `util` → `db` → `itemlevel` →
+`disenchant` → `scan` → `sell` → `buy` → `frame` → `skin` → `tooltip`.
+**`tests/support/wow.lua` keeps a second copy of that order and checks itself
+against the `.toc` at load** — two copies of one order is how a file gets added
+to the addon but never to the tests. `init.lua` must load first (it creates
 the namespace and dispatcher); `util` second (every other module takes a
 file-scope `local util = A.util`); `sell` and `buy` before `frame` because the
 tabs drive `A.sell` / `A.buy` / `A.craft`. `skin` and `tooltip` are only

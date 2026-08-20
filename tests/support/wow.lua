@@ -484,7 +484,32 @@ end
 -- Load the addon's core modules in .toc order under this simulated client.
 -- `upTo` stops early, e.g. W.LoadCore("util") for the pure-Lua layer only.
 function W.LoadCore(upTo)
-    local order = { "init", "util", "db", "scan", "sell", "buy" }
+    local order = { "init", "util", "db", "itemlevel", "disenchant",
+                    "scan", "sell", "buy" }
+    -- This list is a SECOND copy of the .toc's load order, and two copies of
+    -- one order is how a file gets added to the addon but never to the tests
+    -- -- which presents as "the suite passes and the client errors". Read the
+    -- .toc and refuse to run if they have drifted.
+    local toc, i = io.open("Aegis_Exchange.toc"), 1
+    if toc then
+        for line in toc:lines() do
+            local _, _, name = string.find(line, "^core\\(%a+)%.lua")
+            if name then
+                if order[i] ~= name then
+                    error("tests/support/wow.lua load order has drifted from"
+                        .. " Aegis_Exchange.toc: expected '" .. name
+                        .. "' at position " .. i .. ", found '"
+                        .. tostring(order[i]) .. "'")
+                end
+                i = i + 1
+            end
+        end
+        toc:close()
+        if i - 1 ~= table.getn(order) then
+            error("tests/support/wow.lua lists " .. table.getn(order)
+                .. " core files, Aegis_Exchange.toc lists " .. (i - 1))
+        end
+    end
     for i = 1, table.getn(order) do
         dofile("core/" .. order[i] .. ".lua")
         if order[i] == upTo then break end

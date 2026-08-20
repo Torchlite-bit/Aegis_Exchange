@@ -1008,8 +1008,79 @@ end""",
      "    ui.LinkTabOrder({ ui.buyMinLevel, ui.buyMaxLevel })",
      "    ui.LinkTabOrder({ ui.buyBox, ui.buyMinLevel, ui.buyMaxLevel })",
      "taborder"),
-]
+    # ---- disenchant ------------------------------------------------------
+    # The band ladder claims each range by its UPPER bound. Off by one and an
+    # item moves a whole material tier -- Strange Dust where Soul Dust was.
+    ("de-band-off-by-one", "core/disenchant.lua",
+     "        if ilvl <= LADDER[i] then return LADDER[i] end",
+     "        if ilvl < LADDER[i] then return LADDER[i] end",
+     "disenchant"),
 
+    # Above ilvl 65 the observations thin out and stop being monotone, and
+    # Turtle item levels run to 99. Clamping to the top band instead of
+    # returning nil is how a confident wrong answer gets shipped.
+    ("de-band-no-ceiling", "core/disenchant.lua",
+     """        i = i + 1
+    end
+    return nil
+end
+
+-- equipLoc -> "a" (armour) or "w" (weapon)""",
+     """        i = i + 1
+    end
+    return LADDER[table.getn(LADDER)]
+end
+
+-- equipLoc -> "a" (armour) or "w" (weapon)""",
+     "disenchant"),
+
+    # Armour is dust-led (~82%), weapons essence-led (~80%). Exchanging them
+    # still sums to 1.0, still uses real reagents and still climbs the ladder
+    # in order -- only an assertion about WHICH leads can see it.
+    ("de-armour-weapon-swapped", "core/disenchant.lua",
+     """    if not equipLoc then return nil end
+    return INVTYPE[equipLoc]""",
+     """    if not equipLoc then return nil end
+    local c = INVTYPE[equipLoc]
+    if c == "a" then return "w" end
+    if c == "w" then return "a" end
+    return nil""",
+     "disenchant"),
+
+    # An expectation that forgets to weight by probability reports the value
+    # of every material dropping at once.
+    ("de-value-ignores-chance", "core/disenchant.lua",
+     "        total = total + r[2] * r[3] * price",
+     "        total = total + r[3] * price",
+     "disenchant"),
+
+    # One unpriced material must make the WHOLE value unknown. Treating it as
+    # zero silently under-reports every item whose shard has never been seen.
+    ("de-missing-price-undercounts", "core/disenchant.lua",
+     """        local price = priceOf(r[1])
+        if not price then return nil end""",
+     """        local price = priceOf(r[1]) or 0""",
+     "disenchant"),
+
+    # de.Yield must hand out a copy. Returning the stored rows lets one
+    # caller's sort or trim rewrite the shipped constants for the session.
+    ("de-yield-returns-live-table", "core/disenchant.lua",
+     """    local out, i, n = {}, 1, table.getn(rows)
+    while i <= n do
+        local r = rows[i]
+        table.insert(out, { itemId = r[1], chance = r[2], mean = r[3] })
+        i = i + 1
+    end
+    return out""",
+     """    local out, i, n = rows, 1, table.getn(rows)
+    while i <= n do
+        local r = rows[i]
+        r.itemId, r.chance, r.mean = r[1], r[2], r[3]
+        i = i + 1
+    end
+    return out""",
+     "disenchant"),
+]
 SUITES = {
     "util":        "tests/units/util_test.lua",
     "db":          "tests/units/db_test.lua",
@@ -1025,6 +1096,7 @@ SUITES = {
     "rowchrome": "tests/units/rowchrome_test.lua",
     "bags": "tests/units/bags_test.lua",
     "sellslot": "tests/units/sellslot_test.lua",
+    "disenchant": "tests/units/disenchant_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

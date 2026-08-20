@@ -10588,8 +10588,75 @@ A.RegisterEvent("BAG_UPDATE", function()
     end
 end)
 
+-- Print the disenchant breakdown for one item link.
+--
+-- This is a VERIFICATION hook, not a feature: core/disenchant.lua is pure
+-- arithmetic over a generated table, and this is how that arithmetic gets
+-- looked at against a real client before anything is built on top of it. The
+-- optional item level lets the rule be exercised even where the shipped
+-- lookup has nothing -- which, today, is everywhere.
+local function DisenchantReport(rest)
+    local _, _, link = string.find(rest or "", "(|c%x+|Hitem:.-|h.-|h|r)")
+    local _, _, override = string.find(rest or "", "(%d+)%s*$")
+    if not link then
+        ChatMsg("Aegis: /aex de <item link> [item level]"
+            .. " \226\128\148 shift-click an item into the chat box.")
+        return
+    end
+
+    local itemId = util.ItemIdFromLink(link)
+    local info = util.ItemInfo(link)
+    if not itemId or not info then
+        ChatMsg("Aegis: the client has no data cached for that item yet.")
+        return
+    end
+
+    local ilvl, source
+    if override and not string.find(link, override, 1, true) then
+        ilvl, source = tonumber(override), "you said so"
+    else
+        ilvl, source = A.de.ItemLevel(itemId)
+        source = source or "unknown"
+    end
+
+    ChatMsg("Aegis: " .. (info.name or "?") .. "  q=" .. tostring(info.quality)
+        .. "  slot=" .. tostring(info.equipLoc)
+        .. "  ilvl=" .. tostring(ilvl) .. " (" .. source .. ")")
+
+    if not A.de.CanDisenchant(info.quality, info.equipLoc, itemId) then
+        ChatMsg("  cannot be disenchanted")
+        return
+    end
+    local rows = A.de.Yield(ilvl, info.quality, info.equipLoc, itemId)
+    if not rows then
+        ChatMsg("  no answer \226\128\148 band "
+            .. tostring(A.de.Band(ilvl)) .. " has no data for this"
+            .. " quality/slot. See the header of core/disenchant.lua.")
+        return
+    end
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        local name = GetItemInfo(r.itemId) or ("item:" .. r.itemId)
+        ChatMsg(string.format("  %2d%%  %.2f x %s", r.chance * 100,
+            r.mean, name))
+        i = i + 1
+    end
+    local value = A.de.Value(ilvl, info.quality, info.equipLoc, itemId,
+        function(matId)
+            return A.db.MarketValue(matId) or A.db.MinBuyout(matId)
+        end)
+    if value then
+        ChatMsg("  expected: " .. util.FormatMoney(value, true))
+    else
+        ChatMsg("  expected: unknown \226\128\148 no price for at least one"
+            .. " material. Scan, or buy one, to learn it.")
+    end
+end
+
 -- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.
 -- /aex debug                — toggle the scanner's chat trace.
+-- /aex de <link> [ilvl]     — print the disenchant breakdown for one item.
 -- Deliberately NOT "/aegis": other addons in the user's Aegis series (Aegis:
 -- Rally Power) already own that slash, and when two addons register the same
 -- slash text the client resolves it to only ONE of them.
@@ -10597,6 +10664,13 @@ SLASH_AEGISEXCHANGE1 = "/aex"
 SLASH_AEGISEXCHANGE2 = "/aegisexchange"
 SlashCmdList["AEGISEXCHANGE"] = function(msg)
     local cmd = string.lower(msg or "")
+    -- Matched against the ORIGINAL msg, not the lowered copy: an item link
+    -- carries a hex colour code and a name, and lowering it breaks both.
+    local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
+    if deArgs then
+        DisenchantReport(deArgs)
+        return
+    end
     if string.find(cmd, "debug", 1, true) then
         A.debugScan = not A.debugScan
         if A.debugScan then
