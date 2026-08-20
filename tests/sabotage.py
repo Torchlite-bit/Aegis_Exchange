@@ -1152,6 +1152,14 @@ end
         if lvl and string.find(sub, lvl, 1, true) then lvl = nil end
         return id, tonumber(lvl)""",
      "disenchant"),
+    # A regeneration that produced an empty or truncated item-level file would
+    # be invisible: the addon loads, every disenchant line goes quiet, and it
+    # looks exactly like the deliberate silence of the release before the
+    # table landed. Nothing else in the suite would notice.
+    ("itemlevel-table-emptied", "core/itemlevel.lua",
+     "A.ilvlData = {\n",
+     "A.ilvlData = {} local DISCARDED = {\n",
+     "disenchant"),
 ]
 
 SUITES = {

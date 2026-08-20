@@ -11,6 +11,40 @@ better data turns up.
 
 ---
 
+## `gen_itemlevel.py` — `core/itemlevel.lua`
+
+```sh
+python3 tools/gen_itemlevel.py --ilvl <ShaguScore/Database.lua> \
+    > core/itemlevel.lua
+```
+
+Emits `[itemId] = itemLevel` for every entry with a real level. Only item
+level 0 rows are dropped — those are development stubs ("Kazgrim Test Druid
+Chest 1"). Levels above 65 are **kept** even though the disenchant ladder
+stops there: this is a factual item-level lookup, not a disenchant-band
+lookup, and trimming it to what one consumer needs today is the coupling that
+bites later. It also lets a caller tell *"level known, above our data"* apart
+from *"nothing known"*, which are different things to tell a player.
+
+### Provenance, and the caveat that comes with it
+
+**Source: [ShaguScore](https://github.com/shagu/ShaguScore), by shagu.**
+
+ShaguScore ships with **no licence** — no LICENSE file, no header, nothing in
+its README or `.toc`. Aegis is MIT. Including this data is a judgement the
+project owner made deliberately, with attribution, rather than something that
+happened quietly; ROADMAP 3k parked it as the owner's call precisely because
+it is about someone else's work and not a technical question.
+
+If shagu would rather it were not here, it comes out and the addon keeps
+working — the disenchant rule degrades to what the player has learned by
+disenchanting things themselves, which is the source that outranks this one
+anyway.
+
+The input is **not vendored**. Pass it on the command line.
+
+---
+
 ## `gen_disenchant.py` — the BANDS table in `core/disenchant.lua`
 
 ```sh

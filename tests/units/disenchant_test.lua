@@ -360,8 +360,29 @@ H.section("de.ItemLevel -- the shipped lookup, and its absence")
 -- core/itemlevel.lua ships EMPTY on purpose: ShaguScore, the obvious source,
 -- carries no licence at all. The point of these is that an absent table is a
 -- clean "I do not know", never a zero and never an error.
-H.isNil("an unknown item has no level", de.ItemLevel(12345))
+-- An id no client will ever have. Asserting against a plausible-looking id
+-- would only hold until the shipped table happened to grow that entry.
+H.isNil("an unknown item has no level", de.ItemLevel(99999999))
 H.isNil("a nil id has no level", de.ItemLevel(nil))
+
+-- The SHIPPED lookup. Nothing else notices if a regeneration produces an
+-- empty or malformed file -- the addon loads, every tooltip goes quiet, and
+-- it looks exactly like the deliberate silence of the phase before this one.
+local shipped, worst, inBand = 0, nil, 0
+for id, lvl in pairs(A.ilvlData or {}) do
+    shipped = shipped + 1
+    if type(id) ~= "number" or id < 1 or type(lvl) ~= "number"
+        or lvl < 1 or lvl > 100 then
+        worst = tostring(id) .. "=" .. tostring(lvl)
+    end
+    if lvl <= 65 then inBand = inBand + 1 end
+end
+H.check("the shipped item-level table is populated", shipped >= 10000,
+        "found " .. shipped)
+H.isNil("...with no malformed entry", worst)
+H.check("...and most of it is in a band the rule can use",
+        inBand * 10 >= shipped * 6,
+        inBand .. " of " .. shipped)
 
 local saved = A.ilvlData
 A.ilvlData = { [777] = 42, [778] = 0, [779] = "forty" }

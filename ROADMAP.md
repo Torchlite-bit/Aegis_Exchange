@@ -1928,19 +1928,23 @@ reading their source.
   no rule predicts. Turtle will have its own and only a failed disenchant
   reveals them.
 
-#### The open decision — item level provenance
+#### The item-level provenance decision — SETTLED, v1.31.0
 
-`core/itemlevel.lua` **ships empty**. The obvious source (ShaguScore's 12,871
-entries, including a useful slice of Turtle content) carries **no licence at
-all** — no LICENSE file, no header, nothing in its README or `.toc`. Aegis is
-MIT. Vendoring an unlicensed database is a decision about someone else's work
-and belongs to the owner.
+`core/itemlevel.lua` shipped **empty** in v1.29.0 and is **populated** as of
+v1.31.0 with 12,567 entries from **ShaguScore** (shagu), attributed in the
+file header, `tools/README.md` and the README's Credits section.
 
-**Nothing is blocked by it.** The file is in the `.toc` as of v1.29.0, so data
-can land later without a second restart release, and §3 fills item levels in
-from the player's own server — better data than any 2006 table. Options, in
-the order worth trying: ask shagu; ship nothing and rely on §3; or accept it
-as a database of facts, with attribution.
+ShaguScore carries **no licence at all**. The owner made the call knowingly
+and on the record; it was parked here as theirs precisely because it is about
+someone else's work rather than a technical question. It is reversible at any
+time: delete the table's contents and the rule degrades to what the player has
+learned by disenchanting things themselves, which is the source that outranks
+it anyway.
+
+Two releases shipped with nothing visible before this landed (§1 by design, §2
+as a consequence), which is worth remembering as a sequencing lesson: a phase
+whose payoff depends on a parked decision should not be followed by another one
+that depends on the same decision.
 
 The derived yield constants carry no such problem: Enchantrix's GPL v2 file is
 never vendored, and a few dozen probabilities computed from public observation

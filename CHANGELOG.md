@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.31.0]
+
+**The disenchant line actually appears now.** `/reload` — no new files, because
+`core/itemlevel.lua` has been in the `.toc` since 1.29.0 waiting for exactly
+this.
+
+### Added
+- **12,567 item levels**, in `core/itemlevel.lua`. That is the one input 1.12
+  does not give addons and the whole disenchant calculation turns on, so with
+  it in place the tooltip line — shipped inert in 1.30.0 — starts answering for
+  vanilla items and roughly a third of Turtle's custom ones.
+
+  Source: **[ShaguScore](https://github.com/shagu/ShaguScore)** by **shagu**,
+  with thanks. ShaguScore carries no licence of any kind, so including it was a
+  deliberate call by this project's owner rather than something done quietly —
+  see the header of `core/itemlevel.lua` and ROADMAP 3k. If shagu would rather
+  it were not there, it comes out and the addon keeps working.
+
+- `tools/gen_itemlevel.py`, so the file is regenerable rather than a 141 KB
+  blob nobody can check. The input is not vendored.
+
+### Notes
+- Item levels **above 65 are kept** even though the disenchant ladder stops
+  there. This is an item-level lookup, not a disenchant-band lookup, and
+  knowing something is item level 70 is different from knowing nothing about
+  it — `/aex de` now tells you which of those it is.
+- Anything with no entry still says **nothing at all**. That has not changed
+  and is not a gap waiting to be filled with "unknown".
+- A sabotage now plants an emptied table, because a regeneration that produced
+  a truncated file would otherwise be invisible: the addon loads, every line
+  goes quiet, and it looks exactly like the release before this one.
+
+---
+
 ## [1.30.1]
 
 A fix to the one command that could show 1.30.0 working at all. `/reload`.
@@ -2536,6 +2570,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.31.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.30.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.30.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.29.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

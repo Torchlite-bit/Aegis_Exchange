@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.30.1)
+# Aegis: Exchange (v1.31.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -307,13 +307,19 @@ Aegis Disenchant     1g 84s
    4%  1.0 x Large Radiant Shard
 ```
 
-It appears **only when Aegis can actually answer**, which today is rare — the
-1.12 client gives addons no item level, and Aegis ships no borrowed table of
-them (see the note in `core/itemlevel.lua` for why). A later release learns
-item levels from your own disenchants, on the server you actually play on.
-Where it can't answer it says nothing at all, rather than putting "unknown" on
-every grey in your bags. The value shown is for **one** item — a stack of
-twenty is twenty separate rolls, not twenty times that number.
+It appears **only when Aegis can actually answer**. The 1.12 client gives
+addons no item level, which is the one thing the calculation needs, so Aegis
+ships a lookup for it — vanilla items and roughly a third of Turtle's custom
+ones. Where there's no entry it says **nothing at all**, rather than putting
+"unknown" on every grey in your bags.
+
+The value shown is for **one** item — a stack of twenty is twenty separate
+rolls, not twenty times that number.
+
+The numbers behind it are derived from **8.8 million observed disenchants**,
+not typed by hand; epics and anything above item level 65 are deliberately
+left unanswered, because the data there isn't good enough to trust. See
+`tools/README.md` if you want the workings.
 
 ---
 
@@ -435,7 +441,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.30.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.31.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
@@ -457,6 +463,16 @@ Three requests:
 2. Bump the version in **both** `core/init.lua` and the `.toc`, so in-game bug
    reports say which build they came from.
 3. Add a line to [`CHANGELOG.md`](CHANGELOG.md).
+
+## Credits
+
+Item levels in `core/itemlevel.lua` come from
+**[ShaguScore](https://github.com/shagu/ShaguScore)** by **shagu** — 1.12
+gives addons no item level of its own, and the disenchant maths needs one.
+
+The disenchant probabilities are derived from the community-harvested
+observations in **Enchantrix** (Norganna & contributors); no Enchantrix code
+or data file is included here, only statistics computed from it.
 
 ## License
 
