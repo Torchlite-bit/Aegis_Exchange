@@ -704,10 +704,22 @@ function sell.ScanBags()
     return order
 end
 
--- Put the item at (bag, slot) into the auction sell slot. Clears the cursor
--- first so we never swap something already held.
+-- Put the item at (bag, slot) into the auction sell slot.
+--
+-- EMPTY THE SLOT FIRST, and that is the whole function.
+-- ClickAuctionSellItemButton SWAPS: it puts what the cursor holds into the
+-- slot and hands back whatever was already there. So placing a second item
+-- while the first is still slotted left the first one ON THE CURSOR, where it
+-- stayed until something else put it down -- which presents as "the item I
+-- moved on from never went back to my bag".
+--
+-- The old `ClearCursor()` at the top did not help: it runs BEFORE the pickup,
+-- so it clears a cursor that is already empty and is long finished by the time
+-- the swap happens. Clearing the SLOT first turns the click back into a plain
+-- placement, which is what it was assumed to be.
 function sell.PlaceFromBag(bag, slot)
-    ClearCursor()
+    sell.ClearSlot()          -- returns any slotted item to the bags
+    ClearCursor()             -- ...and drops anything the user was carrying
     PickupContainerItem(bag, slot)
     ClickAuctionSellItemButton()
 end

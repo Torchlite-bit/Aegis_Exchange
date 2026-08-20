@@ -138,6 +138,8 @@ tests/
                             the creation order that makes it draw right
     bags_test.lua           bag aggregation, and why "how much do I have" and
                             "what can I post as one stack" are two numbers
+    sellslot_test.lua       moving an item into the sell slot without leaving
+                            it on the cursor -- the slot button SWAPS
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a

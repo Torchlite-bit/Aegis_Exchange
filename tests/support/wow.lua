@@ -241,7 +241,17 @@ end
 -- tests want. A soulbound case would need tooltip lines, not bag entries.
 W.bags = {}
 
-function W.SetBags(t) W.bags = t or {} end
+-- Establishing a fresh set of bags also empties the cursor and the sell slot.
+--
+-- Without that, an item still held from a previous case gets put BACK into
+-- the new bags when something clears the slot -- so five copper bars become
+-- ten and the test reads as a duplication bug in the addon rather than as one
+-- world leaking into the next.
+function W.SetBags(t)
+    W.bags     = t or {}
+    W.cursor   = nil
+    W.sellSlot = nil
+end
 
 function GetContainerNumSlots(bag)
     local b = W.bags[bag]
@@ -257,8 +267,89 @@ end
 function GetContainerItemInfo(bag, slot)
     local b = W.bags[bag]
     local s = b and b[slot]
-    if not s then return nil end
+    if not s or not s.link then return nil end
     return s.texture or "icon", s.count or 1
+end
+
+-- ---------------------------------------------------------------------------
+-- The cursor and the auction sell slot
+-- ---------------------------------------------------------------------------
+--
+-- MODELLED, not stubbed, because the bug this exists for is a property of how
+-- the client MOVES items: ClickAuctionSellItemButton SWAPS the cursor with
+-- whatever is already in the sell slot. Place an item while the slot is
+-- occupied and the old one comes back onto the cursor -- where it silently
+-- stays until something puts it down.
+--
+-- A no-op stub would have made the fix untestable and the bug unreproducible,
+-- which is how it stayed a guess for one whole release.
+--
+-- An emptied bag slot keeps its place in the array as a table with no link,
+-- so GetContainerNumSlots (which is table.getn) does not change when an item
+-- leaves a bag.
+W.cursor   = nil    -- { link, count, bag, slot } or nil
+W.sellSlot = nil    -- { link, count, bag, slot } or nil
+
+local function bagCell(bag, slot)
+    local b = W.bags[bag]
+    if not b then return nil end
+    if not b[slot] then b[slot] = {} end
+    return b[slot]
+end
+
+function PickupContainerItem(bag, slot)
+    local cell = bagCell(bag, slot)
+    if not cell then return end
+    local held = W.cursor
+    if cell.link then
+        W.cursor = { link = cell.link, count = cell.count or 1,
+                     bag = bag, slot = slot }
+    else
+        W.cursor = nil
+    end
+    cell.link  = held and held.link or nil
+    cell.count = held and held.count or nil
+end
+
+function ClickAuctionSellItemButton()
+    local held, slotted = W.cursor, W.sellSlot
+    W.sellSlot = held
+    W.cursor   = slotted
+end
+
+-- Puts a held item back where it came from, which is what the real client
+-- does: the cursor is never simply emptied of a real item.
+function ClearCursor()
+    local held = W.cursor
+    W.cursor = nil
+    if not held then return end
+    local cell = bagCell(held.bag, held.slot)
+    if cell and not cell.link then
+        cell.link, cell.count = held.link, held.count
+        return
+    end
+    -- Its origin is occupied: drop it in the first free slot, as the client
+    -- would. If there is nowhere at all it stays put, which is a full-bags
+    -- case rather than a lost item.
+    for bag = 0, 4 do
+        local b = W.bags[bag]
+        for i = 1, table.getn(b or {}) do
+            if not b[i].link then
+                b[i].link, b[i].count = held.link, held.count
+                return
+            end
+        end
+    end
+    W.cursor = held
+end
+
+function GetAuctionSellItemInfo()
+    local s = W.sellSlot
+    if not s then return nil end
+    local rec = W.items[s.link] or {}
+    return rec.name or s.link, rec.texture or "icon", s.count or 1,
+           rec.quality or 1, 1, rec.sellPrice or 0,
+           rec.stackCount or 20, s.link
 end
 
 -- ---------------------------------------------------------------------------
@@ -381,6 +472,8 @@ function W.Reset()
     W.bids          = {}
     W.items         = {}
     W.bags          = {}
+    W.cursor        = nil
+    W.sellSlot      = nil
     W.tooltipLines  = {}
     W.money         = 500000
     W.now           = 1700000000

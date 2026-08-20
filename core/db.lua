@@ -170,6 +170,11 @@ local SETTING_DEFAULTS = {
     -- Ask before posting an auction. Off = post on the first click, which is
     -- what you want when relisting a stack at a time.
     confirmPost    = true,
+    -- After posting, keep any REMAINING items of the same type in the sell
+    -- slot at the same price, so the leftover stack can go straight out. Off
+    -- clears the slot, which is what you want when posting one thing at a
+    -- time and picking the next from the bags yourself.
+    keepLeftovers  = true,
 }
 
 -- Read a user setting, falling back to its default when unset.

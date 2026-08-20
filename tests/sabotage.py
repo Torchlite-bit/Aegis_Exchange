@@ -390,9 +390,13 @@ end""",
     # widget the new one displaced, so the new checkbox and the whole tail of
     # the panel drew in the same place. Reached through the `label` helper,
     # which is the door the original came through.
+    # Re-anchored in v1.28.0 when "Keep leftovers ready to post" was inserted
+    # into this chain -- which is the very mistake the lint exists for, and the
+    # reason this entry has to follow the chain's TAIL rather than name a fixed
+    # pair. It points at whichever widget the pacing label currently hangs off.
     ("settings-chain-forks-via-label", "ui/frame.lua",
+     '    local thLbl = label("Scan pacing:", klChk, -12)',
      '    local thLbl = label("Scan pacing:", cpChk, -12)',
-     '    local thLbl = label("Scan pacing:", ccChk, -12)',
      "anchorchain"),
 
     # The same fork through a plain SetPoint, so the lint is not just matching
@@ -497,6 +501,37 @@ end""",
         end
         return -e.t""",
      "sort_results"),
+
+    # ---- the sell slot and the cursor --------------------------------------
+    # THE REPORTED BUG, restored. ClickAuctionSellItemButton SWAPS, so placing
+    # a second item while the first is still slotted hands the first one back
+    # onto the cursor -- where it silently stays. "The item I moved on from
+    # never went back to my bag."
+    ("sell-slot-swap-strands-the-old-item", "core/sell.lua",
+     """    sell.ClearSlot()          -- returns any slotted item to the bags
+    ClearCursor()             -- ...and drops anything the user was carrying""",
+     """    ClearCursor()""",
+     "sellslot"),
+
+    # The order reversed: clearing the cursor before emptying the slot is
+    # exactly the version that did not work, because the swap happens after.
+    ("sell-slot-cleared-after-the-pickup", "core/sell.lua",
+     """    sell.ClearSlot()          -- returns any slotted item to the bags
+    ClearCursor()             -- ...and drops anything the user was carrying
+    PickupContainerItem(bag, slot)
+    ClickAuctionSellItemButton()""",
+     """    ClearCursor()
+    PickupContainerItem(bag, slot)
+    ClickAuctionSellItemButton()
+    sell.ClearSlot()""",
+     "sellslot"),
+
+    # PlaceItemById trusting a captured position instead of re-locating, and
+    # taking whatever stack it finds first rather than the biggest.
+    ("place-by-id-takes-the-smallest-stack", "core/sell.lua",
+     "                if (count or 0) > bestCount then",
+     "                if bestCount == 0 then",
+     "sellslot"),
 
     # ---- bag aggregation ---------------------------------------------------
     # THE REPORTED BUG, restored: one row per bag SLOT. Thirty essence held as
@@ -964,6 +999,7 @@ SUITES = {
     "post_filter": "tests/units/post_filter_test.lua",
     "rowchrome": "tests/units/rowchrome_test.lua",
     "bags": "tests/units/bags_test.lua",
+    "sellslot": "tests/units/sellslot_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

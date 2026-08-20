@@ -12,6 +12,58 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.28.0]
+
+Three Sell-tab flow fixes. `/reload`.
+
+### Fixed
+- **An item you moved on from stayed stuck to the cursor.** Click a second bag
+  item while the first is still in the sell slot and the first one never went
+  back to your bag — you had to put it down by hand.
+
+  `ClickAuctionSellItemButton` does not *put*, it **swaps**: it gives the slot
+  what the cursor holds and hands back what was already there. So the second
+  placement handed the first item straight onto the cursor, where it silently
+  stayed. The `ClearCursor()` that was already there could not have helped —
+  it ran *before* the pickup and was long finished by the time the swap
+  happened. The slot is emptied first now, which turns the click back into the
+  plain placement it was always assumed to be.
+
+### Added
+- **Leftovers stay ready to post.** Post two stacks of ten out of
+  twenty-five and the remaining five are re-slotted **at the same price**, so
+  the small stack goes straight out without finding it in the bags and pricing
+  it again.
+
+  Gated on the item matching — that gate is the whole safety of it, because
+  carrying the price across a *different* item would post that one at a stale
+  price. Off while walking a scanned bag list (the queue owns what comes next)
+  and after a cancel. New **Keep leftovers ready to post** toggle on the Aegis
+  tab, defaulting on.
+- **A "Max" button** beside the stack count, filling in every stack of the
+  chosen size that can actually be assembled. Not the total divided by the
+  size: 1.12 cannot merge partial stacks, so thirty held as three tens gives
+  three stacks of ten and none of thirty.
+
+### Internal
+- The cursor and the sell slot are **modelled** in the simulated client now,
+  not stubbed. `ClickAuctionSellItemButton` swaps, `ClearCursor` returns a
+  held item to where it came from, and bags are mutable — which is the only
+  reason the bug above was reproducible instead of guessed at. It had been
+  guessed at for a release.
+- `ui.SetStackCount` is the single writer for the stack count. The count box
+  and its slider are re-ranged against each other on every repaint, so writing
+  the box directly left the two showing different numbers until something else
+  repainted them.
+- `W.SetBags` clears the cursor and slot as well: an item still held from a
+  previous case got put *back* into the new bags, so five copper bars became
+  ten and read as a duplication bug in the addon rather than one test world
+  leaking into the next.
+- New `sellslot` suite (26 checks). Three sabotages there plus a stale
+  anchor-chain entry rewritten — inserting the new checkbox into the settings
+  chain moved the anchor the lint watches, which is exactly the mistake that
+  lint exists for. **109 sabotages caught in all.**
+
 ## [1.27.0]
 
 The Sell tab's listings table, drawn the way the Buy table is. `/reload`.
@@ -2307,6 +2359,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.28.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.27.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.26.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.25.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

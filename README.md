@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.27.0)
+# Aegis: Exchange (v1.28.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -214,7 +214,13 @@ pre-fills your price.
 One caveat vanilla forces on everyone: **stacks can't be merged**. Thirty
 essence held as three stacks of ten is thirty items, but the biggest stack you
 can post is ten — so the size slider stops there and the header still tells you
-the total. Two columns: on the left *what
+the total. **Max** fills in every stack of the chosen size you can actually
+assemble.
+
+**Leftovers stay ready.** Post two stacks of ten out of twenty-five and the
+remaining five come straight back into the slot at the same price, so the
+small stack goes out without hunting for it in your bags again. Turn it off on
+the Aegis tab if you'd rather pick the next item yourself. Two columns: on the left *what
 you're posting* — stack size and stack count on interlocking sliders, duration
 underneath; on the right *for how much* — **Undercut** (by a percentage or a
 flat amount; yes, 1 copper works) or **Price match** to sit level with the
@@ -411,7 +417,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.27.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.28.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

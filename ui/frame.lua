@@ -1689,6 +1689,15 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setConfirmPost = cpChk
 
+    -- Keep leftovers in the slot after posting? Same shape again.
+    local klChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetKeepLeftovers")
+    klChk:SetPoint("TOPLEFT", cpChk, "BOTTOMLEFT", 0, -6)
+    klChk:SetLabel("Keep leftovers ready to post", C.text)
+    klChk:SetScript("OnClick", function()
+        A.db.SetSetting("keepLeftovers", klChk:GetChecked() and true or false)
+    end)
+    ui.setKeepLeftovers = klChk
+
     -- ---- Scan pacing -------------------------------------------------------
     -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
     -- running the AuctionQueryThrottle DLL scans as fast as the server answers
@@ -1699,7 +1708,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- line and Clear price data, all of which chain off thLbl -- on top of
     -- each other. Inserting a widget into an anchor chain means re-pointing
     -- the link BELOW it as well.
-    local thLbl = label("Scan pacing:", cpChk, -12)
+    local thLbl = label("Scan pacing:", klChk, -12)
 
     ui.setThrottleBtns = {}
     local modes = { { "Auto", "auto" }, { "Safe 4s", "safe" } }
@@ -1825,6 +1834,10 @@ function ui.RefreshSettings()
     if ui.setConfirmCancel then
         ui.setConfirmCancel:SetChecked(
             A.db.Setting("confirmCancel") ~= false and 1 or nil)
+    end
+    if ui.setKeepLeftovers then
+        ui.setKeepLeftovers:SetChecked(
+            A.db.Setting("keepLeftovers") ~= false and 1 or nil)
     end
     if ui.setPfSkin then
         ui.setPfSkin:SetChecked(A.db.Setting("pfSkin") ~= false and 1 or nil)
@@ -8278,14 +8291,28 @@ function ui.BuildSellTab()
     local cntLabel = gutter("Stacks", ROW2)
     ui.sellNumStacks = MakeNumBox(panel, 34, function() ui.RefreshSell() end)
     ui.sellCountSlider = MakeHSlider(panel, 150, function(v)
-        ui.sellNumStacks:SetText(tostring(math.floor(v)))
-        ui.RefreshSell()
+        ui.SetStackCount(v)
     end)
     ui.sellCountSlider:SetPoint("LEFT", cntLabel, "RIGHT", 10, 0)
     ui.sellNumStacks:SetPoint("LEFT", ui.sellCountSlider, "RIGHT", 8, 0)
 
+    -- "Max": fill the count with every stack of the chosen SIZE that can be
+    -- assembled. sell.MaxStacks already computes it and the slider is already
+    -- clamped to it -- this only saves the dragging.
+    --
+    -- It writes through ui.SetStackCount rather than straight to the box:
+    -- size and count move each other's ceilings, and SetSliderRange is
+    -- re-applied to both on every RefreshSell, so a raw SetText would leave
+    -- the slider disagreeing with the number beside it until the next repaint.
+    local maxBtn = ui.MakeButton(panel, "quiet", "AegisExchangeSellMaxButton")
+    maxBtn:SetWidth(38); maxBtn:SetHeight(18)
+    maxBtn:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 6, 0)
+    maxBtn:SetText("Max")
+    maxBtn:SetScript("OnClick", function() ui.SetStackCountMax() end)
+    ui.sellMaxBtn = maxBtn
+
     ui.sellMaxInfo = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    ui.sellMaxInfo:SetPoint("LEFT", ui.sellNumStacks, "RIGHT", 10, 0)
+    ui.sellMaxInfo:SetPoint("LEFT", maxBtn, "RIGHT", 10, 0)
 
     local durLabel = gutter("Duration", ROW3)
     ui.sellDurBtns = {}
@@ -9189,6 +9216,30 @@ function ui.RefreshSell()
 end
 
 -- Current stack-size / stack-count entry values (with sensible fallbacks).
+-- Set the number of stacks and re-sync. ONE writer, because the count box and
+-- its slider are re-ranged against each other on every repaint -- writing the
+-- box directly leaves the two showing different numbers until something else
+-- repaints them.
+function ui.SetStackCount(n)
+    if not ui.sellNumStacks then return end
+    if not n or n < 1 then n = 1 end
+    ui.sellNumStacks:SetText(tostring(math.floor(n)))
+    ui.RefreshSell()
+end
+
+-- Every stack of the CURRENT size that can actually be assembled.
+--
+-- Not the total holding divided by the size: 1.12 cannot merge partial
+-- stacks, so sell.MaxStacks counts per slot and thirty held as three tens
+-- gives three stacks of ten and none of thirty. See sell.LargestStack.
+function ui.SetStackCountMax()
+    local it = A.sell.GetItem()
+    if not it or not it.itemId then return end
+    local n = A.sell.MaxStacks(it.itemId, ui.GetStackSize(it))
+    if n < 1 then n = 1 end
+    ui.SetStackCount(n)
+end
+
 function ui.GetStackSize(it)
     it = it or A.sell.GetItem()
     local def = 1
@@ -9698,11 +9749,40 @@ function ui.DoPost()
                     msg = msg .. " (couldn't assemble a stack \226\128\148"
                         .. " /aex debug shows why)"
                 end
+                -- LEFTOVERS STAY TARGETED. Post two stacks of ten out of
+                -- twenty-five and the remaining five are re-slotted at the
+                -- same price, so the small stack can go straight out without
+                -- finding it in the bags and pricing it again.
+                --
+                -- Gated on the item MATCHING, which is the part that matters:
+                -- ui.sellPrefilledFor is what stops the price boxes being
+                -- refilled from the market, so carrying it across a different
+                -- item would post that one at a stale price -- the worst
+                -- thing this tab could do. It is only kept when the item we
+                -- just posted is the item now in the slot.
+                --
+                -- Not while walking a queue (the queue owns what comes next),
+                -- and not after a cancel (the user asked to stop).
+                local left = p.itemId and A.sell.CountInBags(p.itemId) or 0
+                local kept = false
+                if A.db.Setting("keepLeftovers") ~= false
+                    and reason ~= "cancelled"
+                    and not ui.sellQueue
+                    and left > 0
+                    and A.sell.PlaceItemById(p.itemId) then
+                    kept = true
+                    -- The holding is smaller now, so the stack controls
+                    -- re-derive; the PRICE deliberately does not.
+                    ui.sellDefaultsFor = nil
+                    msg = msg .. "  " .. left .. " left \226\128\148 "
+                        .. "same price, ready to post."
+                else
+                    ui.lastScanItemId = nil
+                    ui.sellDefaultsFor = nil
+                    ui.sellPrefilledFor = nil
+                end
                 ui.sellStatus:SetText(msg)
                 ChatMsg("Aegis: " .. msg)
-                ui.lastScanItemId = nil
-                ui.sellDefaultsFor = nil
-                ui.sellPrefilledFor = nil
                 ui.RefreshSell()
                 ui.RefreshBags()
                 -- Walking the post-scan bag list? Move to the next item

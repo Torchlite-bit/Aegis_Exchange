@@ -1800,6 +1800,48 @@ The stated top priority of the report, and the last of the Sell-tab restyle.
   v1.15.0, so the suite asserts the relationships rather than the values,
   including that the gap from box to headings MATCHES the Buy table's.
 
+### 3j — Sell-tab flow: the cursor, leftovers, and Max — ✅ **DONE** (v1.28.0)
+
+- **The cursor bug was diagnosed wrong for a whole release, and the code said
+  so.** The report asked for a `ClearCursor()` / `PutItemInBag()` snippet;
+  `sell.ClearSlot` already did the documented Auctionator pattern and
+  `PlaceFromBag` already opened with `ClearCursor()`. Both true, and neither
+  was the fault.
+- **`ClickAuctionSellItemButton` SWAPS.** It gives the slot what the cursor
+  holds and hands back what was already there. So placing a second item while
+  the first was still slotted handed the first onto the cursor. The existing
+  `ClearCursor()` could not help: it runs BEFORE the pickup and is finished by
+  the time the swap happens. Emptying the SLOT first turns the click back into
+  the plain placement everything assumed it was.
+- **It was unreproducible because the harness stubbed the mechanic away.**
+  `ClickAuctionSellItemButton` was a metatable no-op, so no test could have
+  shown the swap. The cursor and slot are MODELLED now -- bags mutable,
+  `ClearCursor` returning a held item where it came from -- and the bug
+  reproduces in three lines. **A stub that erases the mechanism erases the
+  bug with it**, which is how this stayed a guess.
+- **Leftover retention is gated on the ITEM MATCHING**, and that gate is the
+  whole safety of the feature rather than a detail of it. `sellPrefilledFor`
+  is what stops the price boxes being refilled from the market; carrying it
+  across a DIFFERENT item would post that one at a stale price, which is the
+  worst thing this tab could do.
+- **"Max" was nearly free and the brief said so.** `sell.MaxStacks` existed,
+  the slider was already clamped to it, the readout already printed it. The
+  only real work was routing the write through `ui.SetStackCount` -- size and
+  count re-range each other on every repaint, so a raw `SetText` leaves the
+  slider disagreeing with the number beside it.
+
+#### What the tests learned
+
+- **A test world that leaks is worse than no fixture.** `W.SetBags` replaced
+  the bags while the sell slot still held an item from the previous case, so
+  clearing the slot put a second copy back: five copper bars became ten and
+  read as a duplication bug in the ADDON. `SetBags` empties the cursor and
+  slot now, because "here are the bags" is a statement about the whole world.
+- **Inserting the new checkbox moved an anchor a sabotage named**, and
+  `anchorchain.py` reported it stale rather than passing. That is the lint
+  and the sabotage system doing exactly what they were built for, on the very
+  mistake they were built for.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
