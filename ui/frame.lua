@@ -3685,6 +3685,15 @@ local SELLL = {
     list_x     = 270,
     list_right = 26,
 
+    -- The bag column's own columns. It is a TABLE now, not a list of text --
+    -- same box, same header band, same rule, same right-aligned numeric
+    -- column as the listings beside it -- so the two halves of the tab read
+    -- as one thing. `bag_label_x` is where the name starts (past the icon and
+    -- the cache dot); `bag_have_w` is the count column's width, right-aligned
+    -- against the box's inner edge.
+    bag_label_x = 34,
+    bag_have_w  = 28,
+
     well_top   = SELL_TOP_H + 10,
     hdr_top    = SELL_TOP_H + 16,
     hdr_h      = 22,
@@ -3714,7 +3723,11 @@ local LISTBOX = {
     craft     = { top = 94,  bot = 10 },
     auc       = { top = 70,  bot = 10 },
     hist      = { top = 100, bot = 10 },
-    bag       = { top = SELL_TOP_H + 26, bot = 10 },
+    -- Identical to sellList on purpose: both boxes start under the same
+    -- header band and end on the same line, which is the whole point of
+    -- giving the bag list a box at all. Two lists side by side that begin
+    -- and end at different heights read as an accident.
+    bag       = { top = SELLL.rows_top, bot = SELLL.table_bot },
     sellList  = { top = SELLL.rows_top, bot = SELLL.table_bot },
 }
 ui.LISTBOX = LISTBOX     -- read by the geometry suite
@@ -8173,7 +8186,7 @@ local LIST_ROWS_MAX = 36
 -- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
 -- straight past the list into the listings table -- these are what they get
 -- clipped to. See ui.SetTextClipped.
-local BAG_ITEM_TEXT_W = 176
+local BAG_ITEM_TEXT_W = 160
 local BAG_CAT_TEXT_W  = 210
 
 function ui.BuildSellTab()
@@ -8485,11 +8498,13 @@ function ui.BuildSellTab()
     div:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, -SELL_TOP_H)
 
     -- ---- Bottom-left: Your Bags ----------------------------------------
-    local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -(SELL_TOP_H + 8))
-    bagHdr:SetText("Your Bags")
-    bagHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-
+    --
+    -- Drawn as a TABLE, matching the listings beside it: one box around the
+    -- heading and the rows, a rule under the heading, a right-aligned numeric
+    -- column, and the scrollbar hanging outside the box. It used to be a bare
+    -- list of text on the panel with a loose label above it and its buttons
+    -- floating over the top edge, which read as a different kind of thing
+    -- from the table it sits next to.
     local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
         panel, "FauxScrollFrameTemplate")
     bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.bag_x,
@@ -8499,11 +8514,66 @@ function ui.BuildSellTab()
     bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", SELLL.bag_right,
         LISTBOX.bag.bot)
 
+    -- The box. Anchored the same way the listings well is, and for the same
+    -- two reasons: it has to reach UP past the scroll frame to enclose the
+    -- header row, and its right edge has to stop AT the scroll frame's,
+    -- because FauxScrollFrameTemplate hangs its scrollbar OUTWARD from that
+    -- line and any positive offset would put the box under the bar.
+    local bagWell = CreateFrame("Frame", nil, panel)
+    bagWell:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.bag_x - 6,
+        -SELLL.well_top)
+    bagWell:SetPoint("BOTTOMRIGHT", bagScroll, "BOTTOMRIGHT", 0, -6)
+    bagWell:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    bagWell:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    bagWell:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    ui.sellBagWell = bagWell
+
+    -- "Your Bags" IS the heading now, rather than a separate label above the
+    -- box -- the same way the listings table's first column heading names it.
+    local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.bag_x, -SELLL.hdr_top)
+    bagHdr:SetText("Your Bags")
+    bagHdr:SetTextColor(0.85, 0.72, 0.42)
+
+    local haveHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    haveHdr:SetWidth(SELLL.bag_have_w)
+    haveHdr:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT", -6,
+        -(SELLL.hdr_top - SELLL.well_top))
+    haveHdr:SetJustifyH("RIGHT")
+    haveHdr:SetText("Have")
+    haveHdr:SetTextColor(0.85, 0.72, 0.42)
+
+    -- The rule goes UNDER the heading, not at the top of the box.
+    local bagRule = panel:CreateTexture(nil, "ARTWORK")
+    bagRule:SetPoint("TOPLEFT", bagWell, "TOPLEFT", 6, -SELLL.hdr_h)
+    bagRule:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT", -6, -SELLL.hdr_h)
+    bagRule:SetHeight(1)
+    bagRule:SetTexture(0.45, 0.38, 0.22, 0.85)
+
+    -- One separator, before the numeric column, as the listings table has
+    -- between each of its cells.
+    local bagTick = panel:CreateTexture(nil, "ARTWORK")
+    bagTick:SetWidth(1)
+    bagTick:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
+        -(6 + SELLL.bag_have_w + 4), -6)
+    bagTick:SetPoint("BOTTOMRIGHT", bagWell, "TOPRIGHT",
+        -(6 + SELLL.bag_have_w + 4), -SELLL.hdr_h)
+    bagTick:SetTexture(0.35, 0.30, 0.18, 0.7)
+
     -- Vendor list: bag items worth more at a merchant than on the AH.
+    --
+    -- Below the box now. They used to sit ABOVE the list, on the row the
+    -- heading needed; there is no room for both once the heading moves inside
+    -- the box, and under it they line up with the listings' status line.
     local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
     vendListBtn:SetWidth(56)
     vendListBtn:SetHeight(18)
-    vendListBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -52, 18)
+    vendListBtn:SetPoint("TOPLEFT", bagWell, "BOTTOMLEFT", 6, -4)
     vendListBtn:SetText("Vendor")
     vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
     ui.sellVendorListBtn = vendListBtn
@@ -8511,7 +8581,7 @@ function ui.BuildSellTab()
     local scanAllBtn = ui.MakeButton(panel, "quiet")
     scanAllBtn:SetWidth(48)
     scanAllBtn:SetHeight(18)
-    scanAllBtn:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 18)
+    scanAllBtn:SetPoint("LEFT", vendListBtn, "RIGHT", 6, 0)
     scanAllBtn:SetText("Scan")
     scanAllBtn:SetScript("OnClick", function()
         if A.sell.batchActive then
@@ -8583,9 +8653,20 @@ ui.GrowBagRows = function(n)
             ic:Hide()
             row.icon = ic
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 34, 0)
+            lbl:SetPoint("LEFT", row, "LEFT", SELLL.bag_label_x, 0)
             lbl:SetJustifyH("LEFT")
             row.label = lbl
+            -- How many you hold, in its own right-aligned column under
+            -- "Have", rather than glued onto the end of the name as "x35".
+            -- A number that has to be read out of the middle of a sentence is
+            -- not a column, and this table sits beside one whose numerics all
+            -- line up.
+            local have = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            have:SetWidth(SELLL.bag_have_w)
+            have:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+            have:SetJustifyH("RIGHT")
+            have:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            row.have = have
             -- Cache indicator: small green asterisk left of the label, between the
             -- icon and the item name so long names never overlap it.
             local dot = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -8797,6 +8878,7 @@ function ui.UpdateBagList()
                 row.band:Show()
                 row.label:ClearAllPoints()
                 row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
+                if row.have then row.have:SetText("") end
                 ui.SetTextClipped(row.label, e.name .. " (" .. e.num .. ")",
                     BAG_CAT_TEXT_W)
                 row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -8825,15 +8907,24 @@ function ui.UpdateBagList()
                     end
                 end
                 row.label:ClearAllPoints()
-                row.label:SetPoint("LEFT", row, "LEFT", 34, 0)
-                local txt = it.name
-                -- ONE line per item now, so this count is the whole holding
+                row.label:SetPoint("LEFT", row, "LEFT", SELLL.bag_label_x, 0)
+                ui.SetTextClipped(row.label, it.name, BAG_ITEM_TEXT_W)
+                -- ONE line per item, so this count is the whole holding
                 -- across every bag rather than one slot's worth. See
                 -- sell.ScanBags: `count` is the total and `stackMax` is the
                 -- largest single stack, and only the second bounds what can
                 -- be posted as one auction.
-                if it.count and it.count > 1 then txt = txt .. " x" .. it.count end
-                ui.SetTextClipped(row.label, txt, BAG_ITEM_TEXT_W)
+                --
+                -- Blank at one, not "1". A column of ones down the side of a
+                -- bag list is noise: the interesting fact is a stack, and
+                -- writing the uninteresting case out loud hides it.
+                if row.have then
+                    if it.count and it.count > 1 then
+                        row.have:SetText(it.count)
+                    else
+                        row.have:SetText("")
+                    end
+                end
                 -- Quality-coloured, as every other item column in the window
                 -- is. nil quality means a cold item cache, not "common", so
                 -- it falls back to plain text rather than painting it white.

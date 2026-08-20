@@ -382,6 +382,9 @@ the `.toc`, so it is never a **restart** release and never a version bump.
 - [ ] No function exceeds **32 upvalues** (`python3 tests/lint/upvalues.py`, or
       by hand `luac5.1 -l -p f.lua | grep upvalues`). `luac -p` and a 5.1
       harness will NOT catch this; the client refuses to load the file.
+- [ ] No `C.<colour>` was invented (`python3 tests/lint/palette.py`). The UI
+      file is never loaded by a suite, so a colour that is not in the palette
+      passes every check and throws when a player opens that tab.
 - [ ] No top-level definition was lost to a scripted edit
       (`python3 tests/lint/definitions.py`). Run this after ANY multi-line or
       scripted edit — the file still compiles when a function goes missing, so

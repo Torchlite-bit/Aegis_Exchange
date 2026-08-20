@@ -632,7 +632,7 @@ end""",
 
     # The name column narrowed back to what truncated most item names.
     ("bag-names-truncate-again", "ui/frame.lua",
-     "local BAG_ITEM_TEXT_W = 176",
+     "local BAG_ITEM_TEXT_W = 160",
      "local BAG_ITEM_TEXT_W = 120",
      "geometry"),
 
@@ -1279,6 +1279,16 @@ end
      '    ["disenchant-percent"] = "disenchant one, or scan its materials",',
      '    ["disenchant-percent"] = "scan to learn its price",',
      "post_filter"),
+    # ---- palette ---------------------------------------------------------
+    # A colour that is not in C is valid Lua until the line runs. ui/frame.lua
+    # builds a window on load so no suite loads it, which means an invented
+    # field compiles, lints, passes everything, and throws the first time a
+    # player opens that tab. This exact typo reached a commit with a full
+    # green run behind it.
+    ("palette-invented-colour", "ui/frame.lua",
+     "            have:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])",
+     "            have:SetTextColor(C.textDim[1], C.textDim[2], C.textDim[3])",
+     "palette"),
 ]
 
 SUITES = {
@@ -1309,6 +1319,7 @@ SUITES = {
     # wrong about it the same way an assertion can, so it earns its place here
     # rather than being trusted because it printed "ok" once.
     "anchorchain": "tests/lint/anchorchain.py",
+    "palette": "tests/lint/palette.py",
 }
 
 

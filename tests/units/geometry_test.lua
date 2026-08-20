@@ -1031,8 +1031,28 @@ local ITEM_TEXT_W = constant("BAG_ITEM_TEXT_W")
 H.check("the bag list's name column has room for a name",
         ITEM_TEXT_W >= 160, ITEM_TEXT_W .. "px")
 H.check("...and still fits inside the column it is drawn in",
-        ITEM_TEXT_W + 34 <= (BAG_RIGHT - BAG_X),
-        ITEM_TEXT_W .. " + 34 > " .. (BAG_RIGHT - BAG_X))
+        ITEM_TEXT_W + SELLL.bag_label_x <= (BAG_RIGHT - BAG_X),
+        ITEM_TEXT_W .. " + " .. SELLL.bag_label_x
+            .. " > " .. (BAG_RIGHT - BAG_X))
+
+-- The bag list is a TABLE now, with a right-aligned count column beside the
+-- name, so three numbers have to add up rather than two: where the name
+-- starts, how wide it may be, and how much the "Have" column takes back.
+-- Widen any one of them without the others and the name silently draws
+-- underneath the count.
+H.check("the name and the Have column fit side by side",
+        SELLL.bag_label_x + ITEM_TEXT_W + SELLL.bag_have_w
+            <= (BAG_RIGHT - BAG_X),
+        SELLL.bag_label_x .. " + " .. ITEM_TEXT_W .. " + "
+            .. SELLL.bag_have_w .. " > " .. (BAG_RIGHT - BAG_X))
+H.check("the Have column is wide enough for a real stack count",
+        SELLL.bag_have_w >= 24, SELLL.bag_have_w .. "px")
+
+-- Both halves of the Sell tab are boxes now, and they are only a matched
+-- pair if they start and end on the same lines.
+H.eq("the bag box starts where the listings box starts",
+     LISTBOX.bag.top, LISTBOX.sellList.top)
+H.eq("...and ends where it ends", LISTBOX.bag.bot, LISTBOX.sellList.bot)
 
 -- The bag rows are the Buy table's height now, which is what gives a 20px
 -- icon and a quality-coloured name room to read.

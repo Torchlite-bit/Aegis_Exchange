@@ -12,6 +12,39 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.34.0]
+
+The Sell tab's bag list is a table now, not a list of text. `/reload`.
+
+### Changed
+- **"Your Bags" gets the same treatment the listings table got**: one box
+  around the heading and the rows, a rule under the heading, and the scrollbar
+  hanging outside the box. Both halves of the tab now start and end on the same
+  lines, which is asserted so they cannot drift apart again.
+- **The count moved into its own right-aligned "Have" column** instead of being
+  glued to the end of the name as `Ice Cold Milk x35`. A number you have to
+  read out of the middle of a sentence is not a column, and this list sits
+  beside one whose numerics all line up.
+- A holding of **one shows blank** rather than `1`. A column of ones down the
+  side of a bag list is noise; the interesting fact is a stack, and spelling
+  out the dull case hides it.
+- **Vendor** and **Scan** moved below the box. They used to float over the top
+  edge on the row the heading now occupies, and under it they line up with the
+  listings' status line.
+
+### Added
+- `tests/lint/palette.py` — every `C.<colour>` the UI reads must exist in the
+  palette.
+
+  **This one has a story.** `C.textDim` does not exist; the palette has
+  `goldDim`. That typo passed the Lua parser, all eight lints, all 16 suites
+  and 140 sabotages, because `ui/frame.lua` builds a window on load and so no
+  suite loads it — the line would simply have thrown the first time anyone
+  opened the Sell tab. Now it is caught before a commit, with its own selftest
+  and a sabotage that plants the exact mistake back.
+
+---
+
 ## [1.33.0]
 
 `disenchant-profit` stops being pending, and brings a sibling. `/reload`.
@@ -2668,6 +2701,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.34.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.33.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.32.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.31.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

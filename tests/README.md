@@ -48,6 +48,7 @@ tools we test with are more permissive than the client we ship to.
 | `modebits.py` | A Buy-tab widget no view shows or hides | Every widget exists; one just never appears, or never goes away |
 | `sharedlayout.py` | Two views placed into one space by two different functions | Both look right until one of them is edited |
 | `anchorchain.py` | Two widgets anchored below the same one | A fork in a vertical chain. The addon loads, every widget exists, nothing errors — the tab just draws on top of itself |
+| `palette.py` | A `C.<colour>` that is not in the palette | Valid Lua until the line runs. `ui/frame.lua` builds a window on load so no suite loads it — an invented colour compiles, lints, passes everything, and throws the first time a player opens that tab |
 
 That middle row is not hypothetical. v1.16.0 shipped an addon that would not
 load at all: thirteen new layout constants took `ui.BuildBuyTab` to 36
