@@ -1717,6 +1717,60 @@ was in the source and needed no reproduction once the right question was asked.
   before; it was welded to `SetWidth`/`SetHeight` and therefore untestable, and
   the branch that skipped it entirely was the bug.
 
+### 3h — The bag list: one row per item, and the Buy table's look — ✅ **DONE** (v1.26.0)
+
+Reported as a display bug and it was not only one. `sell.ScanBags` emitted a
+row per bag SLOT, and four things read that list: the display, the vendor
+list, the batch scanner and the post-scan sell queue. Three of the four were
+silently doing the same item two and three times over.
+
+- **THREE NUMBERS, and keeping them apart is the whole design.** `count` is
+  the holdings total, `stackMax` the largest single stack, `slots` every
+  physical stack. 1.12 cannot merge two partial stacks, so thirty held as
+  three tens is thirty items, a largest stack of ten, and **zero** postable
+  stacks of thirty.
+- **The tempting version of this fix ships a worse bug.** Aggregating the row
+  to "x30" while the stack-size slider still ranged to the total lets someone
+  ask for a stack that can never be assembled — `sell.MaxStacks` returns 0 and
+  the count reads zero with no explanation. The slider ranges to
+  `sell.LargestStack` now, and the total is still shown because it is still
+  the useful thing to know.
+- **One consumer must NOT see the aggregate**, and it is the one that spends
+  items: `sell.MarkedInBags` still emits a row per physical stack, because
+  `SellMarkedToVendor` calls `UseContainerItem(bag, slot)` once per row and
+  that sells exactly one stack. An aggregated row there would sell a third of
+  what was marked and report success. Sabotaged in that direction on purpose.
+- **The other two consumers were improved by the same change**, which is the
+  sign the aggregate is the right model: the vendor list stops listing an item
+  three times and the batch scanner stops scanning it three times.
+
+#### The look
+
+- 26px rows, the shared chrome, 20px icons, quality-coloured names, banded
+  category headers. The reference screenshot was an icon GRID; the list was
+  kept and the things actually being complained about were taken from it.
+  **Recorded as a decision, not a shortfall** — a grid is a different widget
+  and is its own job, possibly as a toggle.
+- **The bag column was 156px and truncated most names.** Widening it meant
+  moving the listings column, and those two numbers were four literals across
+  five call sites. `SELLL` holds both now, and the geometry suite requires the
+  listings columns to fit beside the bag column **at the smallest window**,
+  and the gutter to clear the bag list's scrollbar — a FauxScrollFrame's bar
+  sits outside its right edge, so that gap is structural rather than
+  decorative.
+
+#### What the tests learned
+
+- **A cold item cache is the normal state, not an edge case.** `GetItemInfo`
+  answers nil until the client has the item, so the first open of a session
+  categorises everything as "Other". The row must survive that, must recover
+  the name from the item LINK, and must **not claim a quality it does not
+  know** — defaulting to 1 would paint an epic white. All three asserted.
+- The geometry suite's table-field reader could not see a field on a table's
+  **opening line**, so `SCX`-shaped tables reported their first field missing.
+  It read as "the table moved" rather than "the table is formatted
+  differently", which is the worst kind of wrong error.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

@@ -228,6 +228,40 @@ function GetItemInfo(key)
 end
 
 -- ---------------------------------------------------------------------------
+-- Bags
+-- ---------------------------------------------------------------------------
+
+-- Just enough of the container API for core/sell.lua's bag walks.
+--
+-- W.SetBags takes { [bagIndex] = { {link=, count=, texture=}, ... } }, the
+-- inner array indexed by SLOT. Bag 0 is the backpack, as on the real client.
+--
+-- sell.IsAuctionable reads a scanning tooltip, and the stub tooltip reports
+-- zero lines -- so everything here counts as auctionable, which is what these
+-- tests want. A soulbound case would need tooltip lines, not bag entries.
+W.bags = {}
+
+function W.SetBags(t) W.bags = t or {} end
+
+function GetContainerNumSlots(bag)
+    local b = W.bags[bag]
+    return b and table.getn(b) or 0
+end
+
+function GetContainerItemLink(bag, slot)
+    local b = W.bags[bag]
+    local s = b and b[slot]
+    return s and s.link or nil
+end
+
+function GetContainerItemInfo(bag, slot)
+    local b = W.bags[bag]
+    local s = b and b[slot]
+    if not s then return nil end
+    return s.texture or "icon", s.count or 1
+end
+
+-- ---------------------------------------------------------------------------
 -- Auction house
 -- ---------------------------------------------------------------------------
 
@@ -346,6 +380,7 @@ function W.Reset()
     W.queryOpen     = true
     W.bids          = {}
     W.items         = {}
+    W.bags          = {}
     W.tooltipLines  = {}
     W.money         = 500000
     W.now           = 1700000000

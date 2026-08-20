@@ -8070,7 +8070,10 @@ StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {
 -- Sell tab: bag browser + per-item listing scan + post
 -- ---------------------------------------------------------------------------
 
-local BAG_ROWS,  BAG_ROW_H  = 9, 19
+-- 26, the Buy table's row height, not the 19 this list used to draw. The
+-- taller row is what gives a 20px icon and a quality-coloured name room to
+-- read as a table rather than as a packed list.
+local BAG_ROWS,  BAG_ROW_H  = 9, 26
 local BAG_ROWS_MAX  = 36
 -- Row-relative column x / width for the Sell tab's listings table. ONE pair,
 -- read by the row cells and by the headers.
@@ -8102,8 +8105,24 @@ local LIST_ROWS_MAX = 36
 -- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
 -- straight past the list into the listings table -- these are what they get
 -- clipped to. See ui.SetTextClipped.
-local BAG_ITEM_TEXT_W = 120
-local BAG_CAT_TEXT_W  = 146
+-- The Sell tab's two columns, in ONE place. `bag_right` is the bag column's
+-- right edge and `list_x` where the listings column starts; both were literals
+-- (168 and a 200 repeated at three call sites), which is how a column and the
+-- thing beside it drift apart.
+--
+-- The bag column was 156px wide, which truncated most item names to
+-- "Pattern: Fine Leather Bo...". The scrollbar of a FauxScrollFrame sits just
+-- OUTSIDE its right edge, so the gutter between the two columns has to clear
+-- it -- that is what `list_x - bag_right` buys.
+local SELLL = {
+    bag_x      = 12,
+    bag_right  = 238,
+    list_x     = 270,
+    list_right = 26,
+}
+
+local BAG_ITEM_TEXT_W = 176
+local BAG_CAT_TEXT_W  = 210
 
 function ui.BuildSellTab()
     local panel = ui.panels["Sell"]
@@ -8407,11 +8426,12 @@ function ui.BuildSellTab()
 
     local bagScroll = CreateFrame("ScrollFrame", "AegisExchangeBagScroll",
         panel, "FauxScrollFrameTemplate")
-    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -LISTBOX.bag.top)
-    -- Right edge pulled well in (168) so the FauxScrollFrame's scrollbar, which
-    -- sits just OUTSIDE this edge, clears the listings column that starts at
-    -- x=200 -- otherwise the bar overlaps the price info.
-    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 168, LISTBOX.bag.bot)
+    bagScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.bag_x,
+        -LISTBOX.bag.top)
+    -- The FauxScrollFrame's scrollbar sits just OUTSIDE this edge, so the gap
+    -- to SELLL.list_x is what keeps the bar off the listings column.
+    bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", SELLL.bag_right,
+        LISTBOX.bag.bot)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
     local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
@@ -8474,20 +8494,36 @@ ui.GrowBagRows = function(n)
                 row:SetPoint("TOPLEFT", ui.bagRows[bi - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.bagRows[bi - 1], "BOTTOMRIGHT", 0, 0)
             end
+            -- The same chrome every other table wears, on the same terms:
+            -- created before any cell, no selection tint (clicking a bag row
+            -- places the item, it does not leave the row in a chosen state).
+            ui.AddRowChrome(row, bi)
+
+            -- A category header's band. Sized to the row and hidden on item
+            -- rows, so the headers read as the dividers they are instead of
+            -- as text that happened to land there -- which is what the
+            -- reference screenshot is actually showing.
+            local band = row:CreateTexture(nil, "BORDER")
+            band:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+            band:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
+            band:SetTexture(C.titleBG[1], C.titleBG[2], C.titleBG[3], 0.85)
+            band:Hide()
+            row.band = band
+
             local ic = row:CreateTexture(nil, "ARTWORK")
-            ic:SetWidth(16)
-            ic:SetHeight(16)
+            ic:SetWidth(20)
+            ic:SetHeight(20)
             ic:SetPoint("LEFT", row, "LEFT", 4, 0)
             ic:Hide()
             row.icon = ic
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 30, 0)
+            lbl:SetPoint("LEFT", row, "LEFT", 34, 0)
             lbl:SetJustifyH("LEFT")
             row.label = lbl
             -- Cache indicator: small green asterisk left of the label, between the
             -- icon and the item name so long names never overlap it.
             local dot = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            dot:SetPoint("LEFT", row, "LEFT", 20, 0)
+            dot:SetPoint("LEFT", row, "LEFT", 26, 0)
             dot:SetJustifyH("LEFT")
             dot:SetTextColor(0.30, 0.85, 0.30)
             dot:SetText("*")
@@ -8515,7 +8551,8 @@ ui.GrowBagRows = function(n)
 
     -- ---- Bottom-right: listings table ----------------------------------
     ui.listHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.listHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -(SELL_TOP_H + 4))
+    ui.listHeader:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.list_x,
+        -(SELL_TOP_H + 4))
     ui.listHeader:SetJustifyH("LEFT")
     ui.listHeader:SetText("Select an item to see its listings")
     ui.listHeader:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -8526,14 +8563,16 @@ ui.GrowBagRows = function(n)
     -- headers were grey where every other table's are warm tan.
     ui.sellSortKey = "unit"
     ui.sellSortDir = "asc"
-    ui.sellHeaders = ui.MakeSortHeaders(panel, 200, -(SELL_TOP_H + 21),
+    ui.sellHeaders = ui.MakeSortHeaders(panel, SELLL.list_x,
+        -(SELL_TOP_H + 21),
         SCX, SCW, function(key) ui.SetSellSort(key) end, SELL_HEADER_DEFS)
 
     local listScroll = CreateFrame("ScrollFrame", "AegisExchangeListScroll",
         panel, "FauxScrollFrameTemplate")
-    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 200, -LISTBOX.sellList.top)
-    listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -26,
-        LISTBOX.sellList.bot)
+    listScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.list_x,
+        -LISTBOX.sellList.top)
+    listScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -SELLL.list_right, LISTBOX.sellList.bot)
     listScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(LIST_ROW_H, ui.UpdateListingsList)
     end)
@@ -8642,12 +8681,14 @@ function ui.UpdateBagList()
             if e.kind == "cat" then
                 row.icon:Hide()
                 row.cacheDot:Hide()
+                row.band:Show()
                 row.label:ClearAllPoints()
-                row.label:SetPoint("LEFT", row, "LEFT", 4, 0)
+                row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
                 ui.SetTextClipped(row.label, e.name .. " (" .. e.num .. ")",
                     BAG_CAT_TEXT_W)
                 row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
             else
+                row.band:Hide()
                 local it = e.item
                 if it.texture then
                     row.icon:SetTexture(it.texture)
@@ -8671,11 +8712,25 @@ function ui.UpdateBagList()
                     end
                 end
                 row.label:ClearAllPoints()
-                row.label:SetPoint("LEFT", row, "LEFT", 30, 0)
+                row.label:SetPoint("LEFT", row, "LEFT", 34, 0)
                 local txt = it.name
+                -- ONE line per item now, so this count is the whole holding
+                -- across every bag rather than one slot's worth. See
+                -- sell.ScanBags: `count` is the total and `stackMax` is the
+                -- largest single stack, and only the second bounds what can
+                -- be posted as one auction.
                 if it.count and it.count > 1 then txt = txt .. " x" .. it.count end
                 ui.SetTextClipped(row.label, txt, BAG_ITEM_TEXT_W)
-                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                -- Quality-coloured, as every other item column in the window
+                -- is. nil quality means a cold item cache, not "common", so
+                -- it falls back to plain text rather than painting it white.
+                local q = it.quality
+                if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
+                    local qc = ITEM_QUALITY_COLORS[q]
+                    row.label:SetTextColor(qc.r, qc.g, qc.b)
+                else
+                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+                end
             end
             row:Show()
         else
@@ -8988,7 +9043,18 @@ function ui.RefreshSell()
     -- Re-range both sliders. Stack size can't exceed the item's own max stack
     -- or what you actually hold; the count follows from whatever size is
     -- chosen, which is what makes dragging one move the other's ceiling.
-    local sizeMax = totalHave
+    -- BOUNDED BY THE LARGEST SINGLE STACK, not by total holdings.
+    --
+    -- 1.12 has no way to merge two partial stacks, and sell.MaxStacks counts
+    -- `floor(count / size)` PER SLOT -- so with thirty held as three tens,
+    -- asking for a stack of 30 yields zero postable stacks. Ranging the slider
+    -- to the total let you pick a size that could never be assembled and left
+    -- the count reading 0 with no explanation.
+    --
+    -- The total is still shown (the header says "30 total" and the readout
+    -- says "= N of 30"); it is the size CEILING that has to be honest.
+    local sizeMax = A.sell.LargestStack(it.itemId)
+    if sizeMax < 1 then sizeMax = it.count or 1 end
     if it.maxStack and sizeMax > it.maxStack then sizeMax = it.maxStack end
     if sizeMax < 1 then sizeMax = 1 end
     SetSliderRange(ui.sellSizeSlider, 1, sizeMax, size)

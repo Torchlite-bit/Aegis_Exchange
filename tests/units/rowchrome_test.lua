@@ -173,11 +173,12 @@ H.eq("exactly one separator colour",
 H.eq("exactly one selection tint colour",
      occurrences("SetTexture%(0%.6, 0%.45, 0%.10, 0%.34%)"), 1)
 
--- ...and every table actually asks for it. One definition plus FOUR call
--- sites covering five tables: BuildResultRow serves both Buy and Crafting,
--- then Auctions, History and the Sell tab's listings have one each.
+-- ...and every table actually asks for it. One definition plus FIVE call
+-- sites covering six tables: BuildResultRow serves both Buy and Crafting,
+-- then Auctions, History, the Sell tab's listings and its bag list have one
+-- each.
 local calls = occurrences("ui%.AddRowChrome%(")
-H.check("every results table wears the chrome", calls >= 5,
-        "found " .. calls .. " mentions (want 1 definition + 4 call sites)")
+H.check("every results table wears the chrome", calls >= 6,
+        "found " .. calls .. " mentions (want 1 definition + 5 call sites)")
 
 os.exit(H.report("rowchrome"))

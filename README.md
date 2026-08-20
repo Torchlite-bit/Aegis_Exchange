@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.25.1)
+# Aegis: Exchange (v1.26.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -206,8 +206,15 @@ they keep autocomplete, which is worth more on a search box than stepping to
 the level fields.
 
 ### 💰 Sell — price it right the first time
-Drop an item in and Aegis scans the AH for *just that item*, shows you every
-competing listing, and pre-fills your price. Two columns: on the left *what
+**Your Bags** lists what you can post — one line per item showing everything
+you hold, categorised, quality-coloured, click to load it. Drop an item in and
+Aegis scans the AH for *just that item*, shows you every competing listing, and
+pre-fills your price.
+
+One caveat vanilla forces on everyone: **stacks can't be merged**. Thirty
+essence held as three stacks of ten is thirty items, but the biggest stack you
+can post is ten — so the size slider stops there and the header still tells you
+the total. Two columns: on the left *what
 you're posting* — stack size and stack count on interlocking sliders, duration
 underneath; on the right *for how much* — **Undercut** (by a percentage or a
 flat amount; yes, 1 copper works) or **Price match** to sit level with the
@@ -404,7 +411,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.25.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.26.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

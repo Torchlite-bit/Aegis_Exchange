@@ -498,6 +498,86 @@ end""",
         return -e.t""",
      "sort_results"),
 
+    # ---- bag aggregation ---------------------------------------------------
+    # THE REPORTED BUG, restored: one row per bag SLOT. Thirty essence held as
+    # three tens draws three identical lines, and the vendor list, the batch
+    # scanner and the sell queue each process the item three times.
+    ("bags-one-row-per-slot", "core/sell.lua",
+     """                local entry = byId[key]
+                if not entry then""",
+     """                local entry = nil
+                if not entry then""",
+     "bags"),
+
+    # The total taken as the largest single stack. This is the one that lets
+    # someone ask for a stack of 30 that can never be assembled -- the reason
+    # the two numbers are kept apart at all.
+    ("largest-stack-is-really-the-total", "core/sell.lua",
+     """                if (count or 0) > best then best = count or 0 end""",
+     """                best = best + (count or 0)""",
+     "bags"),
+
+    # The row points at the FIRST stack rather than the biggest, so clicking a
+    # 30-count holding places whichever three-count stack happened to be found
+    # first.
+    ("bag-row-points-at-the-first-stack", "core/sell.lua",
+     """                if c > entry.stackMax then
+                    entry.stackMax = c
+                    entry.bag, entry.slot = bag, slot
+                end""",
+     """                if c > entry.stackMax then
+                    entry.stackMax = c
+                end""",
+     "bags"),
+
+    # Vendor selling collapsed onto the aggregate: marks three stacks, sells
+    # one, reports success.
+    ("vendor-sells-one-stack-of-three", "core/sell.lua",
+     """                local si = 1
+                while si <= table.getn(it.slots or {}) do
+                    local sl = it.slots[si]
+                    table.insert(rows, {
+                        bag = sl.bag, slot = sl.slot, itemId = it.itemId,
+                        name = it.name, count = sl.count or 1,
+                        vendorUnit = unit,
+                        value = unit and unit * (sl.count or 1) or nil,
+                    })
+                    si = si + 1
+                end""",
+     """                table.insert(rows, {
+                    bag = it.bag, slot = it.slot, itemId = it.itemId,
+                    name = it.name, count = it.count or 1,
+                    vendorUnit = unit,
+                    value = unit and unit * (it.count or 1) or nil,
+                })""",
+     "bags"),
+
+    # A cold item cache claiming quality 1, which paints an epic white.
+    ("cold-cache-claims-common-quality", "core/sell.lua",
+     "                        quality  = info and info.quality,",
+     "                        quality  = (info and info.quality) or 1,",
+     "bags"),
+
+    # ---- the Sell tab's two columns ----------------------------------------
+    # The bag column widened without the listings column moving: the bag
+    # list's scrollbar draws over the price table.
+    ("sell-columns-overlap", "ui/frame.lua",
+     "    bag_right  = 238,",
+     "    bag_right  = 268,",
+     "geometry"),
+
+    # The name column narrowed back to what truncated most item names.
+    ("bag-names-truncate-again", "ui/frame.lua",
+     "local BAG_ITEM_TEXT_W = 176",
+     "local BAG_ITEM_TEXT_W = 120",
+     "geometry"),
+
+    # The bag rows back to 19px, which no longer fits a 20px icon.
+    ("bag-rows-back-to-19", "ui/frame.lua",
+     "local BAG_ROWS,  BAG_ROW_H  = 9, 26",
+     "local BAG_ROWS,  BAG_ROW_H  = 9, 19",
+     "geometry"),
+
     # ---- the size the window OPENS at --------------------------------------
     # THE BUG THAT SHIPPED, restored: the frame created at the size it used
     # before MIN_W was raised. Every fresh install opens 168px under the
@@ -848,6 +928,7 @@ SUITES = {
     "taborder": "tests/units/taborder_test.lua",
     "post_filter": "tests/units/post_filter_test.lua",
     "rowchrome": "tests/units/rowchrome_test.lua",
+    "bags": "tests/units/bags_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

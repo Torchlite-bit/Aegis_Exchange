@@ -136,6 +136,8 @@ tests/
                             a filter does when it cannot answer
     rowchrome_test.lua      the shared zebra/hairline/selection chrome, and
                             the creation order that makes it draw right
+    bags_test.lua           bag aggregation, and why "how much do I have" and
+                            "what can I post as one stack" are two numbers
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a

@@ -54,6 +54,14 @@ local function field(tableName, fieldName)
         if not inside then
             if string.find(line, "^local " .. tableName .. "%s*=%s*{") then
                 inside = true
+                -- The FIRST field may share the opening line -- `local SCX =
+                -- { unit = 4, ... }` is written that way, and so is ACX. The
+                -- reader used to start looking on the NEXT line and reported
+                -- the field missing, which reads as "the table moved" rather
+                -- than "the table is formatted differently".
+                local _, _, v0 = string.find(line,
+                    "[{,]%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
+                if v0 then value = tonumber(v0); break end
             end
         else
             if string.find(line, "^}") then break end
@@ -965,5 +973,62 @@ H.eq("a saved width with no height keeps the width",
      ui.ClampWindowSize(1200, nil), 1200)
 local _, onlyH = ui.ClampWindowSize(nil, 700)
 H.eq("...and the reverse keeps the height", onlyH, 700)
+
+-- ---------------------------------------------------------------------------
+H.section("The Sell tab's two columns fit beside each other")
+-- ---------------------------------------------------------------------------
+
+-- The bag column was widened in v1.26.0 so item names stopped truncating to
+-- "Pattern: Fine Leather Bo...", and the listings column moved right to make
+-- room. Those are two numbers that have to stay in step: widen the bag column
+-- again without moving the listings and they overlap; move the listings
+-- without widening and the gap grows for no reason.
+--
+-- All of it read out of the file. SELLL's fields are also SetPoint offsets and
+-- SCX/SCW are also the row cells' geometry, so a copy here would pass against
+-- a layout that had moved.
+local function sellField(f) return field("SELLL", f) end
+local BAG_X      = sellField("bag_x")
+local BAG_RIGHT  = sellField("bag_right")
+local LIST_X     = sellField("list_x")
+local LIST_RIGHT = sellField("list_right")
+
+H.check("the bag column starts inside the panel", BAG_X > 0, BAG_X)
+H.check("...and has width", BAG_RIGHT > BAG_X, BAG_RIGHT .. " <= " .. BAG_X)
+H.check("the listings column starts after the bag column ends",
+        LIST_X > BAG_RIGHT, LIST_X .. " <= " .. BAG_RIGHT)
+
+-- A FauxScrollFrame's scrollbar sits just OUTSIDE its right edge, so the
+-- gutter is not decoration -- too small and the bar draws over the prices.
+H.check("...with room for the bag list's scrollbar",
+        LIST_X - BAG_RIGHT >= 16,
+        "gutter is only " .. (LIST_X - BAG_RIGHT) .. "px")
+
+-- The listings table's own columns have to fit in what is left, at the
+-- SMALLEST window. This is the assertion that fails if the bag column is
+-- widened again without checking.
+local function sellCol(f) return field("SCX", f) end
+local function sellW(f) return field("SCW", f) end
+local listEnd = sellCol("you") + sellW("you")
+local avail = ui.PanelWidthAt(MIN_W) - LIST_X - LIST_RIGHT
+H.check("the listings columns fit beside the bag column at MIN_W",
+        listEnd <= avail,
+        "columns end at " .. listEnd .. ", only " .. avail .. "px available")
+
+-- The item name column has to be worth having. 156px was the old bag width
+-- and it truncated most names; assert the text column is meaningfully wider
+-- than the icon and dot that precede it.
+local ITEM_TEXT_W = constant("BAG_ITEM_TEXT_W")
+H.check("the bag list's name column has room for a name",
+        ITEM_TEXT_W >= 160, ITEM_TEXT_W .. "px")
+H.check("...and still fits inside the column it is drawn in",
+        ITEM_TEXT_W + 34 <= (BAG_RIGHT - BAG_X),
+        ITEM_TEXT_W .. " + 34 > " .. (BAG_RIGHT - BAG_X))
+
+-- The bag rows are the Buy table's height now, which is what gives a 20px
+-- icon and a quality-coloured name room to read.
+local _, bagRowH = pairConst("BAG_ROWS", "BAG_ROW_H")
+local _, buyRowH = pairConst("BUY_ROWS", "BUY_ROW_H")
+H.eq("bag rows are as tall as the Buy table's", bagRowH, buyRowH)
 
 os.exit(H.report("geometry"))

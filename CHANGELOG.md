@@ -12,6 +12,65 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.26.0]
+
+The Sell tab's bag list: one row per item, and the Buy table's look.
+`/reload`.
+
+### Fixed
+- **Your Bags drew one row per bag SLOT.** Thirty Lesser Magic Essence held as
+  three stacks of ten showed as three identical lines — and it was not only
+  cosmetic: the **Vendor list**, the **Scan-all batch** and the **post-scan
+  sell queue** each processed the same item three times over. One row per item
+  now, showing the total across every bag.
+
+  Present since the feature was written.
+
+- **The stack-size slider could ask for a stack that cannot exist.** It ranged
+  up to your *total* holdings, and 1.12 has no way to merge two partial
+  stacks — so with thirty held as three tens, asking for a stack of thirty
+  gave zero postable stacks with no explanation. It ranges to the **largest
+  single stack** now. The total is still shown; it is the ceiling that had to
+  be honest.
+
+### Changed
+- **The bag list matches the Buy table.** 26px rows instead of 19, the same
+  zebra banding and hairline separators every other table wears, 20px icons,
+  and **quality-coloured item names**.
+- **Category headers are banded**, so they read as the dividers they are
+  rather than as text that happened to land there.
+- **The bag column is wider** — 156px truncated most names to "Pattern: Fine
+  Leather Bo…". The listings column moved right to match.
+
+### Internal
+- `sell.ScanBags` entries now carry three separate numbers, and keeping them
+  separate is the whole design: `count` is the **holdings total**, `stackMax`
+  the **largest single stack** — the only one that bounds what can be posted
+  as one auction — and `slots` every physical stack behind the row. `bag` and
+  `slot` point at the largest stack, so every caller that places or hovers an
+  item keeps working and gets the most useful stack while doing it.
+- **`sell.MarkedInBags` deliberately still emits one row per physical stack.**
+  `SellMarkedToVendor` calls `UseContainerItem(bag, slot)` once per row and
+  that sells exactly one stack — an aggregated row there would sell a third of
+  what was marked and report success.
+- `sell.LargestStack` is new and is not `sell.CountInBags`; the suite asserts
+  the difference directly.
+- The Sell tab's two column positions were four literals across five call
+  sites (`168`, and `200` three times). One `SELLL` table now, read by every
+  `SetPoint` and by the geometry suite, which requires the listings columns to
+  fit beside the bag column **at the smallest window** and the gutter to clear
+  the bag list's scrollbar.
+- New `bags` suite (36 checks) with a bag model added to the simulated client.
+  It covers the aggregate, the three counts, uneven stacks, vendor marks, and
+  a **cold item cache** — which must still produce a row, must not claim a
+  quality it does not know (quality 1 would paint an epic white), and still
+  recovers the name from the item link.
+- The geometry suite's table-field reader could not see a field on a table's
+  **opening line**, so `SCX`/`ACX`-shaped tables reported their first field
+  missing. Fixed; it read as "the table moved" rather than "the table is
+  formatted differently".
+- Eight new sabotages; **101 caught in all.**
+
 ## [1.25.1]
 
 The window opened smaller than it was designed for on a fresh install.
@@ -2214,6 +2273,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.26.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.25.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

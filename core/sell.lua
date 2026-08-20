@@ -213,12 +213,23 @@ function sell.MarkedInBags()
             local it = items[ii]
             if it.itemId and A.db.IsVendorMarked(it.itemId) then
                 local unit = A.db.GetVendor(it.itemId)
-                table.insert(rows, {
-                    bag = it.bag, slot = it.slot, itemId = it.itemId,
-                    name = it.name, count = it.count or 1,
-                    vendorUnit = unit,
-                    value = unit and unit * (it.count or 1) or nil,
-                })
+                -- ONE ROW PER PHYSICAL STACK, deliberately, even though
+                -- sell.ScanBags now hands back one ENTRY per item.
+                -- sell.SellMarkedToVendor calls UseContainerItem(bag, slot)
+                -- once per row, and that sells exactly one stack -- so an
+                -- aggregated row here would sell a third of what was marked
+                -- and report success.
+                local si = 1
+                while si <= table.getn(it.slots or {}) do
+                    local sl = it.slots[si]
+                    table.insert(rows, {
+                        bag = sl.bag, slot = sl.slot, itemId = it.itemId,
+                        name = it.name, count = sl.count or 1,
+                        vendorUnit = unit,
+                        value = unit and unit * (sl.count or 1) or nil,
+                    })
+                    si = si + 1
+                end
             end
             ii = ii + 1
         end
@@ -600,6 +611,7 @@ end
 function sell.ScanBags()
     local order = {}
     local byCat = {}
+    local byId  = {}      -- item key -> entry, so a second stack finds the first
     local bag = 0
     while bag <= 4 do
         local slots = GetContainerNumSlots(bag) or 0
@@ -632,14 +644,58 @@ function sell.ScanBags()
                     byCat[cname] = cat
                     table.insert(order, cat)
                 end
-                table.insert(cat.items, {
-                    bag     = bag,
-                    slot    = slot,
-                    itemId  = util.ItemIdFromLink(link),
-                    name    = iname or link,
-                    texture = texture,
-                    count   = count or 1,
-                })
+
+                -- ONE ENTRY PER ITEM, not per bag slot.
+                --
+                -- This used to insert a row for every slot, so thirty Lesser
+                -- Magic Essence held as three stacks of ten drew three
+                -- identical lines -- and the vendor list, the batch scanner
+                -- and the post-scan sell queue each processed the same item
+                -- three times over.
+                --
+                -- WHAT THE ENTRY HAS TO CARRY, because a row is not just a
+                -- label. `count` is the HOLDINGS TOTAL. `stackMax` is the
+                -- largest SINGLE stack, and those are different numbers that
+                -- must not be confused: 1.12 has no merge API, so what can
+                -- actually be posted as one stack is bounded by stackMax, not
+                -- by count. `slots` keeps every physical stack, because
+                -- selling to a vendor acts on each one separately.
+                --
+                -- `bag`/`slot` stay on the entry and point at the LARGEST
+                -- stack, so every existing caller that places or hovers an
+                -- item keeps working and gets the most useful stack while
+                -- doing it.
+                local id = util.ItemIdFromLink(link)
+                -- Keyed by name when the id is unreadable, so a cold cache
+                -- groups by the only thing it does know rather than making
+                -- every slot its own entry again.
+                local key = id or ("n:" .. tostring(iname or link))
+                local c = count or 1
+                local entry = byId[key]
+                if not entry then
+                    entry = {
+                        bag      = bag,
+                        slot     = slot,
+                        itemId   = id,
+                        name     = iname or link,
+                        texture  = texture,
+                        -- Carried so the bag list can colour the name the way
+                        -- every other table in the window does. nil on a cold
+                        -- item cache, which the row falls back from.
+                        quality  = info and info.quality,
+                        count    = 0,
+                        stackMax = 0,
+                        slots    = {},
+                    }
+                    byId[key] = entry
+                    table.insert(cat.items, entry)
+                end
+                entry.count = entry.count + c
+                table.insert(entry.slots, { bag = bag, slot = slot, count = c })
+                if c > entry.stackMax then
+                    entry.stackMax = c
+                    entry.bag, entry.slot = bag, slot
+                end
             end
             slot = slot + 1
         end
@@ -786,6 +842,34 @@ function sell.MaxStacks(itemId, stackSize)
         bag = bag + 1
     end
     return n
+end
+
+-- The biggest SINGLE stack of `itemId` in the bags, which is the largest stack
+-- that can actually be posted.
+--
+-- Different from sell.CountInBags, and the difference is load-bearing: 1.12
+-- cannot merge two partial stacks, so thirty held as three tens can be posted
+-- as three stacks of ten and never as one of thirty. The Sell tab shows the
+-- total and ranges its stack-size control by THIS.
+function sell.LargestStack(itemId)
+    if not itemId then return 0 end
+    local best = 0
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                local _, count = GetContainerItemInfo(bag, slot)
+                if (count or 0) > best then best = count or 0 end
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return best
 end
 
 -- Per-stack deposit estimate for a stack of `stackSize`, from the item's vendor
