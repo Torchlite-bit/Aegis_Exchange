@@ -1898,8 +1898,10 @@ reading their source.
   `core/itemlevel.lua` + the `.toc` edit. Pure functions, constants generated
   by `tools/gen_disenchant.py`, `/aex de <link> [ilvl]` to verify in-game.
   441 checks, six sabotages.
-- **§2 — the tooltip line.** Cheapest surfacing; makes §1 visible across a
-  whole bag. Read the HARD RULE 16 corollary before touching `ui/tooltip.lua`.
+- **§2 — the tooltip line. v1.30.0. DONE.** Value plus a Shift-held breakdown,
+  gated on `tipDisenchant`. Silent wherever the rule cannot answer. Added
+  `de.Resolve` / `de.YieldOf` / `de.ValueOf` as the single resolution layer,
+  and `W.LoadUI` so `ui/` modules are testable at all.
 - **§3 — learning from play.** The O(1) hook chain above, storing
   **observations only**. Its payoff: one disenchant identifies the band for
   **46 of 53** material signatures, so a single break of an unknown Turtle item
@@ -1966,7 +1968,8 @@ are facts about the game rather than anyone's expression of them.
   its note about plotting a median before designing the axes.
 - **Disenchant value** in the tooltip — **building**, as §2 of 3k. The v1.28.1
   "no" was overturned: see 3k for which of its claims did not survive checking.
-  v1.29.0 shipped the rule; the tooltip line is the next phase.
+  v1.29.0 shipped the rule and v1.30.0 the tooltip line; learning item levels
+  from play is next.
 
 ---
 

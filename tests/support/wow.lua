@@ -193,6 +193,9 @@ function W.AddItem(id, rec)
     W.items[id] = rec
     W.items[rec.name] = rec
     W.items[rec.link] = rec
+    -- The client answers GetItemInfo for the bare item STRING too, and code
+    -- that builds one by hand would otherwise look broken only here.
+    W.items["item:" .. id .. ":0:0:0"] = rec
     return rec
 end
 
@@ -514,6 +517,16 @@ function W.LoadCore(upTo)
         dofile("core/" .. order[i] .. ".lua")
         if order[i] == upTo then break end
     end
+    return AegisExchange
+end
+
+-- Load a ui/ module on top of the core ones.
+--
+-- Kept separate from W.LoadCore because most suites want nothing to do with
+-- the UI, and ui/frame.lua in particular builds a window on load. The files
+-- reachable this way are the ones that only DEFINE things at file scope.
+function W.LoadUI(name)
+    dofile("ui/" .. name .. ".lua")
     return AegisExchange
 end
 

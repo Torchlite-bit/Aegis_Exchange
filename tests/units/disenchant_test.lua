@@ -373,4 +373,101 @@ H.isNil("a non-numeric level is not a level", de.ItemLevel(779))
 H.isNil("an id the table lacks is still unknown", de.ItemLevel(780))
 A.ilvlData = saved
 
+-- ---------------------------------------------------------------------------
+H.section("de.Resolve -- one item id, everything the rule needs")
+-- ---------------------------------------------------------------------------
+
+W.FireAddonLoaded(A)
+
+-- A green chest the client knows about, with an item level the table knows.
+W.AddItem(900, { name = "Test Chest", quality = GREEN, equipLoc = "INVTYPE_CHEST" })
+W.AddItem(901, { name = "Test Sword", quality = GREEN, equipLoc = "INVTYPE_2HWEAPON" })
+W.AddItem(902, { name = "Test Cloth", quality = 1,     equipLoc = "" })
+W.AddItem(903, { name = "Uncached Level", quality = GREEN, equipLoc = "INVTYPE_CHEST" })
+W.AddItem(11176, { name = "Dream Dust" })
+W.AddItem(11175, { name = "Greater Nether Essence" })
+W.AddItem(11178, { name = "Large Radiant Shard" })
+
+local savedIlvl = A.ilvlData
+A.ilvlData = { [900] = 48, [901] = 48, [902] = 48 }
+
+local lvl, src, q, slot = de.Resolve(900)
+H.eq("resolves the item level", lvl, 48)
+H.eq("...and says where from", src, "itemlevel")
+H.eq("...and the quality", q, GREEN)
+H.eq("...and the equip slot", slot, "INVTYPE_CHEST")
+
+H.isNil("a white shirt resolves to nothing", de.Resolve(902))
+H.isNil("an item with no shipped level resolves to nothing", de.Resolve(903))
+H.isNil("an item the client has never cached resolves to nothing",
+        de.Resolve(99999))
+H.isNil("a nil id resolves to nothing", de.Resolve(nil))
+
+-- ---------------------------------------------------------------------------
+H.section("de.YieldOf / de.ValueOf -- the entry points the UI uses")
+-- ---------------------------------------------------------------------------
+
+local byId = de.YieldOf(900)
+local direct = de.Yield(48, GREEN, "INVTYPE_CHEST", 900)
+H.check("YieldOf agrees with the rule it wraps",
+        byId ~= nil and direct ~= nil and top(byId) == top(direct))
+H.eq("...same number of materials", table.getn(byId), table.getn(direct))
+H.isNil("YieldOf says nothing for an unresolvable item", de.YieldOf(903))
+
+local flatPricer = function() return 1000 end
+local vById, vSrc = de.ValueOf(900, flatPricer)
+H.eq("ValueOf agrees with the rule it wraps", vById,
+     de.Value(48, GREEN, "INVTYPE_CHEST", 900, flatPricer))
+H.eq("...and passes the source through", vSrc, "itemlevel")
+H.isNil("ValueOf says nothing for an unresolvable item",
+        de.ValueOf(903, flatPricer))
+H.isNil("ValueOf says nothing without a pricer", de.ValueOf(900, nil))
+
+-- Armour and weapon of the SAME level must not come back identical -- that is
+-- the wiring mistake that would make the equip slot decorative.
+H.check("armour and weapon differ at the same item level",
+        top(de.YieldOf(900)) ~= top(de.YieldOf(901)))
+
+-- ---------------------------------------------------------------------------
+H.section("de.MarketPrice -- one pricer, so two callers cannot disagree")
+-- ---------------------------------------------------------------------------
+
+A.db.RecordAuction(11176, 5000, "Dream Dust")
+H.check("a recorded auction gives a price", de.MarketPrice(11176) ~= nil)
+H.isNil("an unseen material has no price", de.MarketPrice(987654))
+
+-- ---------------------------------------------------------------------------
+H.section("de.BreakdownText")
+-- ---------------------------------------------------------------------------
+
+local rows48 = de.Yield(48, GREEN, "INVTYPE_CHEST")
+local text = de.BreakdownText(rows48, function(matId)
+    return REAGENT[matId]
+end)
+H.eq("one line per material", table.getn(text), table.getn(rows48))
+H.check("a line carries its percentage",
+        string.find(text[1], "%%") ~= nil, text[1])
+H.check("a line carries its material name",
+        string.find(text[1], REAGENT[rows48[1].itemId], 1, true) ~= nil,
+        text[1])
+H.check("the leading line is the likeliest one",
+        string.find(text[1], REAGENT[top(rows48)], 1, true) ~= nil)
+
+-- Percentages are rounded, not truncated: 4.7% reading as "4%" understates
+-- every shard line, and the shard is the part people care about.
+local rounded = de.BreakdownText(
+    { { itemId = 11176, chance = 0.047, mean = 1 } },
+    function() return "Dream Dust" end)
+H.check("percentages round rather than truncate",
+        string.find(rounded[1], "5%%") ~= nil, rounded[1])
+
+-- An unnamed material must still print something identifiable rather than
+-- "nil" or an empty gap -- the client simply has not cached it yet.
+local unnamed = de.BreakdownText(rows48, function() return nil end)
+H.check("an unnamed material falls back to its id",
+        string.find(unnamed[1], "item:", 1, true) ~= nil, unnamed[1])
+H.isNil("no rows means no text", de.BreakdownText(nil, function() return "x" end))
+
+A.ilvlData = savedIlvl
+
 os.exit(H.report("disenchant"))

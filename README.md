@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.29.0)
+# Aegis: Exchange (v1.30.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -294,8 +294,26 @@ tooltip lines, profit line, and the pfUI skin — all in one place.
 ### 💬 Tooltips everywhere
 Bags, inventory, the auction house, merchants, the mailbox, **loot windows,
 quest rewards and profession reagents** — all gain market value, minimum buyout
-and vendor price, with stack totals. Pick which of those three lines you want on
-the Aegis tab, and optionally show stack totals only while **Shift** is held.
+and vendor price, with stack totals. Pick which lines you want on the Aegis
+tab, and optionally show stack totals only while **Shift** is held.
+
+There's also an **expected disenchant value**, with the full material
+breakdown while **Shift** is held:
+
+```
+Aegis Disenchant     1g 84s
+  78%  1.5 x Dream Dust
+  18%  1.5 x Greater Nether Essence
+   4%  1.0 x Large Radiant Shard
+```
+
+It appears **only when Aegis can actually answer**, which today is rare — the
+1.12 client gives addons no item level, and Aegis ships no borrowed table of
+them (see the note in `core/itemlevel.lua` for why). A later release learns
+item levels from your own disenchants, on the server you actually play on.
+Where it can't answer it says nothing at all, rather than putting "unknown" on
+every grey in your bags. The value shown is for **one** item — a stack of
+twenty is twenty separate rolls, not twenty times that number.
 
 ---
 
@@ -417,7 +435,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.29.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.30.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

@@ -1618,6 +1618,8 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         { key = "tipMarket",     text = "Market value" },
         { key = "tipMinBuyout",  text = "Minimum buyout" },
         { key = "tipVendor",     text = "Vendor price" },
+        { key = "tipDisenchant", text = "Disenchant value (hold Shift for the"
+                                        .. " breakdown)" },
     }
     ui.setTipSubs = {}
     local prevSub = nil
@@ -10634,18 +10636,18 @@ local function DisenchantReport(rest)
             .. " quality/slot. See the header of core/disenchant.lua.")
         return
     end
+    -- Same formatter and same pricer the tooltip uses, so the two can never
+    -- disagree about the item in front of you.
+    local lines = A.de.BreakdownText(rows, function(matId)
+        return GetItemInfo(matId)
+    end)
     local i = 1
-    while i <= table.getn(rows) do
-        local r = rows[i]
-        local name = GetItemInfo(r.itemId) or ("item:" .. r.itemId)
-        ChatMsg(string.format("  %2d%%  %.2f x %s", r.chance * 100,
-            r.mean, name))
+    while lines and i <= table.getn(lines) do
+        ChatMsg("  " .. lines[i])
         i = i + 1
     end
     local value = A.de.Value(ilvl, info.quality, info.equipLoc, itemId,
-        function(matId)
-            return A.db.MarketValue(matId) or A.db.MinBuyout(matId)
-        end)
+        A.de.MarketPrice)
     if value then
         ChatMsg("  expected: " .. util.FormatMoney(value, true))
     else

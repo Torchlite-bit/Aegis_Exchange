@@ -1080,7 +1080,64 @@ end
     end
     return out""",
      "disenchant"),
+    # ---- disenchant, phase 2 ---------------------------------------------
+    # Resolve is the gate every user-facing entry point goes through. Without
+    # the CanDisenchant check a white shirt gets a disenchant value.
+    ("de-resolve-skips-candisenchant", "core/disenchant.lua",
+     """    if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
+        return nil
+    end
+    local ilvl, source = de.ItemLevel(itemId)""",
+     """    local ilvl, source = de.ItemLevel(itemId)""",
+     "disenchant"),
+
+    # 4.7% truncating to "4%" understates every shard line, and the shard is
+    # the part of a breakdown people actually read.
+    ("de-breakdown-truncates-percent", "core/disenchant.lua",
+     "            math.floor(r.chance * 100 + 0.5), r.mean, name))",
+     "            math.floor(r.chance * 100), r.mean, name))",
+     "disenchant"),
+
+    # The source is how a caller knows whether it may ADVISE on the number or
+    # merely show it. Dropping it silently promotes a guess to a fact.
+    ("de-valueof-drops-source", "core/disenchant.lua",
+     """    if not value then return nil end
+    return value, source""",
+     """    if not value then return nil end
+    return value""",
+     "disenchant"),
+
+    # An unpriced material must stay unpriced. Zero here would flow into
+    # de.Value, which cannot then tell "free" from "unknown".
+    ("de-marketprice-zero-not-nil", "core/disenchant.lua",
+     "    return A.db.MarketValue(matId) or A.db.MinBuyout(matId)",
+     "    return A.db.MarketValue(matId) or A.db.MinBuyout(matId) or 0",
+     "disenchant"),
+
+    # ---- tooltip ---------------------------------------------------------
+    # A disenchant value is PER ITEM: each break rolls the table again, so a
+    # stack of twenty is twenty draws, not twenty times this. The price lines
+    # beside it DO multiply, which is what makes routing it through the same
+    # helper the obvious and wrong edit.
+    ("tip-disenchant-multiplied-by-stack", "ui/tooltip.lua",
+     """        gtt:AddDoubleLine("Aegis Disenchant",
+            util.FormatMoney(disenchant, true),""",
+     """        gtt:AddDoubleLine("Aegis Disenchant",
+            money(disenchant),""",
+     "tooltip"),
+
+    ("tip-disenchant-ignores-setting", "ui/tooltip.lua",
+     '    if Want("tipDisenchant") and A.de then',
+     "    if A.de then",
+     "tooltip"),
+
+    # The breakdown is three extra lines on every hover if it is not gated.
+    ("tip-breakdown-not-behind-shift", "ui/tooltip.lua",
+     "        if disenchant and IsShiftKeyDown and IsShiftKeyDown() then",
+     "        if disenchant then",
+     "tooltip"),
 ]
+
 SUITES = {
     "util":        "tests/units/util_test.lua",
     "db":          "tests/units/db_test.lua",
@@ -1097,6 +1154,7 @@ SUITES = {
     "bags": "tests/units/bags_test.lua",
     "sellslot": "tests/units/sellslot_test.lua",
     "disenchant": "tests/units/disenchant_test.lua",
+    "tooltip": "tests/units/tooltip_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

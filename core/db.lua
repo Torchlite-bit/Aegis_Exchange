@@ -175,6 +175,9 @@ local SETTING_DEFAULTS = {
     -- clears the slot, which is what you want when posting one thing at a
     -- time and picking the next from the bags yourself.
     keepLeftovers  = true,
+    -- Expected disenchant value on tooltips. Only ever appears for an item we
+    -- can actually answer for, so leaving it on costs nothing on the rest.
+    tipDisenchant  = true,
 }
 
 -- Read a user setting, falling back to its default when unset.

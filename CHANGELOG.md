@@ -12,6 +12,52 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.30.0]
+
+The disenchant value reaches the tooltip. `/reload`.
+
+### Added
+- **Expected disenchant value on item tooltips**, with the full material
+  breakdown while **Shift** is held:
+
+  ```
+  Aegis Disenchant     1g 84s
+    78%  1.5 x Dream Dust
+    18%  1.5 x Greater Nether Essence
+     4%  1.0 x Large Radiant Shard
+  ```
+
+  Toggle it on the Aegis tab beside the other three tooltip lines.
+
+- **The value is per ITEM, and deliberately does not multiply by the stack.**
+  The price lines beside it do, which is exactly what makes this easy to get
+  wrong — but each disenchant rolls the table again, so a stack of twenty is
+  twenty separate draws rather than twenty times one number. There is a test
+  and a sabotage holding that line.
+
+### It says nothing far more often than it says something
+The line appears only where the rule can genuinely answer: a cached,
+disenchantable item whose **item level** some source knows. Today that is rare,
+because `core/itemlevel.lua` ships empty on purpose — see 1.29.0. Everything
+else gets **no line at all**, rather than "unknown" on every grey, trade good
+and uncached item in a full bag.
+
+That is not a placeholder for a better message. Silence is the message.
+
+### Under the hood
+- `de.Resolve` / `de.YieldOf` / `de.ValueOf` — one place that turns an item id
+  into everything the rule needs, so the tooltip and `/aex de` cannot drift
+  apart. `de.MarketPrice` and `de.BreakdownText` are shared by both for the
+  same reason.
+- `de.ValueOf` returns **value, source** — where the *item level* came from,
+  never where a price did. That is the fact a later phase weighs when deciding
+  whether it may advise on a number or merely show it.
+- The test harness can now load `ui/` modules, so tooltip behaviour is testable
+  at all. First suite in (17 checks) plus three sabotages; the disenchant suite
+  grew to 466.
+
+---
+
 ## [1.29.0] — **restart**
 
 The disenchant rule. **Adds two `.lua` files, so this one needs a full client
@@ -2464,6 +2510,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.30.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.29.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.28.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.28.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

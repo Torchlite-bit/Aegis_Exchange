@@ -50,7 +50,27 @@ function tooltip.Extend(gtt, itemId, count)
     local market = Want("tipMarket")    and A.db.MarketValue(itemId) or nil
     local minBuy = Want("tipMinBuyout") and A.db.MinBuyout(itemId)   or nil
     local vendor = Want("tipVendor")    and A.db.GetVendor(itemId)   or nil
-    if not market and not minBuy and not vendor then return end
+
+    -- Resolved LAST, and only when the line is wanted. It is the one entry
+    -- here that costs a GetItemInfo, and a tooltip that ends up showing no
+    -- Aegis lines at all should not have paid for one.
+    --
+    -- de.ValueOf answers nil for everything not disenchantable, everything the
+    -- client has not cached, and everything whose item level no source knows
+    -- -- which today is most of a bag. That silence is deliberate: an "Aegis
+    -- Disenchant: unknown" line on every grey and every trade good would be
+    -- noise on hundreds of items to be informative about a handful.
+    local disenchant, disenchantRows
+    if Want("tipDisenchant") and A.de then
+        disenchant = A.de.ValueOf(itemId, A.de.MarketPrice)
+        if disenchant and IsShiftKeyDown and IsShiftKeyDown() then
+            disenchantRows = A.de.YieldOf(itemId)
+        end
+    end
+
+    if not market and not minBuy and not vendor and not disenchant then
+        return
+    end
 
     -- Stack totals: always, or only while Shift is held. Holding Shift is the
     -- familiar gesture for "show me the whole stack" and keeps the tooltip
@@ -80,6 +100,26 @@ function tooltip.Extend(gtt, itemId, count)
     if vendor then
         gtt:AddDoubleLine("Aegis Vendor Price", money(vendor),
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
+    end
+    if disenchant then
+        -- Deliberately NOT run through money(): a disenchant value is per
+        -- ITEM, and multiplying it by a stack count would be wrong. You
+        -- disenchant one thing at a time, and each break rolls the table
+        -- again -- a stack of five is five separate draws, not five times
+        -- this number.
+        gtt:AddDoubleLine("Aegis Disenchant",
+            util.FormatMoney(disenchant, true),
+            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
+        if disenchantRows then
+            local lines = A.de.BreakdownText(disenchantRows, function(matId)
+                return GetItemInfo(matId)
+            end)
+            local i = 1
+            while lines and i <= table.getn(lines) do
+                gtt:AddLine("  " .. lines[i], 0.6, 0.6, 0.6)
+                i = i + 1
+            end
+        end
     end
     gtt:Show()
 end

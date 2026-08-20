@@ -48,6 +48,7 @@
 local A = AegisExchange
 A.de = {}
 local de = A.de
+local util = A.util
 
 -- The ladder is fixed and 5 wide. Nothing above the last entry is answerable;
 -- see the header. Kept as ONE table rather than a family of file-scope locals
@@ -407,4 +408,80 @@ function de.ItemLevel(itemId)
     local lvl = A.ilvlData[itemId]
     if type(lvl) ~= "number" or lvl < 1 then return nil end
     return lvl, "itemlevel"
+end
+
+-- ---------------------------------------------------------------------------
+-- Resolving one item -- the layer everything user-facing goes through
+-- ---------------------------------------------------------------------------
+
+-- itemId -> item level, where that level came from, quality, equip slot.
+--
+-- Returns nil unless ALL of it is known. There are three separate ways to not
+-- know -- the client has never cached the item, the item is not disenchantable,
+-- or no source knows its level -- and callers do not need to tell them apart:
+-- every one of them means "say nothing". Distinguishing them here would only
+-- invite a caller to print three different flavours of shrug.
+--
+-- `source` names where the ITEM LEVEL came from, never where a price did. It
+-- is the fact that decides how far a caller should trust the number, which is
+-- why it is returned rather than left implicit.
+function de.Resolve(itemId)
+    if not itemId or not util then return nil end
+    -- The numeric id, not an "item:900:0:0:0" string: both are valid on 1.12
+    -- but the id needs no formatting and therefore cannot be mis-formatted.
+    local info = util.ItemInfo(itemId)
+    if not info then return nil end
+    if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
+        return nil
+    end
+    local ilvl, source = de.ItemLevel(itemId)
+    if not ilvl then return nil end
+    return ilvl, source, info.quality, info.equipLoc
+end
+
+-- What this item disenchants into, by id. Returns rows, source, or nil.
+function de.YieldOf(itemId)
+    local ilvl, source, quality, equipLoc = de.Resolve(itemId)
+    if not ilvl then return nil end
+    local rows = de.Yield(ilvl, quality, equipLoc, itemId)
+    if not rows then return nil end
+    return rows, source
+end
+
+-- What this item is worth disenchanted, by id. Returns copper, source, or nil.
+function de.ValueOf(itemId, priceOf)
+    local ilvl, source, quality, equipLoc = de.Resolve(itemId)
+    if not ilvl then return nil end
+    local value = de.Value(ilvl, quality, equipLoc, itemId, priceOf)
+    if not value then return nil end
+    return value, source
+end
+
+-- The default pricer: what one of a material is worth, best source first.
+--
+-- ONE writer, shared by the tooltip and /aex de, so the two can never quote
+-- different numbers for the same item -- which is the drift that produced the
+-- Saved-vs-Builder mismatch in 1.19.3 and is worth not repeating.
+function de.MarketPrice(matId)
+    if not A.db or not A.db.MarketValue then return nil end
+    return A.db.MarketValue(matId) or A.db.MinBuyout(matId)
+end
+
+-- The breakdown as display lines: { "78%  1.5 x Dream Dust", ... }, or nil.
+--
+-- `nameOf(materialId)` supplies the names and is a PARAMETER for the same
+-- reason de.Value takes a pricer: it keeps this testable without a client, and
+-- it keeps the one decision about how a yield READS out of the UI, where two
+-- callers would otherwise each grow their own version of it.
+function de.BreakdownText(rows, nameOf)
+    if not rows then return nil end
+    local out, i, n = {}, 1, table.getn(rows)
+    while i <= n do
+        local r = rows[i]
+        local name = (nameOf and nameOf(r.itemId)) or ("item:" .. r.itemId)
+        table.insert(out, string.format("%2d%%  %.1f x %s",
+            math.floor(r.chance * 100 + 0.5), r.mean, name))
+        i = i + 1
+    end
+    return out
 end
