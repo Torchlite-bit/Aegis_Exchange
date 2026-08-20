@@ -10598,27 +10598,27 @@ end)
 -- optional item level lets the rule be exercised even where the shipped
 -- lookup has nothing -- which, today, is everywhere.
 local function DisenchantReport(rest)
-    local _, _, link = string.find(rest or "", "(|c%x+|Hitem:.-|h.-|h|r)")
-    local _, _, override = string.find(rest or "", "(%d+)%s*$")
-    if not link then
-        ChatMsg("Aegis: /aex de <item link> [item level]"
-            .. " \226\128\148 shift-click an item into the chat box.")
+    local itemId, override = A.de.ParseReportArgs(rest)
+    if not itemId then
+        ChatMsg("Aegis: /aex de <item link|item id> [item level]"
+            .. " \226\128\148 shift-click an item into the chat box, or"
+            .. " give an id.")
         return
     end
 
-    local itemId = util.ItemIdFromLink(link)
-    local info = util.ItemInfo(link)
-    if not itemId or not info then
-        ChatMsg("Aegis: the client has no data cached for that item yet.")
+    local info = util.ItemInfo(itemId)
+    if not info then
+        ChatMsg("Aegis: the client has no data cached for item "
+            .. itemId .. " yet \226\128\148 hover it once, or link it.")
         return
     end
 
     local ilvl, source
-    if override and not string.find(link, override, 1, true) then
-        ilvl, source = tonumber(override), "you said so"
+    if override then
+        ilvl, source = override, "you said so"
     else
         ilvl, source = A.de.ItemLevel(itemId)
-        source = source or "unknown"
+        source = source or "unknown \226\128\148 add one after the link"
     end
 
     ChatMsg("Aegis: " .. (info.name or "?") .. "  q=" .. tostring(info.quality)

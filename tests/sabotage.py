@@ -1136,6 +1136,22 @@ end
      "        if disenchant and IsShiftKeyDown and IsShiftKeyDown() then",
      "        if disenchant then",
      "tooltip"),
+    # The exact bug that shipped in 1.30.0: read the override out of the WHOLE
+    # string, then try to rule out digits belonging to the link by asking
+    # whether the link contains them. Any item whose id merely contains the
+    # same digits loses its override in silence -- and while the item-level
+    # lookup ships empty this command is the only path that reaches the rule
+    # at all, so it failing quietly was the worst possible place for it.
+    ("de-report-override-from-whole-string", "core/disenchant.lua",
+     """        local id = util and util.ItemIdFromLink(string.sub(rest, first, last))
+        local _, _, lvl = string.find(string.sub(rest, last + 1), "(%d+)")
+        return id, tonumber(lvl)""",
+     """        local sub = string.sub(rest, first, last)
+        local id = util and util.ItemIdFromLink(sub)
+        local _, _, lvl = string.find(rest, "(%d+)%s*$")
+        if lvl and string.find(sub, lvl, 1, true) then lvl = nil end
+        return id, tonumber(lvl)""",
+     "disenchant"),
 ]
 
 SUITES = {

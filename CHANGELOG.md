@@ -12,6 +12,32 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.30.1]
+
+A fix to the one command that could show 1.30.0 working at all. `/reload`.
+
+### Fixed
+- **`/aex de <link> <item level>` silently ignored the item level** for any
+  item whose id happened to contain the same digits — `48` was dropped on item
+  4801, on 7448, and on a good slice of the table besides. The override was
+  being read from the whole string and then filtered by asking whether the link
+  contained those digits, which is not a question that can distinguish them.
+  It now reads only what follows the link.
+
+  This mattered more than a normal parser bug: with `core/itemlevel.lua`
+  shipping empty, this command is the **only** path that reaches the
+  disenchant rule, so the fault made the entire 1.29.0/1.30.0 feature look
+  like it did nothing.
+
+### Added
+- `/aex de` now accepts a **bare item id** as well as a link —
+  `/aex de 12345 48` — so the rule can be tried on items you do not own.
+- The parsing is extracted as `de.ParseReportArgs` and tested (18 checks,
+  including the exact regression above) instead of living inline in the slash
+  handler where nothing could see it.
+
+---
+
 ## [1.30.0]
 
 The disenchant value reaches the tooltip. `/reload`.
@@ -2510,6 +2536,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.30.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.30.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.29.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.28.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

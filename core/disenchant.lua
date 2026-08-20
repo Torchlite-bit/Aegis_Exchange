@@ -485,3 +485,37 @@ function de.BreakdownText(rows, nameOf)
     end
     return out
 end
+
+-- Parse a `/aex de` argument: an item link OR a bare item id, plus an optional
+-- item level to stand in for the lookup.
+--
+-- Returns itemId, ilvl -- either may be nil.
+--
+-- The override is read from what follows the LINK, never from the whole
+-- string. The first version read the trailing number out of the whole string
+-- and then tried to rule out digits belonging to the link by asking whether
+-- the link contained them. That cannot work: any item whose id merely happens
+-- to contain the same digits loses its override silently, so "/aex de <boots>
+-- 48" did nothing at all for a large slice of the item table -- and this
+-- command is the only way to exercise the rule while the item-level lookup
+-- ships empty, so it failing quietly was the worst place for it to fail.
+--
+-- Extracted rather than left inline in the slash handler because a parser is
+-- exactly the kind of thing that can be wrong in a way nothing errors on.
+function de.ParseReportArgs(rest)
+    rest = rest or ""
+    local first, last = string.find(rest, "|c%x+|Hitem:.-|h.-|h|r")
+    if first then
+        local id = util and util.ItemIdFromLink(string.sub(rest, first, last))
+        local _, _, lvl = string.find(string.sub(rest, last + 1), "(%d+)")
+        return id, tonumber(lvl)
+    end
+    -- No link. Bare ids are accepted so the rule can be exercised without
+    -- owning the item -- "/aex de 12345 48" is the whole point of the command
+    -- until item levels are resolvable on their own.
+    local _, _, id, lvl = string.find(rest, "^%s*(%d+)%s+(%d+)%s*$")
+    if id then return tonumber(id), tonumber(lvl) end
+    local _, _, only = string.find(rest, "^%s*(%d+)%s*$")
+    if only then return tonumber(only), nil end
+    return nil, nil
+end

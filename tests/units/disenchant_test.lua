@@ -468,6 +468,56 @@ H.check("an unnamed material falls back to its id",
         string.find(unnamed[1], "item:", 1, true) ~= nil, unnamed[1])
 H.isNil("no rows means no text", de.BreakdownText(nil, function() return "x" end))
 
+-- ---------------------------------------------------------------------------
+H.section("de.ParseReportArgs -- the only way to exercise the rule today")
+-- ---------------------------------------------------------------------------
+
+-- While core/itemlevel.lua ships empty, `/aex de <thing> <level>` is the ONLY
+-- path that reaches the rule at all. The first version read the trailing
+-- number out of the whole string and then tried to rule out digits belonging
+-- to the link by asking whether the link contained them -- so any item whose
+-- id merely contained the same digits lost its override in silence.
+local function link(id, name)
+    return "|cff1eff00|Hitem:" .. id .. ":0:0:0|h[" .. (name or "X") .. "]|h|r"
+end
+
+local id, lvl = de.ParseReportArgs(link(900, "Test Chest") .. " 48")
+H.eq("a link gives its item id", id, 900)
+H.eq("...and the level after it", lvl, 48)
+
+-- THE REGRESSION. Item 4801's id contains "48"; the override must survive.
+id, lvl = de.ParseReportArgs(link(4801, "Boots") .. " 48")
+H.eq("an id containing the override's digits still parses", id, 4801)
+H.eq("...and does NOT swallow the override", lvl, 48)
+
+id, lvl = de.ParseReportArgs(link(7448, "Thing") .. " 44")
+H.eq("an id ENDING in other digits still parses", id, 7448)
+H.eq("...and keeps its own override", lvl, 44)
+
+id, lvl = de.ParseReportArgs(link(900) .. "  60  ")
+H.eq("whitespace around the level is fine", lvl, 60)
+
+id, lvl = de.ParseReportArgs(link(900))
+H.eq("a link with no level still gives the id", id, 900)
+H.isNil("...and no level", lvl)
+
+-- A name full of digits must not be mistaken for the level.
+id, lvl = de.ParseReportArgs(link(900, "Formula 409"))
+H.eq("digits in the item NAME are not a level", id, 900)
+H.isNil("...at all", lvl)
+
+-- Bare ids, so the rule can be exercised without owning the item.
+id, lvl = de.ParseReportArgs("900 48")
+H.eq("a bare id parses", id, 900)
+H.eq("...with its level", lvl, 48)
+id, lvl = de.ParseReportArgs("  900  ")
+H.eq("a bare id alone parses", id, 900)
+H.isNil("...with no level", lvl)
+
+H.isNil("empty input gives nothing", de.ParseReportArgs(""))
+H.isNil("nil input gives nothing", de.ParseReportArgs(nil))
+H.isNil("prose gives nothing", de.ParseReportArgs("what breaks into what"))
+
 A.ilvlData = savedIlvl
 
 os.exit(H.report("disenchant"))
