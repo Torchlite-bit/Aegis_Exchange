@@ -65,8 +65,17 @@ local function field(tableName, fieldName)
             end
         else
             if string.find(line, "^}") then break end
-            local _, _, v = string.find(line,
-                "^%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
+            -- A field can sit ANYWHERE on a line, not just at the start of
+            -- one: RCX_BUY and RCW_BUY pack several per line. Anchoring at
+            -- the line start found the first of them and reported every
+            -- other as missing -- which reads as "the table moved" rather
+            -- than "the table is formatted differently", and sent the last
+            -- reader fix chasing the wrong thing. The leading comma lets one
+            -- pattern serve a field at the start of a line and one after a
+            -- separator, and the [{,] prefix is what stops `lvl` matching
+            -- inside `mylvl`.
+            local _, _, v = string.find("," .. line,
+                "[{,]%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
             if v then value = tonumber(v); break end
         end
     end
@@ -927,6 +936,33 @@ do
     fn()
 end
 
+-- ---------------------------------------------------------------------------
+-- The Buy results table's columns
+-- ---------------------------------------------------------------------------
+
+-- ONE gutter between every pair. Uneven gutters are why a table reads as
+-- assembled rather than designed: the eye finds the rhythm, loses it, and
+-- reads the break as a mistake in the data. These grew into a 6/8/18 mix.
+local BUY_ORDER = { "name", "lvl", "left", "bid", "stack", "unit", "pct" }
+local gutters, firstGut = {}, nil
+for i = 1, table.getn(BUY_ORDER) - 1 do
+    local a, b = BUY_ORDER[i], BUY_ORDER[i + 1]
+    local gut = field("RCX_BUY", b) - (field("RCX_BUY", a) + field("RCW_BUY", a))
+    gutters[i] = a .. "->" .. b .. "=" .. gut
+    firstGut = firstGut or gut
+    H.eq("gutter " .. a .. " -> " .. b .. " matches the first one",
+         gut, firstGut)
+end
+H.check("...and that gutter is big enough to read as a gap",
+        firstGut >= 8, tostring(firstGut))
+
+-- BUY_COLS_END is what decides whether the table fits, and it is written as a
+-- sum rather than derived -- so it can go stale the moment a column moves,
+-- and the only symptom is a table that quietly clips under the scrollbar.
+H.eq("BUY_COLS_END is where the last column actually ends",
+     constant("BUY_COLS_END"),
+     field("RCX_BUY", "pct") + field("RCW_BUY", "pct"))
+
 local defW, defH = creationSize()
 H.check("the window is not created narrower than its own minimum",
         defW >= MIN_W, defW .. " < MIN_W " .. MIN_W)
@@ -1035,18 +1071,26 @@ H.check("...and still fits inside the column it is drawn in",
         ITEM_TEXT_W .. " + " .. SELLL.bag_label_x
             .. " > " .. (BAG_RIGHT - BAG_X))
 
--- The bag list is a TABLE now, with a right-aligned count column beside the
--- name, so three numbers have to add up rather than two: where the name
--- starts, how wide it may be, and how much the "Have" column takes back.
--- Widen any one of them without the others and the name silently draws
--- underneath the count.
-H.check("the name and the Have column fit side by side",
-        SELLL.bag_label_x + ITEM_TEXT_W + SELLL.bag_have_w
-            <= (BAG_RIGHT - BAG_X),
-        SELLL.bag_label_x .. " + " .. ITEM_TEXT_W .. " + "
-            .. SELLL.bag_have_w .. " > " .. (BAG_RIGHT - BAG_X))
-H.check("the Have column is wide enough for a real stack count",
-        SELLL.bag_have_w >= 24, SELLL.bag_have_w .. "px")
+-- The bag list is a TABLE now, with a count column beside the name, so FIVE
+-- numbers have to add up rather than two: where the name starts, how wide it
+-- may be, the gap after it, the count column, and the pad holding that column
+-- off the box edge. Widen any one alone and the name draws underneath the
+-- count, or the count climbs onto the border.
+local BAG_W = BAG_RIGHT - BAG_X
+local bagUsed = SELLL.bag_label_x + ITEM_TEXT_W + SELLL.bag_qty_gap
+    + SELLL.bag_qty_w + SELLL.bag_qty_pad
+H.check("name, gap, count and pad all fit in the bag column",
+        bagUsed <= BAG_W, bagUsed .. " > " .. BAG_W)
+H.check("the count column is wide enough for a four-digit stack",
+        SELLL.bag_qty_w >= 40, SELLL.bag_qty_w .. "px")
+
+-- The count is CENTRED in its column, so the pad is what keeps the column --
+-- heading and cells together -- off the border. At zero the numbers sit on
+-- the edge, which is what "scrunched against the boarder" looked like.
+H.check("the count column is held off the box edge",
+        SELLL.bag_qty_pad > 0, SELLL.bag_qty_pad .. "px")
+H.check("...and the name is held off the count",
+        SELLL.bag_qty_gap >= 6, SELLL.bag_qty_gap .. "px")
 
 -- Both halves of the Sell tab are boxes now, and they are only a matched
 -- pair if they start and end on the same lines.

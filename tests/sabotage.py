@@ -626,13 +626,13 @@ end""",
     # The bag column widened without the listings column moving: the bag
     # list's scrollbar draws over the price table.
     ("sell-columns-overlap", "ui/frame.lua",
-     "    bag_right  = 238,",
-     "    bag_right  = 268,",
+     "    bag_right  = 280,",
+     "    bag_right  = 310,",
      "geometry"),
 
     # The name column narrowed back to what truncated most item names.
     ("bag-names-truncate-again", "ui/frame.lua",
-     "local BAG_ITEM_TEXT_W = 160",
+     "local BAG_ITEM_TEXT_W = 168",
      "local BAG_ITEM_TEXT_W = 120",
      "geometry"),
 
@@ -1289,6 +1289,35 @@ end
      "            have:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])",
      "            have:SetTextColor(C.textDim[1], C.textDim[2], C.textDim[3])",
      "palette"),
+    # ---- Sell tab bag column + Buy table columns -------------------------
+    # A centred column flush to the box edge is what "scrunched against the
+    # boarder" looked like. The pad is the only thing holding it off.
+    ("bag-qty-flush-to-border", "ui/frame.lua",
+     "    bag_qty_pad = 6,",
+     "    bag_qty_pad = 0,",
+     "geometry"),
+
+    # Widen the count column alone and the name silently draws underneath it.
+    ("bag-qty-overlaps-name", "ui/frame.lua",
+     "    bag_qty_w   = 44,",
+     "    bag_qty_w   = 120,",
+     "geometry"),
+
+    # Uneven gutters are the difference between a table that reads as
+    # designed and one that reads as assembled -- and every column is still
+    # individually fine, so nothing else notices.
+    ("buy-gutters-uneven", "ui/frame.lua",
+     "    check = 2, icon = 22, name = 44, lvl = 290, left = 330,",
+     "    check = 2, icon = 22, name = 44, lvl = 286, left = 330,",
+     "geometry"),
+
+    # BUY_COLS_END is written as a sum, so it goes stale the moment a column
+    # moves. The only symptom is a table that quietly clips under the
+    # scrollbar at the width where it used to fit.
+    ("buy-cols-end-stale", "ui/frame.lua",
+     "local BUY_COLS_END = 682 + 44",
+     "local BUY_COLS_END = 678 + 44",
+     "geometry"),
 ]
 
 SUITES = {

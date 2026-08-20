@@ -12,6 +12,56 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.35.0]
+
+Spacing and alignment across both tables. `/reload`.
+
+### Sell tab
+- **The bag column got wider, the listings narrower.** The listings table had
+  ~170px of slack at the minimum window size while the bag column had none and
+  was clipping item names. The two now split the space nearer to how they use
+  it.
+- **"Have" is "Qty"**, and it is a proper column: wider, **centred** under a
+  centred heading, and held off the box edge. A right-aligned number flush to
+  a border reads as though it is falling out of the table.
+- **"Your Bags" and "Qty" are the same colour as the listings headings.** They
+  were the same *literal* before and could drift apart; both now read one
+  palette entry, `C.header`, so they cannot.
+- **Your gold sits bottom-left**, as it does on the Buy tab. Posting is the one
+  place in the addon where you watch a number go up, and the tab that does it
+  was the only one that never showed you the number. **Vendor** and **Scan**
+  moved right to make room, and up slightly.
+- Gold now refreshes on `PLAYER_MONEY`, so a sale, a repair or a trade updates
+  both tabs. Previously the Buy tab's figure only refreshed when you switched
+  to it or bought something.
+
+### Buy tab — results table
+- **One gutter between every pair of columns**, instead of the 6/8/18 mix these
+  had grown into. Uneven gutters are why a table reads as assembled: the eye
+  finds the rhythm and then loses it, and reads the break as a mistake in the
+  data.
+- **Lvl is centred**, not right-aligned. It sat right-aligned immediately
+  before a left-aligned Time Left, which pushed the two columns into the gap
+  between them and left air on the outside of both. A level is a two-digit
+  label, not a magnitude read digit by digit.
+- **The table uses the whole window now.** Column widths were measured against
+  the difference between the two view modes, which is the same number as the
+  row width only at the minimum size — so dragging the window wider grew the
+  table but not its columns, leaving a strip of empty table down the right
+  that got bigger the more room you gave it.
+
+### Fixed
+- `ui.MakeSortHeaders` had no `CENTER` case, so a centred column's heading fell
+  through to left-aligned and sat over the left edge of centred cells — which
+  looks like a mistake in the data rather than in the layout. Found while
+  centring Lvl.
+- The geometry suite's table reader could only find a field that **started** a
+  line, so the Buy table's packed column definitions read as "the table moved"
+  rather than "the table is formatted differently". Eight new assertions
+  depended on it.
+
+---
+
 ## [1.34.0]
 
 The Sell tab's bag list is a table now, not a list of text. `/reload`.
@@ -2701,6 +2751,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.35.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.34.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.33.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.32.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -39,6 +39,12 @@ local C = {
     tabOff  = { 0.21, 0.17, 0.12 },
     tabOn   = { 0.32, 0.27, 0.16 },
     border  = { 0.79, 0.64, 0.15 },
+    -- Table headings. Warm tan: GameFontDisableSmall's grey made a header
+    -- band read as disabled rather than as the table's headings. ONE entry
+    -- because two tables that pick their own heading colour drift, and the
+    -- Sell tab spent a release with its bag headings a different shade from
+    -- the listings headings two inches to the right.
+    header  = { 0.85, 0.72, 0.42 },
 }
 
 -- Last scan older than this is "stale" and rendered amber.
@@ -2695,9 +2701,22 @@ ui.PctColorSell = PctColorSell
 -- The 92px that freed goes first to the gap between Lvl and Time Left, which
 -- were close enough to touch ("43 Very Long" ran together), and then to the
 -- three money columns.
+-- The Buy results table's columns.
+--
+-- ONE gutter between every pair -- 10px -- rather than the 6/8/18 mix these
+-- grew into. Uneven gutters are why a table reads as assembled: the eye finds
+-- the rhythm and then loses it, which looks like a mistake even when every
+-- column is individually fine.
+--
+-- And ONE alignment rule: text LEFT, amounts RIGHT, and the level CENTRED.
+-- Lvl used to be right-aligned directly before a left-aligned Time Left,
+-- which pushed the two columns together into the gap between them and left
+-- air on the outside of both. A level is a two-digit label rather than a
+-- magnitude read digit by digit, so centring it costs nothing and stops the
+-- pinch.
 local RCX_BUY = {
-    check = 2, icon = 22, name = 44, lvl = 288, left = 336,
-    bid = 420, stack = 512, unit = 604, pct = 678,
+    check = 2, icon = 22, name = 44, lvl = 290, left = 330,
+    bid = 418, stack = 512, unit = 606, pct = 682,
 }
 local RCW_BUY = {
     name = 236, lvl = 30, left = 78,
@@ -2705,7 +2724,7 @@ local RCW_BUY = {
 }
 -- Where the rightmost column ends. Asked for rather than re-added by hand, so
 -- a column edit cannot silently push the table under the scrollbar.
-local BUY_COLS_END = 678 + 44
+local BUY_COLS_END = 682 + 44
 
 -- Extra width the ITEM column has been given, over its RCW_BUY.name default.
 --
@@ -2847,7 +2866,7 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         icon:SetPoint("LEFT", row, "LEFT", X.icon, 0)
         row.icon   = icon
         row.name   = mkCell(ColX("name"), W.name + BUY_NAME_EXTRA)
-        row.lvl    = mkCell(ColX("lvl"),    W.lvl,    "RIGHT")
+        row.lvl    = mkCell(ColX("lvl"),    W.lvl,    "CENTER")
         row.left   = mkCell(ColX("left"),   W.left)
         row.bid    = mkCell(ColX("bid"),    W.bid,    "RIGHT")
         row.stack  = mkCell(ColX("stack"),  W.stack,  "RIGHT")
@@ -3191,10 +3210,7 @@ function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
             b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
             local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             fs:SetText(d.text)
-            -- Warm tan, as the mockup has them. GameFontDisableSmall's grey
-            -- made the whole header band read as disabled rather than as the
-            -- table's headings.
-            fs:SetTextColor(0.85, 0.72, 0.42)
+            fs:SetTextColor(C.header[1], C.header[2], C.header[3])
             b.label = fs
             b.baseText = d.text
             if d.just == "RIGHT" then
@@ -3206,6 +3222,17 @@ function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
                 b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
                 fs:SetPoint("RIGHT", b, "RIGHT", 0, 0)
                 fs:SetJustifyH("RIGHT")
+            elseif d.just == "CENTER" then
+                -- The third case, for the same reason the second exists: a
+                -- heading has to be justified the way its CELLS are or the
+                -- column reads as two columns. Without this branch a
+                -- `just = "CENTER"` def fell through to LEFT and the heading
+                -- sat over the left edge of centred cells -- which looks like
+                -- a mistake in the data rather than in the layout.
+                b:SetWidth(widths[d.key] or 40)
+                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
+                fs:SetPoint("CENTER", b, "CENTER", 0, 0)
+                fs:SetJustifyH("CENTER")
             else
                 b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
                 fs:SetPoint("LEFT", b, "LEFT", 0, 0)
@@ -3451,10 +3478,17 @@ function ui.LayoutBuyTable()
     if not panel or not ui.buyListWell or not ui.buyScroll then return end
     local left = ui.buyTableLeft
     if ui.buyMode == "advanced" then left = ui.buyTableLeftAdv end
-    -- Surplus over the Blizzlike width, all of it to Item: it is the column
-    -- that actually runs out of room, and every numeric column is already
-    -- sized to its contents.
-    BUY_NAME_EXTRA = ui.buyTableLeft - left
+    -- Surplus, all of it to Item: it is the column that actually runs out of
+    -- room, and every numeric column is already sized to its contents.
+    --
+    -- Measured against the ACTUAL row width now, not just the difference
+    -- between the two modes' left edges. Those two are the same thing at the
+    -- minimum window size, which is why the narrower reading looked correct
+    -- for so long -- but drag the window wide and the columns stayed at their
+    -- minimum while the table grew, leaving a strip of empty table down the
+    -- right-hand side that got bigger the more room you gave it.
+    local rowW = ui.PanelWidthAt(ui.WindowW()) - left - BUYL.gutter_w
+    BUY_NAME_EXTRA = rowW - BUY_COLS_END
     if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
 
     -- The table's TOP also moves with the mode.
@@ -3681,18 +3715,31 @@ end
 -- headings, a 22px heading band, 8 below the rule to the first row.
 local SELLL = {
     bag_x      = 12,
-    bag_right  = 238,
-    list_x     = 270,
+    -- The bag column got wider and the listings narrower. The listings had
+    -- ~170px of slack at MIN_W and the bag column had none: its name column
+    -- was clipping while a fixed-width table sat next to it in space it was
+    -- never going to use.
+    bag_right  = 280,
+    list_x     = 304,
     list_right = 26,
 
     -- The bag column's own columns. It is a TABLE now, not a list of text --
     -- same box, same header band, same rule, same right-aligned numeric
     -- column as the listings beside it -- so the two halves of the tab read
     -- as one thing. `bag_label_x` is where the name starts (past the icon and
-    -- the cache dot); `bag_have_w` is the count column's width, right-aligned
-    -- against the box's inner edge.
+    -- the cache dot); the `bag_qty_*` trio below sizes and insets the count
+    -- column beside it.
     bag_label_x = 34,
-    bag_have_w  = 28,
+    -- The count column, and the two gaps that keep it off things. `pad` holds
+    -- it away from the box's inner edge -- a right-aligned number flush to a
+    -- border reads as though it is falling out of the table -- and `gap`
+    -- keeps the name from running into it. CENTRED rather than
+    -- right-aligned: the counts here are one to three digits with no decimal
+    -- point to line up, so centring them under a centred heading reads as a
+    -- column where right-alignment just looked like it was hugging the wall.
+    bag_qty_w   = 44,
+    bag_qty_pad = 6,
+    bag_qty_gap = 10,
 
     well_top   = SELL_TOP_H + 10,
     hdr_top    = SELL_TOP_H + 16,
@@ -3761,6 +3808,12 @@ end
 -- so a list cannot accidentally ask a frame instead.
 function ui.WindowH()
     return (ui.frame and ui.frame.GetHeight and ui.frame:GetHeight()) or 0
+end
+
+-- ...and its width, for the same reason. Two-corner-anchored children report
+-- stale sizes, so anything sizing itself to the window asks the WINDOW.
+function ui.WindowW()
+    return (ui.frame and ui.frame.GetWidth and ui.frame:GetWidth()) or 0
 end
 
 -- Usable height of the BROWSE column at a given window height.
@@ -4355,7 +4408,7 @@ function ui.BuildBuyTab()
         function(key) ui.SetBuySort(key) end,
         {
             { key = "name",   text = "Item" },
-            { key = "lvl",    text = "Lvl",         just = "RIGHT" },
+            { key = "lvl",    text = "Lvl",         just = "CENTER" },
             { key = "left",   text = "Time Left" },
             { key = "bid",    text = "Current Bid", just = "RIGHT" },
             { key = "stack",  text = "Buyout",      just = "RIGHT" },
@@ -6140,9 +6193,20 @@ function ui.RefreshBuyActionBar()
     end
 end
 
+-- Repaint every gold display in the window.
+--
+-- ONE writer for two tabs. The Buy tab's was refreshed from three call sites
+-- and the Sell tab now has one too; two functions reading GetMoney would be
+-- two chances for one of them to be forgotten at a new call site.
+function ui.RefreshMoney()
+    local money = GetMoney and GetMoney() or 0
+    if ui.buyMoney  then ui.buyMoney:SetMoney(money) end
+    if ui.sellMoney then ui.sellMoney:SetMoney(money) end
+end
+
+-- The name three call sites already use.
 function ui.RefreshBuyMoney()
-    if not ui.buyMoney then return end
-    ui.buyMoney:SetMoney(GetMoney and GetMoney() or 0)
+    ui.RefreshMoney()
 end
 
 -- Flatten the class > subclass > slot hierarchy into visible rows, honouring
@@ -8186,7 +8250,7 @@ local LIST_ROWS_MAX = 36
 -- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
 -- straight past the list into the listings table -- these are what they get
 -- clipped to. See ui.SetTextClipped.
-local BAG_ITEM_TEXT_W = 160
+local BAG_ITEM_TEXT_W = 168
 local BAG_CAT_TEXT_W  = 210
 
 function ui.BuildSellTab()
@@ -8538,15 +8602,15 @@ function ui.BuildSellTab()
     local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.bag_x, -SELLL.hdr_top)
     bagHdr:SetText("Your Bags")
-    bagHdr:SetTextColor(0.85, 0.72, 0.42)
+    bagHdr:SetTextColor(C.header[1], C.header[2], C.header[3])
 
     local haveHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    haveHdr:SetWidth(SELLL.bag_have_w)
-    haveHdr:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT", -6,
-        -(SELLL.hdr_top - SELLL.well_top))
-    haveHdr:SetJustifyH("RIGHT")
-    haveHdr:SetText("Have")
-    haveHdr:SetTextColor(0.85, 0.72, 0.42)
+    haveHdr:SetWidth(SELLL.bag_qty_w)
+    haveHdr:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
+        -(6 + SELLL.bag_qty_pad), -(SELLL.hdr_top - SELLL.well_top))
+    haveHdr:SetJustifyH("CENTER")
+    haveHdr:SetText("Qty")
+    haveHdr:SetTextColor(C.header[1], C.header[2], C.header[3])
 
     -- The rule goes UNDER the heading, not at the top of the box.
     local bagRule = panel:CreateTexture(nil, "ARTWORK")
@@ -8560,9 +8624,10 @@ function ui.BuildSellTab()
     local bagTick = panel:CreateTexture(nil, "ARTWORK")
     bagTick:SetWidth(1)
     bagTick:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_have_w + 4), -6)
+        -(6 + SELLL.bag_qty_pad + SELLL.bag_qty_w + SELLL.bag_qty_gap), -6)
     bagTick:SetPoint("BOTTOMRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_have_w + 4), -SELLL.hdr_h)
+        -(6 + SELLL.bag_qty_pad + SELLL.bag_qty_w + SELLL.bag_qty_gap),
+        -SELLL.hdr_h)
     bagTick:SetTexture(0.35, 0.30, 0.18, 0.7)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
@@ -8570,19 +8635,32 @@ function ui.BuildSellTab()
     -- Below the box now. They used to sit ABOVE the list, on the row the
     -- heading needed; there is no room for both once the heading moves inside
     -- the box, and under it they line up with the listings' status line.
-    local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
-    vendListBtn:SetWidth(56)
-    vendListBtn:SetHeight(18)
-    vendListBtn:SetPoint("TOPLEFT", bagWell, "BOTTOMLEFT", 6, -4)
-    vendListBtn:SetText("Vendor")
-    vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
-    ui.sellVendorListBtn = vendListBtn
+    -- Your gold, bottom left under the bag box, exactly as the Buy tab has
+    -- it. Posting is the one place in the addon where you are watching a
+    -- number go UP, and the tab that does it was the only one that never
+    -- showed you the number.
+    ui.sellMoney = MakeMoneyDisplay(panel)
+    ui.sellMoney:Anchor("BOTTOMLEFT", panel, "BOTTOMLEFT", SELLL.bag_x, 4)
+    -- Anchor only STORES the point; SetMoney is what places the chain, so
+    -- without this the display exists and draws nothing until the first
+    -- PLAYER_MONEY.
+    ui.RefreshMoney()
 
+    -- ...which pushes these to the right end of the same band. They were on
+    -- the left, where the gold now is.
     local scanAllBtn = ui.MakeButton(panel, "quiet")
     scanAllBtn:SetWidth(48)
     scanAllBtn:SetHeight(18)
-    scanAllBtn:SetPoint("LEFT", vendListBtn, "RIGHT", 6, 0)
+    scanAllBtn:SetPoint("TOPRIGHT", bagWell, "BOTTOMRIGHT", 0, -2)
     scanAllBtn:SetText("Scan")
+
+    local vendListBtn = ui.MakeButton(panel, "quiet", "AegisExchangeVendorListButton")
+    vendListBtn:SetWidth(56)
+    vendListBtn:SetHeight(18)
+    vendListBtn:SetPoint("RIGHT", scanAllBtn, "LEFT", -6, 0)
+    vendListBtn:SetText("Vendor")
+    vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
+    ui.sellVendorListBtn = vendListBtn
     scanAllBtn:SetScript("OnClick", function()
         if A.sell.batchActive then
             A.sell.StopBatchScan()
@@ -8662,9 +8740,11 @@ ui.GrowBagRows = function(n)
             -- not a column, and this table sits beside one whose numerics all
             -- line up.
             local have = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            have:SetWidth(SELLL.bag_have_w)
-            have:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-            have:SetJustifyH("RIGHT")
+            have:SetWidth(SELLL.bag_qty_w)
+            -- Same inset as the heading above it, off the same edge, so the
+            -- two cannot drift apart when either number changes.
+            have:SetPoint("RIGHT", row, "RIGHT", -(6 + SELLL.bag_qty_pad), 0)
+            have:SetJustifyH("CENTER")
             have:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
             row.have = have
             -- Cache indicator: small green asterisk left of the label, between the
@@ -10646,6 +10726,13 @@ end)
 
 -- The item in the sell slot changed (placed / removed) or our auctions
 -- updated (a post landed): keep the Sell tab current.
+-- Gold changes for reasons the addon never sees -- a sale, a repair, a trade,
+-- mail. O(1) and this event does not storm, so it is answered directly rather
+-- than behind a dirty flag.
+A.RegisterEvent("PLAYER_MONEY", function()
+    if ui.RefreshMoney then ui.RefreshMoney() end
+end)
+
 A.RegisterEvent("NEW_AUCTION_UPDATE", function()
     ui.RefreshSell()
 end)
