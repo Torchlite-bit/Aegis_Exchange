@@ -12,6 +12,33 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.39.1]
+
+Rows and their last column stop running under the box border. `/reload`.
+
+### Fixed
+- **Table rows drew underneath their own box's right border.** A backdrop edge
+  is drawn *centred* on the frame boundary, and every table's box is anchored
+  to its scroll frame's right edge — so a row spanning the scroll frame's full
+  width ended up half under that border, and its rightmost column with it.
+
+  One bug, two faces: the **bag rows visibly poking through the box edge**, and
+  the Buy table's **"% Mkt" being shaved** by it. Both are fixed by the same
+  `ROWPAD`, which every row builder and both layout functions read — the rows'
+  inset and the width the columns may use are one measurement seen from two
+  ends.
+
+- **Every heading would have drifted off its column** as a result, by 2px on
+  the left of each table and 8px on the count column in the bag list — headings
+  anchor to the panel and the box, and it was the *rows* that moved. Caught
+  before shipping and fixed at all six anchor points; a heading that disagrees
+  with its cells is the defect these tables keep being fixed for.
+
+Also applied to Auctions and History, which have the same construction and
+therefore had the same overhang, unreported.
+
+---
+
 ## [1.39.0]
 
 The measurement that decides whether Aegis gets a fourth source of item level.
@@ -2912,6 +2939,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.39.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.39.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.38.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.37.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

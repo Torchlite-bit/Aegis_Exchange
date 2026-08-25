@@ -2766,6 +2766,20 @@ local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 -- `selectable` (Buy tab only) builds a Blizzlike row: no per-row Buy/Bid
 -- buttons, click to select, and the window's bottom bar acts on the selection.
 -- The Crafting tab passes nothing and keeps its own per-row buttons.
+-- How far a table's ROWS are held inside its scroll frame.
+--
+-- A backdrop edge is drawn CENTRED on the frame boundary, so a box's border
+-- straddles its own edge by half the edgeSize. Every table's well is anchored
+-- to its scroll frame's right edge -- which means rows running the full width
+-- of the scroll frame end up UNDER that border, and the last column with them.
+-- That is one bug with two faces: the bag rows visibly poking through the box
+-- edge, and the Buy table's "% Mkt" being shaved by it.
+--
+-- ONE table, read by every row builder and by both layout functions, because
+-- the rows' inset and the width the columns are allowed to use are the same
+-- measurement seen from two ends.
+local ROWPAD = { l = 2, r = 8 }
+
 -- The chrome every results row wears: a zebra stripe, a hairline separator,
 -- and -- where rows can be picked -- a selection tint.
 --
@@ -2859,8 +2873,8 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(rowH)
     if i == 1 then
-        row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
+        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
     else
         row:SetPoint("TOPLEFT", store[i - 1], "BOTTOMLEFT", 0, 0)
         row:SetPoint("TOPRIGHT", store[i - 1], "BOTTOMRIGHT", 0, 0)
@@ -3556,6 +3570,7 @@ function ui.LayoutBuyTable()
     -- minimum while the table grew, leaving a strip of empty table down the
     -- right-hand side that got bigger the more room you gave it.
     local rowW = ui.PanelWidthAt(ui.WindowW()) - left - BUYL.gutter_w
+        - ROWPAD.l - ROWPAD.r
     BUY_NAME_EXTRA = rowW - BUY_COLS_END
     if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
 
@@ -3587,7 +3602,7 @@ function ui.LayoutBuyTable()
     for key, b in pairs(ui.buyHeaders or {}) do
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", panel, "TOPLEFT",
-            left + ColX(key), -hdrTop)
+            left + ROWPAD.l + ColX(key), -hdrTop)
     end
     local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
     local ti = 1
@@ -4565,7 +4580,7 @@ function ui.BuildBuyTab()
         local tk = panel:CreateTexture(nil, "ARTWORK")
         tk:SetWidth(1)
         tk:SetPoint("TOPLEFT", well, "TOPLEFT",
-            6 + RCX_BUY[tickKeys[ti]] - 8, -6)
+            6 + ROWPAD.l + RCX_BUY[tickKeys[ti]] - 8, -6)
         tk:SetPoint("BOTTOMLEFT", well, "TOPLEFT",
             6 + RCX_BUY[tickKeys[ti]] - 8, -(BUYL.hdr_h))
         tk:SetTexture(0.35, 0.30, 0.18, 0.7)
@@ -7709,8 +7724,8 @@ ui.GrowAucRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(AUC_ROW_H)
             if i == 1 then
-                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.aucRows[i - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.aucRows[i - 1], "BOTTOMRIGHT", 0, 0)
@@ -8141,8 +8156,8 @@ ui.GrowHistRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(HIST_ROW_H)
             if i == 1 then
-                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.histRows[i - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.histRows[i - 1], "BOTTOMRIGHT", 0, 0)
@@ -8397,6 +8412,7 @@ function ui.LayoutSellTable()
     if not panel then return end
 
     local room = ui.PanelWidthAt(ui.WindowW()) - SELLL.list_x - SELLL.list_right
+        - ROWPAD.l - ROWPAD.r
     SELL_AVAIL_EXTRA = room - SELL_COLS_END
     if SELL_AVAIL_EXTRA < 0 then SELL_AVAIL_EXTRA = 0 end
 
@@ -8409,7 +8425,8 @@ function ui.LayoutSellTable()
         if h then
             h:ClearAllPoints()
             h:SetPoint("TOPLEFT", panel, "TOPLEFT",
-                SELLL.list_x + SellColX(keys[i]), -SELLL.hdr_top)
+                SELLL.list_x + ROWPAD.l + SellColX(keys[i]),
+                -SELLL.hdr_top)
             if keys[i] == "avail" then h:SetWidth(SellColW("avail")) end
         end
         i = i + 1
@@ -8421,7 +8438,7 @@ function ui.LayoutSellTable()
         local t = ui.sellTicks[ti]
         if t and t.aegisKey and ui.sellListWell then
             t:ClearAllPoints()
-            local x = 6 + SellColX(t.aegisKey) - 8
+            local x = 6 + ROWPAD.l + SellColX(t.aegisKey) - 8
             t:SetPoint("TOPLEFT", ui.sellListWell, "TOPLEFT", x, -6)
             t:SetPoint("BOTTOMLEFT", ui.sellListWell, "TOPLEFT", x, -SELLL.hdr_h)
         end
@@ -8446,7 +8463,7 @@ local LIST_ROWS_MAX = 36
 -- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
 -- straight past the list into the listings table -- these are what they get
 -- clipped to. See ui.SetTextClipped.
-local BAG_ITEM_TEXT_W = 168
+local BAG_ITEM_TEXT_W = 164
 local BAG_CAT_TEXT_W  = 210
 
 function ui.BuildSellTab()
@@ -8822,12 +8839,13 @@ function ui.BuildSellTab()
     local bagHdr = ui.MakeHeaderCell(panel, false, "Your Bags", "LEFT",
         BAG_ITEM_TEXT_W)
     bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        SELLL.bag_x + SELLL.bag_label_x, -SELLL.hdr_top)
+        SELLL.bag_x + ROWPAD.l + SELLL.bag_label_x, -SELLL.hdr_top)
 
     local haveHdr = ui.MakeHeaderCell(panel, false, "Qty", "CENTER",
         SELLL.bag_qty_w)
     haveHdr:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_qty_pad), -(SELLL.hdr_top - SELLL.well_top))
+        -(6 + SELLL.bag_qty_pad + ROWPAD.r),
+        -(SELLL.hdr_top - SELLL.well_top))
 
     -- The rule goes UNDER the heading, not at the top of the box.
     local bagRule = panel:CreateTexture(nil, "ARTWORK")
@@ -8841,10 +8859,11 @@ function ui.BuildSellTab()
     local bagTick = panel:CreateTexture(nil, "ARTWORK")
     bagTick:SetWidth(1)
     bagTick:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_qty_pad + SELLL.bag_qty_w + SELLL.bag_qty_gap), -6)
+        -(6 + ROWPAD.r + SELLL.bag_qty_pad + SELLL.bag_qty_w
+          + SELLL.bag_qty_gap), -6)
     bagTick:SetPoint("BOTTOMRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_qty_pad + SELLL.bag_qty_w + SELLL.bag_qty_gap),
-        -SELLL.hdr_h)
+        -(6 + ROWPAD.r + SELLL.bag_qty_pad + SELLL.bag_qty_w
+          + SELLL.bag_qty_gap), -SELLL.hdr_h)
     bagTick:SetTexture(0.35, 0.30, 0.18, 0.7)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
@@ -8919,8 +8938,8 @@ ui.GrowBagRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(BAG_ROW_H)
             if bi == 1 then
-                row:SetPoint("TOPLEFT", bagScroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", bagScroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.bagRows[bi - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.bagRows[bi - 1], "BOTTOMRIGHT", 0, 0)
@@ -9084,8 +9103,8 @@ ui.GrowListRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(LIST_ROW_H)
             if li == 1 then
-                row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", listScroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", listScroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.listRows[li - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)

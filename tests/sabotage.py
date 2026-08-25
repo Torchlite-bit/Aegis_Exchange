@@ -632,7 +632,7 @@ end""",
 
     # The name column narrowed back to what truncated most item names.
     ("bag-names-truncate-again", "ui/frame.lua",
-     "local BAG_ITEM_TEXT_W = 168",
+     "local BAG_ITEM_TEXT_W = 164",
      "local BAG_ITEM_TEXT_W = 120",
      "geometry"),
 
@@ -1404,6 +1404,22 @@ end
      '    if pct >= 95 then verdict = "adopt" end',
      '    if pct >= 60 then verdict = "adopt" end',
      "disenchant"),
+    # ---- the row inset ---------------------------------------------------
+    # Rows back out to the scroll frame's edge, which is where the box's
+    # border is drawn. Every row still draws and every column still holds its
+    # value -- the rows simply poke through the box, and the last column gets
+    # shaved by the border.
+    ("rows-under-the-box-border", "ui/frame.lua",
+     "local ROWPAD = { l = 2, r = 8 }",
+     "local ROWPAD = { l = 0, r = 0 }",
+     "geometry"),
+
+    # An inset too small to clear the overhang: half a fix, which looks like
+    # a whole one until someone measures it.
+    ("row-inset-too-small-for-the-border", "ui/frame.lua",
+     "local ROWPAD = { l = 2, r = 8 }",
+     "local ROWPAD = { l = 2, r = 4 }",
+     "geometry"),
 ]
 
 SUITES = {
