@@ -1338,6 +1338,19 @@ end
      "    bag_label_x = 34,",
      "    bag_label_x = 0,",
      "geometry"),
+    # ---- listings columns ------------------------------------------------
+    ("sell-gutters-uneven", "ui/frame.lua",
+     "local SCX = { unit = 4, avail = 102, stack = 236, pct = 346, you = 406 }",
+     "local SCX = { unit = 4, avail = 92, stack = 236, pct = 346, you = 406 }",
+     "geometry"),
+
+    # SELL_COLS_END drives the stretch -- surplus is measured from it, so a
+    # stale value hands the wrong amount to the column that absorbs it and
+    # the table either overflows or leaves a strip empty.
+    ("sell-cols-end-stale", "ui/frame.lua",
+     "local SELL_COLS_END = 406 + 40",
+     "local SELL_COLS_END = 446 + 44",
+     "geometry"),
 ]
 
 SUITES = {

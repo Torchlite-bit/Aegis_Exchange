@@ -1126,9 +1126,7 @@ function ui.BuildWindow()
         f:StopMovingOrSizing()
         ui.SaveWindowSize()
         ui.Refresh()
-        ui.LayoutViewTabs()      -- re-centre the Advanced tabs
-        ui.LayoutAdvColumns()    -- ...re-split BOTH overlay views together
-        ui.LayoutBuilderForm()   -- ...and size the builder's own controls
+        ui.LayoutAll()           -- everything that depends on the new WIDTH
         ui.RefreshCurrentTab()   -- re-fit the visible list to the new height
     end)
     -- Deliberately NO per-frame refresh while dragging. Repainting mid-drag
@@ -3493,6 +3491,26 @@ end
 -- pager all hang off the well, and the rows off the scroll frame, so they
 -- follow. That is why those anchors were written as relationships rather than
 -- as repeated panel offsets.
+-- Every layout that depends on the window's WIDTH, in ONE list.
+--
+-- There were two lists of this and they disagreed. The resize grip re-laid
+-- four things; ui.SetBuyMode re-laid five, and the one only IT had was the
+-- results table -- so dragging the window wider grew the table and left its
+-- columns at their minimum until a mode switch happened to fix them. The
+-- v1.35.0 change that taught the table to use the whole window was inert in
+-- exactly the situation it was written for.
+--
+-- Two lists of the same thing is how the next entry gets forgotten. Both
+-- callers use this one now; add here, not there.
+function ui.LayoutAll()
+    if ui.AnchorSearchButton then ui.AnchorSearchButton() end
+    if ui.LayoutBuyTable     then ui.LayoutBuyTable()     end
+    if ui.LayoutSellTable    then ui.LayoutSellTable()    end
+    if ui.LayoutViewTabs     then ui.LayoutViewTabs()     end
+    if ui.LayoutAdvColumns   then ui.LayoutAdvColumns()   end
+    if ui.LayoutBuilderForm  then ui.LayoutBuilderForm()  end
+end
+
 function ui.LayoutBuyTable()
     local panel = ui.buyPanel
     if not panel or not ui.buyListWell or not ui.buyScroll then return end
@@ -6018,11 +6036,7 @@ function ui.SetBuyMode(mode)
     -- The results table moves with the mode: Advanced has no category tree, so
     -- the table starts at the panel margin and is wider. Search moves with it,
     -- because the widget it hung off in default mode is not there any more.
-    if ui.AnchorSearchButton then ui.AnchorSearchButton() end
-    if ui.LayoutBuyTable then ui.LayoutBuyTable() end
-    if ui.LayoutViewTabs then ui.LayoutViewTabs() end
-    if ui.LayoutAdvColumns then ui.LayoutAdvColumns() end
-    if ui.LayoutBuilderForm then ui.LayoutBuilderForm() end
+    ui.LayoutAll()
 
     -- Rows of the column that is now hidden, put down explicitly.
     local ri = 1
@@ -8257,8 +8271,54 @@ local BAG_ROWS_MAX  = 36
 -- 4px in, not flush with the row's left edge: at 0 the price sat against the
 -- row border -- and against the highlight box under the pfUI skin -- which
 -- read as clipped.
-local SCX = { unit = 4, avail = 92, stack = 252, pct = 392, you = 446 }
-local SCW = { unit = 84, avail = 156, stack = 136, pct = 50, you = 44 }
+-- The listings table's columns.
+--
+-- The old set had identical 4px gutters everywhere and still looked wrong,
+-- which is worth understanding before editing them: what varied was the
+-- JUSTIFICATION either side of each gutter.
+--
+--   RIGHT then LEFT  (unit -> avail, pct -> you) put two texts 4px apart.
+--   LEFT then RIGHT  (avail -> stack) put a short value at the far left of a
+--                    156px column and the next at the far right of the one
+--                    after it -- about 178px of void, out of 4px of gutter.
+--
+-- So: one gutter of 14, and one alignment rule. Money and magnitudes go
+-- RIGHT; `avail` is text and goes LEFT; `you` is a two-state label rather
+-- than a magnitude and goes CENTER, which is also what stops it colliding
+-- with the right-aligned `pct` before it. Same medicine as the Buy table's
+-- Lvl column.
+local SCX = { unit = 4, avail = 102, stack = 236, pct = 346, you = 406 }
+local SCW = { unit = 84, avail = 120, stack = 96, pct = 46, you = 40 }
+
+-- Where the rightmost column ends before any stretch. Asked for rather than
+-- re-added by hand, so a column edit cannot silently push the table under the
+-- scrollbar.
+local SELL_COLS_END = 406 + 40
+
+-- Extra width `avail` has been given over its SCW default.
+--
+-- The columns are a fixed block and the box they sit in is ~630px at the
+-- SMALLEST window and unbounded above, so without this everything past
+-- SELL_COLS_END was dead table that grew the wider you dragged. All the
+-- surplus goes to `avail` for the same reason the Buy table gives its surplus
+-- to Item: it is the text column, and every other column here is sized to its
+-- contents. `stack`, `pct` and `you` then sit against the right-hand edge,
+-- where the eye looks for totals.
+local SELL_AVAIL_EXTRA = 0
+
+local function SellColX(key)
+    local x = SCX[key]
+    -- Everything AFTER the stretcher moves; the stretcher and what precedes
+    -- it do not. One function, so a caller cannot apply the offset to the
+    -- wrong half.
+    if key == "unit" or key == "avail" then return x end
+    return x + SELL_AVAIL_EXTRA
+end
+
+local function SellColW(key)
+    if key == "avail" then return SCW.avail + SELL_AVAIL_EXTRA end
+    return SCW[key]
+end
 -- Numeric columns are RIGHT-justified, which is the difference between a
 -- table that reads as designed and one that reads as assembled. Every column
 -- here was left-aligned -- the money ran ragged down the page while the Buy
@@ -8271,8 +8331,73 @@ local SELL_HEADER_DEFS = {
     { key = "avail", text = "Available" },
     { key = "stack", text = "Stack price",  just = "RIGHT" },
     { key = "pct",   text = "% mkt",        just = "RIGHT" },
-    { key = "you",   text = "You?" },
+    { key = "you",   text = "You?",        just = "CENTER" },
 }
+
+-- Re-place one listings row's cells at the current width.
+function ui.LayoutSellRow(row)
+    if not row or not row.avail then return end
+    row.avail:SetWidth(SellColW("avail"))
+    local keys, i = { "stack", "pct", "you" }, 1
+    while i <= table.getn(keys) do
+        local cell = row[keys[i]]
+        if cell then
+            cell:ClearAllPoints()
+            cell:SetPoint("LEFT", row, "LEFT", SellColX(keys[i]), 0)
+        end
+        i = i + 1
+    end
+end
+
+-- Give the listings table the width it actually has.
+--
+-- Mirrors ui.LayoutBuyTable. Must be called from every place the window's
+-- width can change -- see the resize grip, which for one release called four
+-- layout functions and not the fifth, leaving the Buy table's columns frozen
+-- at their minimum until something else happened to re-lay them out.
+function ui.LayoutSellTable()
+    if not ui.sellHeaders then return end
+    local panel = ui.panels and ui.panels["Sell"]
+    if not panel then return end
+
+    local room = ui.PanelWidthAt(ui.WindowW()) - SELLL.list_x - SELLL.list_right
+    SELL_AVAIL_EXTRA = room - SELL_COLS_END
+    if SELL_AVAIL_EXTRA < 0 then SELL_AVAIL_EXTRA = 0 end
+
+    -- Headings follow their columns. A heading left behind by a moved column
+    -- is the same defect as a heading justified the wrong way -- the table
+    -- reads as two tables.
+    local keys, i = { "unit", "avail", "stack", "pct", "you" }, 1
+    while i <= table.getn(keys) do
+        local h = ui.sellHeaders[keys[i]]
+        if h then
+            h:ClearAllPoints()
+            h:SetPoint("TOPLEFT", panel, "TOPLEFT",
+                SELLL.list_x + SellColX(keys[i]), -SELLL.hdr_top)
+            if keys[i] == "avail" then h:SetWidth(SellColW("avail")) end
+        end
+        i = i + 1
+    end
+
+    -- ...and so do the separators between them.
+    local ti = 1
+    while ui.sellTicks and ti <= table.getn(ui.sellTicks) do
+        local t = ui.sellTicks[ti]
+        if t and t.aegisKey and ui.sellListWell then
+            t:ClearAllPoints()
+            local x = 6 + SellColX(t.aegisKey) - 8
+            t:SetPoint("TOPLEFT", ui.sellListWell, "TOPLEFT", x, -6)
+            t:SetPoint("BOTTOMLEFT", ui.sellListWell, "TOPLEFT", x, -SELLL.hdr_h)
+        end
+        ti = ti + 1
+    end
+
+    local ri = 1
+    while ui.listRows and ri <= table.getn(ui.listRows) do
+        ui.LayoutSellRow(ui.listRows[ri])
+        ri = ri + 1
+    end
+end
 
 -- 26, the Buy table's row height. At 19 the listings table read as a packed
 -- list beside a window whose every other table had breathing room.
@@ -8887,17 +9012,20 @@ ui.GrowBagRows = function(n)
     -- Thin separators between the header cells, as the Buy table has. The
     -- first column needs none -- there is a box edge to its left already.
     local sellTickKeys = { "avail", "stack", "pct", "you" }
+    ui.sellTicks = {}
     local sti = 1
     while sti <= table.getn(sellTickKeys) do
         local tk = panel:CreateTexture(nil, "ARTWORK")
         tk:SetWidth(1)
-        tk:SetPoint("TOPLEFT", listWell, "TOPLEFT",
-            6 + SCX[sellTickKeys[sti]] - 8, -6)
-        tk:SetPoint("BOTTOMLEFT", listWell, "TOPLEFT",
-            6 + SCX[sellTickKeys[sti]] - 8, -SELLL.hdr_h)
         tk:SetTexture(0.35, 0.30, 0.18, 0.7)
+        -- Remembered WITH its column key: the separators move when the
+        -- columns move, and a separator left behind is a line down the middle
+        -- of a cell.
+        tk.aegisKey = sellTickKeys[sti]
+        ui.sellTicks[sti] = tk
         sti = sti + 1
     end
+    ui.LayoutSellTable()
 
     -- The status line hangs BELOW the box now, the way the Buy table's count
     -- does. It used to float above the headings, where it competed with them
@@ -8938,11 +9066,14 @@ ui.GrowListRows = function(n)
                 fs:SetJustifyH(just or "LEFT")
                 return fs
             end
-            row.unit  = mkCell(SCX.unit,  SCW.unit,  "RIGHT")
-            row.avail = mkCell(SCX.avail, SCW.avail)
-            row.stack = mkCell(SCX.stack, SCW.stack, "RIGHT")
-            row.pct   = mkCell(SCX.pct,   SCW.pct,   "RIGHT")
-            row.you   = mkCell(SCX.you,   SCW.you)
+            row.unit  = mkCell(SellColX("unit"),  SellColW("unit"),  "RIGHT")
+            row.avail = mkCell(SellColX("avail"), SellColW("avail"))
+            row.stack = mkCell(SellColX("stack"), SellColW("stack"), "RIGHT")
+            row.pct   = mkCell(SellColX("pct"),   SellColW("pct"),   "RIGHT")
+            row.you   = mkCell(SellColX("you"),   SellColW("you"),   "CENTER")
+            -- Rows are built on demand as the window grows, so one created
+            -- AFTER a resize has to be laid out at the current width too.
+            ui.LayoutSellRow(row)
             row:SetScript("OnClick", function()
                 local g = row.group
                 if g and g.unit then

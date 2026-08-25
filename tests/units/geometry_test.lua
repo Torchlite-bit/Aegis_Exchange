@@ -1070,6 +1070,28 @@ H.check("...and clears the NEXT box's border on the far side",
 local function sellCol(f) return field("SCX", f) end
 local function sellW(f) return field("SCW", f) end
 local listEnd = sellCol("you") + sellW("you")
+
+-- ONE gutter between every adjacent pair, the same rule the Buy table follows.
+-- The old set had identical 4px gutters and still read badly, because what
+-- varied was the JUSTIFICATION either side of them -- so this assertion is
+-- necessary and was never sufficient. The alignment half lives in
+-- SELL_HEADER_DEFS and in the row builder, and the two have to agree.
+local SELL_ORDER = { "unit", "avail", "stack", "pct", "you" }
+local sellGut = nil
+for i = 1, table.getn(SELL_ORDER) - 1 do
+    local a, b = SELL_ORDER[i], SELL_ORDER[i + 1]
+    local gut = sellCol(b) - (sellCol(a) + sellW(a))
+    sellGut = sellGut or gut
+    H.eq("listings gutter " .. a .. " -> " .. b .. " matches the first",
+         gut, sellGut)
+end
+H.check("...and it is big enough to read as a gap",
+        sellGut >= 8, tostring(sellGut))
+
+-- SELL_COLS_END drives the stretch: surplus is measured from it, so a stale
+-- value hands the wrong amount to the column that absorbs it.
+H.eq("SELL_COLS_END is where the last column actually ends",
+     constant("SELL_COLS_END"), listEnd)
 local avail = ui.PanelWidthAt(MIN_W) - LIST_X - LIST_RIGHT
 H.check("the listings columns fit beside the bag column at MIN_W",
         listEnd <= avail,

@@ -12,6 +12,49 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.37.0]
+
+The listings table uses its window, and every layout runs on resize. `/reload`.
+
+### Fixed
+- **The Buy table's "use the whole window" fix, shipped in v1.35.0, never ran
+  when you resized the window.** It lived in `ui.LayoutBuyTable()`, and the
+  resize grip re-laid out four things — not that one. So dragging wider grew
+  the table and left its columns at their minimum until a Blizzlike/Advanced
+  toggle happened to fix them, at which point they jumped. The fix was inert in
+  exactly the situation it was written for.
+
+  There were **two lists** of "things to re-lay out" — one in the grip, one in
+  `ui.SetBuyMode` — and they disagreed. There is one now, `ui.LayoutAll()`, and
+  both callers use it. Two lists of the same thing is how the next entry gets
+  forgotten.
+
+### Changed — the Sell tab's listings columns
+- **One gutter (14px) and one alignment rule.** Worth understanding before
+  editing them: the old set already had *identical* 4px gutters and still read
+  badly. What varied was the **justification** either side of each one.
+  RIGHT-then-LEFT (`Unit price → Available`, `% mkt → You?`) put two texts 4px
+  apart; LEFT-then-RIGHT (`Available → Stack price`) put a short value at the
+  far left of a 156px column and the next at the far right of the one after —
+  about **178px of void out of 4px of gutter**. Both complaints, one cause.
+- **`You?` is centred**, which is what stops it colliding with the
+  right-aligned `% mkt` before it. Same medicine as the Buy table's `Lvl`.
+- **`Available` absorbs the surplus width**, so `Stack price`, `% mkt` and
+  `You?` sit against the right edge where the eye looks for totals. The columns
+  were a fixed 490px block in a box that is ~630px at the *smallest* window and
+  unbounded above — everything past that was dead table that grew the wider you
+  dragged.
+
+### A note on what is and is not guarded
+The column geometry is asserted: one gutter between every pair, and
+`SELL_COLS_END` checked against where the last column actually ends rather than
+a hand-written sum. **The resize wiring is not.** No suite loads `ui/frame.lua`
+or simulates a drag, so nothing would catch `ui.LayoutAll()` losing a line. The
+mitigation is structural — one list instead of two — not a test, and it is
+worth saying so plainly rather than implying coverage that does not exist.
+
+---
+
 ## [1.36.0]
 
 The Sell tab's bag column: headings, indent, scrollbar. `/reload`.
@@ -2783,6 +2826,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.37.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.36.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.35.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.34.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
