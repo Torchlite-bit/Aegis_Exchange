@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.37.0)
+# Aegis: Exchange (v1.38.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -457,7 +457,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.37.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.38.0`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots

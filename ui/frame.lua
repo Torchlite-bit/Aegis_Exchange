@@ -2822,11 +2822,41 @@ function ui.AddRowChrome(row, i, selectable)
         sel:Hide()
         row.selTex = sel
     end
+
+    -- Hover, on every table rather than the one that happened to be built
+    -- from Buttons.
+    --
+    -- The client draws this itself on its own HIGHLIGHT layer, above
+    -- everything created here and below the cells' text. That is the whole
+    -- reason to do it this way rather than with a texture of our own: it
+    -- needs no place in the ordering rule above, and -- far more important --
+    -- it needs no OnEnter. Four of these tables already own their OnEnter to
+    -- show an item tooltip, and SetScript REPLACES a handler rather than
+    -- adding to it, so a hover wired through scripts would have silently
+    -- deleted those tooltips. Nothing would have errored.
+    --
+    -- The guard is defensive, not permissive: SetHighlightTexture is a BUTTON
+    -- method, and a row built as a plain Frame gets no hover instead of an
+    -- error. That silence is exactly how five of the six tables came to be
+    -- missing it, so rowchrome_test asserts the call was made.
+    if row.SetHighlightTexture then
+        row:SetHighlightTexture(
+            "Interface\\QuestFrame\\UI-QuestTitleHighlight")
+    end
     return row
 end
 
 local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
-    local row = CreateFrame("Frame", nil, parent)
+    -- A BUTTON, not a Frame. It was a Frame, which is why these rows needed
+    -- EnableMouse to get a tooltip at all, why selecting one goes through
+    -- OnMouseDown instead of OnClick, and why they were the only results
+    -- table in the window that did not light up under the cursor:
+    -- SetHighlightTexture does not exist on a Frame.
+    --
+    -- The row's Buy/Bid buttons and its batch tick box are CHILDREN and take
+    -- their own clicks first, so making the row itself clickable does not
+    -- take anything away from them.
+    local row = CreateFrame("Button", nil, parent)
     row:SetHeight(rowH)
     if i == 1 then
         row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
@@ -7674,7 +7704,9 @@ ui.GrowAucRows = function(n)
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.aucRows) + 1
         while i <= n do
-            local row = CreateFrame("Frame", nil, panel)
+            -- A Button for the hover highlight; see BuildResultRow. Its
+            -- Cancel button is a child and still takes its own clicks.
+            local row = CreateFrame("Button", nil, panel)
             row:SetHeight(AUC_ROW_H)
             if i == 1 then
                 row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
@@ -8102,7 +8134,11 @@ ui.GrowHistRows = function(n)
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.histRows) + 1
         while i <= n do
-            local row = CreateFrame("Frame", nil, panel)
+            -- A Button, as every other table's rows are. These had no mouse
+            -- enabled at all, so they received no hover events of any kind --
+            -- a ledger line is not clickable, but it should still light up
+            -- under the cursor like every other row in the window.
+            local row = CreateFrame("Button", nil, panel)
             row:SetHeight(HIST_ROW_H)
             if i == 1 then
                 row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
@@ -9054,10 +9090,11 @@ ui.GrowListRows = function(n)
                 row:SetPoint("TOPLEFT", ui.listRows[li - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)
             end
-            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-            -- The highlight above is HOVER, which is a different thing from
-            -- selection: these rows are pressed to copy a price, never left
-            -- in a chosen state. So chrome without a selection tint.
+            -- Chrome without a selection tint: these rows are pressed to
+            -- copy a price, never left in a chosen state. The HOVER highlight
+            -- -- which is a different thing from selection -- used to be set
+            -- here, and is now part of the shared chrome so that every table
+            -- gets it rather than this one alone.
             ui.AddRowChrome(row, li)
             local mkCell = function(x, w, just)
                 local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")

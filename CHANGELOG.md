@@ -12,6 +12,50 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.38.0]
+
+Rows light up under the cursor in every table, not one. `/reload`.
+
+### Changed
+- **The hover highlight is part of the shared row chrome now**, so Buy results,
+  Crafting results, Your Bags, Auctions and History all get it — previously the
+  Sell tab's listings were the only data table in the window that had one.
+
+  Worth naming what the inconsistency was actually signalling: the highlight
+  read as *"this row is interactive"* when it really meant *"this row happened
+  to be built as a Button"*. Every one of these rows is interactive.
+
+- **Four row types are Buttons instead of Frames.** `SetHighlightTexture` is a
+  Button method and does not exist on a Frame, which is why those tables had no
+  hover. The change also removes the reason `BuildResultRow` needed
+  `EnableMouse` to get a tooltip at all, and the reason selecting a Buy result
+  goes through `OnMouseDown` — its own comment reads *"A Frame has no
+  OnClick"*. Those workarounds are left in place for now: frame type first,
+  simplify once it has been seen working.
+
+- **History rows had no mouse enabled at all**, so they received no hover
+  events of any kind. A ledger line is not clickable, but it should still light
+  up like every other row.
+
+### The bug this deliberately avoided
+The obvious implementation is `row:SetScript("OnEnter", …)` to show a texture.
+In WoW `SetScript` **replaces** a handler rather than adding to it — and four
+of these tables already own their `OnEnter` **to show an item tooltip**. That
+patch would have silently deleted the tooltips on all four: nothing errors,
+every row draws, the highlight works perfectly. Asking the client for a
+highlight instead needs no script at all, which is why it is done that way.
+There is a sabotage planting the script version.
+
+### Not covered by tests
+`rowchrome_test.lua` asserts the highlight is requested, that it does not join
+the three ordered BACKGROUND textures, and that a Frame-shaped row degrades
+instead of erroring. It **cannot** tell you whether the highlight looks right
+beside the listings table, or whether making a row clickable broke a click that
+used to reach a child — the Buy tab's batch tick boxes are the place to check.
+Both need the client and a person.
+
+---
+
 ## [1.37.0]
 
 The listings table uses its window, and every layout runs on resize. `/reload`.
@@ -2826,6 +2870,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.38.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.37.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.36.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.35.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

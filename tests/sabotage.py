@@ -1351,6 +1351,29 @@ end
      "local SELL_COLS_END = 406 + 40",
      "local SELL_COLS_END = 446 + 44",
      "geometry"),
+    # ---- row hover -------------------------------------------------------
+    # The hover dropped from the shared chrome. Every row still draws, every
+    # table still works, and the window quietly goes back to one table in six
+    # lighting up under the cursor.
+    ("rowchrome-no-hover", "ui/frame.lua",
+     """    if row.SetHighlightTexture then
+        row:SetHighlightTexture(
+            "Interface\\\\QuestFrame\\\\UI-QuestTitleHighlight")
+    end""",
+     "",
+     "rowchrome"),
+
+    # The tempting "fix" for a Frame row: wire the hover through OnEnter.
+    # SetScript REPLACES rather than adds, so this deletes the item tooltip on
+    # four tables -- silently, with the highlight working perfectly.
+    ("rowchrome-hover-eats-onenter", "ui/frame.lua",
+     """    if row.SetHighlightTexture then
+        row:SetHighlightTexture(
+            "Interface\\\\QuestFrame\\\\UI-QuestTitleHighlight")
+    end""",
+     """    row.SetScript = row.SetScript or function() end
+    row:SetScript("OnEnter", function() end)""",
+     "rowchrome"),
 ]
 
 SUITES = {

@@ -66,6 +66,18 @@ local function StubRow()
         table.insert(self.made, t)
         return t
     end
+    -- Rows are Buttons, so they answer this. A Frame does NOT -- see the
+    -- Frame-shaped row below, which is what five of the six tables used to be.
+    row.SetHighlightTexture = function(self, path)
+        self.highlight = path
+    end
+    return row
+end
+
+-- A row built as a plain Frame: no SetHighlightTexture at all.
+local function StubFrameRow()
+    local row = StubRow()
+    row.SetHighlightTexture = nil
     return row
 end
 
@@ -101,6 +113,39 @@ H.eq("a plain row gets two", table.getn(plain.made), 2)
 H.isNil("...and no selection tint", plain.selTex)
 H.check("...but still a stripe", plain.zebra ~= nil, "")
 H.check("...and still a separator", plain.sep ~= nil, "")
+
+-- ---------------------------------------------------------------------------
+H.section("Hover, on every row")
+-- ---------------------------------------------------------------------------
+
+-- The highlight is asked of the CLIENT rather than built here, and that is
+-- the point of it: it lands on its own HIGHLIGHT layer, so it needs no place
+-- in the ordering rule above, and it needs no OnEnter -- which four of these
+-- tables already own, to show an item tooltip. A hover wired through
+-- SetScript would have replaced those handlers and silently deleted the
+-- tooltips.
+H.check("a row is given a hover highlight", sel.highlight ~= nil)
+H.check("...a plain row too", plain.highlight ~= nil)
+H.check("...and it is the same one the rest of the window uses",
+        string.find(sel.highlight or "", "UI-QuestTitleHighlight", 1, true)
+            ~= nil, tostring(sel.highlight))
+
+-- It must not join the BACKGROUND textures, or the creation-order rule that
+-- keeps the stripe under the hairline under the tint stops describing
+-- reality.
+H.eq("the highlight is not one of the ordered textures",
+     table.getn(sel.made), 3)
+H.eq("...nor on a plain row", table.getn(plain.made), 2)
+
+-- SetHighlightTexture is a BUTTON method. A row built as a Frame has to come
+-- out unhighlighted rather than throwing -- but that silence is exactly how
+-- five tables went years without a hover, so the assertion above is what
+-- stops it being acceptable.
+local frameRow = StubFrameRow()
+H.survives("a Frame-shaped row does not error",
+           function() ui.AddRowChrome(frameRow, 1, true) end)
+H.isNil("...it simply gets no highlight", frameRow.highlight)
+H.eq("...and its other chrome is unaffected", table.getn(frameRow.made), 3)
 
 -- ---------------------------------------------------------------------------
 H.section("The banding is keyed to POSITION, and it alternates")
