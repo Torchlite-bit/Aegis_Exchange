@@ -214,7 +214,13 @@ end
 -- tell the anchor apart from a hardcoded index -- and a hardcoded index is
 -- exactly the bug that shipped and cost four rounds of "why does /stack do
 -- nothing". Flip with W.itemInfoShape.
-W.itemInfoShape = "vanilla"          -- or "later"
+-- "vanilla" (9) | "later" (10) | "wide" (18, what a client mod may install
+-- in place of the global). All three are offered because util.ItemInfo's
+-- anchor-on-the-last-number trick is RIGHT for the first two and exactly
+-- wrong for the third -- the wide tuple has six numbers after stackCount --
+-- and a test that only ever sees one shape cannot tell the anchor apart from
+-- a hardcoded index.
+W.itemInfoShape = "vanilla"          -- or "later" / "wide"
 
 -- The client resolves an item from an id, a name, or ANY well-formed link --
 -- the colour code in front of a link is decoration, not identity. Keying only
@@ -234,6 +240,13 @@ end
 function GetItemInfo(key)
     local r = ItemRec(key)
     if not r then return nil end
+    if W.itemInfoShape == "wide" then
+        return r.name, r.link, r.quality or 1, r.itemLevel or 0,
+               r.minLevel or 0, r.type or "Trade Goods",
+               r.subType or "Cloth", r.stackCount or 20,
+               r.equipLoc or "", r.texture or "icon",
+               r.sellPrice or 0, 0, 0, 0, 0, nil, false, ""
+    end
     if W.itemInfoShape == "later" then
         return r.name, r.link, r.quality or 1, r.itemLevel or 55,
                r.minLevel or 0, r.type or "Trade Goods",
@@ -499,6 +512,8 @@ function W.Reset()
     W.spellTargeting = false
     W.loot          = {}
     W.equipped      = {}
+    W.itemInfoShape = "vanilla"
+    C_Item          = nil
     AegisExchangeDB     = nil
     AegisExchangeCharDB = nil
 end
@@ -582,6 +597,29 @@ function GetInventoryItemLink(unit, slot)
     return r and r.link or nil
 end
 W.equipped = {}
+
+-- ---------------------------------------------------------------------------
+-- C_Item: the data 1.12 has and never shows
+-- ---------------------------------------------------------------------------
+
+-- A client mod (ClassicAPI) exposes an item's vendor sell price and its item
+-- level -- both of which the client fills in on every item and displays for
+-- neither. Aegis must work with it and WITHOUT it, so the harness has to be
+-- able to take it away again: `W.SetClientItemData(false)` removes the global
+-- entirely, which is the state of every client that has no such mod.
+function W.SetClientItemData(on)
+    if not on then C_Item = nil return end
+    C_Item = {
+        GetItemSellPriceByID = function(id)
+            local r = W.items[id]
+            return r and r.sellPrice or nil
+        end,
+        GetDetailedItemLevelInfo = function(id)
+            local r = W.items[id]
+            return r and r.itemLevel or nil
+        end,
+    }
+end
 
 -- Load a ui/ module on top of the core ones.
 --

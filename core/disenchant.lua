@@ -424,6 +424,15 @@ function de.ItemLevel(itemId, quality)
         local band, count = de.BandFromObservation(itemId, quality)
         if band and count == 1 then return band, "observed" end
     end
+    -- The CLIENT's own item level, where a mod exposes it. Above the shipped
+    -- table because it is the real number for EVERY item -- including the two
+    -- thirds of Turtle's custom gear the borrowed table has never heard of --
+    -- and below observation, which reflects the server actually being played
+    -- on rather than what an item's data says.
+    if util and util.ClientItemLevel then
+        local lvl = util.ClientItemLevel(itemId)
+        if lvl then return lvl, "client" end
+    end
     if not itemId or not A.ilvlData then return nil end
     local lvl = A.ilvlData[itemId]
     if type(lvl) ~= "number" or lvl < 1 then return nil end

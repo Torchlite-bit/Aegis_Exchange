@@ -1936,31 +1936,42 @@ reading their source.
   alone. The two share one remedy string on purpose: `UnansweredSummary`
   withholds advice when components disagree about the cure, so a query using
   both would otherwise lose its advice line.
-- **§5 — the `reqlevel` fallback. Conditional. MEASUREMENT SHIPPED v1.39.0;
-  the fallback itself is still unbuilt and stays that way until the number
-  comes back.**
+- **§5 — the `reqlevel` fallback. DROPPED, v1.40.0.** Never built, and now
+  never will be.
 
-  `/aex de audit` walks the shipped item-level table and, for every item this
-  client has cached, compares the band its real item level gives against the
-  band its **required** level would have given. `de.CompareBands` is the pure
-  judgement half and is tested; the walk is chunked over frames because it is
-  thousands of `GetItemInfo` calls.
+  The measurement shipped in v1.39.0 (`/aex de audit`) came back **0 items
+  judged, 12,135 uncached** out of 12,567. That is not a verdict on required
+  level; it is 1.12's item cache holding only what a client has actually seen.
+  A bulk sweep cannot work, and warming 12,567 items to make it work is a
+  worse idea than the fallback was.
 
-  It could not be measured here. `minLevel` comes from `GetItemInfo`, which
-  answers only for items the client has cached, so this is a thing to run
-  rather than a thing already decided — and the audit reports what it could
-  **not** judge, because a run that saw 200 items measured 200 items.
+  It is moot regardless: **v1.40.0 reads the real item level** where a client
+  mod exposes it. There is no reason to approximate a number you can read.
+  `/aex de audit` and `de.CompareBands` are kept — they still answer "how good
+  would that guess have been" for anyone curious, and they cost nothing.
 
-  The bar is **95% agreement**, and it is deliberately high: a band is one
-  material tier wide, so "one band out" is Dream Dust where the answer was
-  Illusion Dust. `off-by-one` is counted against the fallback exactly as hard
-  as a wilder miss. An item with **no** level requirement yields no band at
-  all, which means the fallback would decline — a safe failure, tallied
-  separately and never as a wrong answer.
+- **§5b — client-provided item data. DONE, v1.40.0.** 1.12 populates an item's
+  vendor sell price AND its item level on every item and displays neither.
+  Where a mod (ClassicAPI) exposes them, Aegis now reads both:
+  `util.ClientSellPrice` and `util.ClientItemLevel`, asked as **capabilities**
+  rather than by addon name — the rule the scanner already applies to
+  AuctionQueryThrottle.
 
-  If it clears the bar it is a last-resort source **for the filters only** —
-  never for the tooltip and never for §6, where being confidently wrong costs
-  someone an item.
+  Rankings: vendor price is `client` → `merchant` (learned) → nil. Item level
+  is `observed` → `client` → `itemlevel` (shipped) → nil. Observation stays on
+  top because it reflects the server being played on, not what an item's data
+  says.
+
+  **Nothing degrades without it.** The absence path is asserted directly, and
+  is the case for most players.
+
+- **§5c — then decide about `core/itemlevel.lua`. OPEN.** With the client
+  answering for every item including Turtle's, the borrowed 12,567-entry table
+  may have nothing left to do — and deleting it retires the unlicensed-data
+  question with it. That is a decision to make **with a number in hand**: how
+  often is the shipped table still the answer? Do not delete on the strength
+  of the argument alone; §5 is what that mistake looks like.
+
 - **§6 — "worth more disenchanted" on the Sell tab. Not committed.** A wrong
   answer here destroys something unrecoverable, so it needs shipped item level
   **and** a local observation, or it says nothing.

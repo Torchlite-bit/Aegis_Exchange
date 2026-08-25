@@ -482,9 +482,29 @@ function db.SetVendor(itemId, copper)
     db.account.vendors[itemId] = copper
 end
 
+-- What a merchant pays for one of these, and where the number came from.
+--
+-- Returns value, source -- "client" or "merchant", or nil, nil.
+--
+-- The CLIENT's own figure outranks anything we learned, because it is not a
+-- learned figure at all: 1.12 populates a sell price on every sellable item
+-- and never displays it, so where a mod exposes that field it is simply the
+-- answer. What we recorded at a merchant stays as the fallback for players
+-- with no such mod, and as a cross-check where there is one.
+--
+-- The extra return is additive: seven call sites read only the first value
+-- and are unaffected. It exists because a price the client stated and a price
+-- we watched a merchant offer are different KINDS of fact, and advising
+-- someone to destroy an item -- the one feature still unbuilt -- will have to
+-- tell them apart.
 function db.GetVendor(itemId)
+    local known = A.util and A.util.ClientSellPrice
+        and A.util.ClientSellPrice(itemId)
+    if known then return known, "client" end
     if not db.account or not db.account.vendors then return nil end
-    return db.account.vendors[itemId]
+    local learned = db.account.vendors[itemId]
+    if learned then return learned, "merchant" end
+    return nil
 end
 
 -- Max stack size, learned opportunistically. See the `stacks` note in

@@ -1420,6 +1420,53 @@ end
      "local ROWPAD = { l = 2, r = 8 }",
      "local ROWPAD = { l = 2, r = 4 }",
      "geometry"),
+    # ---- client-provided item data ---------------------------------------
+    # The learned price winning over the client's own. Both answer, so the
+    # only visible difference is a number that is subtly wrong wherever a
+    # merchant was ever visited.
+    ("vendor-learned-beats-client", "core/db.lua",
+     """    local known = A.util and A.util.ClientSellPrice
+        and A.util.ClientSellPrice(itemId)
+    if known then return known, "client" end""",
+     "",
+     "clientdata"),
+
+    # The source dropped. Everything still works and every caller still gets
+    # its number -- but a price the client stated and one we watched a
+    # merchant offer stop being distinguishable, which is the fact the
+    # unbuilt "destroy this item" advice will have to weigh.
+    ("vendor-source-dropped", "core/db.lua",
+     '    if known then return known, "client" end',
+     "    if known then return known end",
+     "clientdata"),
+
+    # The client's item level ignored, which puts every Turtle custom item
+    # back to unanswerable while looking entirely healthy on vanilla ones.
+    ("itemlevel-ignores-client", "core/disenchant.lua",
+     """    if util and util.ClientItemLevel then
+        local lvl = util.ClientItemLevel(itemId)
+        if lvl then return lvl, "client" end
+    end""",
+     "",
+     "clientdata"),
+
+    # The client's level put ABOVE what the player actually saw. Observation
+    # is server truth; an item's data is not.
+    ("client-level-beats-observation", "core/disenchant.lua",
+     """    if quality then
+        local band, count = de.BandFromObservation(itemId, quality)
+        if band and count == 1 then return band, "observed" end
+    end""",
+     "",
+     "clientdata"),
+
+    # The wide-tuple branch removed, so a widened global falls through to the
+    # last-number anchor -- which lands on setID and reads classID as the
+    # minLevel. Small, plausible, silently wrong integers.
+    ("iteminfo-wide-tuple-anchored", "core/util.lua",
+     "    if n >= 12 then",
+     "    if false then",
+     "clientdata"),
 ]
 
 SUITES = {
@@ -1440,6 +1487,7 @@ SUITES = {
     "disenchant": "tests/units/disenchant_test.lua",
     "tooltip": "tests/units/tooltip_test.lua",
     "disenchant.learn": "tests/units/disenchant_learn_test.lua",
+    "clientdata": "tests/units/clientdata_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

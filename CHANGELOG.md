@@ -12,6 +12,56 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.40.0]
+
+Aegis stops guessing two numbers the client has had all along. `/reload`.
+
+### Added
+1.12 fills in an item's **vendor sell price** and its **item level** on every
+item and displays **neither** — the sell-price field is populated and the
+engine's tooltip code simply never reads it. Where a client mod
+([ClassicAPI](https://github.com/brues-code/ClassicAPI), a DLL) exposes them,
+Aegis now reads both.
+
+- **Vendor prices are known, not learned.** Previously Aegis only knew what a
+  merchant paid if you had stood at one with that item. Ranking is now
+  `client` → `merchant` (what we learned) → unknown, and `db.GetVendor` returns
+  the source alongside the number — a price the client states and one we
+  watched a merchant offer are different kinds of fact.
+- **Item level is read, not borrowed.** The disenchant rule has always been
+  exact *given* a level; the level was the only missing input. Ranking is
+  `observed` (what you disenchanted) → `client` → the shipped table → unknown.
+  Observation stays on top because it reflects the server you actually play on.
+- **Turtle's custom items become answerable.** Roughly two thirds of them are
+  absent from the shipped item-level table. The client knows all of them.
+
+Detected as **capabilities**, never by addon name or version — the same rule
+the scanner applies to AuctionQueryThrottle, where the query gate itself is the
+detector. Asked per function, so a build providing one and not the other costs
+one feature rather than both.
+
+**Nothing degrades without it.** Every path behaves exactly as v1.39.1 did when
+no such mod is present, which is the case for most players, and a test asserts
+that directly rather than assuming it.
+
+### Dropped
+- **The required-level fallback (§5) will not be built.** Its measurement,
+  shipped in v1.39.0, came back **0 items judged, 12,135 uncached** — 1.12's
+  item cache only holds what your client has seen, so a bulk sweep cannot
+  work. And it is moot now: there is no reason to approximate a number you can
+  read. `/aex de audit` stays, since it still answers "how good would that
+  guess have been".
+
+### Hardened
+- `util.ItemInfo` now handles a **third** `GetItemInfo` shape. It anchors on
+  "the last value that is a number" — right for vanilla's 9 and later clients'
+  10, and exactly wrong for modern WoW's 18, where six numbers sit *after*
+  stack count. A mod that replaced the global rather than namespacing it would
+  have had Aegis read the class id where the required level belongs: small,
+  plausible, silently wrong integers. Defended rather than trusted.
+
+---
+
 ## [1.39.1]
 
 Rows and their last column stop running under the box border. `/reload`.
@@ -2939,6 +2989,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.40.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.39.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.39.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.38.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
