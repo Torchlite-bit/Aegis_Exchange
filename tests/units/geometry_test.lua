@@ -1049,6 +1049,21 @@ H.check("...with room for the bag list's scrollbar",
         LIST_X - BAG_RIGHT >= 16,
         "gutter is only " .. (LIST_X - BAG_RIGHT) .. "px")
 
+-- THE SCROLLBAR AND THE TWO BORDERS IT RUNS BETWEEN.
+--
+-- A backdrop edge is drawn CENTRED on the frame boundary, so an edgeSize of 12
+-- hangs `well_overhang` outside the box. The template anchors the bar 2px
+-- INSIDE the scroll frame's right edge -- the same line -- so by default the
+-- bar runs straight through the border and into the box. That is what the
+-- clipping was. Three numbers have to agree, and one of them is the gutter.
+H.check("the scrollbar clears its own box's border",
+        SELLL.bar_x >= SELLL.well_overhang,
+        SELLL.bar_x .. " < " .. SELLL.well_overhang)
+H.check("...and clears the NEXT box's border on the far side",
+        SELLL.bar_x + SELLL.bar_w + SELLL.well_overhang <= LIST_X - BAG_RIGHT,
+        SELLL.bar_x .. " + " .. SELLL.bar_w .. " + " .. SELLL.well_overhang
+            .. " > " .. (LIST_X - BAG_RIGHT))
+
 -- The listings table's own columns have to fit in what is left, at the
 -- SMALLEST window. This is the assertion that fails if the bag column is
 -- widened again without checking.
@@ -1091,6 +1106,13 @@ H.check("the count column is held off the box edge",
         SELLL.bag_qty_pad > 0, SELLL.bag_qty_pad .. "px")
 H.check("...and the name is held off the count",
         SELLL.bag_qty_gap >= 6, SELLL.bag_qty_gap .. "px")
+
+-- The "Your Bags" heading lines up with the item NAMES under it, not with the
+-- box edge -- the same rule the numeric columns follow, applied to the left
+-- edge. Flush against the border it read as falling out of the table, which
+-- is the same complaint the count column had on the other side.
+H.check("the bag heading is indented to meet its own cells",
+        SELLL.bag_label_x > 0, SELLL.bag_label_x .. "px")
 
 -- Both halves of the Sell tab are boxes now, and they are only a matched
 -- pair if they start and end on the same lines.

@@ -12,6 +12,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.36.0]
+
+The Sell tab's bag column: headings, indent, scrollbar. `/reload`.
+
+### Fixed
+- **"Your Bags" and "Qty" rendered grey while the listings headings two inches
+  away rendered tan — from the identical palette entry.** The colour was never
+  wrong. These were bare FontStrings on the panel, and in WoW every child
+  *frame* draws above **all** of its parent's regions whatever draw layer they
+  claim — so the headings were drawn underneath their own table's 85%-opaque
+  backdrop and came out darkened. The listings headings escaped it only because
+  they happened to be built as Buttons.
+
+  Both now go through one `ui.MakeHeaderCell`, so a heading is a child frame
+  wherever it appears and the difference cannot come back. Setting the colour
+  again would have fixed nothing.
+
+- **The bag list's scrollbar cut through the box's right border.**
+  `FauxScrollFrameTemplate` anchors its bar 2px *inside* the scroll frame's
+  right edge; a backdrop edge is drawn *centred* on that same line and so hangs
+  6px outside it. The bar therefore ran through the border and 2px into the
+  box. It is pushed clear now, and the gutter widened so it also clears the
+  **listings** box's border on the far side — three numbers that are really one
+  measurement, with an assertion tying them together.
+
+### Changed
+- **"Your Bags" is indented to line up with the item names beneath it**, rather
+  than sitting flush on the box edge. Same rule the numeric columns follow — a
+  heading is placed the way its cells are — applied to the left edge.
+
+---
+
 ## [1.35.0]
 
 Spacing and alignment across both tables. `/reload`.
@@ -2751,6 +2783,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.36.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.35.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.34.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.33.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

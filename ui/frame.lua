@@ -3197,6 +3197,61 @@ local CRAFT_HEADER_DEFS = {
     { key = "pct",   text = "% mkt" },
 }
 
+-- ONE way a table heading is built, sortable or not.
+--
+-- This is NOT a tidy-up. A heading written as a bare FontString on the panel
+-- is a REGION of the panel, and in WoW every child FRAME of a frame draws
+-- above ALL of that frame's regions, whatever draw layer they claim. A table's
+-- box is a child frame with an 85%-opaque backdrop -- so a heading built that
+-- way is drawn UNDERNEATH its own table's background, comes out darkened and
+-- desaturated, and reads as grey.
+--
+-- Which is exactly what happened: "Your Bags" and "Qty" set the identical
+-- palette entry the listings headings set, and rendered a different colour,
+-- because the listings headings were Buttons (child frames) and these were
+-- not. No amount of correcting the colour would have fixed it -- the colour
+-- was never wrong.
+--
+-- So both go through here now and the difference cannot come back.
+-- `clickable` is the only thing that varies: a sortable heading needs a
+-- Button, a fixed one only needs a Frame, and both are child frames.
+function ui.MakeHeaderCell(parent, clickable, text, just, width)
+    local b = CreateFrame(clickable and "Button" or "Frame", nil, parent)
+    b:SetHeight(16)
+    b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
+    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fs:SetText(text)
+    fs:SetTextColor(C.header[1], C.header[2], C.header[3])
+    b.label = fs
+    b.baseText = text
+    if just == "RIGHT" then
+        -- A numeric column's header sits over the RIGHT edge of its cells,
+        -- because the cells are right-justified. Left-aligning the header of a
+        -- right-aligned column is the thing that makes a table look like it
+        -- was assembled rather than designed.
+        b:SetWidth(width or 40)
+        fs:SetPoint("RIGHT", b, "RIGHT", 0, 0)
+        fs:SetJustifyH("RIGHT")
+    elseif just == "CENTER" then
+        -- The third case, for the same reason the second exists: a heading has
+        -- to be justified the way its CELLS are or the column reads as two
+        -- columns. Without this branch a `just = "CENTER"` def fell through to
+        -- LEFT and the heading sat over the left edge of centred cells.
+        b:SetWidth(width or 40)
+        fs:SetPoint("CENTER", b, "CENTER", 0, 0)
+        fs:SetJustifyH("CENTER")
+    else
+        fs:SetPoint("LEFT", b, "LEFT", 0, 0)
+        -- Width: the label plus room for the sort arrow, but never wider than
+        -- the column, so adjacent headers can't overlap.
+        local w = fs:GetStringWidth() + 12
+        local maxw = (width or 40) + 12
+        if w > maxw then w = maxw end
+        b:SetWidth(w)
+    end
+    return b
+end
+
 function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
     local headers = {}
     defs = defs or CRAFT_HEADER_DEFS
@@ -3205,44 +3260,9 @@ function ui.MakeSortHeaders(panel, rowLeft, y, cols, widths, onClick, defs)
         local d = defs[i]
         local cx = cols[d.key]
         if cx then
-            local b = CreateFrame("Button", nil, panel)
-            b:SetHeight(16)
-            b.aegisNoSkin = true       -- keep pfUI's button backdrop off it
-            local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            fs:SetText(d.text)
-            fs:SetTextColor(C.header[1], C.header[2], C.header[3])
-            b.label = fs
-            b.baseText = d.text
-            if d.just == "RIGHT" then
-                -- A numeric column's header sits over the RIGHT edge of its
-                -- cells, because the cells are right-justified. Left-aligning
-                -- the header of a right-aligned column is the thing that makes
-                -- a table look like it was assembled rather than designed.
-                b:SetWidth(widths[d.key] or 40)
-                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
-                fs:SetPoint("RIGHT", b, "RIGHT", 0, 0)
-                fs:SetJustifyH("RIGHT")
-            elseif d.just == "CENTER" then
-                -- The third case, for the same reason the second exists: a
-                -- heading has to be justified the way its CELLS are or the
-                -- column reads as two columns. Without this branch a
-                -- `just = "CENTER"` def fell through to LEFT and the heading
-                -- sat over the left edge of centred cells -- which looks like
-                -- a mistake in the data rather than in the layout.
-                b:SetWidth(widths[d.key] or 40)
-                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
-                fs:SetPoint("CENTER", b, "CENTER", 0, 0)
-                fs:SetJustifyH("CENTER")
-            else
-                b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
-                fs:SetPoint("LEFT", b, "LEFT", 0, 0)
-                -- Width: the label plus room for the sort arrow, but never
-                -- wider than the column, so adjacent headers can't overlap.
-                local w = fs:GetStringWidth() + 12
-                local maxw = (widths[d.key] or 40) + 12
-                if w > maxw then w = maxw end
-                b:SetWidth(w)
-            end
+            local b = ui.MakeHeaderCell(panel, true, d.text, d.just,
+                widths[d.key])
+            b:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft + cx, y)
             b:SetScript("OnClick", function() onClick(d.key) end)
             headers[d.key] = b
         end
@@ -3720,8 +3740,23 @@ local SELLL = {
     -- was clipping while a fixed-width table sat next to it in space it was
     -- never going to use.
     bag_right  = 280,
-    list_x     = 304,
+    list_x     = 312,
     list_right = 26,
+
+    -- A backdrop edge is drawn CENTRED on the frame boundary, so an edgeSize
+    -- of 12 hangs 6px OUTSIDE the box it draws. FauxScrollFrameTemplate then
+    -- anchors its scrollbar 2px INSIDE the scroll frame's right edge -- which
+    -- is the same line -- so the bar ran straight through that border and 2px
+    -- into the box. That is the "clipping": the box's right border is chewed
+    -- through wherever the bar covers it.
+    --
+    -- `bar_x` pushes the bar out past the overhang, and the gutter above is
+    -- wide enough for the bar to clear the NEXT box's border on the far side
+    -- as well. All three numbers are one measurement; change one and check
+    -- the other two.
+    well_overhang = 6,
+    bar_x         = 8,
+    bar_w         = 16,   -- FauxScrollFrameTemplate's bar, measured not guessed
 
     -- The bag column's own columns. It is a TABLE now, not a list of text --
     -- same box, same header band, same rule, same right-aligned numeric
@@ -8578,6 +8613,19 @@ function ui.BuildSellTab()
     bagScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", SELLL.bag_right,
         LISTBOX.bag.bot)
 
+    -- Move the bar out of the box's border. FauxScrollFrameTemplate anchors
+    -- it 2px INSIDE the scroll frame's right edge, which is where the well's
+    -- backdrop edge also lives -- see SELLL.bar_x. Re-anchored rather than
+    -- re-templated: the template is Blizzard's and every other FauxScrollFrame
+    -- in the window inherits it.
+    local bagBar = getglobal("AegisExchangeBagScrollScrollBar")
+    if bagBar then
+        bagBar:ClearAllPoints()
+        bagBar:SetPoint("TOPLEFT", bagScroll, "TOPRIGHT", SELLL.bar_x, -16)
+        bagBar:SetPoint("BOTTOMLEFT", bagScroll, "BOTTOMRIGHT",
+            SELLL.bar_x, 16)
+    end
+
     -- The box. Anchored the same way the listings well is, and for the same
     -- two reasons: it has to reach UP past the scroll frame to enclose the
     -- header row, and its right edge has to stop AT the scroll frame's,
@@ -8599,18 +8647,26 @@ function ui.BuildSellTab()
 
     -- "Your Bags" IS the heading now, rather than a separate label above the
     -- box -- the same way the listings table's first column heading names it.
-    local bagHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", SELLL.bag_x, -SELLL.hdr_top)
-    bagHdr:SetText("Your Bags")
-    bagHdr:SetTextColor(C.header[1], C.header[2], C.header[3])
+    --
+    -- Built through ui.MakeHeaderCell, like every other heading in the window.
+    -- These were bare FontStrings on the panel and therefore drawn UNDER the
+    -- box's own backdrop; see the note on that function for why that turned a
+    -- correct colour grey.
+    --
+    -- Indented to line up with the item NAMES below it rather than sitting on
+    -- the box edge. That is the same rule the numeric columns follow -- a
+    -- heading is placed the way its cells are -- and it is what the listings'
+    -- first heading is doing too, though there it comes out of being
+    -- right-justified over its column rather than from an explicit inset.
+    local bagHdr = ui.MakeHeaderCell(panel, false, "Your Bags", "LEFT",
+        BAG_ITEM_TEXT_W)
+    bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        SELLL.bag_x + SELLL.bag_label_x, -SELLL.hdr_top)
 
-    local haveHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    haveHdr:SetWidth(SELLL.bag_qty_w)
+    local haveHdr = ui.MakeHeaderCell(panel, false, "Qty", "CENTER",
+        SELLL.bag_qty_w)
     haveHdr:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
         -(6 + SELLL.bag_qty_pad), -(SELLL.hdr_top - SELLL.well_top))
-    haveHdr:SetJustifyH("CENTER")
-    haveHdr:SetText("Qty")
-    haveHdr:SetTextColor(C.header[1], C.header[2], C.header[3])
 
     -- The rule goes UNDER the heading, not at the top of the box.
     local bagRule = panel:CreateTexture(nil, "ARTWORK")

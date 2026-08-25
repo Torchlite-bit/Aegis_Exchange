@@ -1318,6 +1318,26 @@ end
      "local BUY_COLS_END = 682 + 44",
      "local BUY_COLS_END = 678 + 44",
      "geometry"),
+    # ---- bag column, round two -------------------------------------------
+    # The bar back inside the box's border, which is where the template puts
+    # it and what chewed a hole through the box's right edge.
+    ("bag-scrollbar-inside-border", "ui/frame.lua",
+     "    bar_x         = 8,",
+     "    bar_x         = 2,",
+     "geometry"),
+
+    # A gutter too narrow for the bar to clear the NEXT box's border. The bar
+    # still clears its own, so half the rule passing is not enough.
+    ("bag-gutter-eats-next-border", "ui/frame.lua",
+     "    list_x     = 312,",
+     "    list_x     = 300,",
+     "geometry"),
+
+    # The heading back flush against the box edge.
+    ("bag-heading-flush-to-edge", "ui/frame.lua",
+     "    bag_label_x = 34,",
+     "    bag_label_x = 0,",
+     "geometry"),
 ]
 
 SUITES = {
