@@ -12,6 +12,48 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.39.0]
+
+The measurement that decides whether Aegis gets a fourth source of item level.
+`/reload`.
+
+**This release does not build that source.** It builds the thing that says
+whether it should exist, because the brief for it said not to build it until
+the number was in hand.
+
+### Added
+- **`/aex de audit`** — walks the shipped item-level table and, for every item
+  your client has cached, compares the band the item's *real* level gives
+  against the band its **required** level would have given.
+
+  That is the open question from the disenchant work. aux feeds `GetItemInfo`'s
+  slot 4 — which on 1.12 is required level — into a table that wants item
+  level. Aegis has refused to, on the grounds that a disenchant band is one
+  material tier wide so a near miss is not a near miss. That was **reasoning,
+  not measurement**. This measures it.
+
+  It cannot be measured anywhere but in a client: `minLevel` comes from
+  `GetItemInfo`, which only answers for items that client has already cached.
+  So the audit reports what it could **not** judge rather than quietly skipping
+  it — a run that saw 200 items has measured 200 items, not the game — and
+  declines to conclude anything under 200.
+
+### How it scores, and why that way
+- The bar is **95% agreement**, deliberately high.
+- **One band out counts against it as hard as a wilder miss.** A band is one
+  material tier wide: "off by one" is Dream Dust where the answer was Illusion
+  Dust, not a rounding error.
+- An item with **no level requirement** yields no band at all, so the fallback
+  would *decline* rather than answer. That is a safe failure and is tallied
+  separately — counting it as wrong would reject the fallback for the wrong
+  reason.
+
+If it clears the bar, required level becomes a last-resort source **for the
+filters only** — never the tooltip, and never for advising you to destroy
+something.
+
+---
+
 ## [1.38.0]
 
 Rows light up under the cursor in every table, not one. `/reload`.
@@ -2870,6 +2912,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.39.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.38.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.37.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.36.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

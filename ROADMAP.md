@@ -1936,9 +1936,31 @@ reading their source.
   alone. The two share one remedy string on purpose: `UnansweredSummary`
   withholds advice when components disagree about the cure, so a query using
   both would otherwise lose its advice line.
-- **§5 — the `reqlevel` fallback. Conditional.** Measure the disagreement rate
-  first (`de.Band(shipped ilvl)` vs `de.Band(minLevel)` across cached items).
-  ~5% and it earns a place, **filters only**; 30%+ and *unanswered* absorbs it.
+- **§5 — the `reqlevel` fallback. Conditional. MEASUREMENT SHIPPED v1.39.0;
+  the fallback itself is still unbuilt and stays that way until the number
+  comes back.**
+
+  `/aex de audit` walks the shipped item-level table and, for every item this
+  client has cached, compares the band its real item level gives against the
+  band its **required** level would have given. `de.CompareBands` is the pure
+  judgement half and is tested; the walk is chunked over frames because it is
+  thousands of `GetItemInfo` calls.
+
+  It could not be measured here. `minLevel` comes from `GetItemInfo`, which
+  answers only for items the client has cached, so this is a thing to run
+  rather than a thing already decided — and the audit reports what it could
+  **not** judge, because a run that saw 200 items measured 200 items.
+
+  The bar is **95% agreement**, and it is deliberately high: a band is one
+  material tier wide, so "one band out" is Dream Dust where the answer was
+  Illusion Dust. `off-by-one` is counted against the fallback exactly as hard
+  as a wilder miss. An item with **no** level requirement yields no band at
+  all, which means the fallback would decline — a safe failure, tallied
+  separately and never as a wrong answer.
+
+  If it clears the bar it is a last-resort source **for the filters only** —
+  never for the tooltip and never for §6, where being confidently wrong costs
+  someone an item.
 - **§6 — "worth more disenchanted" on the Sell tab. Not committed.** A wrong
   answer here destroys something unrecoverable, so it needs shipped item level
   **and** a local observation, or it says nothing.

@@ -11055,9 +11055,51 @@ local function DisenchantReport(rest)
     end
 end
 
+-- Measure whether required level could stand in for item level.
+--
+-- The one number that decides whether Aegis grows a fourth source of item
+-- level. It cannot be taken anywhere but in a client -- minLevel comes from
+-- GetItemInfo, which only answers for items this client has cached -- so it
+-- ships as something to run rather than something already decided.
+local function DisenchantAudit()
+    local started = A.de.AuditStart(
+        function(done)
+            if math.mod(done, 3000) == 0 then
+                ChatMsg("Aegis: audited " .. done .. " ...")
+            end
+        end,
+        function(tally, considered, done)
+            local lines, verdict = A.de.AuditSummary(tally, considered)
+            ChatMsg("Aegis: required-level audit \226\128\148 walked "
+                .. done .. " item(s) we know the real level of")
+            local i = 1
+            while lines and i <= table.getn(lines) do
+                ChatMsg("  " .. lines[i])
+                i = i + 1
+            end
+            if verdict == "adopt" then
+                ChatMsg("  \226\134\146 required level agrees often enough"
+                    .. " to be worth a last-resort source FOR FILTERS. Never"
+                    .. " for advice: a wrong band is a wrong material tier.")
+            elseif verdict == "reject" then
+                ChatMsg("  \226\134\146 required level is wrong too often"
+                    .. " to use. Rows we cannot answer for stay unanswered,"
+                    .. " which is already what they do.")
+            end
+        end)
+    if not started then
+        ChatMsg("Aegis: nothing to audit \226\128\148 either one is already"
+            .. " running, or core/itemlevel.lua is empty.")
+    else
+        ChatMsg("Aegis: auditing required level against item level"
+            .. " \226\128\148 this takes a few seconds.")
+    end
+end
+
 -- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.
 -- /aex debug                — toggle the scanner's chat trace.
 -- /aex de <link> [ilvl]     — print the disenchant breakdown for one item.
+-- /aex de audit             — measure required level against item level.
 -- Deliberately NOT "/aegis": other addons in the user's Aegis series (Aegis:
 -- Rally Power) already own that slash, and when two addons register the same
 -- slash text the client resolves it to only ONE of them.
@@ -11069,7 +11111,11 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
     -- carries a hex colour code and a name, and lowering it breaks both.
     local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
     if deArgs then
-        DisenchantReport(deArgs)
+        if string.find(string.lower(deArgs), "^%s*audit") then
+            DisenchantAudit()
+        else
+            DisenchantReport(deArgs)
+        end
         return
     end
     if string.find(cmd, "debug", 1, true) then

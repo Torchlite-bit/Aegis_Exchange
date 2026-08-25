@@ -1374,6 +1374,36 @@ end
      """    row.SetScript = row.SetScript or function() end
     row:SetScript("OnEnter", function() end)""",
      "rowchrome"),
+    # ---- the required-level audit ----------------------------------------
+    # An item with no level requirement yields no band, so the fallback would
+    # DECLINE. Counting that as a wrong answer makes the fallback look worse
+    # than it is and rejects it for the wrong reason -- the audit exists to
+    # settle a decision, so a biased tally is worse than no tally.
+    ("audit-declines-counted-as-wrong", "core/disenchant.lua",
+     '    if not guess then return "no-guess" end',
+     '    if not guess then return "worse" end',
+     "disenchant"),
+
+    # One band out is one MATERIAL TIER out -- Dream Dust where the answer was
+    # Illusion Dust. Treating it as near enough is exactly the compromise this
+    # addon declined to make.
+    ("audit-off-by-one-counted-as-right", "core/disenchant.lua",
+     '    if math.abs(ti - gi) == 1 then return "off-by-one" end',
+     '    if math.abs(ti - gi) == 1 then return "same" end',
+     "disenchant"),
+
+    # A handful of cached items is not a measurement. Without the floor the
+    # audit will happily "adopt" on a sample of six.
+    ("audit-no-sample-floor", "core/disenchant.lua",
+     "    if considered < 200 then",
+     "    if considered < 0 then",
+     "disenchant"),
+
+    # The bar for adopting a source that can be confidently wrong.
+    ("audit-bar-lowered", "core/disenchant.lua",
+     '    if pct >= 95 then verdict = "adopt" end',
+     '    if pct >= 60 then verdict = "adopt" end',
+     "disenchant"),
 ]
 
 SUITES = {

@@ -539,6 +539,109 @@ H.isNil("empty input gives nothing", de.ParseReportArgs(""))
 H.isNil("nil input gives nothing", de.ParseReportArgs(nil))
 H.isNil("prose gives nothing", de.ParseReportArgs("what breaks into what"))
 
+-- ---------------------------------------------------------------------------
+H.section("de.CompareBands -- could required level have stood in?")
+-- ---------------------------------------------------------------------------
+
+-- The question this settles: aux feeds GetItemInfo's slot 4 -- which on 1.12
+-- is REQUIRED level -- into a table that wants ITEM level. This addon has
+-- refused to, on the grounds that a band is one material tier wide so a near
+-- miss is not a near miss. That was reasoning; this is the measurement's
+-- judgement half, and it is pure so it can be tested without a client even
+-- though the data cannot be gathered without one.
+
+H.eq("a required level in the same band is a hit",
+     de.CompareBands(48, 46), "same")
+H.eq("...at the band's own boundary too",
+     de.CompareBands(50, 50), "same")
+
+-- Band 50 is Dream Dust / Greater Nether; band 55 is Dream Dust / Lesser
+-- Eternal. One band out is a different material, not a rounding error, which
+-- is why it is counted against the fallback as hard as a wilder miss.
+H.eq("one band out is one MATERIAL TIER out",
+     de.CompareBands(50, 55), "off-by-one")
+H.eq("...in either direction", de.CompareBands(55, 50), "off-by-one")
+H.eq("further than that is worse", de.CompareBands(60, 20), "worse")
+
+-- An item with no level requirement yields no band, so the fallback would
+-- DECLINE rather than answer. That is a safe failure and must never be
+-- tallied as a wrong answer -- doing so would make the fallback look worse
+-- than it is and reject it for the wrong reason.
+H.eq("no level requirement means no guess, not a wrong guess",
+     de.CompareBands(48, 0), "no-guess")
+H.isNil("an item off the top of the ladder cannot be judged",
+        de.CompareBands(80, 60))
+
+-- ---------------------------------------------------------------------------
+H.section("de.AuditSummary -- and the decision it exists to make")
+-- ---------------------------------------------------------------------------
+
+local function tallyOf(same, off, worse, none, uncached)
+    return { same = same, ["off-by-one"] = off, worse = worse,
+             ["no-guess"] = none, uncached = uncached or 0, skipped = 0 }
+end
+
+local _, verdict = de.AuditSummary(tallyOf(10, 0, 0, 0, 5), 10)
+H.eq("too few items judged is not a result", verdict, "unclear")
+
+_, verdict = de.AuditSummary(tallyOf(990, 5, 5, 0), 1000)
+H.eq("agreeing 99% of the time earns a place", verdict, "adopt")
+
+_, verdict = de.AuditSummary(tallyOf(700, 200, 100, 0), 1000)
+H.eq("agreeing 70% of the time does not", verdict, "reject")
+
+-- The boundary is a decision, so it is pinned rather than left to drift.
+_, verdict = de.AuditSummary(tallyOf(950, 30, 20, 0), 1000)
+H.eq("95% is the line, and it is inclusive", verdict, "adopt")
+_, verdict = de.AuditSummary(tallyOf(949, 31, 20, 0), 1000)
+H.eq("...just under it is not", verdict, "reject")
+
+local lines = de.AuditSummary(tallyOf(900, 50, 50, 20, 300), 1000)
+H.check("the summary reports what it could NOT judge",
+        (function()
+            local i = 1
+            while i <= table.getn(lines) do
+                if string.find(lines[i], "uncached", 1, true) then return true end
+                i = i + 1
+            end
+            return false
+        end)(),
+        "a run that saw 200 items measured 200 items, not the game")
+
+-- ---------------------------------------------------------------------------
+H.section("the audit walk")
+-- ---------------------------------------------------------------------------
+
+W.AddItem(1001, { name = "Right", quality = GREEN,
+                  equipLoc = "INVTYPE_CHEST", minLevel = 46 })
+W.AddItem(1002, { name = "Wrong", quality = GREEN,
+                  equipLoc = "INVTYPE_CHEST", minLevel = 22 })
+W.AddItem(1003, { name = "Potion", quality = 1, equipLoc = "", minLevel = 0 })
+-- 1004 is deliberately NOT added: the client has never cached it.
+
+A.ilvlData = { [1001] = 48, [1002] = 48, [1003] = 48, [1004] = 48 }
+
+local got = nil
+H.check("the audit starts", de.AuditStart(nil, function(tally, considered)
+    got = { tally = tally, considered = considered }
+end) == true)
+H.check("...and refuses to start twice",
+        de.AuditStart(nil, function() end) == false)
+
+local guard = 0
+while got == nil and guard < 50 do
+    de.AuditStep()
+    guard = guard + 1
+end
+
+H.check("the walk finished", got ~= nil)
+H.eq("the matching item counted as a hit", got.tally.same, 1)
+H.eq("the mismatched one counted against it", got.tally["off-by-one"]
+     + got.tally.worse, 1)
+H.eq("the potion was skipped, not judged", got.tally.skipped, 1)
+H.eq("the uncached item was counted as uncached", got.tally.uncached, 1)
+H.eq("...and only the two real ones were judged", got.considered, 2)
+
 A.ilvlData = savedIlvl
 
 os.exit(H.report("disenchant"))
