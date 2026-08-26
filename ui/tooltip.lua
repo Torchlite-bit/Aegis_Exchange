@@ -21,6 +21,22 @@ local util = A.util
 -- Cool accent for the left column (design's #5ac8fa).
 local ACCENT_R, ACCENT_G, ACCENT_B = 0.35, 0.78, 0.98
 
+-- The amber a 1.12 tooltip uses for a HINT -- the register "Alt+Click to trade
+-- with ..." is written in. The sighting count belongs there rather than in
+-- grey: it is context for everything under it, not a dimmed afterthought, and
+-- grey reads as "ignore me" beside lines that matter.
+local HINT_R, HINT_G, HINT_B = 1.0, 0.72, 0.26
+
+-- Verdict colours, as inline escapes because AddDoubleLine takes ONE colour
+-- for the whole left string and only the parenthesised clause is being
+-- coloured. |r restores the line's own colour, so the label around it stays
+-- the accent.
+--
+-- Green says "destroy it", red says "sell it" -- the two are opposite advice
+-- about an irreversible action, so they must not read alike at a glance.
+local VERDICT_GOOD = "|cff4cd94c"
+local VERDICT_BAD  = "|cffe6663d"
+
 -- Saved originals, keyed by method name.
 tooltip.orig = {}
 
@@ -133,7 +149,7 @@ function tooltip.Extend(gtt, itemId, count)
     local seen = A.db.SeenCount and A.db.SeenCount(itemId) or 0
     if seen > 0 then
         gtt:AddLine("Seen " .. seen .. " times at auction total",
-            0.6, 0.6, 0.6)
+            HINT_R, HINT_G, HINT_B)
     end
 
     -- WHAT IT IS WORTH: the three prices, one group. Buyout first -- today's
@@ -188,22 +204,26 @@ function tooltip.Extend(gtt, itemId, count)
             -- THE VERDICT LIVES IN THE LABEL. On its own line it read as a
             -- footnote to a number the reader had already moved past; beside
             -- the figure it is the answer to why they hovered.
-            local verdict
+            local verdict, good
             local ah = minBuy or market
             if vendor and vendor > 0 and disenchant > vendor * 1.1 then
-                verdict = "worth more than vendor"
+                verdict, good = "worth more than vendor", true
             end
             if ah and ah > 0 and disenchant > ah * 1.1 then
-                verdict = "worth more than the AH"
+                verdict, good = "worth more than the AH", true
             elseif ah and ah > 0 and disenchant * 1.1 < ah then
-                verdict = "sells for more than it breaks for"
+                verdict, good = "sells for more than it breaks for", false
+            end
+            local clause = ""
+            if verdict then
+                clause = " " .. (good and VERDICT_GOOD or VERDICT_BAD)
+                    .. "(" .. verdict .. ")|r"
             end
             if disenchantRows then blank() end
             -- NOT run through money(): a disenchant value is per ITEM. Each
             -- break rolls the table again, so a stack of five is five separate
             -- draws, not five times this number.
-            pair("Disenchant"
-                    .. (verdict and (" (" .. verdict .. ")") or "")
+            pair("Disenchant" .. clause
                     .. ((not disenchantRows) and approx or "") .. ":",
                 util.FormatMoney(disenchant, true))
         elseif deUnpriced and deUnpriced > 0 then

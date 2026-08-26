@@ -1130,6 +1130,29 @@ end
      "                money(disenchant))",
      "tooltip"),
 
+    # The sighting line back to grey. Grey in a tooltip reads as "ignore me",
+    # and this line is context for every figure under it.
+    ("tip-sighting-line-is-grey", "ui/tooltip.lua",
+     "local HINT_R, HINT_G, HINT_B = 1.0, 0.72, 0.26",
+     "local HINT_R, HINT_G, HINT_B = 0.6, 0.6, 0.6",
+     "tooltip"),
+
+    # Both verdicts the same colour. Green says destroy it and red says sell
+    # it -- opposite advice about an irreversible action, read at a glance by
+    # colour before the words are read at all.
+    ("tip-verdict-colours-identical", "ui/tooltip.lua",
+     'local VERDICT_BAD  = "|cffe6663d"',
+     'local VERDICT_BAD  = "|cff4cd94c"',
+     "tooltip"),
+
+    # The good/bad flag never set false, so every verdict renders green --
+    # including "sells for more than it breaks for", which then advises
+    # destroying an item in the colour that means "do it".
+    ("tip-verdict-always-green", "ui/tooltip.lua",
+     '                verdict, good = "sells for more than it breaks for", false',
+     '                verdict, good = "sells for more than it breaks for", true',
+     "tooltip"),
+
     # The sighting count removed. A median resting on one auction and one
     # resting on thirty produce the same figure and are not the same claim,
     # and this line is the only place a player is told which they have.
@@ -1689,8 +1712,11 @@ end
     # THE VERDICT REMOVED. The number survives and the comparison that made
     # the player hover in the first place goes back to being their problem.
     ("tip-verdict-removed", "ui/tooltip.lua",
-     '                    .. (verdict and (" (" .. verdict .. ")") or "")',
-     '                    .. ""',
+     """            if verdict then
+                clause = " " .. (good and VERDICT_GOOD or VERDICT_BAD)
+                    .. "(" .. verdict .. ")|r"
+            end""",
+     "",
      "tooltip"),
 
     # A one-sided verdict: only ever says "break it", never "sell it". Half

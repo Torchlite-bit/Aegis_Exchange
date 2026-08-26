@@ -30,8 +30,8 @@ local function Capture()
     function t:AddDoubleLine(left, right)
         table.insert(self.lines, { left = left, right = right })
     end
-    function t:AddLine(text)
-        table.insert(self.lines, { left = text })
+    function t:AddLine(text, r, g, b)
+        table.insert(self.lines, { left = text, r = r, g = g, b = b })
     end
     function t:Show() self.shown = self.shown + 1 end
     return t
@@ -474,5 +474,67 @@ local partial = Capture()
 A.tooltip.Extend(partial, 911, 1)
 H.isNil("an unpriced reagent gives no cost rather than a low one",
         lineFor(partial, "Crafting Cost:"))
+
+-- ---------------------------------------------------------------------------
+H.section("the two lines that are read by colour")
+-- ---------------------------------------------------------------------------
+
+-- THE SIGHTING COUNT is a hint, not a footnote. It was grey, which in a
+-- tooltip reads as "ignore me" -- and it is context for every figure under it.
+-- Amber is the register 1.12 writes "Alt+Click to ..." in.
+A.db.SetSetting("tipDisenchantRows", true)
+shiftHeld = false
+-- An earlier section clears every market price to exercise the unpriced path,
+-- so both the materials AND the item's own sightings have to be re-recorded
+-- here. Shared fixtures have already quietly changed what three tests in this
+-- file were measuring.
+A.db.RecordAuction(11176, 5000, "Dream Dust")
+A.db.RecordAuction(11175, 20000, "Greater Nether Essence")
+A.db.RecordAuction(11178, 300000, "Large Radiant Shard")
+local n = 1
+while n <= 12 do A.db.RecordAuction(900, 1000, "Test Chest"); n = n + 1 end
+
+local c = Capture()
+A.tooltip.Extend(c, 900, 1)
+local seenLine
+for i = 1, table.getn(c.lines) do
+    if string.find(c.lines[i].left or "", "times at auction total", 1, true) then
+        seenLine = c.lines[i]
+    end
+end
+H.check("the sighting line exists", seenLine ~= nil)
+H.check("...and is not grey", seenLine and not (seenLine.r == seenLine.g
+        and seenLine.g == seenLine.b), "r/g/b were equal")
+H.check("...it is warm -- red above green above blue",
+        seenLine and seenLine.r > seenLine.g and seenLine.g > seenLine.b)
+
+-- THE VERDICT is opposite advice about an irreversible action: green says
+-- destroy it, red says sell it. They must not read alike at a glance, and the
+-- clause is coloured INLINE because AddDoubleLine takes one colour for the
+-- whole left string.
+local good = valueLinePrefixed(c, "Disenchant")
+H.check("a positive verdict is present",
+        good and string.find(good.left, "worth more", 1, true) ~= nil,
+        good and good.left)
+H.check("...and carries the green escape",
+        good and string.find(good.left, "|cff4cd94c", 1, true) ~= nil,
+        good and good.left)
+
+-- The reverse: an item listing far above what it breaks for.
+W.AddItem(912, { name = "Dear Chest", quality = GREEN,
+                 equipLoc = "INVTYPE_CHEST", itemLevel = 48,
+                 type = "Armor", subType = "Cloth" })
+A.db.RecordAuction(912, 99999999, "Dear Chest")
+local bad = Capture()
+A.tooltip.Extend(bad, 912, 1)
+local badLine = valueLinePrefixed(bad, "Disenchant")
+H.check("a negative verdict is present",
+        badLine and string.find(badLine.left, "sells for more", 1, true) ~= nil,
+        badLine and badLine.left)
+H.check("...and carries the RED escape, not the green",
+        badLine and string.find(badLine.left, "|cffe6663d", 1, true) ~= nil,
+        badLine and badLine.left)
+H.isNil("...and not both",
+        badLine and string.find(badLine.left, "|cff4cd94c", 1, true))
 
 os.exit(H.report("tooltip"))

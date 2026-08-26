@@ -12,6 +12,19 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.49.1]
+
+### Changed
+- **The sighting count is amber, not grey.** It reads in the same register as
+  1.12's "Alt+Click to …" hints. Grey in a tooltip means *ignore me*, and this
+  line is context for every figure beneath it.
+
+- **The verdict is coloured: green for "worth more than …", red for "sells for
+  more than it breaks for".** They are opposite advice about an irreversible
+  action, so they must not read alike at a glance — the colour lands before the
+  words do. Written as an inline escape because `AddDoubleLine` takes one colour
+  for the whole left string and only the parenthesised clause is being coloured.
+
 ## [1.49.0]
 
 ### Changed
@@ -3552,6 +3565,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.49.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.48.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.47.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
