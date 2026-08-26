@@ -476,7 +476,39 @@ function W.SetPage(rows, totalAuctions)
     W.totalAuctions = totalAuctions or table.getn(W.page)
 end
 
+-- YOUR OWN auctions, and they are PAGED like the browse list. The client hands
+-- back a BATCH of at most 50 plus the TOTAL you actually own, and CancelAuction
+-- indexes into the batch -- which is why the addon shows one page rather than
+-- gathering them all.
+--
+-- The mock returned 0 for "owner", so a suite could not tell a paged list from
+-- an unpaged one, and the addon read only page 0 for its whole life.
+W.owned = {}          -- every auction you own, across all pages
+W.ownerPage = 0
+W.OWNER_PAGE = 50
+
+function W.SetOwned(rows) W.owned = rows or {}; W.ownerPage = 0 end
+
+local function ownerBatch()
+    local out, first = {}, W.ownerPage * W.OWNER_PAGE
+    local i = 1
+    while i <= W.OWNER_PAGE do
+        local r = W.owned[first + i]
+        if not r then break end
+        table.insert(out, r)
+        i = i + 1
+    end
+    return out
+end
+
+function GetOwnerAuctionItems(page)
+    W.ownerPage = page or 0
+end
+
 function GetNumAuctionItems(list)
+    if list == "owner" then
+        return table.getn(ownerBatch()), table.getn(W.owned)
+    end
     if list ~= "list" then return 0, 0 end
     return table.getn(W.page), W.totalAuctions
 end
@@ -484,6 +516,13 @@ end
 -- EXACTLY the 1.12 twelve, in order. `owner` is nil until the name resolves,
 -- and rows may say so by setting ownerUnresolved.
 function GetAuctionItemInfo(list, i)
+    if list == "owner" then
+        local r = ownerBatch()[i]
+        if not r then return nil end
+        return r.name, r.texture or "icon", r.count or 1, r.quality or 1,
+               nil, r.level or 1, r.minBid or 0, 0,
+               r.buyout or 0, r.bidAmount or 0, r.highBidder, "me"
+    end
     if list ~= "list" then return nil end
     local r = W.page[i]
     if not r then return nil end
@@ -495,13 +534,15 @@ function GetAuctionItemInfo(list, i)
 end
 
 function GetAuctionItemLink(list, i)
-    local r = (list == "list") and W.page[i]
+    local r
+    if list == "owner" then r = ownerBatch()[i] else r = W.page[i] end
     return r and r.link or nil
 end
 
 -- 1-4 on 1.12, indexing AUCTION_TIME_LEFT1..4. Never a string.
 function GetAuctionItemTimeLeft(list, i)
-    local r = (list == "list") and W.page[i]
+    local r
+    if list == "owner" then r = ownerBatch()[i] else r = W.page[i] end
     return r and (r.timeLeft or 4) or nil
 end
 
@@ -582,6 +623,8 @@ function W.Reset()
     W.bags          = {}
     W.cursor        = nil
     W.sellSlot      = nil
+    W.owned         = {}
+    W.ownerPage     = 0
     W.tooltipLines  = {}
     W.money         = 500000
     W.now           = 1700000000

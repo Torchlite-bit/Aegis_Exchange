@@ -186,11 +186,50 @@ end
 -- shown and that field can still be nil -- which threw
 --   Blizzard_AuctionUI.lua:836: attempt to perform arithmetic on field 'page'
 -- Seed it (harmless: 0 is exactly what their OnShow sets) before asking.
-function sell.RequestOwnerAuctions()
+-- THE OWNER LIST IS PAGED, and this addon spent its whole life reading only
+-- page 0.
+--
+-- GetNumAuctionItems("owner") returns (BATCH, TOTAL): the batch is what the
+-- client is holding right now, capped at 50, and the total is how many auctions
+-- you actually have. Turtle's cap is 120, so anyone with a full book saw fewer
+-- than half of them and nothing said so.
+--
+-- WHY THIS PAGES RATHER THAN ACCUMULATING every page into one list. CancelAuction
+-- takes an index into the page the CLIENT currently holds. Gather 120 auctions
+-- into one table and the index stored against row 80 belongs to page 2 -- cancel
+-- it while the client is on page 1 and you destroy a different auction, lose its
+-- deposit, and mail the wrong item back. Showing exactly the page the client is
+-- on makes every index correct by construction.
+sell.OWNER_PAGE_SIZE = 50
+
+-- Ask for one page (0-indexed, like QueryAuctionItems). The reply arrives as
+-- AUCTION_OWNED_LIST_UPDATE.
+function sell.RequestOwnerAuctions(page)
     if AuctionFrameAuctions and AuctionFrameAuctions.page == nil then
         AuctionFrameAuctions.page = 0
     end
-    if GetOwnerAuctionItems then GetOwnerAuctionItems(0) end
+    page = page or 0
+    if page < 0 then page = 0 end
+    sell.ownerPage = page
+    -- Kept in step with the Blizzard frame's own idea of the page: its
+    -- AUCTION_OWNED_LIST_UPDATE handler does arithmetic on this field, and it
+    -- is still registered even though the window is hidden.
+    if AuctionFrameAuctions then AuctionFrameAuctions.page = page end
+    if GetOwnerAuctionItems then GetOwnerAuctionItems(page) end
+end
+
+-- Which page the client is holding, and how many there are in total.
+-- Returns page (0-indexed), pageCount, total.
+function sell.OwnerPageInfo()
+    local _, total = GetNumAuctionItems("owner")
+    total = total or 0
+    local pages = math.ceil(total / sell.OWNER_PAGE_SIZE)
+    if pages < 1 then pages = 1 end
+    local page = sell.ownerPage or 0
+    -- Clamp: auctions expire and sell while you are looking at them, so the
+    -- page you were on can stop existing.
+    if page > pages - 1 then page = pages - 1 end
+    return page, pages, total
 end
 
 -- Read your active auctions from the "owner" list into plain rows. Bid/buyout

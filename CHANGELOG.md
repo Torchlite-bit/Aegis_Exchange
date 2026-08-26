@@ -53,10 +53,28 @@ correctly.
   irreversible act rather than showing a number. It also wants a **25%** edge,
   where the tooltip's verdict wants 10%: the value is an average over a
   probability table, and one break can return the cheapest row.
+- **Page navigation on the Auctions tab.** The owner list is paged at 50 and
+  Turtle's cap is 120, so a full book needs three pages — and only the first
+  existed. The summary now counts what you **own** rather than what the page
+  holds, and the status line says which page you are on.
+
+  Deliberately paged rather than gathered into one list: `CancelAuction` indexes
+  into the page the *client* is holding, so a combined list would point row 80's
+  Cancel at a different auction — destroying the wrong one, forfeiting its
+  deposit and mailing the wrong item back. Showing exactly the client's page
+  makes every index correct by construction. The trade is that undercut counts
+  are per page, which the status line states.
+
 - **`/aex diag`** and **`/aex cache`**, which is how three of the bugs below were
   found at all.
 
 ### And fixes, the notable ones
+- **The Auctions tab showed only 50 of your auctions.**
+  `GetNumAuctionItems("owner")` returns *(batch, total)* and the batch was read
+  as the whole list, so two thirds of a full book were invisible with nothing
+  saying so.
+- **Row heights on the Auctions, Crafting and History tables** now match the Buy
+  and Sell tabs (26px). They were 20–21 and read as a different, denser UI.
 - **The disenchant tooltip line had never worked on a real client** — an item id
   was passed to `GetItemInfo`, which 1.12 does not accept, and separately a
   client that appends a value to the tuple shifted four fields.

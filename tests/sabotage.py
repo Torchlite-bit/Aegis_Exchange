@@ -1592,6 +1592,39 @@ end
      "    if not itemId then return nil end\n    bestSale = bestSale or 0",
      "clientdata"),
 
+    # ---- the paged owner list --------------------------------------------
+    #
+    # The batch read as the total is what hid two thirds of a full auction
+    # book for the life of the addon, and nothing said so: fifty rows looks
+    # like a complete list.
+
+    ("owner-count-reads-the-batch", "core/sell.lua",
+     "    local _, total = GetNumAuctionItems(\"owner\")\n    return total or 0",
+     "    local batch = GetNumAuctionItems(\"owner\")\n    return batch or 0",
+     "sellslot"),
+
+    # The page argument dropped, so every request fetches page 0 and Next
+    # appears to do nothing.
+    ("owner-always-requests-page-zero", "core/sell.lua",
+     "    if GetOwnerAuctionItems then GetOwnerAuctionItems(page) end",
+     "    if GetOwnerAuctionItems then GetOwnerAuctionItems(0) end",
+     "sellslot"),
+
+    # Page count off by one at the boundary: exactly 100 auctions reports
+    # three pages, and the third is empty.
+    ("owner-page-count-rounds-up-wrong", "core/sell.lua",
+     "    local pages = math.ceil(total / sell.OWNER_PAGE_SIZE)",
+     "    local pages = math.floor(total / sell.OWNER_PAGE_SIZE) + 1",
+     "sellslot"),
+
+    # The clamp removed. Auctions expire while you are looking at them, so the
+    # page you are on can stop existing -- and then the list reads empty with
+    # no way back.
+    ("owner-page-not-clamped", "core/sell.lua",
+     "    if page > pages - 1 then page = pages - 1 end",
+     "",
+     "sellslot"),
+
     # ---- the deposit formula --------------------------------------------
     #
     # Replaced a home-grown 2.5% plus a stack-size fudge that appeared in no

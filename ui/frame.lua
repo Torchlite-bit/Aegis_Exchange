@@ -7017,7 +7017,7 @@ end
 --         populated when you click a reagent.
 -- ---------------------------------------------------------------------------
 
-local CRAFT_ROWS,  CRAFT_ROW_H  = 11, 20
+local CRAFT_ROWS,  CRAFT_ROW_H  = 9, 26
 local CRAFT_ROWS_MAX  = 34
 local CSIDE_ROWS,  CSIDE_ROW_H  = 10, 18
 local CSIDE_ROWS_MAX  = 38
@@ -7716,7 +7716,7 @@ end)
 -- and a per-row Cancel.
 -- ---------------------------------------------------------------------------
 
-local AUC_ROWS, AUC_ROW_H = 12, 21
+local AUC_ROWS, AUC_ROW_H = 10, 26
 local AUC_ROWS_MAX = 32
 -- Row-relative column x / width.
 local ACX = { name = 2, qty = 176, unit = 216, stack = 300, time = 392,
@@ -7759,6 +7759,32 @@ function ui.BuildAuctionsTab()
     cancelAll:SetText("Cancel all undercuts")
     cancelAll:SetScript("OnClick", function() ui.ConfirmCancelAllUndercut() end)
     ui.aucCancelAllBtn = cancelAll
+
+    -- PAGE NAVIGATION. The owner list is paged at 50 and Turtle's cap is 120,
+    -- so a full book needs three pages -- and until now only the first existed.
+    --
+    -- Deliberately NOT one accumulated list: CancelAuction indexes into the
+    -- page the CLIENT holds, so showing exactly that page is what keeps every
+    -- Cancel pointed at the auction the player clicked. See the note above
+    -- sell.RequestOwnerAuctions.
+    local aucNext = ui.MakeButton(panel, "quiet", "AegisExchangeAucNextButton")
+    aucNext:SetWidth(24); aucNext:SetHeight(20)
+    aucNext:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -34)
+    aucNext:SetText(">")
+    aucNext:SetScript("OnClick", function() ui.AucStepPage(1) end)
+    ui.aucNextBtn = aucNext
+
+    ui.aucPageText = panel:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlightSmall")
+    ui.aucPageText:SetPoint("RIGHT", aucNext, "LEFT", -6, 0)
+    ui.aucPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    local aucPrev = ui.MakeButton(panel, "quiet", "AegisExchangeAucPrevButton")
+    aucPrev:SetWidth(24); aucPrev:SetHeight(20)
+    aucPrev:SetPoint("RIGHT", ui.aucPageText, "LEFT", -6, 0)
+    aucPrev:SetText("<")
+    aucPrev:SetScript("OnClick", function() ui.AucStepPage(-1) end)
+    ui.aucPrevBtn = aucPrev
 
     ui.aucStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.aucStatus:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -34)
@@ -7885,11 +7911,22 @@ function ui.SortAuctions(all, sortKey, dir)
 end
 
 -- Read the owner list into ui.aucAuctions; `request` also pings the server.
-function ui.RefreshAuctions(request)
+function ui.RefreshAuctions(request, page)
     if not ui.aucBuilt then return end
-    if request then A.sell.RequestOwnerAuctions() end
+    if request then A.sell.RequestOwnerAuctions(page or 0) end
     ui.aucAuctions = A.sell.OwnerAuctions()
     ui.UpdateAuctionsList()
+end
+
+-- Move `delta` pages and ask the server for that one. The reply lands as
+-- AUCTION_OWNED_LIST_UPDATE, which repaints.
+function ui.AucStepPage(delta)
+    local page, pages = A.sell.OwnerPageInfo()
+    local want = page + delta
+    if want < 0 then want = 0 end
+    if want > pages - 1 then want = pages - 1 end
+    if want == page then return end
+    ui.RefreshAuctions(true, want)
 end
 
 function ui.UpdateAuctionsList()
@@ -7901,7 +7938,26 @@ function ui.UpdateAuctionsList()
     local total = table.getn(rows)
 
     local cap = A.sell.CAP or 120
-    ui.aucSummary:SetText("Your auctions: " .. total .. " / " .. cap)
+    local page, pages, owned = A.sell.OwnerPageInfo()
+
+    -- The count is what you OWN, not what this page shows. Reading the batch
+    -- here is what made a full book look like fifty auctions.
+    ui.aucSummary:SetText("Your auctions: " .. owned .. " / " .. cap)
+
+    if ui.aucPageText then
+        if pages > 1 then
+            ui.aucPageText:SetText("Page " .. (page + 1) .. " / " .. pages)
+            ui.aucPrevBtn:Show(); ui.aucNextBtn:Show()
+            if page <= 0 then ui.aucPrevBtn:Disable()
+            else ui.aucPrevBtn:Enable() end
+            if page >= pages - 1 then ui.aucNextBtn:Disable()
+            else ui.aucNextBtn:Enable() end
+        else
+            -- One page is not a paged list; the controls would be furniture.
+            ui.aucPageText:SetText("")
+            ui.aucPrevBtn:Hide(); ui.aucNextBtn:Hide()
+        end
+    end
 
     -- Label the bulk-cancel with how many are actually undercut, and disable it
     -- when there's nothing to do.
@@ -7917,6 +7973,12 @@ function ui.UpdateAuctionsList()
     end
     if total == 0 then
         ui.aucStatus:SetText("No active auctions. Post some on the Sell tab.")
+    elseif pages > 1 then
+        -- Say plainly that the undercut count is per page, because "Cancel 3
+        -- undercut" on a three-page book reads as three in total.
+        ui.aucStatus:SetText("Cancel refunds the item (deposit is forfeit)."
+            .. "  Showing page " .. (page + 1) .. " of " .. pages
+            .. " \226\128\148 undercut counts are for this page.")
     else
         ui.aucStatus:SetText("Cancel refunds the item (deposit is forfeit)."
             .. "  Undercut = someone is cheaper than you.")
@@ -8095,7 +8157,7 @@ local HIST_HEADER_DEFS = {
     { key = "amount", text = "Amount", just = "RIGHT" },
 }
 
-local HIST_ROWS, HIST_ROW_H = 12, 20
+local HIST_ROWS, HIST_ROW_H = 10, 26
 local HIST_ROWS_MAX = 34
 -- Period options: label + window seconds (0 = all time).
 local HIST_PERIODS = {

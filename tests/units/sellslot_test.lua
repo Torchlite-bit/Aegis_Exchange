@@ -232,4 +232,75 @@ W.npcFaction = "Alliance"
 H.isNil("no vendor price, no estimate", sell.DepositAmount(nil, 10, 1, 120))
 H.isNil("no duration, no estimate", sell.DepositAmount(100, 10, 1, 0))
 
+-- ---------------------------------------------------------------------------
+H.section("the owner list is paged")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR. GetNumAuctionItems("owner") returns (BATCH, TOTAL):
+-- the batch is what the client holds right now, capped at 50, and the total is
+-- how many auctions you have. The addon read the batch as if it were the whole
+-- list and only ever asked for page 0 -- so with Turtle's 120-auction cap, a
+-- full book showed fifty auctions and nothing said otherwise.
+
+local owned = {}
+local oi = 1
+while oi <= 120 do
+    table.insert(owned, { name = "Auction " .. oi, count = 1,
+        minBid = 100 * oi, buyout = 200 * oi,
+        link = "|Hitem:" .. (5000 + oi) .. ":0:0:0|h[a]|h" })
+    oi = oi + 1
+end
+W.SetOwned(owned)
+
+sell.RequestOwnerAuctions(0)
+H.eq("the count is what you OWN, not the batch", sell.OwnerCount(), 120)
+H.eq("...and a page holds fifty", table.getn(sell.OwnerAuctions()), 50)
+
+local page, pages, total = sell.OwnerPageInfo()
+H.eq("page is 0-indexed", page, 0)
+H.eq("120 auctions is three pages", pages, 3)
+H.eq("...of 120", total, 120)
+
+-- PAGE 2 HOLDS DIFFERENT AUCTIONS. A version that requests a page and then
+-- reads page 0 anyway looks exactly like a working one until you compare rows.
+sell.RequestOwnerAuctions(1)
+local second = sell.OwnerAuctions()
+H.eq("the second page also holds fifty", table.getn(second), 50)
+H.eq("...starting where the first left off", second[1].name, "Auction 51")
+H.eq("...and page reports as 1", (sell.OwnerPageInfo()), 1)
+
+-- The last page is the remainder, not a padded fifty.
+sell.RequestOwnerAuctions(2)
+H.eq("the last page holds the remainder",
+     table.getn(sell.OwnerAuctions()), 20)
+
+-- CLAMPED, because auctions expire and sell while you are looking at them and
+-- the page you were on can stop existing.
+W.SetOwned({ owned[1] })
+sell.ownerPage = 2
+local p2, pg2 = sell.OwnerPageInfo()
+H.eq("a page past the end clamps back", p2, 0)
+H.eq("...to the one page that is left", pg2, 1)
+
+-- AN EXACT MULTIPLE, which is the only count that can tell ceil() from
+-- floor()+1: 120 gives three either way, 100 gives two or a phantom third
+-- page holding nothing.
+local hundred = {}
+oi = 1
+while oi <= 100 do
+    table.insert(hundred, { name = "A" .. oi, count = 1, buyout = 100,
+        link = "|Hitem:" .. (7000 + oi) .. ":0:0:0|h[a]|h" })
+    oi = oi + 1
+end
+W.SetOwned(hundred)
+sell.RequestOwnerAuctions(0)
+local _, pgExact = sell.OwnerPageInfo()
+H.eq("exactly 100 auctions is two pages, not three", pgExact, 2)
+
+-- An empty book is one page, not zero -- pages are 1-based in the label and a
+-- count of zero would render "Page 1 / 0".
+W.SetOwned({})
+local _, pg0 = sell.OwnerPageInfo()
+H.eq("no auctions still reports one page", pg0, 1)
+
 os.exit(H.report("sellslot"))
