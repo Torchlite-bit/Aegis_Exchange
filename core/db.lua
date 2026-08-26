@@ -464,6 +464,19 @@ function db.MinBuyout(itemId)
     return rec.daily[newest]
 end
 
+-- How many auctions we have ever recorded for this item.
+--
+-- Sightings, not days: this is the "seen 18 times at auction total" figure, and
+-- it answers a different question from db.DayCount. One busy afternoon and a
+-- month of quiet trading can produce the same day count and wildly different
+-- sighting counts, and it is the sighting count a reader reads as confidence.
+function db.SeenCount(itemId)
+    if not db.account then return 0 end
+    local items = db.Items()
+    local rec = items and items[itemId]
+    return (rec and rec.seen) or 0
+end
+
 -- How many distinct DAYS we hold a price for. The confidence figure behind
 -- every market number: one day's data and thirty days' data produce the same
 -- kind of answer from db.MarketValue and are not the same kind of fact.

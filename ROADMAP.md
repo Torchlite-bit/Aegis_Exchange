@@ -2290,6 +2290,29 @@ would fix a SHIFTED field. The diagnostic showed the field was absent, so it
 could never fire, and the sabotage layer said so by refusing to be caught. An
 unexercised guard is worse than none: it reads as coverage.
 
+#### The deposit, and a factor nobody measured — v1.48.0
+
+The artifact flagged this and it then sat unbuilt for four releases: deposit is
+a pure function of vendor price, and once the sell slot supplies that (v1.42.0)
+the real number is computable. What was actually there was **2.5% plus a
+stack-size fudge**, matching no client, times 0.6.
+
+The vanilla rule is `floor(vendorUnit * rate * stackSize) * stackCount *
+(minutes / 120)`, rate 5% at a faction auctioneer and **25% at a neutral one**.
+That second case had never been handled -- the one auction house where the
+deposit actually hurts.
+
+**`TURTLE_DEPOSIT_FACTOR` remains 0.6 and remains unverified.** It is a claim
+about what the SERVER charges and nothing in this repo measures it. Tuning it
+would have been the same mistake as the formula it was compensating for, so
+instead `/aex diag` prints our figure beside the client's own
+`CalculateAuctionDeposit` for a slotted item. **Settle it with that readout
+before touching the number.**
+
+Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
+and always answered "Alliance", so a neutral auctioneer could not be modelled
+at all -- and the addon ignored that case for exactly as long.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

@@ -11248,6 +11248,27 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         local v, vs, un, first = A.de.ValueOf(itemId, A.de.MarketPrice)
         ChatMsg("  de.ValueOf=" .. tostring(v) .. " (" .. tostring(vs) .. ")"
             .. " unpriced=" .. tostring(un) .. " first=" .. tostring(first))
+
+        -- DEPOSIT, ours beside the client's. The only comparison that can
+        -- settle whether TURTLE_DEPOSIT_FACTOR is a real correction or a
+        -- number someone once guessed -- and it needs an item in the sell
+        -- slot, because CalculateAuctionDeposit only answers for that one.
+        local slotted = A.sell.GetItem()
+        if slotted then
+            local mins = 480
+            local client = CalculateAuctionDeposit
+                and CalculateAuctionDeposit(mins) or nil
+            local ours = A.sell.DepositAmount(
+                slotted.price / (slotted.count or 1), slotted.count or 1,
+                1, mins)
+            ChatMsg("  deposit @480m: client=" .. tostring(client)
+                .. " formula=" .. tostring(ours and math.floor(ours))
+                .. " rate=" .. tostring(A.sell.DepositRate())
+                .. " turtleFactor=" .. tostring(A.sell.TURTLE_DEPOSIT_FACTOR))
+        else
+            ChatMsg("  deposit: put an item in the Sell slot to compare"
+                .. " ours against the client's")
+        end
         return
     end
     if string.find(cmd, "cache", 1, true) then

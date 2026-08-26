@@ -38,9 +38,52 @@ sell.DEFAULT_DURATION = 480   -- 24h, matching the stock UI's default radio
 sell.CAP = 120     -- Turtle account-wide auction cap
 sell.CUT = 0.05    -- 5% consignment cut taken on a sale
 
+-- THE VANILLA DEPOSIT FORMULA, which is not a guess:
+--
+--   floor(vendorUnit * rate * stackSize) * stackCount * (minutes / 120)
+--
+-- `rate` is 5% at your own faction's auction house and 25% at a neutral one --
+-- the neutral penalty, which this addon ignored entirely until now and which
+-- makes a real difference to whether a posting is worth it. `minutes / 120`
+-- turns the duration into units of two hours: 1, 4, 12 in vanilla.
+--
+-- This replaces a home-grown 2.5% plus a stack-size fudge that appeared in no
+-- client and matched nothing. aux uses the formula above, and it is what the
+-- vanilla client's own CalculateAuctionDeposit computes.
+sell.DEPOSIT_RATE_HOME    = 0.05
+sell.DEPOSIT_RATE_NEUTRAL = 0.25
+
 -- Turtle's shown deposit is inflated relative to what actually gets charged;
 -- scale by this to approximate. The result is ALWAYS presented as "approx".
+--
+-- UNVERIFIED, and flagged as such. It is a claim about what the server charges,
+-- carried since before the formula above was right, and nothing in this repo
+-- measures it. `/aex diag` now prints our figure beside the client's
+-- CalculateAuctionDeposit for a slotted item, which is the comparison that
+-- would settle it. Do not tune this number without that readout.
 sell.TURTLE_DEPOSIT_FACTOR = 0.6
+
+-- Which rate applies where the player is standing. UnitFactionGroup("npc")
+-- answers only at a faction auctioneer; at a neutral one it is nil.
+function sell.DepositRate()
+    if UnitFactionGroup and UnitFactionGroup("npc") then
+        return sell.DEPOSIT_RATE_HOME
+    end
+    return sell.DEPOSIT_RATE_NEUTRAL
+end
+
+-- The formula itself, with nothing read from the world. One writer, so the
+-- slotted path and the bag preview cannot drift apart -- which is how they
+-- came to disagree in the first place.
+function sell.DepositAmount(vendorUnit, stackSize, stackCount, minutes, rate)
+    if not vendorUnit or vendorUnit <= 0 then return nil end
+    if not minutes or minutes <= 0 then return nil end
+    stackSize  = stackSize  or 1
+    stackCount = stackCount or 1
+    rate = rate or sell.DepositRate()
+    return math.floor(vendorUnit * rate * stackSize)
+        * stackCount * (minutes / 120)
+end
 
 -- ---------------------------------------------------------------------------
 -- Reads
@@ -320,11 +363,13 @@ function sell.EstimateDeposit(minutes)
     if CalculateAuctionDeposit then
         base = CalculateAuctionDeposit(minutes)
     else
-        -- Fallback: the vanilla formula, from the slot item directly.
+        -- Fallback: the same formula the bag preview uses, from the slot item.
+        -- `it.price` is the vendor price for the WHOLE stack, so the unit price
+        -- is what the formula wants.
         local it = sell.GetItem()
         if not it then return 0, true end
-        base = math.floor(it.price * (minutes / 120)
-            * (1 + (it.maxStack - it.count) * 0.05) * 0.025)
+        base = sell.DepositAmount(it.price / (it.count or 1),
+            it.count or 1, 1, minutes)
     end
     base = base or 0
     if A.isTurtle then
@@ -936,13 +981,9 @@ end
 -- unit price (nil if we have no vendor data). Turtle-scaled + approximate.
 function sell.DepositFor(itemId, stackSize, minutes, maxStack)
     local vendorUnit = A.db.GetVendor(itemId)
-    if not vendorUnit or vendorUnit <= 0 or not minutes or minutes <= 0 then
-        return nil
-    end
-    maxStack = maxStack or stackSize
-    local price = vendorUnit * stackSize
-    local base = math.floor(price * (minutes / 120)
-        * (1 + (maxStack - stackSize) * 0.05) * 0.025)
+    local base = sell.DepositAmount(vendorUnit, stackSize, 1, minutes)
+    if not base then return nil end
+    base = math.floor(base)
     if A.isTurtle then base = math.floor(base * sell.TURTLE_DEPOSIT_FACTOR) end
     return base
 end

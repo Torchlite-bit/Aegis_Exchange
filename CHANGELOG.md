@@ -12,6 +12,61 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.48.0]
+
+### Fixed
+- **The deposit was computed with an invented formula.** It used 2.5% of vendor
+  value plus a stack-size fudge that appears in no client and matches nothing,
+  then scaled the result by 0.6. The real vanilla rule is
+
+  ```
+  floor(vendorUnit * rate * stackSize) * stackCount * (minutes / 120)
+  ```
+
+  with `rate` **5%** at your own faction's auctioneer and **25%** at a neutral
+  one — and the neutral case was not handled at all, understating the cost of
+  the one auction house where it matters most. `minutes / 120` turns the
+  duration into two-hour units, which is how Turtle's ×3 durations flow
+  straight through.
+
+  One writer now, shared by the sell slot and the bag preview, so the two
+  cannot drift apart the way they had.
+
+- **`TURTLE_DEPOSIT_FACTOR` is flagged as unverified.** It is a claim about what
+  the server charges, carried since before the formula above was right, and
+  nothing measured it. **`/aex diag` now prints our figure beside the client's
+  own `CalculateAuctionDeposit`** for whatever is in the sell slot — the
+  comparison that would settle it. Left at 0.6 rather than tuned on a guess.
+
+### Changed
+- **The tooltip is laid out in three groups**, label left and value right:
+  auction house, vendor, disenchant.
+
+  ```
+  Seen 18 times at auction total
+
+  Aegis Buyout:                        11s 96c
+  Aegis Market:                        11s 96c
+
+  Sell to Vendor:                       7s 40c
+
+  Class:                                Weapon
+  Disenchant Value: (approx)           39s 41c
+    worth more than the AH
+  Disenchants Into:
+      81%  Lesser Magic Essence  x1.5
+      19%  Strange Dust  x1.5
+  ```
+
+  The sighting count leads instead of riding as a suffix on the market value:
+  it qualifies every figure below it, not one of them. Buyout sits above Market
+  because today's cheapest is what a buyer acts on and the median is context
+  for it. **Class** is new — armour and weapons break into different things, so
+  it is part of reading the split rather than trivia.
+
+  The inline `2d` and `(100% of mkt)` suffixes are gone, replaced by the
+  sighting line. Say the word if you want the percentage back.
+
 ## [1.47.1]
 
 ### Fixed
@@ -3453,6 +3508,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.48.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.47.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.47.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

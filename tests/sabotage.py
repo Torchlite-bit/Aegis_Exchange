@@ -1126,10 +1126,31 @@ end
     # beside it DO multiply, which is what makes routing it through the same
     # helper the obvious and wrong edit.
     ("tip-disenchant-multiplied-by-stack", "ui/tooltip.lua",
-     """            util.FormatMoney(disenchant, true),
-            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)""",
-     """            money(disenchant),
-            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)""",
+     "                util.FormatMoney(disenchant, true))",
+     "                money(disenchant))",
+     "tooltip"),
+
+    # The sighting count removed. A median resting on one auction and one
+    # resting on thirty produce the same figure and are not the same claim,
+    # and this line is the only place a player is told which they have.
+    ("tip-drops-the-sighting-count", "ui/tooltip.lua",
+     '        gtt:AddLine("Seen " .. seen .. " times at auction total",',
+     '        gtt:AddLine("",',
+     "tooltip"),
+
+    # The groups run together. An empty string collapses to nothing on 1.12,
+    # so a separator written as "" is not a separator -- and the tooltip
+    # becomes one undifferentiated block.
+    ("tip-blank-lines-collapse", "ui/tooltip.lua",
+     '    local function blank() gtt:AddLine(" ") end',
+     '    local function blank() gtt:AddLine("") end',
+     "tooltip"),
+
+    # Market above Buyout. Today's cheapest is what a buyer acts on; the
+    # median is context for it, not the headline.
+    ("tip-market-above-buyout", "ui/tooltip.lua",
+     '        if minBuy then pair("Aegis Buyout:", money(minBuy)) end\n        if market then pair("Aegis Market:", money(market)) end',
+     '        if market then pair("Aegis Market:", money(market)) end\n        if minBuy then pair("Aegis Buyout:", money(minBuy)) end',
      "tooltip"),
 
     # The label that separates an estimate from a measurement. Nothing about
@@ -1488,6 +1509,39 @@ end
      "    return FromInfo(info, \"sellPrice\") or (util.ItemInfo(itemId)\n        and util.ItemInfo(itemId).sellPrice)",
      "clientdata"),
 
+    # ---- the deposit formula --------------------------------------------
+    #
+    # Replaced a home-grown 2.5% plus a stack-size fudge that appeared in no
+    # client and matched nothing. These plant the ways the real rule goes
+    # wrong -- all silently, since a deposit estimate is never checked
+    # against what the server actually charges.
+
+    # The neutral auction house charges FIVE TIMES the deposit, and the addon
+    # ignored that case entirely until this rule landed.
+    ("deposit-ignores-the-neutral-ah", "core/sell.lua",
+     "    if UnitFactionGroup and UnitFactionGroup(\"npc\") then\n        return sell.DEPOSIT_RATE_HOME\n    end\n    return sell.DEPOSIT_RATE_NEUTRAL",
+     "    return sell.DEPOSIT_RATE_HOME",
+     "sellslot"),
+
+    # Duration ignored: a 72h posting costs the same as a 2h one.
+    ("deposit-ignores-duration", "core/sell.lua",
+     "        * stackCount * (minutes / 120)",
+     "        * stackCount",
+     "sellslot"),
+
+    # The floor moved outside the per-stack term. Not the same arithmetic, and
+    # the error compounds across twelve duration units.
+    ("deposit-floors-the-total-instead", "core/sell.lua",
+     "    return math.floor(vendorUnit * rate * stackSize)\n        * stackCount * (minutes / 120)",
+     "    return math.floor(vendorUnit * rate * stackSize\n        * stackCount * (minutes / 120))",
+     "sellslot"),
+
+    # The old invented rate, back.
+    ("deposit-rate-is-invented", "core/sell.lua",
+     "sell.DEPOSIT_RATE_HOME    = 0.05",
+     "sell.DEPOSIT_RATE_HOME    = 0.025",
+     "sellslot"),
+
     # ---- vendor price learned from the sell slot ------------------------
     #
     # GetAuctionSellItemInfo reports the price of the WHOLE STACK. This file
@@ -1614,20 +1668,6 @@ end
      "clientdata"),
 
     # ---- the multi-section tooltip --------------------------------------
-
-    # The day count behind a market median. One day and thirty days produce
-    # the same-looking figure and are not the same claim.
-    ("tip-market-drops-the-day-count", "ui/tooltip.lua",
-     '            right = right .. "  |cff9d8b5a" .. days .. "d|r"',
-     "",
-     "tooltip"),
-
-    # Today's cheapest listing shown without the fraction it only means
-    # anything as. Every reader then does the division themselves.
-    ("tip-minbuyout-drops-the-percentage", "ui/tooltip.lua",
-     '            right = right .. "  |cff9d8b5a("',
-     '            right = right .. "  |cff9d8b5a(" .. "" and "" or (',
-     "tooltip"),
 
     # THE VERDICT REMOVED. The number survives and the comparison that made
     # the player hover in the first place goes back to being their problem.

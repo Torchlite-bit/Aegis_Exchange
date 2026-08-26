@@ -70,7 +70,8 @@ end
 -- A green chest whose item level the shipped table knows, and priced
 -- materials so the value can actually be computed.
 W.AddItem(900, { name = "Test Chest", quality = GREEN,
-                 equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
+                 equipLoc = "INVTYPE_CHEST", itemLevel = 48,
+                 type = "Armor", subType = "Cloth" })
 W.AddItem(11176, { name = "Dream Dust", quality = 1 })
 W.AddItem(11175, { name = "Greater Nether Essence", quality = 1 })
 W.AddItem(11178, { name = "Large Radiant Shard", quality = 3 })
@@ -88,7 +89,7 @@ H.section("the disenchant line appears, and says one item's worth")
 
 local t = Capture()
 A.tooltip.Extend(t, 900, 1)
-local line = lineFor(t, "Aegis Disenchant")
+local line = lineFor(t, "Disenchant Value:")
 H.check("a disenchantable item gets the line", line ~= nil)
 H.check("the tooltip was re-flowed", t.shown > 0)
 
@@ -101,11 +102,11 @@ A.tooltip.Extend(single, 900, 1)
 local stacked = Capture()
 A.tooltip.Extend(stacked, 900, 20)
 H.eq("a stack of twenty does not multiply the disenchant value",
-     lineFor(stacked, "Aegis Disenchant").right,
-     lineFor(single, "Aegis Disenchant").right)
+     lineFor(stacked, "Disenchant Value:").right,
+     lineFor(single, "Disenchant Value:").right)
 H.check("...and no stack total is appended to it",
-        string.find(lineFor(stacked, "Aegis Disenchant").right, "x20", 1, true)
-        == nil, lineFor(stacked, "Aegis Disenchant").right)
+        string.find(lineFor(stacked, "Disenchant Value:").right, "x20", 1, true)
+        == nil, lineFor(stacked, "Disenchant Value:").right)
 
 -- ---------------------------------------------------------------------------
 H.section("silence, where silence is right")
@@ -118,7 +119,7 @@ W.AddItem(902, { name = "Test Cloth", quality = 1, equipLoc = "" })
 local cloth = Capture()
 A.tooltip.Extend(cloth, 902, 5)
 H.isNil("a trade good gets no disenchant line",
-        lineFor(cloth, "Aegis Disenchant"))
+        lineFor(cloth, "Disenchant Value:"))
 
 -- Cached, disenchantable, and the client has no level for it: the state of
 -- every item on a client with no mod exposing one.
@@ -127,7 +128,7 @@ W.AddItem(903, { name = "Unknown Level", quality = GREEN,
 local noLevel = Capture()
 A.tooltip.Extend(noLevel, 903, 1)
 H.isNil("an item whose level no source knows gets no line",
-        lineFor(noLevel, "Aegis Disenchant"))
+        lineFor(noLevel, "Disenchant Value:"))
 H.isNil("...and no 'unknown' text either", anyLineWith(noLevel, "unknown"))
 
 -- ---------------------------------------------------------------------------
@@ -137,12 +138,12 @@ H.section("the per-line setting")
 A.db.SetSetting("tipDisenchant", false)
 local off = Capture()
 A.tooltip.Extend(off, 900, 1)
-H.isNil("switched off, the line is gone", lineFor(off, "Aegis Disenchant"))
+H.isNil("switched off, the line is gone", lineFor(off, "Disenchant Value:"))
 A.db.SetSetting("tipDisenchant", true)
 H.check("switched back on, it returns",
         lineFor((function() local c = Capture()
                  A.tooltip.Extend(c, 900, 1); return c end)(),
-                "Aegis Disenchant") ~= nil)
+                "Disenchant Value:") ~= nil)
 
 A.db.SetSetting("tooltip", false)
 local master = Capture()
@@ -167,7 +168,7 @@ H.check("the breakdown shows with no Shift and no setting touched",
         anyLineWith(onByDefault, "Dream Dust") ~= nil)
 H.check("...with a percentage", anyLineWith(onByDefault, "%") ~= nil)
 H.check("...alongside the value rather than replacing it",
-        lineFor(onByDefault, "Aegis Disenchant") ~= nil)
+        lineFor(onByDefault, "Disenchant Value:") ~= nil)
 
 -- Turned off, it goes -- and Shift still brings it back, so the checkbox
 -- never takes away the gesture.
@@ -194,10 +195,10 @@ H.section("it does not disturb the price lines it sits with")
 A.db.RecordAuction(900, 12345, "Test Chest")
 local both = Capture()
 A.tooltip.Extend(both, 900, 4)
-H.check("the market line is still there", lineFor(both, "Aegis Market") ~= nil)
+H.check("the market line is still there", lineFor(both, "Aegis Market:") ~= nil)
 H.check("...and still multiplies by the stack",
-        string.find(lineFor(both, "Aegis Market").right, "x4", 1, true) ~= nil,
-        lineFor(both, "Aegis Market").right)
+        string.find(lineFor(both, "Aegis Market:").right, "x4", 1, true) ~= nil,
+        lineFor(both, "Aegis Market:").right)
 
 -- ---------------------------------------------------------------------------
 H.section("an approximated level is LABELLED as one")
@@ -221,37 +222,55 @@ W.AddItem(904, { name = "Approx Chest", quality = GREEN,
 local approx = Capture()
 A.tooltip.Extend(approx, 904, 1)
 H.check("an item known only by its required level still gets a line",
-        lineFor(approx, "Aegis Disenchant (approx)") ~= nil)
+        lineFor(approx, "Disenchant Value: (approx)") ~= nil)
 H.isNil("...and NOT the unqualified label",
-        lineFor(approx, "Aegis Disenchant"))
+        lineFor(approx, "Disenchant Value:"))
 
 -- The converse, so the label cannot simply be hardcoded on: item 900's level
 -- comes from the client, and that answer is exact.
 local exact = Capture()
 A.tooltip.Extend(exact, 900, 1)
 H.check("a client-measured level keeps the plain label",
-        lineFor(exact, "Aegis Disenchant") ~= nil)
+        lineFor(exact, "Disenchant Value:") ~= nil)
 H.isNil("...and is never marked approximate",
-        lineFor(exact, "Aegis Disenchant (approx)"))
+        lineFor(exact, "Disenchant Value: (approx)"))
 
 -- ---------------------------------------------------------------------------
-H.section("the qualifiers beside each number")
+H.section("confidence comes before the figures, not appended to one")
 -- ---------------------------------------------------------------------------
 
--- A market median resting on one day and one resting on thirty produce the
--- same-looking figure and are not the same claim. The tooltip is the only
--- place a player ever sees either, so the day count rides beside the value.
+-- A median resting on one auction and one resting on thirty produce the same
+-- figure and are not the same claim. That used to ride as a suffix on the
+-- market value; it is now its own line ABOVE the group, because it qualifies
+-- every number below it rather than any single one.
 local q = Capture()
 A.tooltip.Extend(q, 900, 1)
-local mkt = lineFor(q, "Aegis Market")
-H.check("the market line carries a day count",
-        string.find(mkt.right, "d|r", 1, true) ~= nil, mkt.right)
+H.check("the sighting count leads",
+        anyLineWith(q, "times at auction total") ~= nil)
 
--- Today's cheapest listing is interesting mainly as a FRACTION of the median.
--- Without it every reader does the division in their head.
-local mb = lineFor(q, "Aegis Min Buyout")
-H.check("min buyout is shown against the market",
-        string.find(mb.right, "% of mkt", 1, true) ~= nil, mb.right)
+-- ORDER. Buyout above Market: today's cheapest is what a buyer acts on, and
+-- the median is context for it rather than the other way round.
+local iBuy, iMkt
+for i = 1, table.getn(q.lines) do
+    if q.lines[i].left == "Aegis Buyout:" then iBuy = i end
+    if q.lines[i].left == "Aegis Market:" then iMkt = i end
+end
+H.check("both price lines are present", iBuy ~= nil and iMkt ~= nil)
+H.check("...buyout above market", iBuy and iMkt and iBuy < iMkt)
+
+-- GROUPS. Auction house, then vendor, then disenchant -- separated by blank
+-- lines. An empty string collapses to nothing on 1.12, so the separator has to
+-- be a space; a test that accepts either would pass on a tooltip with no gaps.
+local blanks = 0
+for i = 1, table.getn(q.lines) do
+    if q.lines[i].left == " " then blanks = blanks + 1 end
+end
+H.check("the groups are separated", blanks >= 2, "got " .. blanks)
+
+-- The item class frames the split: armour and weapons break into different
+-- things, so it is part of reading the breakdown rather than trivia.
+H.eq("the class is shown", lineFor(q, "Class:") and lineFor(q, "Class:").right,
+     "Armor")
 
 -- ---------------------------------------------------------------------------
 H.section("the verdict, and only when there is one")
@@ -301,7 +320,7 @@ A.db.Init()
 local blind = Capture()
 A.tooltip.Extend(blind, 905, 1)
 H.check("the line appears rather than vanishing",
-        lineFor(blind, "Aegis Disenchant") ~= nil)
+        lineFor(blind, "Disenchant Value:") ~= nil)
 H.check("...and names a material it has no price for",
         anyLineWith(blind, "no price yet for") ~= nil
         or anyLineWith(blind, "never seen on the AH") ~= nil)

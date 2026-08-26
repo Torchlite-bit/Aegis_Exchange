@@ -191,4 +191,45 @@ end)
 A.db.SetVendor(1, 25)
 H.eq("a merchant-learned price overwrites the slot's", A.db.GetVendor(1), 25)
 
+-- ---------------------------------------------------------------------------
+H.section("the deposit formula")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. The deposit was computed with a home-grown 2.5% plus a
+-- stack-size fudge that appeared in no client and matched nothing, then scaled
+-- by 0.6. The real vanilla rule is
+--
+--   floor(vendorUnit * rate * stackSize) * stackCount * (minutes / 120)
+--
+-- with rate 5% at your own faction's auctioneer and 25% at a neutral one. The
+-- neutral case was not handled AT ALL, which understated the cost of the one
+-- auction house where it matters most.
+
+W.npcFaction = "Alliance"
+H.eq("home rate is 5%", sell.DepositRate(), 0.05)
+
+-- 100c vendor, stack of 10, 120 minutes: floor(100 * .05 * 10) * 1 * 1 = 50.
+H.eq("120 minutes is one duration unit",
+     sell.DepositAmount(100, 10, 1, 120), 50)
+-- 480 minutes is four of them, 1440 is twelve. This is the factor Turtle's x3
+-- durations flow straight through.
+H.eq("480 minutes is four", sell.DepositAmount(100, 10, 1, 480), 200)
+H.eq("1440 minutes is twelve", sell.DepositAmount(100, 10, 1, 1440), 600)
+H.eq("stack count multiplies", sell.DepositAmount(100, 10, 3, 120), 150)
+
+-- THE FLOOR IS INSIDE, not outside. floor(vendor * rate * stackSize) applied
+-- per stack is not the same as flooring the total, and rounding a per-stack
+-- fraction up across twelve duration units is how an estimate drifts.
+H.eq("the floor lands per stack, before the multipliers",
+     sell.DepositAmount(9, 1, 10, 1440), 0)
+
+W.npcFaction = nil          -- a goblin auctioneer
+H.eq("neutral rate is 25%", sell.DepositRate(), 0.25)
+H.eq("...and costs five times as much",
+     sell.DepositAmount(100, 10, 1, 120), 250)
+W.npcFaction = "Alliance"
+
+H.isNil("no vendor price, no estimate", sell.DepositAmount(nil, 10, 1, 120))
+H.isNil("no duration, no estimate", sell.DepositAmount(100, 10, 1, 0))
+
 os.exit(H.report("sellslot"))

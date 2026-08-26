@@ -157,7 +157,15 @@ W.realm   = "TestRealm"
 W.player  = "Tester"
 function GetRealmName() return W.realm end
 function UnitName(unit) if unit == "player" then return W.player end return nil end
-function UnitFactionGroup() return "Alliance" end
+-- "npc" answers only at a FACTION auctioneer; at a neutral (goblin) one the
+-- client returns nil. The old version ignored its argument and always said
+-- "Alliance", so the 25% neutral deposit could not be modelled at all -- and
+-- the addon ignored that case for just as long.
+W.npcFaction = "Alliance"
+function UnitFactionGroup(unit)
+    if unit == "npc" then return W.npcFaction end
+    return "Alliance"
+end
 
 W.money = 500000                      -- 50g
 function GetMoney() return W.money end

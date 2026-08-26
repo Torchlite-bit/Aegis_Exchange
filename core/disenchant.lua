@@ -532,11 +532,16 @@ end
 -- `source` names where the ITEM LEVEL came from, never where a price did. It
 -- is the fact that decides how far a caller should trust the number, which is
 -- why it is returned rather than left implicit.
-function de.Resolve(itemId)
+-- `info` is optional and is only ever a util.ItemInfo the caller ALREADY had.
+-- Nothing here fetches one on a caller's behalf -- see the note above
+-- util.ClientSellPrice for what that cost when it did. The tooltip needs the
+-- item's type for its Class line anyway, so handing the same table over keeps
+-- the whole tooltip at one item lookup instead of two.
+function de.Resolve(itemId, info)
     if not itemId or not util then return nil end
     -- The numeric id, not an "item:900:0:0:0" string: both are valid on 1.12
     -- but the id needs no formatting and therefore cannot be mis-formatted.
-    local info = util.ItemInfo(itemId)
+    info = info or util.ItemInfo(itemId)
     if not info then
         -- The client has not cached this item -- but we may have copied its
         -- facts out of the cache in an earlier session. This is the whole point
@@ -555,8 +560,8 @@ function de.Resolve(itemId)
 end
 
 -- What this item disenchants into, by id. Returns rows, source, or nil.
-function de.YieldOf(itemId)
-    local ilvl, source, quality, equipLoc = de.Resolve(itemId)
+function de.YieldOf(itemId, info)
+    local ilvl, source, quality, equipLoc = de.Resolve(itemId, info)
     if not ilvl then return nil end
     local rows = de.Yield(ilvl, quality, equipLoc, itemId)
     if not rows then return nil end
@@ -573,8 +578,8 @@ end
 -- item all over again, which on the tooltip path took the cost from one item
 -- lookup to three -- on exactly the items most likely to be unpriced, which is
 -- most of them before a scan.
-function de.ValueOf(itemId, priceOf)
-    local ilvl, source, quality, equipLoc = de.Resolve(itemId)
+function de.ValueOf(itemId, priceOf, info)
+    local ilvl, source, quality, equipLoc = de.Resolve(itemId, info)
     if not ilvl then return nil end
     local value = de.Value(ilvl, quality, equipLoc, itemId, priceOf)
     if not value then
@@ -586,8 +591,8 @@ function de.ValueOf(itemId, priceOf)
 end
 
 -- The same question by item id, for callers that have one rather than a band.
-function de.MissingPriceOf(itemId, priceOf)
-    local ilvl, _, quality, equipLoc = de.Resolve(itemId)
+function de.MissingPriceOf(itemId, priceOf, info)
+    local ilvl, _, quality, equipLoc = de.Resolve(itemId, info)
     if not ilvl then return nil end
     return de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
 end
