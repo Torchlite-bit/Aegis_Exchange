@@ -1144,9 +1144,18 @@ end
      "tooltip"),
 
     # The breakdown is three extra lines on every hover if it is not gated.
-    ("tip-breakdown-not-behind-shift", "ui/tooltip.lua",
-     "        if disenchant and IsShiftKeyDown and IsShiftKeyDown() then",
-     "        if disenchant then",
+    # Gated two ways now -- a setting, or Shift -- and ungating it is the same
+    # regression either way.
+    ("tip-breakdown-not-gated", "ui/tooltip.lua",
+     "        local wantRows = (A.db.Setting and A.db.Setting(\"tipDisenchantRows\") == true)",
+     "        local wantRows = true or (A.db.Setting and A.db.Setting(\"tipDisenchantRows\") == true)",
+     "tooltip"),
+
+    # ...and the other direction: the setting ignored, so the only way to see
+    # the breakdown is to hold Shift and the checkbox does nothing.
+    ("tip-breakdown-setting-ignored", "ui/tooltip.lua",
+     "        local wantRows = (A.db.Setting and A.db.Setting(\"tipDisenchantRows\") == true)",
+     "        local wantRows = (false)",
      "tooltip"),
     # The exact bug that shipped in 1.30.0: read the override out of the WHOLE
     # string, then try to rule out digits belonging to the link by asking
@@ -1577,6 +1586,44 @@ end
      "        local f = A.db and A.db.ItemFacts and A.db.ItemFacts(itemId)",
      "        local f = nil",
      "clientdata"),
+
+    # ---- the multi-section tooltip --------------------------------------
+
+    # The day count behind a market median. One day and thirty days produce
+    # the same-looking figure and are not the same claim.
+    ("tip-market-drops-the-day-count", "ui/tooltip.lua",
+     '            right = right .. "  |cff9d8b5a" .. days .. "d|r"',
+     "",
+     "tooltip"),
+
+    # Today's cheapest listing shown without the fraction it only means
+    # anything as. Every reader then does the division themselves.
+    ("tip-minbuyout-drops-the-percentage", "ui/tooltip.lua",
+     '            right = right .. "  |cff9d8b5a("',
+     '            right = right .. "  |cff9d8b5a(" .. "" and "" or (',
+     "tooltip"),
+
+    # THE VERDICT REMOVED. The number survives and the comparison that made
+    # the player hover in the first place goes back to being their problem.
+    ("tip-verdict-removed", "ui/tooltip.lua",
+     '            gtt:AddLine("  " .. verdict, r, g, b)',
+     "",
+     "tooltip"),
+
+    # A one-sided verdict: only ever says "break it", never "sell it". Half
+    # the advice, and the half that costs gold.
+    ("tip-verdict-only-ever-positive", "ui/tooltip.lua",
+     "        elseif ah and ah > 0 and disenchant * 1.1 < ah then",
+     "        elseif false then",
+     "tooltip"),
+
+    # THE DEVOUT BELT CASE, back. An unresolvable value goes silent again
+    # rather than naming the material standing in the way, so "this item has
+    # never worked" has no diagnosis attached to it.
+    ("tip-unpriced-goes-silent", "ui/tooltip.lua",
+     "    elseif deUnpriced and deUnpriced > 0 then",
+     "    elseif false then",
+     "tooltip"),
 ]
 
 SUITES = {

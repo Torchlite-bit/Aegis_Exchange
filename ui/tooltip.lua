@@ -61,14 +61,28 @@ function tooltip.Extend(gtt, itemId, count)
     -- Disenchant: unknown" line on every grey and every trade good would be
     -- noise on hundreds of items to be informative about a handful.
     local disenchant, disenchantRows, disenchantSource
+    local deUnpriced, deMissingId
     if Want("tipDisenchant") and A.de then
         disenchant, disenchantSource = A.de.ValueOf(itemId, A.de.MarketPrice)
-        if disenchant and IsShiftKeyDown and IsShiftKeyDown() then
+        -- The rows are a fact about the ITEM, not about the market, so they do
+        -- not depend on the value resolving. Shown when the setting asks for
+        -- them, and always available on Shift whatever the setting says.
+        local wantRows = (A.db.Setting and A.db.Setting("tipDisenchantRows") == true)
+            or (IsShiftKeyDown and IsShiftKeyDown() and true or false)
+        if wantRows then
             disenchantRows = A.de.YieldOf(itemId)
+        end
+        -- A missing value with rows present means the rule answered and the
+        -- MARKET did not. Find out which material, so the line can say so
+        -- instead of going quiet -- see de.MissingPrice.
+        if not disenchant and A.de.MissingPriceOf then
+            deUnpriced, _, deMissingId =
+                A.de.MissingPriceOf(itemId, A.de.MarketPrice)
         end
     end
 
-    if not market and not minBuy and not vendor and not disenchant then
+    if not market and not minBuy and not vendor and not disenchant
+        and not disenchantRows and not deUnpriced then
         return
     end
 
@@ -90,11 +104,31 @@ function tooltip.Extend(gtt, itemId, count)
     end
 
     if market then
-        gtt:AddDoubleLine("Aegis Market", money(market),
+        -- How many DAYS the median rests on. One day and thirty days give the
+        -- same-looking number and are not the same claim, and the tooltip is
+        -- the only place a player ever sees either.
+        --
+        -- On the VALUE side, not the label. A qualifier belongs next to the
+        -- number it qualifies, and labels that change shape are hard to scan
+        -- down a column -- the same reason the % sits beside Min Buyout below.
+        local right = money(market)
+        local days = A.db.DayCount and A.db.DayCount(itemId) or 0
+        if days > 0 then
+            right = right .. "  |cff9d8b5a" .. days .. "d|r"
+        end
+        gtt:AddDoubleLine("Aegis Market", right,
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
     end
     if minBuy then
-        gtt:AddDoubleLine("Aegis Min Buyout", money(minBuy),
+        -- Against the median, because the interesting question about today's
+        -- cheapest listing is whether it is cheap. A bare figure makes the
+        -- reader do that division in their head every time.
+        local right = money(minBuy)
+        if market and market > 0 then
+            right = right .. "  |cff9d8b5a("
+                .. math.floor(minBuy / market * 100 + 0.5) .. "% of mkt)|r"
+        end
+        gtt:AddDoubleLine("Aegis Min Buyout", right,
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
     end
     if vendor then
@@ -107,6 +141,7 @@ function tooltip.Extend(gtt, itemId, count)
         -- disenchant one thing at a time, and each break rolls the table
         -- again -- a stack of five is five separate draws, not five times
         -- this number.
+        --
         -- WHERE THE LEVEL CAME FROM IS PART OF THE NUMBER. Source "required"
         -- means the item level was inferred from the level needed to equip the
         -- item (see de.REQ_OFFSET), which can land a band out -- and adjacent
@@ -118,15 +153,56 @@ function tooltip.Extend(gtt, itemId, count)
                 .. ((disenchantSource == "required") and " (approx)" or ""),
             util.FormatMoney(disenchant, true),
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
-        if disenchantRows then
-            local lines = A.de.BreakdownText(disenchantRows, function(matId)
-                return GetItemInfo(matId)
-            end)
-            local i = 1
-            while lines and i <= table.getn(lines) do
-                gtt:AddLine("  " .. lines[i], 0.6, 0.6, 0.6)
-                i = i + 1
-            end
+
+        -- THE VERDICT. The number on its own still leaves the reader doing the
+        -- comparison that made them hover in the first place -- is this worth
+        -- more broken than sold? Both comparisons are against a PER-ITEM
+        -- figure, so vendor and market are used per unit, never per stack.
+        --
+        -- Only ever states the case it can support: silent when there is
+        -- nothing to compare against, and silent when the answer is "about the
+        -- same", because a verdict on a 3% difference is noise.
+        local beats, verdict = nil, nil
+        local ah = minBuy or market
+        if vendor and vendor > 0 and disenchant > vendor * 1.1 then
+            beats, verdict = true, "worth more than vendor"
+        end
+        if ah and ah > 0 and disenchant > ah * 1.1 then
+            beats, verdict = true, "worth more than the AH"
+        elseif ah and ah > 0 and disenchant * 1.1 < ah then
+            beats, verdict = false, "sells for more than it breaks for"
+        end
+        if verdict then
+            local r, g, b = 0.30, 0.85, 0.30
+            if not beats then r, g, b = 0.75, 0.55, 0.35 end
+            gtt:AddLine("  " .. verdict, r, g, b)
+        end
+    elseif deUnpriced and deUnpriced > 0 then
+        -- THE DIAGNOSIS. The rule answered; the market did not. Saying which
+        -- material is missing turns "this item has never worked" into "scan
+        -- for that shard", which is a thing a person can act on.
+        local matName = deMissingId and GetItemInfo(deMissingId)
+        local why
+        if matName then
+            why = "no price yet for " .. matName
+        else
+            why = deUnpriced .. " material(s) never seen on the AH"
+        end
+        gtt:AddDoubleLine("Aegis Disenchant", "|cff9d8b5a?|r",
+            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
+        gtt:AddLine("  " .. why, 0.6, 0.6, 0.6)
+    end
+
+    -- Outside both branches: the breakdown is a fact about the item and stands
+    -- whether or not the market can price it.
+    if disenchantRows then
+        local lines = A.de.BreakdownText(disenchantRows, function(matId)
+            return GetItemInfo(matId)
+        end)
+        local i = 1
+        while lines and i <= table.getn(lines) do
+            gtt:AddLine("  " .. lines[i], 0.6, 0.6, 0.6)
+            i = i + 1
         end
     end
     gtt:Show()

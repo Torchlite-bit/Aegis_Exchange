@@ -402,6 +402,31 @@ function de.Value(ilvl, quality, equipLoc, itemId, priceOf)
     return math.floor(total + 0.5)
 end
 
+-- WHY the value came back nil, when it did.
+--
+-- de.Value is all-or-nothing: one unpriced material and the whole answer
+-- disappears. That is right for the NUMBER -- a partial sum understates, and
+-- an understated gold figure is worse than no figure -- but it is a bad
+-- explanation. aux does the same and the visible result is a tooltip that says
+-- nothing for an item you have scanned repeatedly, with no way to tell whether
+-- the rule failed or one shard has simply never been listed.
+--
+-- Returns unpriced, total, firstUnpricedId. A caller that got nil from
+-- de.Value can then name the material standing in the way.
+function de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
+    local rows = RowsFor(ilvl, quality, equipLoc, itemId)
+    if not rows or not priceOf then return nil end
+    local unpriced, first, i, n = 0, nil, 1, table.getn(rows)
+    while i <= n do
+        if not priceOf(rows[i][1]) then
+            unpriced = unpriced + 1
+            if not first then first = rows[i][1] end
+        end
+        i = i + 1
+    end
+    return unpriced, n, first
+end
+
 -- How far an item's LEVEL sits above the level needed to equip it.
 --
 -- THIS IS THE NO-CLIENT-MOD FALLBACK, and it is the only number in this file
@@ -539,6 +564,13 @@ function de.ValueOf(itemId, priceOf)
     local value = de.Value(ilvl, quality, equipLoc, itemId, priceOf)
     if not value then return nil end
     return value, source
+end
+
+-- The same question by item id, for callers that have one rather than a band.
+function de.MissingPriceOf(itemId, priceOf)
+    local ilvl, _, quality, equipLoc = de.Resolve(itemId)
+    if not ilvl then return nil end
+    return de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
 end
 
 -- The default pricer: what one of a material is worth, best source first.

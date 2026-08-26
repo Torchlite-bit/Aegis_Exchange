@@ -1662,6 +1662,9 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         { key = "tipDisenchant", text = "Disenchant value (hold Shift for the"
                                         .. " breakdown)",
           help = ui.HELP_DISENCHANT },
+        { key = "tipDisenchantRows",
+          text = "...and always show the breakdown",
+          help = ui.HELP_DISENCHANT },
     }
     ui.setTipSubs = {}
     local prevSub = nil

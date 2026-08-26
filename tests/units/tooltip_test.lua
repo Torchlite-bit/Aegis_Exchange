@@ -205,4 +205,103 @@ H.check("a client-measured level keeps the plain label",
 H.isNil("...and is never marked approximate",
         lineFor(exact, "Aegis Disenchant (approx)"))
 
+-- ---------------------------------------------------------------------------
+H.section("the qualifiers beside each number")
+-- ---------------------------------------------------------------------------
+
+-- A market median resting on one day and one resting on thirty produce the
+-- same-looking figure and are not the same claim. The tooltip is the only
+-- place a player ever sees either, so the day count rides beside the value.
+local q = Capture()
+A.tooltip.Extend(q, 900, 1)
+local mkt = lineFor(q, "Aegis Market")
+H.check("the market line carries a day count",
+        string.find(mkt.right, "d|r", 1, true) ~= nil, mkt.right)
+
+-- Today's cheapest listing is interesting mainly as a FRACTION of the median.
+-- Without it every reader does the division in their head.
+local mb = lineFor(q, "Aegis Min Buyout")
+H.check("min buyout is shown against the market",
+        string.find(mb.right, "% of mkt", 1, true) ~= nil, mb.right)
+
+-- ---------------------------------------------------------------------------
+H.section("the verdict, and only when there is one")
+-- ---------------------------------------------------------------------------
+
+-- The number alone still leaves the reader doing the comparison that made them
+-- hover. Item 900's materials are priced high above its (unset) market price.
+H.check("a clearly-better disenchant says so",
+        anyLineWith(q, "worth more than") ~= nil)
+
+-- ...and the reverse. An item listing far above what it breaks for should say
+-- that instead, or the line only ever gives one kind of advice.
+-- A FRESH id: db.RecordAuction keeps the day's MINIMUM, so a high price
+-- written over an item something earlier in this file already recorded
+-- cheaply is silently discarded -- and the test then passes or fails on
+-- whatever that earlier price happened to be.
+W.AddItem(906, { name = "Pricey Chest", quality = GREEN,
+                 equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
+A.db.RecordAuction(906, 99999999, "Pricey Chest")
+local pricey = Capture()
+A.tooltip.Extend(pricey, 906, 1)
+H.check("an item worth more sold than broken says THAT",
+        anyLineWith(pricey, "sells for more") ~= nil)
+H.isNil("...and does not also claim the opposite",
+        anyLineWith(pricey, "worth more than the AH"))
+
+-- ---------------------------------------------------------------------------
+H.section("a value that cannot resolve says WHY")
+-- ---------------------------------------------------------------------------
+
+-- THE DEVOUT BELT CASE. de.Value is all-or-nothing: one unpriced material and
+-- the whole figure disappears. That is right for the number and useless as an
+-- explanation -- aux does the same, and the visible result is a tooltip that
+-- says nothing about an item you have scanned repeatedly, with no way to tell
+-- whether the rule failed or one shard has simply never been listed.
+--
+-- Band 50 needs Dream Dust, Greater Nether Essence and Large Radiant Shard.
+-- This item's level is known; the market's knowledge of one material is not.
+W.AddItem(905, { name = "Unpriced Chest", quality = GREEN,
+                 equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
+W.AddItem(11999, { name = "Never Listed Shard" })
+
+local before = A.db.MarketValue(11178)
+A.db.account.realms = {}            -- forget every market price
+A.db.Init()
+
+local blind = Capture()
+A.tooltip.Extend(blind, 905, 1)
+H.check("the line appears rather than vanishing",
+        lineFor(blind, "Aegis Disenchant") ~= nil)
+H.check("...and names a material it has no price for",
+        anyLineWith(blind, "no price yet for") ~= nil
+        or anyLineWith(blind, "never seen on the AH") ~= nil)
+
+-- ---------------------------------------------------------------------------
+H.section("the breakdown is gated two ways")
+-- ---------------------------------------------------------------------------
+
+-- Three extra lines on every disenchantable item is a lot of tooltip, so the
+-- breakdown is off unless asked for -- by the setting, or by Shift, and the
+-- two are independent. A change that collapses them into one takes away either
+-- the checkbox or the gesture.
+shiftHeld = false
+A.db.SetSetting("tipDisenchantRows", false)
+local quiet = Capture()
+A.tooltip.Extend(quiet, 900, 1)
+H.isNil("off and no Shift: no breakdown", anyLineWith(quiet, "x "))
+
+A.db.SetSetting("tipDisenchantRows", true)
+local always = Capture()
+A.tooltip.Extend(always, 900, 1)
+H.check("the setting alone shows it", anyLineWith(always, "x ") ~= nil)
+
+A.db.SetSetting("tipDisenchantRows", false)
+shiftHeld = true
+local shifted = Capture()
+A.tooltip.Extend(shifted, 900, 1)
+H.check("Shift alone still shows it, whatever the setting says",
+        anyLineWith(shifted, "x ") ~= nil)
+shiftHeld = false
+
 os.exit(H.report("tooltip"))

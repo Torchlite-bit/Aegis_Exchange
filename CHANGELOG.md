@@ -12,6 +12,46 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.45.0]
+
+**The tooltip, rebuilt as sections.** Last of the aux work. `/reload`-safe.
+
+### Added
+- **Every number now carries what qualifies it.**
+  - *Market* shows how many **days** the median rests on. One day and thirty
+    produce the same-looking figure and are not the same claim, and the tooltip
+    is the only place a player ever sees either.
+  - *Min Buyout* shows today's cheapest **as a percentage of market**, which is
+    the only thing it means. A bare figure made every reader do that division.
+
+- **A verdict on the disenchant line.** *worth more than vendor*, *worth more
+  than the AH*, or *sells for more than it breaks for* — the comparison that
+  made you hover in the first place, rather than a number you then have to
+  compare yourself. Silent when there is nothing to compare against, and silent
+  when the two are within 10% of each other, because a verdict on a 3%
+  difference is noise.
+
+- **An unresolvable value now says why.** `de.Value` is all-or-nothing: one
+  unpriced material and the whole figure disappears. That is right for the
+  number — a partial sum understates, and an understated gold figure is worse
+  than none — but it made a useless explanation. The line now appears with a
+  grey `?` and **names the material standing in the way**: *no price yet for
+  Large Radiant Shard*.
+
+  This is the long-standing "that item has never worked" complaint, and it was
+  never a bug in the rule. aux has the same behaviour and the same silence.
+
+- **"Always show the breakdown" setting.** The material list is off by default —
+  three extra lines on every disenchantable item — and **Shift still shows it on
+  demand whatever the setting says**. The two gates are independent, so turning
+  the setting off does not take away the gesture.
+
+### Not built
+- **Vendor *buy* prices.** aux learns what a merchant charges as well as what it
+  pays, and flags limited stock. Aegis never scans a merchant's inventory, so
+  there is nothing to show — that is a feature, not a line, and it can have its
+  own release rather than a half-built one here.
+
 ## [1.44.0]
 
 **The item-fact harvest.** `/reload`-safe — no new files.
@@ -3245,6 +3285,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.45.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.44.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.43.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.42.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

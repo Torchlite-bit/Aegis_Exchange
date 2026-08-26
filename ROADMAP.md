@@ -2089,7 +2089,15 @@ a code one:
 
 Phase 1 (sell-slot vendor price) shipped in **v1.42.0**; phase 2 (the
 required-level fallback) in **v1.43.0**; phase 3 (the item-fact harvest) in
-**v1.44.0**. Remaining: **4** the multi-section tooltip.
+**v1.44.0**; phase 4 (the multi-section tooltip) in **v1.45.0**. **The aux work
+is done.**
+
+Left deliberately unbuilt: **vendor BUY prices**. aux learns what a merchant
+charges as well as what it pays and flags limited stock (`limited = stock >= 0`
+from GetMerchantItemInfo's 5th return, with an unlimited-stock price always
+beating a limited one). We never scan a merchant's inventory, so there is
+nothing to show. It is a feature with its own event handling, not a tooltip
+line, and belongs in its own release.
 
 **A load-bearing fact was wrong and is now corrected.** `GetItemInfo` does NOT
 query the server for an uncached item -- it returns nil and does nothing else.

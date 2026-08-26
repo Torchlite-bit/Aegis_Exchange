@@ -184,6 +184,10 @@ local SETTING_DEFAULTS = {
     -- Expected disenchant value on tooltips. Only ever appears for an item we
     -- can actually answer for, so leaving it on costs nothing on the rest.
     tipDisenchant  = true,
+    -- The material breakdown under the disenchant value. OFF by default: it is
+    -- three extra lines on every disenchantable item, and holding Shift still
+    -- shows it on demand whatever this is set to.
+    tipDisenchantRows = false,
 }
 
 -- Read a user setting, falling back to its default when unset.
@@ -426,6 +430,21 @@ function db.MinBuyout(itemId)
     end
     if not newest then return nil end
     return rec.daily[newest]
+end
+
+-- How many distinct DAYS we hold a price for. The confidence figure behind
+-- every market number: one day's data and thirty days' data produce the same
+-- kind of answer from db.MarketValue and are not the same kind of fact.
+--
+-- Days, not auctions. A day contributes exactly one value (its minimum), so
+-- counting sightings would report the size of one busy afternoon rather than
+-- the breadth of the history.
+function db.DayCount(itemId)
+    if not db.account then return 0 end
+    local items = db.Items()
+    local rec = items and items[itemId]
+    if not rec or type(rec.daily) ~= "table" then return 0 end
+    return A.util.CountKeys(rec.daily)
 end
 
 -- Best "buy it now" unit price for estimates: the most recent daily minimum
