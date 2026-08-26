@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.22.0)
+# Aegis: Exchange (v1.49.2)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -6,12 +6,15 @@
 [![Raven WoW](https://img.shields.io/badge/Raven%20WoW-1.18.1-1e1e1e?style=flat-square&labelColor=555)](https://ravencraft.io/)
 [![Octo WoW](https://img.shields.io/badge/Octo%20WoW-1.18.1-8A2BE2?style=flat-square&labelColor=555)](https://octowow.st/)
 [![Capy WoW](https://img.shields.io/badge/Capy%20WoW-1.18.1-8B5A2B?style=flat-square&labelColor=555)](https://capycraft.io/)
-[![Client](https://img.shields.io/badge/client-WoW%201.12%20(vanilla)-c79c6e?style=flat-square)](https://turtle-wow.org)
 
+[![ClassicAPI](https://img.shields.io/badge/ClassicAPI-Recommended-3fb950?style=flat-square&labelColor=555)](https://github.com/brues-code/ClassicAPI)
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Highly%20Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
 
-<sub>**Aegis needs no mods or .dll** — it calls only vanilla 1.12 API.
-**AuctionQueryThrottle** however is the one that changes anything here (scan speed).
+<sub>**Aegis runs on a stock client.** Two optional DLLs make it better, and
+neither is required: **AuctionQueryThrottle** makes scans much faster, and
+**ClassicAPI** gives exact item levels and vendor prices — without it, disenchant
+values are estimated from the level needed to equip an item and are labelled
+*(approx)*.
 </sub>
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
@@ -240,7 +243,12 @@ columns — **Total**, **Deposit**, **After cut** (what actually lands in your
 mailbox once the 5% consignment cut is taken) and **Listings** against the
 120-auction cap. Post **multiple stacks at once** — "3 stacks of 20". Click any
 competitor's row to steal their price. If your price ever drops below what a
-merchant would pay, the action bar says so. And after a **bag scan**, Aegis loads the
+merchant would pay, the action bar says so — and if the item is **worth more
+disenchanted** than sold, it says that instead, because that is the larger
+mistake. That warning is deliberately hard to trigger: it needs an *exact* item
+level (one you learned by disenchanting, or one ClassicAPI supplied — never the
+approximation) and a 25% margin, because it is recommending something you cannot
+undo. And after a **bag scan**, Aegis loads the
 first item into the sell slot and walks you down the list — **Post** or **Skip**
 moves to the next one, so you can clear a full bag without clicking back and
 forth.
@@ -269,6 +277,14 @@ cheapest. Red means someone slid under you. Cancel anything with one click.
 
 Every column sorts — click **vs market** and the auctions you've been undercut
 hardest on come to the top.
+
+The client hands out your auctions **50 at a time**, so a full book (Turtle caps
+you at 120) needs paging — use **`<` / `>`** at the top right. The header counts
+what you *own*, not what the page shows. It pages rather than gathering them all
+into one list on purpose: cancelling works on an index into the page the client
+is holding, so showing exactly that page is what keeps every Cancel pointed at
+the auction you clicked. The trade is that **undercut counts are per page**, and
+the status line says so.
 
 ### 🔨 Crafting — is this even worth making?
 Open a profession, pick a recipe, hit **Add to Aegis**. The Crafting tab then
@@ -302,55 +318,70 @@ tooltip lines, profit line, and the pfUI skin — all in one place.
 
 ### 💬 Tooltips everywhere
 Bags, inventory, the auction house, merchants, the mailbox, **loot windows,
-quest rewards and profession reagents** — all gain market value, minimum buyout
-and vendor price, with stack totals. Pick which lines you want on the Aegis
-tab, and optionally show stack totals only while **Shift** is held.
-
-There's also an **expected disenchant value**, with the full material
-breakdown while **Shift** is held:
+quest rewards and profession reagents** — all gain the same block:
 
 ```
-Aegis Disenchant     1g 84s
-  78%  1.5 x Dream Dust
-  18%  1.5 x Greater Nether Essence
-   4%  1.0 x Large Radiant Shard
+Seen 313 times at auction total
+
+Aegis Buyout:                          7s 99c
+Aegis Market:                          7s 99c
+Sell to Vendor:                         3s 6c
+
+Crafting Cost:                         5s 40c
+
+Class: Weapon
+Disenchants Into (approx, from required level):
+    81%  Lesser Magic Essence  x1.5
+    19%  Strange Dust  x1.5
+
+Disenchant (worth more than the AH):   10s 40c
 ```
 
-It appears **only when Aegis can actually answer**. The 1.12 client gives
-addons no item level, which is the one thing the calculation needs, so Aegis
-ships a lookup for it — vanilla items and roughly a third of Turtle's custom
-ones. Where there's no entry it says **nothing at all**, rather than putting
-"unknown" on every grey in your bags.
+Every number carries what qualifies it. The **sighting count** leads, because it
+is context for every figure below it. **Buyout** sits above **Market** — today's
+cheapest is what you act on, the median is the context for it. Pick which lines
+you want on the Aegis tab, and optionally show stack totals only while **Shift**
+is held.
 
-The value shown is for **one** item — a stack of twenty is twenty separate
-rolls, not twenty times that number.
+**Crafting Cost** appears when a recipe you have opened makes the item, priced
+per unit rather than per craft. It stays quiet unless *every* reagent is priced:
+a partial total reads low, and low is the direction that loses money.
 
-The numbers behind it are derived from **8.8 million observed disenchants**,
-not typed by hand; epics and anything above item level 65 are deliberately
-left unanswered, because the data there isn't good enough to trust. See
-`tools/README.md` if you want the workings.
+**The verdict** — *worth more than vendor*, *worth more than the AH*, or *sells
+for more than it breaks for* — is the comparison that made you hover, in green or
+red. It stays silent when the two are within 10% of each other.
 
-**This line needs [ClassicAPI](https://github.com/brues-code/ClassicAPI)** (a
-DLL, not an addon). 1.12 stores an item level on every item and shows it
-nowhere; ClassicAPI hands it over, and that is the one input the calculation
-needs. With it the line answers for everything, Turtle's custom gear included.
+#### How the disenchant line knows
 
-**Disenchanting something also teaches Aegis about that item**, with or without
-ClassicAPI — and what you saw yourself always outranks what the client says,
-because it came from the server you actually play on.
+Item level is the one input the calculation needs, and the 1.12 client gives
+addons no way to read it. Aegis has three sources, best first:
 
-Where neither applies, Aegis says nothing rather than guessing.
+1. **You disenchanted one.** Evidence from the server you actually play on, so
+   it outranks everything else. It won't guess from a single result: an essence
+   pins an item down, a dust leaves two or three possibilities, so it keeps quiet
+   until a second break settles it.
+2. **[ClassicAPI](https://github.com/brues-code/ClassicAPI)** — a DLL, not an
+   addon. 1.12 stores an item level on every item and shows it nowhere;
+   ClassicAPI hands over the real number for everything, Turtle's custom gear
+   included.
+3. **The level required to equip it**, plus five. Approximate, and **always
+   labelled** *(approx, from required level)* — required level moves in steps of
+   five where item level does not, so an item near a boundary can land one band
+   out. This is what answers without any DLL at all.
 
-ClassicAPI does the same for **vendor prices**: 1.12 stores a sell price on
-every item and never displays it. Without the DLL those are still learned by
-visiting a merchant, exactly as before.
+When the rule can answer but the market cannot, the line says which material is
+missing — *no price yet for Large Glowing Shard* — instead of going quiet.
 
-**And it learns.** Disenchant something and Aegis records what came out —
-nothing to switch on. That's the only way it can ever answer for Turtle's
-custom items, and because it's evidence from the server you're actually on, it
-**outranks** the shipped item levels. It won't guess from a single result
-though: an essence pins an item down, a dust leaves two or three
-possibilities, so it keeps quiet until a second break settles it.
+The value shown is for **one** item: a stack of twenty is twenty separate rolls,
+not twenty times that number. The numbers behind it come from **8.8 million
+observed disenchants**, not typed by hand; epics and anything above item level 65
+are deliberately left unanswered because the data there isn't good enough to
+trust. See `tools/README.md` for the workings.
+
+ClassicAPI does the same for **vendor prices**. Without it they are still learned
+two ways that cost you nothing: hovering an item at a merchant, and **putting one
+in the auction house sell slot** — every item you post teaches Aegis its exact
+vendor price.
 
 ---
 
@@ -472,9 +503,15 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.22.0`) — quote it.
-2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
-3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
+1. Check the **version** in the window's title bar (`v1.49.2`) — quote it.
+2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
+   that item and every step it took: which modules loaded, what the client
+   returned, the item level and where it came from, and the disenchant value.
+   If a tooltip line is missing, this says why in one line. It found three
+   separate bugs that screenshots could not.
+3. **`/aex cache`** reports how many items Aegis has learned from the client.
+4. `/aex debug` turns on a scanner trace if a scan is misbehaving.
+5. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
    help enormously, especially for anything layout-related.
 

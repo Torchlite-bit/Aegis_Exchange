@@ -306,19 +306,26 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
 - **The badge block at the top of `README.md` is maintained by the project
   owner.** It is grouped deliberately:
-  1. Discord (`5865F2`), then the 1.18.1 servers — Octo WoW purple (`8A2BE2`),
-     Capy WoW brown (`8B5A2B`).
-     Also a **Client** badge (`c79c6e`, WoW 1.12 vanilla).
-  2. **AuctionQueryThrottle** alone, orange (`ff8c00`), labelled "Highly
-     Recommended" — it is the ONLY external thing that changes Aegis's behaviour
-     (scan speed) — followed by a `<sub>` caption saying Aegis needs no mods or
-     DLLs.
+  1. Discord (`5865F2`), then the 1.18.1 servers — Raven (`1e1e1e`), Octo WoW
+     purple (`8A2BE2`), Capy WoW brown (`8B5A2B`).
+  2. The two OPTIONAL DLLs, on their own row: **ClassicAPI** green (`3fb950`,
+     "Recommended") and **AuctionQueryThrottle** orange (`ff8c00`, "Highly
+     Recommended"), followed by a `<sub>` caption saying Aegis runs on a stock
+     client and naming what each one buys.
 
-  **Nothing is Required, and the loader badges were deliberately REMOVED.**
-  SuperWoW, Nampower, UnitXP_SP3 and ClassicAPI badges used to sit here; a grep
-  of `core/` and `ui/` finds no calls to any of them, so the owner removed them
-  rather than imply a relationship. Do not re-add them, and do not reinstate a
-  "Required" badge, without a code change that actually depends on one.
+  **The Client badge was removed** (`c79c6e`, "WoW 1.12 vanilla). It restated
+  what the server badges and the intro already say, and the row it sat in is now
+  the optional-DLL row, where a client badge does not belong.
+
+  **ClassicAPI earned its badge in code and nothing else has.** SuperWoW,
+  Nampower and UnitXP_SP3 badges used to sit here; a grep of `core/` and `ui/`
+  finds no calls to any of them, so they were removed rather than imply a
+  relationship. `C_Item` IS called (`util.ClientSellPrice`,
+  `util.ClientItemLevel`), which is why ClassicAPI came back. Same test for
+  anything else: a code change that actually depends on it, or no badge.
+
+  **Nothing is Required.** Both DLLs are optional and the addon states what it
+  loses without them — do not reinstate a "Required" badge.
 
   There is **no version badge** — but the **H1 carries the version**
   (`# Aegis: Exchange (v1.1.2)`), so it is a bump site. See the checklist below.
@@ -378,11 +385,16 @@ to 1.49.1 while `main` sat at 1.21.1.
 **When a release does both** — adds a capability *and* fixes things — it is a
 MINOR. The larger claim wins.
 
-**One merge is one release.** A branch is not a version per commit. Bump when
-the work lands on `main`, not on every push to a feature branch: whatever the
-branch adds, the merge is a single MINOR (or PATCH) over what `main` had.
-`tests/lint/version.py` cannot see `main`, so this is the one part of the rule
-that stays a habit rather than a check.
+**Every shipped change bumps.** Not once per merge — once per piece of work.
+Fix a bug on a feature branch and the PATCH goes up; add a capability and the
+MINOR goes up and PATCH resets. The merge lands at whatever the branch has
+reached, so a branch that adds a feature and then fixes three things in it
+merges as `1.50.3`, not `1.50.0`.
+
+The number is a running account of what happened, which is what makes
+"quote the version in the title bar" worth asking for: a player on 1.49.2 and a
+player on 1.49.5 are not running the same code, and a scheme that only bumps at
+merge time cannot tell them apart.
 
 **Not a release at all**, and therefore not a bump: anything under `tests/`,
 `tools/` or `design/`, and edits to `CLAUDE.md` / `ROADMAP.md`. None of it ships.

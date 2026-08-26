@@ -12,51 +12,23 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-## [1.22.0]
+## [1.49.2]
 
-**Everything on this branch, as one release.** `main` is at 1.21.1; this adds
-capabilities, so the merge is a single MINOR over it.
-
-The entries below, from 1.49.1 down to 1.22.0, are the development steps that
-make up this release and keep their working numbers. They were never separately
-released — the branch bumped a version per push, which is what took the number
-to 1.49.1 while `main` sat at 1.21.1.
-
-### The numbering rule, now written down
-Recounting the branch against the rule now in `CLAUDE.md` — MINOR for a new
-capability, PATCH for a fix or a correction — **ten of those steps were numbered
-MINOR for work that only fixed or polished**. A layout change is a PATCH. So is
-a colour, a rename, and a rewritten formula that computes the same quantity more
-correctly.
-
-- **MAJOR** is 1 and stays there. It moves only for a change that breaks an
-  existing setup without a migration — not for "a lot has changed".
-- **MINOR** — the addon can do something it could not do before.
-- **PATCH** — bug fixes, security fixes, typos, wording, colour, layout.
-- **One merge is one release**, not one version per commit.
-
-### What this release adds, over 1.21.1
-- **Vendor prices learned from the auction sell slot** — every item you post
-  teaches its exact vendor price, with no merchant visit and no DLL.
-- **Disenchant values without ClassicAPI**, from the level required to equip an
-  item, always labelled as the approximation it is.
-- **An item-fact harvest** that copies what the client's cache knows into
-  SavedVariables, so coverage accumulates across sessions instead of resetting.
-- **A rebuilt tooltip**: sighting count, buyout, market, vendor, crafting cost,
-  class, the disenchant split in quality colours, and a verdict on whether the
-  item is worth more broken than sold.
-- **Crafting Cost** from recipes you have opened, per unit rather than per craft.
+### Added
 - **"Worth more disenchanted" on the Sell tab** — a warning before you post
-  something you should be breaking. It answers only from an **exact** item
-  level (one you observed by disenchanting, or one the client stated) and never
-  from the required-level approximation, because this recommends an
-  irreversible act rather than showing a number. It also wants a **25%** edge,
-  where the tooltip's verdict wants 10%: the value is an average over a
-  probability table, and one break can return the cheapest row.
-- **Page navigation on the Auctions tab.** The owner list is paged at 50 and
-  Turtle's cap is 120, so a full book needs three pages — and only the first
-  existed. The summary now counts what you **own** rather than what the page
-  holds, and the status line says which page you are on.
+  something you should be breaking. It answers only from an **exact** item level
+  (one you observed by disenchanting, or one the client stated) and never from
+  the required-level approximation, because this recommends an irreversible act
+  rather than showing a number. It also wants a **25%** edge where the tooltip's
+  verdict wants 10%: the value is an average over a probability table, and one
+  break can return the cheapest row.
+
+### Fixed
+- **The Auctions tab showed only 50 of your auctions.**
+  `GetNumAuctionItems("owner")` returns *(batch, total)* and the batch was read
+  as the whole list, so with Turtle's 120-auction cap two thirds of a full book
+  were invisible with nothing saying so. There is a `< Page 1/3 >` control now,
+  and the summary counts what you **own** rather than what the page holds.
 
   Deliberately paged rather than gathered into one list: `CancelAuction` indexes
   into the page the *client* is holding, so a combined list would point row 80's
@@ -65,21 +37,16 @@ correctly.
   makes every index correct by construction. The trade is that undercut counts
   are per page, which the status line states.
 
-- **`/aex diag`** and **`/aex cache`**, which is how three of the bugs below were
-  found at all.
-
-### And fixes, the notable ones
-- **The Auctions tab showed only 50 of your auctions.**
-  `GetNumAuctionItems("owner")` returns *(batch, total)* and the batch was read
-  as the whole list, so two thirds of a full book were invisible with nothing
-  saying so.
 - **Row heights on the Auctions, Crafting and History tables** now match the Buy
-  and Sell tabs (26px). They were 20–21 and read as a different, denser UI.
-- **The disenchant tooltip line had never worked on a real client** — an item id
-  was passed to `GetItemInfo`, which 1.12 does not accept, and separately a
-  client that appends a value to the tuple shifted four fields.
-- **The deposit was computed with an invented formula** and ignored the neutral
-  auction house entirely, where it costs five times as much.
+  and Sell tabs (26px). They were 20–21 and read as a denser, separate UI.
+
+### Note on numbering
+The 1.x line continues. An earlier attempt in this branch renumbered to 0.59.1
+and then to 1.22.0 on the reasoning that the branch should merge as a single
+release; that was reverted. **Every shipped change bumps** — a fix moves PATCH,
+a new capability moves MINOR and resets PATCH — so the branch carries a running
+account of what happened rather than one number applied at merge time. See
+`CLAUDE.md`.
 
 ## [1.49.1]
 
@@ -1649,11 +1616,7 @@ their own boxes now fill them. `/reload`.
   all.** Two written for this pass were deleted rather than papered over — a
   sabotage that cannot fail proves as little as a test that cannot.
 
-## 1.22.0 — development step
-
-> Not the release above. This was the branch's own numbering, which ran a
-> version per push from here up to 1.49.1; all of it ships as the single
-> [1.22.0] release at the top of this file.
+## [1.22.0]
 
 Five of the nine placeholder filter components are real filters now.
 `/reload`.
@@ -3677,7 +3640,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.22.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.49.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
