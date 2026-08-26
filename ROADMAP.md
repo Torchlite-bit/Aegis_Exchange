@@ -2085,6 +2085,100 @@ a code one:
   its own release, on its own evidence, and let it be tested for what it
   actually does: fewer server queries when hovering lists of uncached items.
 
+### 3l — The no-ClassicAPI backup, from aux — **RESEARCHED, not built**
+
+Read `shirsig/aux-addon-vanilla` @ `6b56d0f` in full. Full write-up lives in the
+artifact "Aux, Taken Apart"; what follows is what the repo needs to remember.
+
+**No LICENSE file exists in that repository**, and no licence appears in its
+README or `.toc`. Understood-and-reimplemented only, never copied — the same
+conclusion this project reached for Auctionator and for the ShaguScore table.
+
+#### The finding that matters
+
+**Aux never had an item level either.** `util/info.lua:375` destructures
+`GetItemInfo` and names position 4 `level`, feeding it straight into the
+disenchant band lookup — but on 1.12 position 4 is **minLevel, the required
+level**. Aux's whole disenchant model is keyed on required level, which every
+client returns with no mod at all. Its ladder stops at **60**, the maximum
+*required* level; ours stops at 65, consistent with *item* level. Two ladders,
+each internally consistent with its own key.
+
+§5 dropped the required-level fallback on an audit that returned *0 judged /
+12,135 uncached*. That measured a cold item cache, not the quality of the
+signal. The addon that actually ships on Turtle has run on it for years.
+
+**THE TRAP: required level cannot be fed into our existing bands.** They are
+item-level bands built from item-level observations, and required level runs
+~5-10 lower for the same piece — every item would land a band or two low and
+report the wrong materials, silently. The backup needs its own ladder: either
+re-derive bands keyed on required level (correct), or adopt aux's boundaries
+with our measured distributions (cheaper, approximate at the seams, must be
+labelled). `de.ItemLevel` already returns a `source`; add `"required"` to the
+ranking below `"table"` and let the UI say "approx".
+
+#### The passive cache harvest — what §5 should have concluded
+
+`core/cache.lua:165` walks item ids 1..30000 calling `GetItemInfo`, records
+**only items already cached** (the `if name` guard — it never forces a fetch),
+paced at 100 newly-recorded items per half second, and **persists to
+SavedVariables** so coverage accumulates across every session played. Forcing
+the cache to fill is a separate, explicit, opt-in command that prints progress
+and is never automatic.
+
+That separation is the whole design. A sweep cannot work as a snapshot; it
+works as an incremental, persistent curve. It also makes tooltips O(1) after
+first sight, which independently removes the query-per-hover cost measured
+earlier (40 rows cost 32 `GetItemInfo` calls).
+
+#### Vendor price without a DLL — one source we do not have
+
+Aux has three: the merchant tooltip scan (we have this), `ShaguTweaks.SellValueDB`
+as a fallback, and — **the one worth taking** — the **AH sell slot**.
+`NEW_AUCTION_UPDATE` plus `GetAuctionSellItemInfo()` position 6 gives the exact
+vendor price of anything a player posts, divided by charges or count. We already
+handle that event and already have a sell slot. Every posted item would teach us
+a vendor price, free.
+
+That also makes the deposit exact rather than approximate. Aux:
+`floor(unit_vendor_price * deposit_factor * stack_size) * stack_count *
+duration_factor`, where `deposit_factor` is `.05` at your faction's AH and `.25`
+neutral, and `duration_factor` is `minutes / 120`. Turtle's x3 durations flow
+straight through: 72h = 4320/120 = **36**, against vanilla's 12 at 24h. That is
+most of the "inflated deposit", and it is arithmetic, not a mystery. Our ~0.6
+fudge exists only because we do not reliably know the vendor price.
+
+#### Corrections to the brief, from source
+
+- The expected-value sum also multiplies by the **quantity midpoint**
+  `(min+max)/2`. The brief's version (probability x value) is the Classic/TBC
+  form and understates every multi-drop material.
+- `history.market_value()` is **today's** minimum buyout; `history.value()` is
+  the 11-day age-weighted median. The brief has these swapped. The disenchant
+  clamp is therefore `min(median, today)` — a pessimism clamp, not a comparison
+  of two averages.
+- The 4th argument to `disenchant.value` is a **not-disenchantable exception
+  list**, not a value override. Same seven ids our `NEVER` table already has.
+- Aux prints the **raw quantity range** `(1-2)`, not Enchantrix's `x1.5`
+  midpoint. Same fact, two notations.
+- If **any one material** is unpriced, aux returns nil for the whole item. That
+  is the "Devout Belt never resolves" report — expected behaviour, not a bug.
+  We should show the distribution anyway and name the missing material.
+
+#### One genuine conflict to settle in game
+
+**`INVTYPE_SHIELD`: aux says weapon, we say armour.** Armour is dust-led (~82%)
+and weapons essence-led (~80%), so this swaps which material dominates. Our
+table came from 8.8M observations and aux's is hand-written, so ours should
+win — but disenchant a few shields and confirm. Aux also omits `INVTYPE_THROWN`,
+`INVTYPE_RELIC` and `INVTYPE_TABARD` entirely, reporting them not-disenchantable.
+
+Where the data overlaps we are better: we carry measured multi-material
+distributions for uncommon *and* rare where aux's rare bands are a single
+deterministic shard. Aux has five epic bands; they are as unmeasured as the ones
+we dropped, so its epics are a guess presented without qualification. Our
+silence is the more honest of the two — keep it.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
