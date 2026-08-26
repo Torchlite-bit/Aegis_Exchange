@@ -88,7 +88,7 @@ step "No two widgets hang off the same anchor"
 # is what 1.20.0 shipped in the settings panel.
 python3 tests/lint/anchorchain.py || fail=1
 
-say "== Every colour the UI reads exists in the palette =="
+step "Every colour the UI reads exists in the palette"
 python3 tests/lint/palette.py --selftest >/dev/null || { \
     echo "palette selftest FAILED"; python3 tests/lint/palette.py --selftest; \
     fail=1; }

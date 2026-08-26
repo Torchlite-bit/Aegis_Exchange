@@ -67,6 +67,14 @@ function tooltip.Extend(gtt, itemId, count)
     local minBuy = Want("tipMinBuyout") and A.db.MinBuyout(itemId)   or nil
     local vendor = Want("tipVendor")    and A.db.GetVendor(itemId)   or nil
 
+    -- What a MERCHANT CHARGES, learned by walking vendor inventories, plus
+    -- whether that vendor's stock was finite. A different fact from `vendor`
+    -- above -- that is what a merchant PAYS -- and the two are never equal.
+    local vendorBuy, vendorBuyLimited
+    if Want("tipVendorBuy") and A.db.GetVendorBuy then
+        vendorBuy, vendorBuyLimited = A.db.GetVendorBuy(itemId)
+    end
+
     -- Resolved LAST, and only when the line is wanted. It is the one entry
     -- here that costs a GetItemInfo, and a tooltip that ends up showing no
     -- Aegis lines at all should not have paid for one.
@@ -102,8 +110,9 @@ function tooltip.Extend(gtt, itemId, count)
         end
     end
 
-    if not market and not minBuy and not vendor and not disenchant
-        and not disenchantRows and not deUnpriced and not craftCost then
+    if not market and not minBuy and not vendor and not vendorBuy
+        and not disenchant and not disenchantRows and not deUnpriced
+        and not craftCost then
         return
     end
 
@@ -154,11 +163,18 @@ function tooltip.Extend(gtt, itemId, count)
 
     -- WHAT IT IS WORTH: the three prices, one group. Buyout first -- today's
     -- cheapest is what a buyer acts on; the median is context for it.
-    if minBuy or market or vendor then
+    if minBuy or market or vendor or vendorBuy then
         if seen > 0 then blank() end
         if minBuy then pair("Aegis Buyout:", money(minBuy)) end
         if market then pair("Aegis Market:", money(market)) end
         if vendor then pair("Sell to Vendor:", money(vendor)) end
+        -- Phrased to pair with the line above it, and the "(limited)" is not
+        -- decoration: a finite-stock price is not a supply, so it must not
+        -- read as one you can go and buy out.
+        if vendorBuy then
+            pair(vendorBuyLimited and "Buy from Vendor (limited):"
+                or "Buy from Vendor:", money(vendorBuy))
+        end
     end
 
     -- WHAT IT COSTS TO MAKE, when a captured recipe makes it.

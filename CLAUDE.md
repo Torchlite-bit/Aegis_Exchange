@@ -227,9 +227,22 @@ Turtle exposes a global **`TURTLE_WOW_VERSION`** — use it to detect Turtle
 - **Cross-faction AH.** Turtle's auction house is a **single shared economy**.
   Do **not** split the price DB by faction.
 - **Auction durations are ×3 vanilla** — max **72h**.
-- **Deposit is inflated** in what the client shows. Apply a **~0.6 factor** as
-  an approximation and **label it "approx"** in the UI. Never present it as
-  exact.
+- **Deposit is MEASURED, not guessed.** Two corrections, and they are different
+  claims — do not collapse them into one factor:
+  1. **Formula → client.** The vanilla formula is wrong for this server by
+     roughly 2x (a real client said `client=25 formula=48` for the same item at
+     the same duration). `sell.LearnDepositRatio` measures the ratio wherever an
+     item is in the sell slot, because that is the one place both answers exist,
+     and `sell.DepositFor` applies it to the bag preview, which can only reach
+     the formula. **The client's own figure is used RAW** — scaling it by this
+     correction double-counts, and was the bug that made the two paths disagree.
+  2. **Client → charged.** `sell.TURTLE_DEPOSIT_FACTOR = 0.6` is now only a
+     starting guess. The deposit watch (`sell.ArmDepositWatch` /
+     `sell.SettleDepositWatch`) compares what the client quoted against the
+     money that actually left the bags on a real post, and that measurement
+     replaces it.
+
+  Still **label the result "approx"** in the UI. Never present it as exact.
 - **120-auction account cap.**
 - **5% faction consignment cut** on sales.
 

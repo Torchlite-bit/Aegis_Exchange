@@ -2114,12 +2114,20 @@ required-level fallback) in **v1.43.0**; phase 3 (the item-fact harvest) in
 **v1.44.0**; phase 4 (the multi-section tooltip) in **v1.45.0**. **The aux work
 is done.**
 
-Left deliberately unbuilt: **vendor BUY prices**. aux learns what a merchant
-charges as well as what it pays and flags limited stock (`limited = stock >= 0`
-from GetMerchantItemInfo's 5th return, with an unlimited-stock price always
-beating a limited one). We never scan a merchant's inventory, so there is
-nothing to show. It is a feature with its own event handling, not a tooltip
-line, and belongs in its own release.
+**Vendor BUY prices shipped in v1.50.0**, which closes the aux list. A
+MERCHANT_SHOW pass reads the whole open inventory -- bounded, no `GetItemInfo`,
+no tooltip, so HARD RULE 16 is satisfied structurally rather than by a flag --
+and records the per-unit asking price for every line.
+
+The rule worth keeping in mind is that **limited stock outranks price**
+(`limited = stock >= 0` from GetMerchantItemInfo's 5th return). A vendor with
+three of something is not a source of it, so an unlimited price replaces a
+limited one even when it is dearer. Two things bite here and both have
+sabotages: the flag reads backwards (`-1` is unlimited, so a **sold-out vendor
+reporting 0 has LIMITED stock**), and `price` is for the whole bundle of
+`quantity`, not per unit. A `price` of 0 is not free either -- it is an
+extended-cost row, bought with tokens or honour, and recording it would make
+every such item the cheapest source in the game.
 
 **A load-bearing fact was wrong and is now corrected.** `GetItemInfo` does NOT
 query the server for an uncached item -- it returns nil and does nothing else.
@@ -2327,6 +2335,54 @@ would have been the same mistake as the formula it was compensating for, so
 instead `/aex diag` prints our figure beside the client's own
 `CalculateAuctionDeposit` for a slotted item. **Settle it with that readout
 before touching the number.**
+
+#### What that readout actually said — v1.50.0
+
+The reading came back `client=25 formula=48` for a 2s50c vendor item at 480
+minutes, and it settled something OTHER than the thing it was built to settle.
+Both figures are the CLIENT's, so the disagreement is not about what the server
+charges at all — **it is our arithmetic being wrong for this server**, by
+almost exactly 2x. The 0.6 was never the problem; it was sitting on top of a
+base that was already double.
+
+Two corrections now, and they are different claims, measured separately:
+
+1. **Formula → client.** Learned wherever an item is in the sell slot, because
+   that is the one place both answers exist. Applied to the bag preview, which
+   can only reach the formula. Before this, the Sell tab showed a different
+   deposit depending on whether Aegis happened to know the vendor price — two
+   paths, one auction, two numbers.
+2. **Client → charged.** Learned from the money that actually leaves the bags
+   when a post goes through, which is the only measurement of the SERVER in the
+   addon. `TURTLE_DEPOSIT_FACTOR` is now the value used until the player's first
+   post and nothing more.
+
+The client's figure is used **raw**. It had been scaled by correction (1) as
+well, which double-counts: that correction exists to move the formula towards
+the client, so applying it to the client pushes the one reliable number away
+from the truth. That is a sabotage now.
+
+**The interesting design problem was the money watch.** The deduction is not
+synchronous with `StartAuction`, so it cannot be a subtraction around the call
+— it has to be a watch armed at post time and settled by the next
+`PLAYER_MONEY`. Two ways that goes wrong, both sabotaged:
+
+- **A rising balance.** Loot, a quest reward or a sale mail lands between the
+  post and the charge. Holding the watch across it leaves the baseline stale,
+  and the next delta is then deposit-minus-income — which, for a small enough
+  income, lands inside the plausibility band and gets recorded as a real
+  reading. The first money event settles the watch whatever it was; abandoning
+  a sample loses a measurement, keeping it invents one.
+- **Re-arming mid-flight.** Multi-stack posting fires `StartAuction` every
+  0.45s. A second watch armed before the first one's money event landed would
+  take a balance still holding the first deposit, then measure both deductions
+  as one and record a ratio of about 2 — comfortably inside the band. One watch
+  at a time, expiring after five seconds.
+
+**And the general lesson, again.** Three releases were spent reasoning about
+`TURTLE_DEPOSIT_FACTOR` from the outside. One `/aex diag` line settled it in a
+sentence — and settled a different question than the one being argued about.
+Build the readout first.
 
 Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled

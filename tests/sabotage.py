@@ -1908,6 +1908,104 @@ end
         return nil, source, unpriced, first""",
      "        return nil, source",
      "tooltip"),
+
+    # ---- vendor buy prices ------------------------------------------------
+    # The rule that is not about price. Drop the limited/unlimited preference
+    # and it collapses to "cheaper wins" -- which records a vendor with three
+    # of something as the place to buy it.
+    ("vendorbuy-cheapest-always-wins", "core/db.lua",
+     """    if oldLimited and not newLimited then return newCopper, newLimited end
+    if newLimited and not oldLimited then return oldCopper, oldLimited end""",
+     "",
+     "vendorbuy"),
+
+    # Half the preference, which is the subtler version: an unlimited price
+    # replaces a limited one, but a cheap limited one then takes it back.
+    ("vendorbuy-limited-can-take-it-back", "core/db.lua",
+     "    if newLimited and not oldLimited then return oldCopper, oldLimited end",
+     "",
+     "vendorbuy"),
+
+    # `limited` is `stock >= 0`, and it reads backwards: the client uses -1 for
+    # unlimited, so a sold-out vendor reporting 0 has LIMITED stock. The
+    # obvious-looking `> 0` marks it unlimited and lets a one-off price become
+    # the addon's idea of a supply.
+    ("vendorbuy-zero-stock-reads-unlimited", "core/sell.lua",
+     "    local limited = (numAvailable or -1) >= 0",
+     "    local limited = (numAvailable or -1) > 0",
+     "vendorbuy"),
+
+    # The bundle divisor dropped: a vendor selling five Copper Bars for 5s is
+    # recorded as charging 5s each.
+    ("vendorbuy-bundle-price-as-unit", "core/sell.lua",
+     "    return itemId, math.floor(price / quantity), limited",
+     "    return itemId, math.floor(price), limited",
+     "vendorbuy"),
+
+    # An extended-cost row prices at 0 and is not free. Recording it makes
+    # every token item look like the cheapest source in the game.
+    ("vendorbuy-records-token-items-as-free", "core/sell.lua",
+     "    if not price or price <= 0 then return nil end",
+     "    price = price or 0",
+     "vendorbuy"),
+
+    # ---- deposit calibration ----------------------------------------------
+    # The ratio inverted. It still produces a plausible-looking number and the
+    # bag preview then lands twice as far from the client as before.
+    ("deposit-ratio-inverted", "core/sell.lua",
+     "    local r = clientCopper / formulaCopper",
+     "    local r = formulaCopper / clientCopper",
+     "vendorbuy"),
+
+    # The plausibility band removed, so a bad reading is averaged in instead of
+    # discarded.
+    ("deposit-ratio-accepts-anything", "core/sell.lua",
+     "    if r < sell.RATIO_MIN or r > sell.RATIO_MAX then return nil end\n    return r",
+     "    return r",
+     "vendorbuy"),
+
+    # The client's own figure scaled by the formula's correction as well --
+    # double-counting, and the exact bug this release fixes. The correction
+    # exists to move the FORMULA towards the client; applying it to the client
+    # pushes the one reliable number away from the truth.
+    ("deposit-client-figure-double-scaled", "core/sell.lua",
+     "        base = CalculateAuctionDeposit(minutes)",
+     "        base = CalculateAuctionDeposit(minutes) * sell.FormulaScale()",
+     "vendorbuy"),
+
+    # The bag preview stops calibrating, which is the state that shipped: two
+    # paths, one auction, two different numbers.
+    ("deposit-bag-path-uncalibrated", "core/sell.lua",
+     "    return math.floor(base * sell.FormulaScale() * sell.ChargeFactor())",
+     "    return math.floor(base * sell.ChargeFactor())",
+     "vendorbuy"),
+
+    # A rising balance leaves the watch armed on a stale baseline. The next
+    # deduction is then measured as deposit-minus-income and, when the income
+    # is small enough, lands inside the band and is recorded as real.
+    ("deposit-watch-survives-income", "core/sell.lua",
+     """    sell.depositWatch = nil
+    local spent = w.money - money
+    if spent <= 0 then return nil end""",
+     """    local spent = w.money - money
+    if spent <= 0 then return nil end
+    sell.depositWatch = nil""",
+     "vendorbuy"),
+
+    # Re-arming while a watch is live. Multi-stack posting fires every 0.45s,
+    # so the second watch takes a balance that still holds the first deposit
+    # and then measures both deductions as one.
+    ("deposit-watch-rearms-mid-flight", "core/sell.lua",
+     "    if live and (now - live.at) <= sell.WATCH_TIMEOUT then return nil end",
+     "",
+     "vendorbuy"),
+
+    # The running mean replaced by "latest wins", so one odd post takes the
+    # learned factor over entirely.
+    ("deposit-mean-is-just-the-latest", "core/db.lua",
+     "        rec[meanKey] = old + (value - old) / n",
+     "        rec[meanKey] = value",
+     "vendorbuy"),
 ]
 
 SUITES = {
@@ -1929,6 +2027,7 @@ SUITES = {
     "tooltip": "tests/units/tooltip_test.lua",
     "disenchant.learn": "tests/units/disenchant_learn_test.lua",
     "clientdata": "tests/units/clientdata_test.lua",
+    "vendorbuy": "tests/units/vendorbuy_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

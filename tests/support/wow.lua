@@ -170,6 +170,14 @@ end
 W.money = 500000                      -- 50g
 function GetMoney() return W.money end
 
+-- Change the balance the way the client does: the number moves and PLAYER_MONEY
+-- fires. Tests that only assign W.money are testing a client that never told
+-- the addon anything, which is not one that exists.
+function W.SpendMoney(copper, frame)
+    W.money = W.money - copper
+    if frame then W.FireEvent(frame, "PLAYER_MONEY") end
+end
+
 ITEM_QUALITY_COLORS = {
     [0] = { r = 0.62, g = 0.62, b = 0.62 },
     [1] = { r = 1.00, g = 1.00, b = 1.00 },
@@ -461,6 +469,61 @@ function GetAuctionSellItemInfo()
 end
 
 -- ---------------------------------------------------------------------------
+-- Merchants
+-- ---------------------------------------------------------------------------
+
+-- An open vendor's inventory. Each row is { link, price, quantity,
+-- numAvailable } where `price` is for the whole BUNDLE of `quantity`, and
+-- numAvailable is -1 for unlimited stock -- which is the client's convention
+-- and the reason "limited" is `>= 0` rather than `> 0`.
+W.merchant = {}
+function W.SetMerchant(rows) W.merchant = rows or {} end
+
+function GetMerchantNumItems() return table.getn(W.merchant) end
+
+function GetMerchantItemInfo(index)
+    local r = W.merchant[index]
+    if not r then return nil end
+    local rec = ItemRec(r.link) or {}
+    return rec.name or r.link, rec.texture or "icon", r.price or 0,
+           r.quantity or 1,
+           r.numAvailable == nil and -1 or r.numAvailable,
+           1, r.extendedCost
+end
+
+function GetMerchantItemLink(index)
+    local r = W.merchant[index]
+    return r and r.link or nil
+end
+
+-- ---------------------------------------------------------------------------
+-- The client's own deposit maths
+-- ---------------------------------------------------------------------------
+
+-- CalculateAuctionDeposit answers for the SLOTTED item only, which is exactly
+-- why the addon cannot use it for a bag preview.
+--
+-- The rate is settable because the whole point of the calibration work is that
+-- we do NOT know this client's rule. A real Turtle client was measured saying
+-- 25 where vanilla's 5% says 48, so a test can set 0.025 and reproduce that
+-- disagreement rather than assert against a number someone typed.
+--
+-- Set W.clientDepositRate to nil to model a client with no such function at
+-- all, which is what the addon sees before the AH UI has loaded.
+W.clientDepositRate = 0.05
+
+function CalculateAuctionDeposit(minutes)
+    if W.clientDepositRate == nil then return nil end
+    local s = W.sellSlot
+    if not s then return 0 end
+    local rec = ItemRec(s.link) or {}
+    local unit = (rec.sellPrice or 0)
+    if unit <= 0 then return 0 end
+    local count = s.count or 1
+    return math.floor(unit * W.clientDepositRate * count * (minutes / 120))
+end
+
+-- ---------------------------------------------------------------------------
 -- Auction house
 -- ---------------------------------------------------------------------------
 
@@ -652,6 +715,9 @@ function W.Reset()
     W.equipped      = {}
     W.itemInfoShape = "vanilla"
     W.itemInfoCalls = 0
+    W.merchant      = {}
+    W.clientDepositRate = 0.05
+    W.npcFaction    = "Alliance"
     C_Item          = nil
     AegisExchangeDB     = nil
     AegisExchangeCharDB = nil

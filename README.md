@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.49.3)
+# Aegis: Exchange (v1.50.0)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -268,7 +268,9 @@ button appears on the vendor window — **"Aegis: sell 6 marked"** — which con
 what's about to go, sells the lot, and logs the gold to your History.
 
 > Vendor prices are learned by **hovering items at a merchant** (1.12's API
-> doesn't expose them otherwise), so this list fills in as you play.
+> doesn't expose them otherwise), so this list fills in as you play. What a
+> merchant *charges* is easier: opening any vendor reads its whole shelf in one
+> pass, so that side fills in just by walking past.
 
 ### 📜 Auctions — mind the store
 Every auction you have out, with time left, current bid, and the thing you
@@ -326,6 +328,7 @@ Seen 313 times at auction total
 Aegis Buyout:                          7s 99c
 Aegis Market:                          7s 99c
 Sell to Vendor:                         3s 6c
+Buy from Vendor:                       12s 0c
 
 Crafting Cost:                         5s 40c
 
@@ -339,7 +342,11 @@ Disenchant (worth more than the AH):   10s 40c
 
 Every number carries what qualifies it. The **sighting count** leads, because it
 is context for every figure below it. **Buyout** sits above **Market** — today's
-cheapest is what you act on, the median is the context for it. Pick which lines
+cheapest is what you act on, the median is the context for it. **Sell to
+Vendor** and **Buy from Vendor** sit together because they are opposite sides of
+the same NPC — money in and money out — and a vendor whose stock was finite
+reads *Buy from Vendor (limited)*, because a price you can't go back to is not
+a supply. Pick which lines
 you want on the Aegis tab, and optionally show stack totals only while **Shift**
 is held.
 
@@ -503,7 +510,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.49.3`) — quote it.
+1. Check the **version** in the window's title bar (`v1.50.0`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.

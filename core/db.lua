@@ -91,6 +91,17 @@ local function DefaultAccountDB()
         realms  = {},
         -- Game constants, shared by every realm (see header note).
         vendors = {},   -- itemID   -> vendor sell price, per unit
+        -- What a merchant CHARGES for an item, per unit, learned by scanning
+        -- merchant inventories. A different fact from `vendors` above, which is
+        -- what a merchant PAYS -- the two are never the same number and must
+        -- never share a table. `l` records limited stock; see db.MergeVendorBuy
+        -- for why that flag outranks the price itself.
+        vendorBuy = {}, -- itemID   -> { p = unit copper, l = 1 when limited }
+        -- Deposit calibration. Both entries are MEASURED, which is the whole
+        -- point of them: `ratio` is our formula against the client's own
+        -- CalculateAuctionDeposit, `charge` is the client's figure against the
+        -- money that actually left the bags. See core/sell.lua.
+        deposit = {},   -- { ratio, ratioN, charge, chargeN }
         names   = {},   -- itemName -> itemID
         -- Item FACTS harvested from the client's own cache: quality, required
         -- level and equip slot, per item id. Account-wide for the same reason
@@ -157,7 +168,8 @@ local SETTING_DEFAULTS = {
     -- master `tooltip` switch is on.
     tipMarket      = true,      -- "Aegis Market" (time-weighted median)
     tipMinBuyout   = true,      -- "Aegis Min Buyout" (most recent daily low)
-    tipVendor      = true,      -- "Aegis Vendor Price"
+    tipVendor      = true,      -- "Sell to Vendor" (what a merchant PAYS)
+    tipVendorBuy   = true,      -- "Buy from Vendor" (what a merchant CHARGES)
     -- Stack totals -- "(x20 = 24g)" after a unit price. false = always show,
     -- true = only while Shift is held, which is how aux does it and keeps the
     -- tooltip short on a bank full of stacks.
@@ -585,6 +597,124 @@ function db.GetVendor(itemId, info)
     local learned = db.account.vendors[itemId]
     if learned then return learned, "merchant" end
     return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Vendor BUY prices -- what a merchant CHARGES
+-- ---------------------------------------------------------------------------
+
+-- The merge rule, as a PURE function, so it can be tested without a DB and so
+-- there is exactly one statement of it.
+--
+-- The rule is aux's, and the interesting half is that LIMITED STOCK OUTRANKS
+-- PRICE. A vendor selling three Elixirs of Fortitude for 40s each is not a
+-- source of Elixirs of Fortitude; a vendor selling them forever at 60s is. So
+-- an unlimited price replaces a limited one even when it is dearer, and only
+-- once both readings agree about availability does the cheaper win.
+--
+-- "Limited" is `stock >= 0` from GetMerchantItemInfo's 5th return, which is
+-- backwards from how it reads: the client uses -1 for "unlimited", so any
+-- number at all -- including 0, a vendor sold out right now -- means the
+-- supply is finite.
+--
+-- Returns the winning (copper, limited).
+function db.MergeVendorBuy(oldCopper, oldLimited, newCopper, newLimited)
+    if not oldCopper or oldCopper <= 0 then return newCopper, newLimited end
+    if not newCopper or newCopper <= 0 then return oldCopper, oldLimited end
+    if oldLimited and not newLimited then return newCopper, newLimited end
+    if newLimited and not oldLimited then return oldCopper, oldLimited end
+    if newCopper < oldCopper then return newCopper, newLimited end
+    return oldCopper, oldLimited
+end
+
+-- Record a merchant's asking price, per unit. Account-wide for the same reason
+-- as the sell price: what an NPC charges is a property of the game, not of the
+-- realm you happened to see it on.
+function db.SetVendorBuy(itemId, copper, limited)
+    if not db.account then return end
+    if not itemId or not copper or copper <= 0 then return end
+    if not db.account.vendorBuy then db.account.vendorBuy = {} end
+    local rec = db.account.vendorBuy[itemId]
+    local price, lim = db.MergeVendorBuy(rec and rec.p, rec and rec.l == 1,
+        copper, limited)
+    db.account.vendorBuy[itemId] = { p = price, l = lim and 1 or nil }
+end
+
+-- What a merchant charges for one of these, and whether the stock was limited.
+-- Returns copper, limited -- or nil.
+function db.GetVendorBuy(itemId)
+    if not db.account or not db.account.vendorBuy or not itemId then
+        return nil
+    end
+    local rec = db.account.vendorBuy[itemId]
+    if not rec or not rec.p then return nil end
+    return rec.p, rec.l == 1
+end
+
+-- How many items we have a merchant asking price for. For /aex diag, so
+-- "the line never shows" can be told apart from "no merchant has been opened".
+function db.VendorBuyCount()
+    if not db.account or not db.account.vendorBuy then return 0 end
+    local n = 0
+    for _ in pairs(db.account.vendorBuy) do n = n + 1 end
+    return n
+end
+
+-- ---------------------------------------------------------------------------
+-- Deposit calibration
+-- ---------------------------------------------------------------------------
+
+-- How many readings a learned ratio averages over. Capped so an early sample
+-- stops dominating, and so a single odd one can never take the number over.
+local RATIO_SAMPLES_MAX = 20
+
+local function RecordRatio(rec, meanKey, countKey, value)
+    if not value then return nil end
+    local n = (rec[countKey] or 0) + 1
+    if n > RATIO_SAMPLES_MAX then n = RATIO_SAMPLES_MAX end
+    local old = rec[meanKey]
+    if old == nil then
+        rec[meanKey] = value
+    else
+        rec[meanKey] = old + (value - old) / n
+    end
+    rec[countKey] = n
+    return rec[meanKey], n
+end
+
+local function DepositRec()
+    if not db.account then return nil end
+    if not db.account.deposit then db.account.deposit = {} end
+    return db.account.deposit
+end
+
+-- Our formula's answer against the client's own, for the same item and
+-- duration. See sell.DepositRatio for where the number comes from.
+function db.RecordDepositRatio(ratio)
+    local rec = DepositRec()
+    if not rec then return nil end
+    return RecordRatio(rec, "ratio", "ratioN", ratio)
+end
+
+function db.DepositRatio()
+    local rec = db.account and db.account.deposit
+    if not rec or not rec.ratio then return nil end
+    return rec.ratio, rec.ratioN or 0
+end
+
+-- The client's figure against what actually left the bags when a post went
+-- through. This is the only measurement in the addon of what the SERVER
+-- charges, which is what sell.TURTLE_DEPOSIT_FACTOR had been guessing at.
+function db.RecordDepositCharge(ratio)
+    local rec = DepositRec()
+    if not rec then return nil end
+    return RecordRatio(rec, "charge", "chargeN", ratio)
+end
+
+function db.DepositCharge()
+    local rec = db.account and db.account.deposit
+    if not rec or not rec.charge then return nil end
+    return rec.charge, rec.chargeN or 0
 end
 
 -- Max stack size, learned opportunistically. See the `stacks` note in

@@ -537,4 +537,71 @@ H.check("...and carries the RED escape, not the green",
 H.isNil("...and not both",
         badLine and string.find(badLine.left, "|cff4cd94c", 1, true))
 
+-- ---------------------------------------------------------------------------
+H.section("Buy from Vendor -- what a merchant CHARGES")
+-- ---------------------------------------------------------------------------
+
+-- A plain trade good, so nothing else claims the tooltip.
+W.AddItem(920, { name = "Test Thread", quality = 1, type = "Trade Goods" })
+
+local none = Capture()
+A.tooltip.Extend(none, 920, 1)
+H.isNil("no merchant seen, no line", lineFor(none, "Buy from Vendor:"))
+
+A.db.SetVendorBuy(920, 1000, false)
+local unlimited = Capture()
+A.tooltip.Extend(unlimited, 920, 1)
+local buyLine = lineFor(unlimited, "Buy from Vendor:")
+H.check("an unlimited source gets the plain label", buyLine ~= nil)
+H.eq("...at its price", buyLine and buyLine.right,
+     A.util.FormatMoney(1000, true))
+H.isNil("...and NOT the limited label",
+        lineFor(unlimited, "Buy from Vendor (limited):"))
+
+-- The flag is not decoration: a finite-stock price is not a supply, and must
+-- not read as one you can go and buy out.
+A.db.SetVendorBuy(921, 1000, true)
+W.AddItem(921, { name = "Test Scroll", quality = 1, type = "Trade Goods" })
+local limited = Capture()
+A.tooltip.Extend(limited, 921, 1)
+H.check("a limited source is labelled as such",
+        lineFor(limited, "Buy from Vendor (limited):") ~= nil)
+H.isNil("...and not as an unlimited one",
+        lineFor(limited, "Buy from Vendor:"))
+
+-- Unlike the disenchant value, a BUY price is per unit of a thing you buy in
+-- quantity, so the stack total belongs on it.
+local stackedBuy = Capture()
+A.tooltip.Extend(stackedBuy, 920, 20)
+H.check("a stack total is appended",
+        string.find(lineFor(stackedBuy, "Buy from Vendor:").right,
+                    "x20", 1, true) ~= nil,
+        lineFor(stackedBuy, "Buy from Vendor:").right)
+
+-- Its own switch, and it must not take the others with it.
+A.db.SetSetting("tipVendorBuy", false)
+local offBuy = Capture()
+A.tooltip.Extend(offBuy, 920, 1)
+H.isNil("switched off, the line is gone", lineFor(offBuy, "Buy from Vendor:"))
+A.db.SetSetting("tipVendorBuy", true)
+
+-- And on its own it is enough to open the tooltip: an item Aegis knows
+-- NOTHING else about still gets the one line it can answer.
+W.AddItem(922, { name = "Test Twine", quality = 1, type = "Trade Goods" })
+A.db.SetVendorBuy(922, 250, false)
+local alone = Capture()
+A.tooltip.Extend(alone, 922, 1)
+H.check("the vendor buy price alone opens the tooltip",
+        lineFor(alone, "Buy from Vendor:") ~= nil)
+
+-- It is a DIFFERENT fact from what a merchant pays, and the two must never be
+-- confused: one is money in, the other money out.
+A.db.SetVendor(922, 60)
+local both = Capture()
+A.tooltip.Extend(both, 922, 1)
+H.eq("what a merchant pays", lineFor(both, "Sell to Vendor:").right,
+     A.util.FormatMoney(60, true))
+H.eq("what a merchant charges", lineFor(both, "Buy from Vendor:").right,
+     A.util.FormatMoney(250, true))
+
 os.exit(H.report("tooltip"))

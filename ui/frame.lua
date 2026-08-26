@@ -541,6 +541,12 @@ ui.HELP_VENDOR = "Learned by visiting a merchant with the item.\n\n"
     .. "With ClassicAPI installed, Aegis reads the price out of the client "
     .. "instead \226\128\148 every item, no merchant visit."
 
+ui.HELP_VENDOR_BUY = "What a merchant CHARGES, learned by opening one. "
+    .. "Aegis reads the whole inventory, not just the item you hover.\n\n"
+    .. "\"limited\" means that vendor's stock was finite, so the price is not "
+    .. "a supply you can go back to. An unlimited price always replaces a "
+    .. "limited one, even a cheaper limited one."
+
 -- A hover explanation on any widget.
 --
 -- Assigns rather than chains, and that is only safe because the widgets this
@@ -1659,6 +1665,8 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         { key = "tipMinBuyout",  text = "Minimum buyout" },
         { key = "tipVendor",     text = "Vendor price",
           help = ui.HELP_VENDOR },
+        { key = "tipVendorBuy",  text = "What a vendor charges",
+          help = ui.HELP_VENDOR_BUY },
         { key = "tipDisenchant", text = "Disenchant value (hold Shift for the"
                                         .. " breakdown)",
           help = ui.HELP_DISENCHANT },
@@ -9825,6 +9833,12 @@ function ui.RefreshSell()
     end
 
     -- Deposit: per stack of `size`, times the number of stacks.
+    --
+    -- Learn first. An item is slotted, so the client will answer for it, and
+    -- both numbers this needs are about to be computed anyway -- so the one
+    -- place the formula can be checked against the client is the same place
+    -- the formula gets used. O(1): one client call and one division.
+    A.sell.LearnDepositRatio(ui.sellDuration)
     local perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
         it.maxStack)
     local approx = true
@@ -11404,11 +11418,30 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  deposit @480m: client=" .. tostring(client)
                 .. " formula=" .. tostring(ours and math.floor(ours))
                 .. " rate=" .. tostring(A.sell.DepositRate())
-                .. " turtleFactor=" .. tostring(A.sell.TURTLE_DEPOSIT_FACTOR))
+                -- The SLOT's item, not the one named on the command line:
+                -- CalculateAuctionDeposit only answers for what is slotted, so
+                -- comparing it against a different item's formula would be
+                -- comparing two unrelated numbers.
+                .. " shown=" .. tostring(A.sell.DepositFor(slotted.itemId,
+                    slotted.count or 1, mins)))
         else
             ChatMsg("  deposit: put an item in the Sell slot to compare"
                 .. " ours against the client's")
         end
+        -- The two LEARNED corrections, with their sample counts, because a
+        -- factor averaged over one reading and one averaged over twenty are
+        -- not the same claim and the number alone cannot tell them apart.
+        local fr, fn = A.db.DepositRatio()
+        local cr, cn = A.db.DepositCharge()
+        ChatMsg("  deposit calibration: formula->client="
+            .. tostring(fr) .. " (n=" .. tostring(fn or 0) .. ")"
+            .. "  client->charged=" .. tostring(cr)
+            .. " (n=" .. tostring(cn or 0) .. ")"
+            .. "  fallback=" .. tostring(A.sell.TURTLE_DEPOSIT_FACTOR))
+        local vb, vbl = A.db.GetVendorBuy(itemId)
+        ChatMsg("  vendor buy=" .. tostring(vb)
+            .. " limited=" .. tostring(vbl)
+            .. "  known=" .. tostring(A.db.VendorBuyCount()))
         return
     end
     if string.find(cmd, "cache", 1, true) then

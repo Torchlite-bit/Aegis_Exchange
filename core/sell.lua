@@ -56,12 +56,55 @@ sell.DEPOSIT_RATE_NEUTRAL = 0.25
 -- Turtle's shown deposit is inflated relative to what actually gets charged;
 -- scale by this to approximate. The result is ALWAYS presented as "approx".
 --
--- UNVERIFIED, and flagged as such. It is a claim about what the server charges,
--- carried since before the formula above was right, and nothing in this repo
--- measures it. `/aex diag` now prints our figure beside the client's
--- CalculateAuctionDeposit for a slotted item, which is the comparison that
--- would settle it. Do not tune this number without that readout.
+-- STILL A GUESS, and now only a STARTING guess: sell.ChargeFactor prefers a
+-- ratio measured from the money that actually left the bags (see the deposit
+-- watch below), and falls back to this only until the player has posted
+-- something. Do not tune the constant -- post an auction and let it learn.
 sell.TURTLE_DEPOSIT_FACTOR = 0.6
+
+-- Bounds on a learned ratio. Anything outside this band is not a calibration,
+-- it is a bad reading: a vendor price for the wrong item, a charge-item stack,
+-- a client that answered zero, or money that moved for some other reason in
+-- the same frame. Discard it rather than average it in.
+sell.RATIO_MIN = 0.1
+sell.RATIO_MAX = 3.0
+
+-- Our formula against the client's own CalculateAuctionDeposit, for the same
+-- item, stack and duration. Pure; nil when either side has nothing to say or
+-- the answer is not believable.
+--
+-- WHY THIS EXISTS. On a real Turtle client the two disagreed by roughly 2x:
+-- for a 2s50c vendor item at 480 minutes the client said 25 and the vanilla
+-- formula said 48. Both figures are the CLIENT's, so the disagreement is not
+-- about what the server charges -- it is our arithmetic being wrong for this
+-- server. The slot could ask the client directly and the bag preview could
+-- not, so the two paths showed different numbers for the same item. Rather
+-- than tune a second constant by hand, learn the ratio wherever both answers
+-- are available and apply it where only the formula is.
+function sell.DepositRatio(clientCopper, formulaCopper)
+    if not clientCopper or not formulaCopper then return nil end
+    if clientCopper <= 0 or formulaCopper <= 0 then return nil end
+    local r = clientCopper / formulaCopper
+    if r < sell.RATIO_MIN or r > sell.RATIO_MAX then return nil end
+    return r
+end
+
+-- What to multiply a formula result by so it agrees with the client.
+-- Returns factor, measured.
+function sell.FormulaScale()
+    local r = A.db and A.db.DepositRatio and A.db.DepositRatio()
+    if r then return r, true end
+    return 1, false
+end
+
+-- What fraction of the client's deposit actually leaves your bags.
+-- Returns factor, measured.
+function sell.ChargeFactor()
+    if not A.isTurtle then return 1, false end
+    local r = A.db and A.db.DepositCharge and A.db.DepositCharge()
+    if r then return r, true end
+    return sell.TURTLE_DEPOSIT_FACTOR, false
+end
 
 -- Which rate applies where the player is standing. UnitFactionGroup("npc")
 -- answers only at a faction auctioneer; at a neutral one it is nil.
@@ -154,6 +197,64 @@ function sell.LearnVendorFromSlot()
     if not itemId or not unit or unit <= 0 then return nil end
     if A.db and A.db.SetVendor then A.db.SetVendor(itemId, unit) end
     return itemId, unit
+end
+
+-- ---------------------------------------------------------------------------
+-- Vendor BUY prices: what a merchant CHARGES
+-- ---------------------------------------------------------------------------
+
+-- Merchant pages are small (the client shows ten at a time and vanilla vendors
+-- rarely exceed a few dozen lines), but a cap costs nothing and means a server
+-- that reports a nonsense count cannot hang the client.
+sell.MERCHANT_MAX = 200
+
+-- One merchant line, normalised. Returns itemId, unit copper, limited -- or
+-- nil for a line we should not learn from.
+--
+-- Two things get skipped, and both would otherwise poison the table:
+--   * `price` 0, which is not free -- it is what an EXTENDED-COST item shows,
+--     the ones bought with honour, marks or tokens. Recording zero would make
+--     every such item look like the cheapest source in the game.
+--   * a quantity of 0 or less, because the unit price is price / quantity and
+--     a vendor selling in bundles of five is the normal case, not the odd one.
+function sell.MerchantLine(index)
+    if not GetMerchantItemInfo then return nil end
+    local name, texture, price, quantity, numAvailable = GetMerchantItemInfo(index)
+    if not name then return nil end
+    if not price or price <= 0 then return nil end
+    quantity = quantity or 1
+    if quantity < 1 then return nil end
+    local link = GetMerchantItemLink and GetMerchantItemLink(index)
+    local itemId = link and util.ItemIdFromLink(link)
+    if not itemId then return nil end
+    -- -1 is the client's "unlimited". ANY number, zero included, means finite
+    -- supply -- a vendor that is sold out right now still has limited stock.
+    local limited = (numAvailable or -1) >= 0
+    return itemId, math.floor(price / quantity), limited
+end
+
+-- Walk the open merchant's inventory and record what it charges.
+--
+-- HARD RULE 16: this is the BOUNDED shape. MERCHANT_SHOW fires once per
+-- merchant, the loop is capped, and every call inside it is a cheap client
+-- read -- no GetItemInfo, no tooltip, no list repaint. Returns how many lines
+-- it learned from.
+function sell.ScanMerchant()
+    if not GetMerchantNumItems then return 0 end
+    local n = GetMerchantNumItems() or 0
+    if n > sell.MERCHANT_MAX then n = sell.MERCHANT_MAX end
+    local learned, i = 0, 1
+    while i <= n do
+        local itemId, unit, limited = sell.MerchantLine(i)
+        if itemId and unit and unit > 0 then
+            if A.db and A.db.SetVendorBuy then
+                A.db.SetVendorBuy(itemId, unit, limited)
+            end
+            learned = learned + 1
+        end
+        i = i + 1
+    end
+    return learned
 end
 
 -- Your current number of active auctions (second return of GetNumAuctionItems).
@@ -394,8 +495,13 @@ end
 
 -- Approximate deposit (copper) for the slotted item at `minutes`. Prefers the
 -- client's own CalculateAuctionDeposit (present once the AH UI has loaded),
--- scaled by the Turtle factor. Returns (copper, isApprox); isApprox is true on
+-- then the charge factor. Returns (copper, isApprox); isApprox is true on
 -- Turtle so the UI can label it honestly.
+--
+-- The client's figure is used RAW as the base. It used to be scaled by the
+-- formula's correction as well, which double-counted: the ratio exists to make
+-- the formula agree with the client, so applying it to the client itself
+-- pushes the one reliable number away from the truth.
 function sell.EstimateDeposit(minutes)
     if not minutes or minutes <= 0 then return 0, true end
     local base
@@ -404,17 +510,37 @@ function sell.EstimateDeposit(minutes)
     else
         -- Fallback: the same formula the bag preview uses, from the slot item.
         -- `it.price` is the vendor price for the WHOLE stack, so the unit price
-        -- is what the formula wants.
+        -- is what the formula wants. Scaled, because this branch IS the
+        -- formula and the client is not answering.
         local it = sell.GetItem()
         if not it then return 0, true end
         base = sell.DepositAmount(it.price / (it.count or 1),
             it.count or 1, 1, minutes)
+        if base then base = base * sell.FormulaScale() end
     end
     base = base or 0
     if A.isTurtle then
-        return math.floor(base * sell.TURTLE_DEPOSIT_FACTOR), true
+        return math.floor(base * sell.ChargeFactor()), true
     end
-    return base, false
+    return math.floor(base), false
+end
+
+-- Learn the formula-to-client ratio from the item in the sell slot. Cheap and
+-- opportunistic: both numbers are already computed for the item the player is
+-- looking at, so this costs one division whenever the Sell tab redraws.
+--
+-- Returns the ratio it recorded, or nil when it could not.
+function sell.LearnDepositRatio(minutes)
+    if not CalculateAuctionDeposit then return nil end
+    if not minutes or minutes <= 0 then return nil end
+    local it = sell.GetItem()
+    if not it or not it.price or it.price <= 0 then return nil end
+    local ours = sell.DepositAmount(it.price / (it.count or 1),
+        it.count or 1, 1, minutes)
+    local ratio = sell.DepositRatio(CalculateAuctionDeposit(minutes), ours)
+    if not ratio then return nil end
+    if A.db and A.db.RecordDepositRatio then A.db.RecordDepositRatio(ratio) end
+    return ratio
 end
 
 -- Suggested per-unit prices for `itemId` from the price DB (any may be nil).
@@ -895,6 +1021,70 @@ function sell.PlaceItemById(itemId)
 end
 
 -- ---------------------------------------------------------------------------
+-- What the deposit ACTUALLY cost
+-- ---------------------------------------------------------------------------
+
+-- The only measurement in this addon of what the SERVER charges, as opposed to
+-- what the client says it will. Posting is the moment both numbers exist: the
+-- client states a deposit for the slotted item, and a moment later exactly
+-- that much money -- or not -- leaves the bags.
+--
+-- The deduction is not synchronous, so this cannot be a subtraction around
+-- StartAuction. Arm a watch with the balance and the expectation, and let the
+-- next PLAYER_MONEY do the subtraction.
+sell.WATCH_TIMEOUT = 5   -- seconds before an unanswered watch is abandoned
+
+-- Remember the balance and what the client expects to charge. Returns the
+-- watch, or nil when it declined to arm.
+--
+-- ONE AT A TIME, deliberately. Multi-stack posting fires StartAuction every
+-- 0.45s, and a second watch armed before the first one's money event landed
+-- would take a balance that still contained the first deposit -- then measure
+-- both deductions as one and record a ratio of about 2. Skipping the arm
+-- learns less often and never learns something false.
+function sell.ArmDepositWatch(minutes, now)
+    now = now or (GetTime and GetTime()) or 0
+    local live = sell.depositWatch
+    if live and (now - live.at) <= sell.WATCH_TIMEOUT then return nil end
+    sell.depositWatch = nil
+    if not CalculateAuctionDeposit or not GetMoney then return nil end
+    if not minutes or minutes <= 0 then return nil end
+    local expect = CalculateAuctionDeposit(minutes)
+    if not expect or expect <= 0 then return nil end
+    sell.depositWatch = { money = GetMoney(), expect = expect, at = now }
+    return sell.depositWatch
+end
+
+-- Money changed. Returns (ratio, spent) when that settled a watch.
+--
+-- THE FIRST MONEY EVENT SETTLES IT, whatever it was, and a watch is never
+-- reused. A balance that went UP is somebody else's event -- a loot, a quest
+-- reward, a sale mail -- and holding the watch across it would leave the
+-- baseline stale: the next delta would then be the deposit MINUS that income,
+-- and a small enough income lands inside the plausibility band and gets
+-- recorded as a real reading. Abandoning the sample loses a measurement;
+-- keeping it invents one.
+function sell.SettleDepositWatch(money, now)
+    local w = sell.depositWatch
+    if not w then return nil end
+    now = now or (GetTime and GetTime()) or 0
+    if (now - w.at) > sell.WATCH_TIMEOUT then
+        sell.depositWatch = nil
+        return nil
+    end
+    if money == nil then return nil end
+    sell.depositWatch = nil
+    local spent = w.money - money
+    if spent <= 0 then return nil end
+    local ratio = spent / w.expect
+    if ratio < sell.RATIO_MIN or ratio > sell.RATIO_MAX then return nil end
+    if A.db and A.db.RecordDepositCharge then
+        A.db.RecordDepositCharge(ratio)
+    end
+    return ratio, spent
+end
+
+-- ---------------------------------------------------------------------------
 -- Posting
 -- ---------------------------------------------------------------------------
 
@@ -922,6 +1112,7 @@ function sell.Post(unitBuyout, unitStart, minutes)
     if buyout > 0 and start > buyout then
         return false, "Start bid can't exceed the buyout."
     end
+    sell.ArmDepositWatch(minutes)
     StartAuction(start, buyout, minutes)
     return true
 end
@@ -1022,9 +1213,13 @@ function sell.DepositFor(itemId, stackSize, minutes, maxStack)
     local vendorUnit = A.db.GetVendor(itemId)
     local base = sell.DepositAmount(vendorUnit, stackSize, 1, minutes)
     if not base then return nil end
-    base = math.floor(base)
-    if A.isTurtle then base = math.floor(base * sell.TURTLE_DEPOSIT_FACTOR) end
-    return base
+    -- Two corrections, in order, and they are different claims. The first
+    -- makes our arithmetic agree with the CLIENT (measured wherever an item is
+    -- slotted); the second turns the client's figure into what the SERVER
+    -- takes (measured from a real post). Floor once, at the end -- flooring
+    -- between them threw away up to a copper per correction and was how this
+    -- path and the slotted one drifted apart in the first place.
+    return math.floor(base * sell.FormulaScale() * sell.ChargeFactor())
 end
 
 -- Trace the posting state machine. Shares the /aex debug flag with the scanner,
@@ -1328,6 +1523,7 @@ function sell.PostTick(dt)
             local buyout = math.floor(job.unitBuyout * job.stackSize)
             local start  = math.floor(job.unitStart * job.stackSize)
             if start < 1 then start = 1 end
+            sell.ArmDepositWatch(job.minutes)
             StartAuction(start, buyout, job.minutes)   -- posts, clears slot
             job.posted = job.posted + 1
             job.remaining = job.remaining - 1
@@ -1364,4 +1560,19 @@ end
 
 function sell.CancelPosting()
     if sell.job then FinishJob("cancelled") end
+end
+
+-- ---------------------------------------------------------------------------
+-- Events
+-- ---------------------------------------------------------------------------
+
+if A.RegisterEvent then
+    -- At a merchant: learn what it charges. Bounded, one fire per merchant.
+    A.RegisterEvent("MERCHANT_SHOW", function() sell.ScanMerchant() end)
+    -- Money moved. O(1): a subtraction against an armed watch, and an
+    -- immediate return when there is none -- which is every other time this
+    -- fires, and it fires for every copper the player earns or spends.
+    A.RegisterEvent("PLAYER_MONEY", function()
+        sell.SettleDepositWatch(GetMoney and GetMoney() or nil)
+    end)
 end

@@ -12,6 +12,51 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.50.0]
+
+### Added
+- **Vendor buy prices — what a merchant *charges*.** Open any vendor and Aegis
+  reads the whole inventory in one bounded pass, recording the per-unit asking
+  price for everything on the shelf. It shows up as a **Buy from Vendor:** line
+  on the tooltip, beside the existing *Sell to Vendor:* line — one is money in,
+  the other money out, and they are never the same number.
+  - **Limited stock is flagged, and it outranks price.** A vendor with three of
+    something is not a *source* of it; a vendor with an endless supply is, even
+    at a worse price. So an unlimited price replaces a limited one even when it
+    is dearer, and only when both readings agree about availability does the
+    cheaper win. Limited prices read **Buy from Vendor (limited):** so they
+    can't be mistaken for a supply you can go back to.
+  - Items bought with tokens, marks or honour are skipped rather than recorded
+    as free, and a bundle price is divided down to a per-unit one.
+  - Its own tooltip switch on the Aegis tab: **What a vendor charges**.
+
+### Fixed
+- **The deposit estimate disagreed with itself, by about 2×.** The Sell tab has
+  two ways to reach a deposit: ask the client about the item in the slot, or
+  compute one from the vendor price. On a real Turtle client those answered
+  **25** and **48** for the same item at the same duration — so which number you
+  saw depended on whether Aegis happened to know the vendor price.
+  - The formula is now **calibrated against the client**. Whenever an item is in
+    the sell slot both answers exist, so Aegis measures the ratio between them
+    and applies it where only the formula can reach. The two paths now land on
+    the same figure.
+  - The client's own figure is used **raw**. It used to be scaled by the same
+    correction, which double-counted: that correction exists to move the
+    *formula* towards the client, so applying it to the client pushed the one
+    reliable number away from the truth.
+- **`TURTLE_DEPOSIT_FACTOR` is measured now, not guessed.** The 0.6 has been
+  carried since before the formula underneath it was right, and nothing in the
+  addon ever checked it. Posting an auction now compares the deposit the client
+  quoted against the money that actually left your bags, and the measurement
+  replaces the constant — which becomes a starting guess used only until your
+  first post. Readings average over the last twenty posts, so one odd result
+  can't take the number over, and a reading that isn't plausibly a deposit is
+  discarded rather than averaged in.
+- `/aex diag` prints both learned corrections with their sample counts, plus
+  the vendor buy price for the item you named and how many the addon knows.
+
+---
+
 ## [1.49.3]
 
 ### Fixed
@@ -3677,6 +3722,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
