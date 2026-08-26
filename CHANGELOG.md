@@ -12,6 +12,44 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.41.2]
+
+**The crash to desktop, found and fixed.**
+
+### Fixed
+- **Hovering rows on the Auctions, History and Crafting tabs froze the client
+  and then killed it.** On 1.12, `GetItemInfo` answers from the client's item
+  cache — and for an item that is **not** in it, the client asks the **server**
+  and returns `nil` in the meantime. Nothing remembered that `nil`, so every
+  hover asked again.
+
+  Measured against the real window: re-hovering **one** auction row twenty times
+  cost twenty `GetItemInfo` calls, and sweeping forty rows cost thirty-two. Where
+  the items are cached that is free, which is why the Buy tab was always fine —
+  its rows sit on the auction page the client just loaded. Auctions, History and
+  Crafting draw from mail, the ledger and recipe reagents, none of which the
+  client has necessarily seen this session, and those are exactly the lists you
+  sweep the mouse down. Forty rows is forty server queries in about two seconds.
+
+  Misses are now paced by a per-item cooldown *and* a burst budget, so a sweep
+  costs a bounded few queries instead of one per row. Only misses pay either
+  limit: sixty-one cached items still resolve in sixty-one calls, so the Buy tab
+  and the bag browser are untouched. Nothing is blocked permanently — the query
+  that does go out warms the cache, and the next lookup past the cooldown picks
+  the answer up. Same bargain the scanner strikes with `CanSendAuctionQuery`:
+  progress, paced.
+
+  Same measurements after the fix: forty rows **1**, twenty re-hovers of one row
+  **0**, sixty-one cached items **61**.
+
+### Note on v1.41.1
+- v1.41.1 said it fixed this and did not. The three crashing tabs are precisely
+  the three that never call `db.GetVendor`, so the fallback it removed was not on
+  the path. What v1.41.1 *did* do is real and worth having: v1.40.0 had tripled
+  the per-hover cost (1 → 3) by adding two more lookups to the same tooltip path,
+  which is the regression that made a long-standing problem suddenly fatal, and
+  removing them put it back to 1. This release removes the remaining one.
+
 ## [1.41.1]
 
 ### Fixed
@@ -3071,6 +3109,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.41.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.40.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

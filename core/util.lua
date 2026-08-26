@@ -264,11 +264,84 @@ end
 --
 -- Returns a named table, or nil when the client has no data for the item yet
 -- (which it often does not -- GetItemInfo only answers for cached items).
+--
+-- A MISS IS A SERVER QUERY, NOT A CACHE READ. Read this before removing the
+-- gate below.
+--
+-- GetItemInfo answers from the client's item cache. For an item that is NOT in
+-- it, 1.12 asks the SERVER and returns nil in the meantime -- and nothing
+-- remembers that nil, so a caller that asks on every tooltip sends one query
+-- per hover, for ever. Measured on the real ui/frame.lua: re-hovering ONE
+-- auction row twenty times cost twenty GetItemInfo calls.
+--
+-- Which is survivable where the items are cached and fatal where they are not.
+-- Buy-tab rows sit on the auction page the client just loaded, so they always
+-- hit. Auctions, History and Crafting draw their items from mail, the ledger
+-- and recipe reagents -- none of which the client has necessarily seen this
+-- session -- and those are exactly the lists a player sweeps the mouse down.
+-- Forty rows is forty queries in about two seconds: the client freezes, then
+-- dies. That is HARD RULE 16, reached through a normalising helper rather
+-- than through an event handler.
+--
+-- So misses are PACED. Two limits, and only misses pay either of them:
+--
+--   * a per-item cooldown, so re-hovering one row cannot re-ask, and
+--   * a burst budget, so sweeping a list of forty DIFFERENT uncached items
+--     cannot fire forty queries either.
+--
+-- Neither is permanent. The query we did send populates the cache a moment
+-- later, and the next lookup past the cooldown picks the answer up -- the same
+-- bargain scan.lua strikes with CanSendAuctionQuery: progress, paced. A list
+-- whose items are all cached never misses, so it never pays anything.
+--
+-- ONE TABLE, NOT FIVE LOCALS. See the 32-upvalue note in CLAUDE.md.
+local MISS = {
+    retry  = 5,     -- seconds before the same item may be asked about again
+    burst  = 3,     -- server-bound lookups allowed per window
+    window = 1,     -- length of that window, in seconds
+    at     = {},    -- item -> when we last failed to resolve it
+    start  = 0,     -- when the current burst window opened
+    n      = 0,     -- misses charged to it so far
+}
+
+-- Forget every recorded miss. For tests, and for anything that knows the
+-- client's cache just changed.
+function util.ForgetMisses()
+    MISS.at = {}
+    MISS.start = 0
+    MISS.n = 0
+end
+
+-- May we spend a lookup on `key` right now? Only asked BEFORE a lookup; only
+-- charged AFTER one turns out to have missed.
+local function MayAsk(key, now)
+    local last = MISS.at[key]
+    if last and (now - last) < MISS.retry then return false end
+    if (now - MISS.start) >= MISS.window then
+        MISS.start, MISS.n = now, 0
+    end
+    if MISS.n >= MISS.burst then return false end
+    return true
+end
+
 function util.ItemInfo(link)
     if not link then return nil end
+
+    -- No clock means no pacing rather than permanent pacing: a nil GetTime
+    -- would make every `now - last` zero and block every item for ever.
+    local now = GetTime and GetTime() or nil
+    if now and not MayAsk(link, now) then return nil end
+
     local r = { GetItemInfo(link) }
     local n = table.getn(r)
-    if n < 1 or not r[1] then return nil end
+    if n < 1 or not r[1] then
+        if now then
+            MISS.at[link] = now
+            MISS.n = MISS.n + 1
+        end
+        return nil
+    end
+    if now then MISS.at[link] = nil end
 
     -- A THIRD shape. A client mod can replace this global with modern WoW's
     -- WIDE tuple (17-18 values), and the last-number anchor below is exactly

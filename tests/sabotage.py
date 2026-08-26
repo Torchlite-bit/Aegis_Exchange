@@ -1459,6 +1459,45 @@ end
      "    return FromInfo(info, \"sellPrice\")",
      "    return FromInfo(info, \"sellPrice\") or (util.ItemInfo(itemId)\n        and util.ItemInfo(itemId).sellPrice)",
      "clientdata"),
+
+    # ---- the miss gate on util.ItemInfo --------------------------------
+    #
+    # THE FREEZE-THEN-CRASH, planted back four different ways. On 1.12 a
+    # GetItemInfo for an uncached item is a SERVER QUERY, so each of these
+    # turns hovering a list into a query storm -- or, for the last two,
+    # breaks the addon in the opposite direction by pacing lookups that
+    # never cost anything.
+
+    # No gate at all: every hover queries again, for ever. This is what
+    # shipped, and what took the client down on Auctions/History/Crafting.
+    ("itemcache-miss-gate-removed", "core/util.lua",
+     "    if now and not MayAsk(link, now) then return nil end",
+     "",
+     "util"),
+
+    # Only the per-item cooldown, no burst budget. Re-hovering one row is
+    # fixed and sweeping forty DIFFERENT rows is not -- which is the case
+    # that actually crashes, since every row down a list is a new item.
+    ("itemcache-burst-budget-removed", "core/util.lua",
+     "    if MISS.n >= MISS.burst then return false end",
+     "",
+     "util"),
+
+    # Misses remembered for ever rather than re-tried. The query we DID send
+    # warms the cache a moment later, so this one is silent: the line simply
+    # never appears again for any item that missed once.
+    ("itemcache-miss-never-retried", "core/util.lua",
+     "    if last and (now - last) < MISS.retry then return false end",
+     "    if last then return false end",
+     "util"),
+
+    # HITS charged against the budget too. Pacing a list whose items are all
+    # cached -- the Buy tab, the bag browser -- breaks the addon far more
+    # visibly than the crash did.
+    ("itemcache-hits-pay-the-budget", "core/util.lua",
+     "    if now then MISS.at[link] = nil end",
+     "    if now then MISS.at[link] = now; MISS.n = MISS.n + 1 end",
+     "util"),
 ]
 
 SUITES = {
