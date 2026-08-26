@@ -1105,9 +1105,11 @@ end
     # The source is how a caller knows whether it may ADVISE on the number or
     # merely show it. Dropping it silently promotes a guess to a fact.
     ("de-valueof-drops-source", "core/disenchant.lua",
-     """    if not value then return nil end
+     """        return nil, source, unpriced, first
+    end
     return value, source""",
-     """    if not value then return nil end
+     """        return nil, source, unpriced, first
+    end
     return value""",
      "disenchant"),
 
@@ -1623,6 +1625,16 @@ end
     ("tip-unpriced-goes-silent", "ui/tooltip.lua",
      "    elseif deUnpriced and deUnpriced > 0 then",
      "    elseif false then",
+     "tooltip"),
+
+    # The diagnosis resolving the item a SECOND time. Nothing looks wrong --
+    # the same line appears with the same text -- and the most common case
+    # (nothing scanned yet) quietly becomes the most expensive one.
+    ("tip-diagnosis-resolves-twice", "core/disenchant.lua",
+     """        local unpriced, _, first =
+            de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
+        return nil, source, unpriced, first""",
+     "        return nil, source",
      "tooltip"),
 ]
 

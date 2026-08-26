@@ -304,4 +304,18 @@ H.check("Shift alone still shows it, whatever the setting says",
         anyLineWith(shifted, "x ") ~= nil)
 shiftHeld = false
 
+-- ---------------------------------------------------------------------------
+H.section("the diagnosis costs nothing extra")
+-- ---------------------------------------------------------------------------
+
+-- de.ValueOf hands back WHY it failed alongside the failure. Asking separately
+-- resolves the item a second time, and the unpriced path is the common one
+-- before a scan -- so the naive version made the most frequent case the most
+-- expensive.
+W.itemInfoCalls = 0
+local cheap = Capture()
+A.tooltip.Extend(cheap, 905, 1)
+H.check("an unresolvable value still costs one item lookup, not two",
+        W.itemInfoCalls <= 2, "got " .. W.itemInfoCalls)
+
 os.exit(H.report("tooltip"))

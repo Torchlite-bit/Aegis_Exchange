@@ -558,11 +558,24 @@ function de.YieldOf(itemId)
 end
 
 -- What this item is worth disenchanted, by id. Returns copper, source, or nil.
+-- Returns value, source -- and on failure, additionally why it failed:
+-- value(nil), source, unpricedCount, firstUnpricedMaterialId.
+--
+-- The extra returns are additive; every existing caller reads the first two and
+-- is unaffected. They exist so a caller can explain the silence WITHOUT paying
+-- for a second de.Resolve: asking de.MissingPriceOf separately resolves the
+-- item all over again, which on the tooltip path took the cost from one item
+-- lookup to three -- on exactly the items most likely to be unpriced, which is
+-- most of them before a scan.
 function de.ValueOf(itemId, priceOf)
     local ilvl, source, quality, equipLoc = de.Resolve(itemId)
     if not ilvl then return nil end
     local value = de.Value(ilvl, quality, equipLoc, itemId, priceOf)
-    if not value then return nil end
+    if not value then
+        local unpriced, _, first =
+            de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
+        return nil, source, unpriced, first
+    end
     return value, source
 end
 

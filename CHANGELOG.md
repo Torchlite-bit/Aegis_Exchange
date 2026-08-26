@@ -12,6 +12,15 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.45.1]
+
+### Changed
+- **The disenchant diagnosis no longer resolves the item twice.** v1.45.0 asked
+  `de.MissingPriceOf` separately from `de.ValueOf`, which repeated the whole
+  resolve — taking an unpriced item's tooltip from one item lookup to three, on
+  exactly the items most likely to be unpriced, which is most of them before a
+  scan. `de.ValueOf` now hands back *why* it failed alongside the failure.
+
 ## [1.45.0]
 
 **The tooltip, rebuilt as sections.** Last of the aux work. `/reload`-safe.
@@ -3285,6 +3294,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.45.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.44.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.43.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -63,7 +63,10 @@ function tooltip.Extend(gtt, itemId, count)
     local disenchant, disenchantRows, disenchantSource
     local deUnpriced, deMissingId
     if Want("tipDisenchant") and A.de then
-        disenchant, disenchantSource = A.de.ValueOf(itemId, A.de.MarketPrice)
+        -- One resolve, not two: de.ValueOf hands back WHY it failed alongside
+        -- the failure, so the diagnosis below costs nothing extra.
+        disenchant, disenchantSource, deUnpriced, deMissingId =
+            A.de.ValueOf(itemId, A.de.MarketPrice)
         -- The rows are a fact about the ITEM, not about the market, so they do
         -- not depend on the value resolving. Shown when the setting asks for
         -- them, and always available on Shift whatever the setting says.
@@ -71,13 +74,6 @@ function tooltip.Extend(gtt, itemId, count)
             or (IsShiftKeyDown and IsShiftKeyDown() and true or false)
         if wantRows then
             disenchantRows = A.de.YieldOf(itemId)
-        end
-        -- A missing value with rows present means the rule answered and the
-        -- MARKET did not. Find out which material, so the line can say so
-        -- instead of going quiet -- see de.MissingPrice.
-        if not disenchant and A.de.MissingPriceOf then
-            deUnpriced, _, deMissingId =
-                A.de.MissingPriceOf(itemId, A.de.MarketPrice)
         end
     end
 
