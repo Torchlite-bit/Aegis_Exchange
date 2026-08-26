@@ -1558,6 +1558,21 @@ end
      "    if info and type(info.minLevel) == \"number\" and info.minLevel > 0 then\n        return info.minLevel + de.REQ_OFFSET, \"required\"\n    end\n    if util and util.ClientItemLevel then",
      "clientdata"),
 
+    # Facts from the broken reader kept. Fixing util.ItemInfo does not fix
+    # records already written through it, and de.Resolve reads them exactly
+    # when the client cache is empty -- so the bug outlives its own fix.
+    ("harvest-keeps-stale-facts", "core/db.lua",
+     "    acct.facts = {}\n    acct.factsVersion = FACTS_VERSION",
+     "    acct.factsVersion = FACTS_VERSION",
+     "db"),
+
+    # ...and the opposite: wiped on EVERY login, so the sweep can never
+    # accumulate and every session starts from nothing.
+    ("harvest-wipes-facts-every-login", "core/db.lua",
+     "    if acct.factsVersion == FACTS_VERSION then return end",
+     "",
+     "db"),
+
     # ---- the item-fact harvest ------------------------------------------
 
     # The budget ignored: 120,000 ids walked in a single frame. Does not

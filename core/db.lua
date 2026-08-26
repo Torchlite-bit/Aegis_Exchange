@@ -318,6 +318,28 @@ end
 -- multi-realm user one realm inherits some foreign dailies, and that
 -- self-corrects within KEEP_DAYS as fresh scans age the old values out. The
 -- alternative -- discarding price history on upgrade -- is worse for everyone.
+-- Bumped whenever a change makes previously HARVESTED facts wrong.
+--
+-- The harvest copies fields straight out of util.ItemInfo, so a bug in how
+-- that tuple is read is written into SavedVariables and outlives the fix. That
+-- happened: v1.44.0 through v1.46.2 recorded facts through an anchor that
+-- misread four fields on clients returning a trailing value, so `r` held the
+-- stack size instead of the required level. Thousands of records per player,
+-- all quietly wrong, and de.Resolve reads them whenever the client's own cache
+-- comes up empty -- which is exactly when they get used.
+--
+-- Fixing the reader does not fix the records. Bumping this discards them and
+-- lets the sweep refill from the corrected reader.
+local FACTS_VERSION = 2
+
+-- Throw away harvested facts written by an older, wronger reader.
+local function MigrateFacts(acct)
+    if not acct then return end
+    if acct.factsVersion == FACTS_VERSION then return end
+    acct.facts = {}
+    acct.factsVersion = FACTS_VERSION
+end
+
 local function MigrateToRealms(acct, realmKey)
     if type(acct.items) ~= "table" then return end
     if not acct.realms then acct.realms = {} end
@@ -374,6 +396,10 @@ function db.Init()
     end
     ApplyDefaults(AegisExchangeDB, DefaultAccountDB())
     AegisExchangeDB.version = DB_VERSION
+    -- Discard harvested facts from a reader that got the tuple wrong. Placed
+    -- here rather than in the sweep so it runs exactly once per session, before
+    -- anything can read a stale record.
+    MigrateFacts(AegisExchangeDB)
 
     if AegisExchangeCharDB == nil then
         AegisExchangeCharDB = DefaultCharDB()

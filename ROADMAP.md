@@ -1965,7 +1965,10 @@ reading their source.
   **Nothing degrades without it.** The absence path is asserted directly, and
   is the case for most players.
 
-- **§5c — then decide about `core/itemlevel.lua`. OPEN.** With the client
+- **§5c — then decide about `core/itemlevel.lua`. CLOSED by deletion, v1.41.0.**
+  (This bullet said OPEN long after the decision was made; see "The item-level
+  provenance decision" below for what was actually decided and why.) Original
+  framing kept for the record: With the client
   answering for every item including Turtle's, the borrowed 12,567-entry table
   may have nothing left to do — and deleting it retires the unlicensed-data
   question with it. That is a decision to make **with a number in hand**: how

@@ -12,6 +12,19 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.47.1]
+
+### Fixed
+- **Harvested item facts written by the broken reader are discarded on load.**
+  The v1.44.0 sweep copies fields straight out of `util.ItemInfo`, so the anchor
+  bug fixed in v1.47.0 was **written into SavedVariables** — thousands of records
+  per player with the stack size stored where the required level belongs.
+
+  Fixing the reader could not fix the records, and `de.Resolve` reads them
+  precisely when the client's own cache comes up empty, which is when they
+  matter most. They are now thrown away once and the sweep refills from the
+  corrected reader. Nothing else in the database is touched.
+
 ## [1.47.0]
 
 ### Fixed
@@ -3440,6 +3453,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.47.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.47.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

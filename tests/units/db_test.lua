@@ -295,4 +295,30 @@ H.isNil("a missing quality stores nothing", db.ItemFacts(99))
 db.SetItemFacts(98, 0, 1, "")
 H.check("a grey is a real fact and IS stored", db.ItemFacts(98) ~= nil)
 
+-- ---------------------------------------------------------------------------
+H.section("harvested facts written by an older reader are discarded")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. The harvest copies fields straight out of util.ItemInfo, so
+-- a bug in how that tuple is read gets WRITTEN INTO SavedVariables and outlives
+-- the fix. v1.44.0 through v1.46.2 stored the stack size where the required
+-- level belongs, thousands of records per player -- and de.Resolve reads those
+-- records precisely when the client's own cache comes up empty, which is when
+-- they matter most.
+--
+-- Fixing the reader cannot fix the records. Only throwing them away can.
+
+db.account.facts = { [123] = { q = 2, r = 99, e = "INVTYPE_CHEST" } }
+db.account.factsVersion = nil          -- written before the version existed
+db.Init()
+H.isNil("facts from an unversioned save are discarded", db.ItemFacts(123))
+
+-- ...and having been discarded once, they are not discarded again on every
+-- login -- otherwise the sweep can never accumulate anything.
+db.SetItemFacts(456, 2, 40, "INVTYPE_LEGS")
+db.Init()
+local kept = db.ItemFacts(456)
+H.check("facts written by the current reader survive a reload", kept ~= nil)
+H.eq("...intact", kept and kept.r, 40)
+
 os.exit(H.report("db"))
