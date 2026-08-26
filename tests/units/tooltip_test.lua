@@ -37,6 +37,23 @@ local function Capture()
     return t
 end
 
+-- The disenchant label carries its verdict and provenance inside it
+-- ("Disenchant (worth more than vendor):"), so an exact match on the bare word
+-- would only ever pass on the one case with neither. Prefix instead -- and
+-- REQUIRE A VALUE, because "Disenchants Into:" shares the prefix and is a
+-- heading with nothing on the right. Matching it and then reading .right is a
+-- nil, which is how this helper failed the first time.
+local function valueLinePrefixed(t, prefix)
+    for i = 1, table.getn(t.lines) do
+        local L = t.lines[i].left or ""
+        if t.lines[i].right
+            and string.sub(L, 1, string.len(prefix)) == prefix then
+            return t.lines[i]
+        end
+    end
+    return nil
+end
+
 local function lineFor(t, label)
     for i = 1, table.getn(t.lines) do
         if t.lines[i].left == label then return t.lines[i] end
@@ -89,7 +106,7 @@ H.section("the disenchant line appears, and says one item's worth")
 
 local t = Capture()
 A.tooltip.Extend(t, 900, 1)
-local line = lineFor(t, "Disenchant Value:")
+local line = valueLinePrefixed(t, "Disenchant")
 H.check("a disenchantable item gets the line", line ~= nil)
 H.check("the tooltip was re-flowed", t.shown > 0)
 
@@ -102,11 +119,11 @@ A.tooltip.Extend(single, 900, 1)
 local stacked = Capture()
 A.tooltip.Extend(stacked, 900, 20)
 H.eq("a stack of twenty does not multiply the disenchant value",
-     lineFor(stacked, "Disenchant Value:").right,
-     lineFor(single, "Disenchant Value:").right)
+     valueLinePrefixed(stacked, "Disenchant").right,
+     valueLinePrefixed(single, "Disenchant").right)
 H.check("...and no stack total is appended to it",
-        string.find(lineFor(stacked, "Disenchant Value:").right, "x20", 1, true)
-        == nil, lineFor(stacked, "Disenchant Value:").right)
+        string.find(valueLinePrefixed(stacked, "Disenchant").right, "x20", 1, true)
+        == nil, valueLinePrefixed(stacked, "Disenchant").right)
 
 -- ---------------------------------------------------------------------------
 H.section("silence, where silence is right")
@@ -119,7 +136,7 @@ W.AddItem(902, { name = "Test Cloth", quality = 1, equipLoc = "" })
 local cloth = Capture()
 A.tooltip.Extend(cloth, 902, 5)
 H.isNil("a trade good gets no disenchant line",
-        lineFor(cloth, "Disenchant Value:"))
+        valueLinePrefixed(cloth, "Disenchant"))
 
 -- Cached, disenchantable, and the client has no level for it: the state of
 -- every item on a client with no mod exposing one.
@@ -128,7 +145,7 @@ W.AddItem(903, { name = "Unknown Level", quality = GREEN,
 local noLevel = Capture()
 A.tooltip.Extend(noLevel, 903, 1)
 H.isNil("an item whose level no source knows gets no line",
-        lineFor(noLevel, "Disenchant Value:"))
+        valueLinePrefixed(noLevel, "Disenchant"))
 H.isNil("...and no 'unknown' text either", anyLineWith(noLevel, "unknown"))
 
 -- ---------------------------------------------------------------------------
@@ -138,12 +155,12 @@ H.section("the per-line setting")
 A.db.SetSetting("tipDisenchant", false)
 local off = Capture()
 A.tooltip.Extend(off, 900, 1)
-H.isNil("switched off, the line is gone", lineFor(off, "Disenchant Value:"))
+H.isNil("switched off, the line is gone", valueLinePrefixed(off, "Disenchant"))
 A.db.SetSetting("tipDisenchant", true)
 H.check("switched back on, it returns",
-        lineFor((function() local c = Capture()
+        valueLinePrefixed((function() local c = Capture()
                  A.tooltip.Extend(c, 900, 1); return c end)(),
-                "Disenchant Value:") ~= nil)
+                "Disenchant") ~= nil)
 
 A.db.SetSetting("tooltip", false)
 local master = Capture()
@@ -168,7 +185,7 @@ H.check("the breakdown shows with no Shift and no setting touched",
         anyLineWith(onByDefault, "Dream Dust") ~= nil)
 H.check("...with a percentage", anyLineWith(onByDefault, "%") ~= nil)
 H.check("...alongside the value rather than replacing it",
-        lineFor(onByDefault, "Disenchant Value:") ~= nil)
+        valueLinePrefixed(onByDefault, "Disenchant") ~= nil)
 
 -- Turned off, it goes -- and Shift still brings it back, so the checkbox
 -- never takes away the gesture.
@@ -222,18 +239,18 @@ W.AddItem(904, { name = "Approx Chest", quality = GREEN,
 local approx = Capture()
 A.tooltip.Extend(approx, 904, 1)
 H.check("an item known only by its required level still gets a line",
-        lineFor(approx, "Disenchant Value: (approx)") ~= nil)
-H.isNil("...and NOT the unqualified label",
-        lineFor(approx, "Disenchant Value:"))
+        valueLinePrefixed(approx, "Disenchant") ~= nil)
+H.check("...and the provenance is stated in words",
+        anyLineWith(approx, "approx, from required level") ~= nil)
 
 -- The converse, so the label cannot simply be hardcoded on: item 900's level
 -- comes from the client, and that answer is exact.
 local exact = Capture()
 A.tooltip.Extend(exact, 900, 1)
 H.check("a client-measured level keeps the plain label",
-        lineFor(exact, "Disenchant Value:") ~= nil)
+        valueLinePrefixed(exact, "Disenchant") ~= nil)
 H.isNil("...and is never marked approximate",
-        lineFor(exact, "Disenchant Value: (approx)"))
+        anyLineWith(exact, "approx"))
 
 -- ---------------------------------------------------------------------------
 H.section("confidence comes before the figures, not appended to one")
@@ -269,8 +286,11 @@ H.check("the groups are separated", blanks >= 2, "got " .. blanks)
 
 -- The item class frames the split: armour and weapons break into different
 -- things, so it is part of reading the breakdown rather than trivia.
-H.eq("the class is shown", lineFor(q, "Class:") and lineFor(q, "Class:").right,
-     "Armor")
+-- Class is a plain LEFT line, not a label/value pair: a double line reserves
+-- the right column whether or not anything sits in it, and the label then
+-- reads as half a pair with a missing value rather than as a statement.
+H.check("the class is shown, hard left",
+        anyLineWith(q, "Class: Armor") ~= nil)
 
 -- ---------------------------------------------------------------------------
 H.section("the verdict, and only when there is one")
@@ -320,7 +340,7 @@ A.db.Init()
 local blind = Capture()
 A.tooltip.Extend(blind, 905, 1)
 H.check("the line appears rather than vanishing",
-        lineFor(blind, "Disenchant Value:") ~= nil)
+        valueLinePrefixed(blind, "Disenchant") ~= nil)
 H.check("...and names a material it has no price for",
         anyLineWith(blind, "no price yet for") ~= nil
         or anyLineWith(blind, "never seen on the AH") ~= nil)
@@ -401,5 +421,58 @@ local function colourOf(line)
 end
 H.neq("...and a rare shard does not share the common dust's colour",
       shard and colourOf(shard.left), row and colourOf(row.left))
+
+-- ---------------------------------------------------------------------------
+H.section("crafting cost, when a captured recipe makes the item")
+-- ---------------------------------------------------------------------------
+
+-- PER UNIT, not per craft. A recipe that makes four costs a quarter as much
+-- per item, and this line sits beside per-unit auction prices -- comparing a
+-- four-stack craft cost against one item's buyout is the mistake the divide
+-- exists to prevent.
+W.AddItem(910, { name = "Craftable Thing", quality = GREEN,
+                 equipLoc = "", type = "Trade Goods", subType = "Cloth" })
+A.db.RecordAuction(910, 5000, "Craftable Thing")
+-- An earlier section clears every market price to test the unpriced path, so
+-- the reagent has to be priced again here rather than relying on the top of
+-- the file. Shared fixtures have already changed what two tests measured.
+A.db.RecordAuction(11176, 5000, "Dream Dust")
+
+local before = Capture()
+A.tooltip.Extend(before, 910, 1)
+H.isNil("nothing captured, no line", lineFor(before, "Crafting Cost:"))
+
+-- Dream Dust is priced at 5000 above; four of them, and the recipe makes two.
+A.craft.AddProject({ name = "Craftable Thing", itemId = 910, made = 2,
+    reagents = { { name = "Dream Dust", itemId = 11176, count = 4 } } })
+local after = Capture()
+A.tooltip.Extend(after, 910, 1)
+local cc = lineFor(after, "Crafting Cost:")
+H.check("a captured recipe adds the line", cc ~= nil)
+
+-- 4 x 5000 = 20000 for a craft that makes 2, so 10000 each. If the divide is
+-- missing this reads 20000 and the item looks twice as expensive to make.
+H.check("...divided by how many the craft makes",
+        cc and string.find(cc.right, "1g", 1, true) ~= nil, cc and cc.right)
+
+-- An unpriced reagent means no answer at all: a partial total is SMALLER than
+-- the real one, and a crafting cost that reads low is the direction that loses
+-- money.
+-- ONE priced reagent and one not, deliberately. A recipe where nothing is
+-- priced totals zero and is rejected by the zero check alone -- so it cannot
+-- tell a completeness rule from its absence, and a version that answers with
+-- partial totals passes.
+A.craft.AddProject({ name = "Half Known", itemId = 911, made = 1,
+    reagents = {
+        { name = "Dream Dust", itemId = 11176, count = 1 },
+        { name = "Nobody Prices This", itemId = 999123, count = 1 },
+    } })
+W.AddItem(911, { name = "Half Known", quality = GREEN, equipLoc = "",
+                 type = "Trade Goods", subType = "Cloth" })
+A.db.RecordAuction(911, 5000, "Half Known")
+local partial = Capture()
+A.tooltip.Extend(partial, 911, 1)
+H.isNil("an unpriced reagent gives no cost rather than a low one",
+        lineFor(partial, "Crafting Cost:"))
 
 os.exit(H.report("tooltip"))

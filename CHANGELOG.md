@@ -12,6 +12,50 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.49.0]
+
+### Changed
+- **Tooltip layout: values right, everything else hard left.**
+
+  ```
+  Seen 18 times at auction total
+
+  Aegis Buyout:                        11s 96c
+  Aegis Market:                        11s 96c
+  Sell to Vendor:                       7s 40c
+
+  Crafting Cost:                            36s
+
+  Class: Weapon
+  Disenchants Into (approx, from required level):
+      81%  Lesser Magic Essence  x1.5
+      19%  Strange Dust  x1.5
+
+  Disenchant (worth more than the AH):  39s 41c
+  ```
+
+  The three prices are one group now. **Class** is a plain left line rather than
+  a label/value pair — a double line reserves the right column whether or not
+  anything sits in it, so the label reads as half a pair with a missing value
+  instead of a statement.
+
+  **The provenance moved onto the "Disenchants Into" heading and says what it
+  means**: *(approx, from required level)* rather than a bare *(approx)*. When
+  the breakdown is switched off it rides on the value line instead, so it can
+  never be dropped.
+
+  **The verdict moved into the label** — *Disenchant (worth more than the AH):*.
+  On its own line it read as a footnote to a number the reader had already moved
+  past; beside the figure it is the answer to why they hovered.
+
+### Added
+- **Crafting Cost**, when a recipe you have opened makes the item. Per unit, not
+  per craft: a recipe that makes four costs a quarter as much each, and this
+  line sits beside per-unit auction prices.
+
+  Silent unless **every** reagent is priced. A partial total is smaller than the
+  real one, and a crafting cost that reads low is the direction that loses money.
+
 ## [1.48.0]
 
 ### Fixed
@@ -3508,6 +3552,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.49.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.48.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.47.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.47.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1157,8 +1157,8 @@ end
     # the NUMBER changes when this goes -- a required-level answer just starts
     # reading exactly like a client-measured one.
     ("tip-disenchant-approx-unlabelled", "ui/tooltip.lua",
-     '                .. ((disenchantSource == "required") and " (approx)" or ""),',
-     '                .. "",',
+     '        local approx = (disenchantSource == "required")\n            and " (approx, from required level)" or ""',
+     '        local approx = ""',
      "tooltip"),
 
     ("tip-disenchant-ignores-setting", "ui/tooltip.lua",
@@ -1509,6 +1509,23 @@ end
      "    return FromInfo(info, \"sellPrice\") or (util.ItemInfo(itemId)\n        and util.ItemInfo(itemId).sellPrice)",
      "clientdata"),
 
+    # Crafting cost NOT divided by how many the recipe makes, so an item from
+    # a four-at-a-time recipe reads four times too expensive -- beside
+    # per-unit auction prices, which is what makes it wrong rather than
+    # merely different.
+    ("craft-cost-not-per-unit", "core/buy.lua",
+     "                local unit = math.floor(total / (p.made or 1))",
+     "                local unit = math.floor(total)",
+     "tooltip"),
+
+    # A partial total answered as if complete. It is SMALLER than the real
+    # cost, so the item looks cheaper to make than it is -- the direction that
+    # loses money.
+    ("craft-cost-answers-when-incomplete", "core/buy.lua",
+     "            if complete and total > 0 then",
+     "            if total > 0 then",
+     "tooltip"),
+
     # ---- the deposit formula --------------------------------------------
     #
     # Replaced a home-grown 2.5% plus a stack-size fudge that appeared in no
@@ -1672,8 +1689,8 @@ end
     # THE VERDICT REMOVED. The number survives and the comparison that made
     # the player hover in the first place goes back to being their problem.
     ("tip-verdict-removed", "ui/tooltip.lua",
-     '            gtt:AddLine("  " .. verdict, r, g, b)',
-     "",
+     '                    .. (verdict and (" (" .. verdict .. ")") or "")',
+     '                    .. ""',
      "tooltip"),
 
     # A one-sided verdict: only ever says "break it", never "sell it". Half

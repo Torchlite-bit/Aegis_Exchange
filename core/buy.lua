@@ -2213,6 +2213,38 @@ function craft.CostOf(project)
     return total, complete, missing
 end
 
+-- What it costs to CRAFT one of `itemId`, from the recipes captured on the
+-- Crafting tab. Returns copper-per-unit, or nil when nothing captured makes
+-- this item.
+--
+-- PER UNIT, not per craft: a recipe that makes four costs a quarter as much per
+-- item, and the tooltip sits beside per-unit auction prices. Comparing a
+-- four-stack craft cost against one item's buyout is the mistake this divide
+-- exists to prevent.
+--
+-- Only answers when EVERY reagent is priced. A partial total is smaller than
+-- the real one, and a crafting cost that reads low is the direction that loses
+-- money -- so an incomplete answer is no answer.
+--
+-- Takes the cheapest where several recipes make the same thing.
+function craft.CostForItem(itemId)
+    if not itemId then return nil end
+    local list = craft.Projects()
+    local best, i = nil, 1
+    while i <= table.getn(list) do
+        local p = list[i]
+        if ResolveId(p.itemId, p.name) == itemId then
+            local total, complete = craft.CostOf(p)
+            if complete and total > 0 then
+                local unit = math.floor(total / (p.made or 1))
+                if not best or unit < best then best = unit end
+            end
+        end
+        i = i + 1
+    end
+    return best
+end
+
 -- Best known sale value of the crafted item (× quantity made). Returns
 -- (copper, known). Enchanting crafts have no item, so known is false.
 function craft.ValueOf(project)
