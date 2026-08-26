@@ -1630,6 +1630,24 @@ end
     # The diagnosis resolving the item a SECOND time. Nothing looks wrong --
     # the same line appears with the same text -- and the most common case
     # (nothing scanned yet) quietly becomes the most expensive one.
+    # ---- an id is not a lookup key ---------------------------------------
+    #
+    # 1.12's GetItemInfo takes a name, a link or an itemstring -- never a bare
+    # number. Removing the conversion puts back the bug that cost the
+    # disenchant tooltip line its entire existence, silently: the price lines
+    # beside it are DB reads and keep working.
+    ("iteminfo-passes-a-bare-id", "core/util.lua",
+     '        link = "item:" .. link .. ":0:0:0"',
+     "",
+     "util"),
+
+    # The same mistake at the name lookup: three sites did this and printed
+    # "item:10940" at a player instead of a material name.
+    ("itemname-bypasses-the-conversion", "core/util.lua",
+     "    local info = util.ItemInfo(itemId)\n    return info and info.name or nil",
+     "    return GetItemInfo(itemId)",
+     "util"),
+
     ("tip-diagnosis-resolves-twice", "core/disenchant.lua",
      """        local unpriced, _, first =
             de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)

@@ -2220,6 +2220,38 @@ deterministic shard. Aux has five epic bands; they are as unmeasured as the ones
 we dropped, so its epics are a guess presented without qualification. Our
 silence is the more honest of the two — keep it.
 
+#### An id is not a lookup key — v1.45.2, and it cost the most
+
+1.12's `GetItemInfo` takes an item NAME, a LINK, or an item STRING. **It does
+not take an id as a number.** `de.Resolve` passed the raw numeric id under a
+comment asserting "both are valid on 1.12", so every item reached by id
+resolved to nil and **the disenchant tooltip line never appeared on a real
+client** -- in every release that shipped it, back to v1.29.0.
+
+Three things made it survive so long, and all three are worth remembering:
+
+- **Nothing errored.** `util.ItemInfo` returning nil is a supported answer
+  ("the client has not cached this"), so the failure was indistinguishable
+  from the feature's own designed silence.
+- **The lines beside it worked.** Market, Min Buyout and Vendor are DB reads
+  keyed by id, so the tooltip looked healthy and the disenchant half looked
+  unfinished. Several releases were spent adding item-level SOURCES for a
+  lookup that could never have run.
+- **The mock resolved bare numbers.** `tests/support/wow.lua` was more capable
+  than the client, so every suite reported the feature working. **A mock more
+  capable than the client is the worst kind of mock** -- it does not merely
+  fail to catch a bug, it actively certifies it. The mock now returns nil for
+  a number, exactly as 1.12 does.
+
+The blast radius was wider than the tooltip: the disenchant search filters,
+`/aex de`, and the v1.44.0 item-fact harvest (which had recorded **nothing**)
+all resolve by id. One conversion in `util.ItemInfo` fixed all of them.
+
+**The general lesson.** Every claim in a comment about what an API accepts is a
+test that was never written. This one sat in the code asserting the opposite of
+the truth, and the reference addon disagreed with it in every single call site
+-- which was checkable at any point.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

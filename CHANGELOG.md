@@ -12,6 +12,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.45.2]
+
+**The disenchant tooltip line has never worked. This is why.**
+
+### Fixed
+- **1.12's `GetItemInfo` does not take an item id as a number.** It takes a
+  NAME, a LINK, or an item STRING (`item:2586:0:0:0`). `de.Resolve` passed the
+  raw numeric id — carrying a comment asserting "both are valid on 1.12" —
+  so `util.ItemInfo` returned nil for every item reached by id, `de.Resolve`
+  returned nil, and **the disenchant line never appeared on a real client**, in
+  every release that has ever shipped it.
+
+  Nothing errored. The price lines beside it are database reads keyed by id and
+  worked perfectly, so the tooltip looked healthy and the disenchant feature
+  looked unfinished. Every GetItemInfo call in aux builds an itemstring; that is
+  why.
+
+  `util.ItemInfo` now converts an id to an itemstring. That one fix reaches
+  everything that resolves an item by id: the tooltip line, the disenchant
+  search filters, `/aex de`, and the item-fact harvest — which had been
+  recording **nothing at all** since v1.44.0 for the same reason.
+
+- **Material names printed as `item:10940`.** Three call sites passed a bare id
+  to `GetItemInfo` for a name and silently got nothing. They now go through
+  `util.ItemName`, which exists so no caller has to remember this rule again.
+
+### Why no test caught it
+`tests/support/wow.lua` resolved bare numbers, which the client does not. **A
+mock more capable than the client is the worst kind**, and this one hid a
+whole feature being dead across many releases while reporting it fine. It now
+returns nil for a number, exactly as 1.12 does, and two sabotages hold the line.
+
 ## [1.45.1]
 
 ### Changed
@@ -3294,6 +3326,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.45.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.44.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

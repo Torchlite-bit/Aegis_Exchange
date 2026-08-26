@@ -264,8 +264,34 @@ end
 --
 -- Returns a named table, or nil when the client has no data for the item yet
 -- (which it often does not -- GetItemInfo only answers for cached items).
+-- An item's NAME by id, for the handful of places that want only that.
+--
+-- Exists so no caller has to remember that GetItemInfo will not take a bare
+-- number (see util.ItemInfo). Three call sites passed one and silently got no
+-- name; two of them then printed "item:10940" at a player.
+function util.ItemName(itemId)
+    local info = util.ItemInfo(itemId)
+    return info and info.name or nil
+end
+
 function util.ItemInfo(link)
     if not link then return nil end
+
+    -- A BARE NUMBER IS NOT A LOOKUP KEY. 1.12's GetItemInfo takes an item
+    -- NAME, an item LINK, or an item STRING -- never an id as a number.
+    --
+    -- This cost the disenchant tooltip line its entire existence. de.Resolve
+    -- passed the numeric id, carrying a comment claiming "both are valid on
+    -- 1.12", so util.ItemInfo returned nil for every item reached by id and the
+    -- line simply never appeared on a real client -- while the price lines
+    -- beside it, which are DB reads keyed by id, worked perfectly. Nothing
+    -- errored, so it read as "the disenchant feature is not finished yet".
+    --
+    -- Every GetItemInfo call in aux builds an itemstring. That is why.
+    if type(link) == "number" then
+        link = "item:" .. link .. ":0:0:0"
+    end
+
     local r = { GetItemInfo(link) }
     local n = table.getn(r)
     if n < 1 or not r[1] then return nil end

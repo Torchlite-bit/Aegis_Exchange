@@ -11138,7 +11138,7 @@ local function DisenchantReport(rest)
     -- Same formatter and same pricer the tooltip uses, so the two can never
     -- disagree about the item in front of you.
     local lines = A.de.BreakdownText(rows, function(matId)
-        return GetItemInfo(matId)
+        return util.ItemName(matId)
     end)
     local i = 1
     while lines and i <= table.getn(lines) do

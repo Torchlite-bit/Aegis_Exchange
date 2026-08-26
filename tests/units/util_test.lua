@@ -216,4 +216,40 @@ H.eq("equipLoc survives the shift", laterOne.equipLoc, "INVTYPE_CHEST")
 
 W.itemInfoShape = "vanilla"          -- leave the client as we found it
 
+-- ---------------------------------------------------------------------------
+H.section("ItemInfo takes an ID, because half the addon has one")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR, and it is the most expensive one in this project so
+-- far measured in releases: 1.12's GetItemInfo takes an item NAME, an item
+-- LINK or an item STRING. It does NOT take an id as a number.
+--
+-- de.Resolve passed the raw numeric id, carrying a comment asserting "both are
+-- valid on 1.12". They are not. So util.ItemInfo returned nil for every item
+-- reached by id, de.Resolve returned nil, and THE DISENCHANT TOOLTIP LINE
+-- NEVER APPEARED ON A REAL CLIENT -- across every release that shipped it,
+-- while the price lines beside it (DB reads keyed by id) worked perfectly.
+-- Nothing errored. It read as "that feature must not be finished".
+--
+-- Every GetItemInfo call in aux builds an itemstring. That is why.
+--
+-- The mock hid it by resolving numbers, which the client does not. It no
+-- longer does, and this section is what holds that line.
+
+local byId = util.ItemInfo(2589)
+H.check("a numeric id resolves", byId ~= nil)
+H.eq("...to the right item", byId and byId.name, "Linen Cloth")
+
+local byString = util.ItemInfo("item:2589:0:0:0")
+H.eq("an itemstring resolves the same", byString and byString.name, "Linen Cloth")
+
+local byLink = util.ItemInfo(W.items[2589].link)
+H.eq("and so does a link", byLink and byLink.name, "Linen Cloth")
+
+-- The name-only helper the tooltip and the /aex de report use. Three sites
+-- passed a bare number to GetItemInfo and silently got nothing; two of them
+-- then printed "item:10940" at a player instead of a material name.
+H.eq("util.ItemName answers for an id", util.ItemName(2589), "Linen Cloth")
+H.isNil("...and nil for an id nobody knows", util.ItemName(999999))
+
 os.exit(H.report("util"))

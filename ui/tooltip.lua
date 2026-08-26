@@ -177,7 +177,7 @@ function tooltip.Extend(gtt, itemId, count)
         -- THE DIAGNOSIS. The rule answered; the market did not. Saying which
         -- material is missing turns "this item has never worked" into "scan
         -- for that shard", which is a thing a person can act on.
-        local matName = deMissingId and GetItemInfo(deMissingId)
+        local matName = deMissingId and util.ItemName(deMissingId)
         local why
         if matName then
             why = "no price yet for " .. matName
@@ -193,7 +193,7 @@ function tooltip.Extend(gtt, itemId, count)
     -- whether or not the market can price it.
     if disenchantRows then
         local lines = A.de.BreakdownText(disenchantRows, function(matId)
-            return GetItemInfo(matId)
+            return util.ItemName(matId)
         end)
         local i = 1
         while lines and i <= table.getn(lines) do

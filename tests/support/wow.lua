@@ -252,8 +252,19 @@ end
 -- it is still a loop worth catching -- just not a network one.
 W.itemInfoCalls = 0
 
+-- A BARE NUMBER IS NOT A LOOKUP KEY, and this mock used to pretend it was.
+--
+-- 1.12's GetItemInfo takes an item NAME, an item LINK or an item STRING
+-- ("item:2586:0:0:0"). It does not take an item id as a number. Every call in
+-- aux builds an itemstring for exactly this reason.
+--
+-- Resolving numbers here hid a real bug for many releases: de.Resolve passed
+-- the raw numeric id, so the disenchant tooltip line never appeared on a real
+-- client while every test said it did. The mock being MORE capable than the
+-- client is the worst kind of mock.
 function GetItemInfo(key)
     W.itemInfoCalls = W.itemInfoCalls + 1
+    if type(key) == "number" then return nil end
     local r = ItemRec(key)
     if not r then return nil end
     if W.itemInfoShape == "wide" then
