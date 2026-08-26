@@ -2036,58 +2036,58 @@ ClassicAPI. The `info` argument on `db.GetVendor` / `de.ItemLevel` is a caller
 *handing over* a `util.ItemInfo` it already paid for — never a hint to fetch
 one.
 
-#### The crash to desktop — CLOSED, v1.41.2, after one wrong answer
+#### The crash to desktop — OPEN. Tree rolled back to 1.39.0.
 
-**A miss on `GetItemInfo` is a SERVER QUERY, not a cache read.** That is the
-whole finding, and it is now a comment above `util.ItemInfo` because nothing
-about the call site says so.
+**Three fixes, three misses. The shipping code is v1.39.0's again.** Do not
+attempt a fourth from reading alone; the record below is what that produces.
 
-1.12 answers `GetItemInfo` from the client's item cache; for an item not in it,
-the client asks the server and returns `nil` meanwhile. Nothing remembered the
-`nil`, so every hover asked again — one query per hover, for ever. Free where
-items are cached (the Buy tab: its rows are on the auction page the client just
-loaded), fatal where they are not (Auctions, History, Crafting: mail, the
-ledger, recipe reagents). Sweeping forty rows was forty queries in two seconds.
+What is actually established, from the player: it is a **freeze of a few
+seconds and then a crash to desktop**; it still happens with the **ClassicAPI
+DLL removed**; **v1.39.1 was the last build that did not do it**; and it fires
+on the Auctions, History and Crafting tabs but never on Buy, Sell or Scan.
 
-Measured on the real `ui/frame.lua`, before → after:
+Ruled out by RUNNING the real `ui/frame.lua` against a mock client:
 
-| action | before | after |
-|---|---|---|
-| select any tab | 0 | 0 |
-| hover one row | 1 | 1 |
-| hover 40 rows | 32 | 1 |
-| re-hover ONE row 20x | 20 | 0 |
-| 61 **cached** items | 61 | 61 |
+- **A Lua error on the tab-select path.** All six sub-tabs select cleanly,
+  empty and populated, across every sort column in both directions. (A crash to
+  desktop was never an addon error anyway — those print red text.)
+- **Native ClassicAPI.** Zero `C_Item` calls from selecting any tab, and the
+  player has since confirmed the crash without the DLL present at all.
+- **Unbounded frame or texture creation.** 178 frames on the first cycle of
+  every tab at five window heights, then 0 on every later cycle.
+- **Malformed UI escape sequences.** Only `|c`/`|r` pairs anywhere.
+- **`db.GetVendor`.** The three crashing tabs never call it on their paint path.
+- **`GetItemInfo` storms from hovering.** Real and measured (40 rows cost 32
+  calls; one row re-hovered 20 times cost 20), fixed in v1.41.2 — **and the
+  crash survived it**, so it was a genuine problem but not this one.
 
-The last row is the one that constrains the design: only misses may pay, or the
-fix breaks the Buy tab and the bag browser worse than the crash did.
+The three wrong answers each came from reading code and finding something that
+*could* explain it. Every one was refutable before shipping by a check not
+performed. **The next attempt starts with a measurement or a bisect, not a
+hypothesis.**
 
-**HARD RULE 16 was reached through a normalising helper, not an event handler.**
-The rule is written about handlers, and every audit of it has therefore looked
-at handlers. `util.ItemInfo` is a shape-normaliser three call frames below the
-tooltip; it does not look like a place where a query lives. Worth generalising:
-the rule is about the CALL, wherever it sits.
+The cheapest unexploited lead is a **bisect between v1.39.1 and v1.40.0**,
+because the player has pinned the boundary there and v1.40.0's diff is four
+core files and no UI file at all. If the crash really does start at v1.40.0,
+something in that small diff reaches those three tabs by a route not yet found;
+if it does not, the boundary is wrong and that is worth knowing before anything
+else is tried.
 
-**Two wrong answers preceded the right one, and both were wrong the same way.**
-v1.41.1 blamed `db.GetVendor`'s `GetItemInfo` fallback and shipped saying so.
-The refutation was available before shipping and was not looked for: the three
-crashing tabs are precisely the three that never call `db.GetVendor`. What
-actually settled it was measurement, not reading — a rig that loads the real
-`ui/frame.lua` against the mock client and counts `GetItemInfo` per tab and per
-hover. **Reach for that first next time.** Ruling things out by running them
-took one pass; three rounds of reading produced two confident wrong answers.
-
-v1.40.0's part was real but secondary: it tripled the per-hover cost (1 → 3) by
-adding `ClientSellPrice` and `ClientItemLevel` to the same tooltip path, which
-is why a long-standing problem became fatal exactly then. v1.41.1 put that back
-to 1; v1.41.2 removes the last one.
-
-**The rig is worth rebuilding into `tests/`, and there is one blocker.**
+**The rig belongs in `tests/`, and one thing blocks it.**
 `tests/support/wow.lua` resolves ANY unknown key to a fresh no-op function, so
-`if b.backdrop then` is true for every frame and a genuinely nil field read as a
-method never surfaces. Driving `ui/frame.lua` needs a fixed list of real widget
-methods with nil for everything else — which is what the client does. Until
-then `ui/frame.lua` is still a file no suite loads.
+`if b.backdrop then` is true for every frame and a genuinely nil field read as
+a method never surfaces. Driving `ui/frame.lua` needs a fixed list of real
+widget methods with nil for everything else — which is what the client does.
+Until then `ui/frame.lua` is a file no suite loads, and that is why every check
+above had to be built by hand.
+
+#### What the rollback parked
+
+`core/itemlevel.lua` is back, so the provenance question v1.41.0 closed by
+deletion is open again. ClassicAPI vendor prices and item levels, the
+`GetItemInfo` miss gate and the tooltip `SetHyperlink` fallback are all out.
+The miss gate and the tooltip fallback were sound independently of the crash
+and can be re-applied on their own.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

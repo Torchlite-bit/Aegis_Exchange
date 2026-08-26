@@ -46,16 +46,19 @@ REMOVED_ON_PURPOSE = {
     "ui.RowsFor": "v1.23.0 -- measured a two-edge-anchored scroll frame, "
                   "which is the trap four separate bugs walked into; "
                   "replaced by ui.ListRowsAt",
-    # The required-level audit. It existed to decide whether minLevel could
-    # stand in for item level; the client can be asked for the real one now,
-    # so the question it answered no longer gets asked.
-    "de.AuditStart":   "v1.41.0 -- see de.ItemLevel; the fallback it measured "
-                       "was dropped once the client could be asked directly",
-    "de.AuditStep":    "v1.41.0 -- with de.AuditStart",
-    "de.AuditSummary": "v1.41.0 -- with de.AuditStart",
-    "de.CompareBands": "v1.41.0 -- with de.AuditStart",
-    "DisenchantAudit": "v1.41.0 -- the /aex de audit command, with the audit "
-                       "it drove",
+
+    # The v1.40.0 - v1.41.2 client-data work, rolled back whole. Three
+    # attempts at the crash on the Auctions/History/Crafting tabs all missed,
+    # so the tree went back to the last build the player had running. These
+    # are the definitions that arrived with it and left with it. The history
+    # is intact -- see CHANGELOG for how to bring any of it back.
+    "util.ClientSellPrice": "rolled back to 1.39.0 -- with the ClassicAPI work",
+    "util.ClientItemLevel": "rolled back to 1.39.0 -- with the ClassicAPI work",
+    "util.ForgetMisses":    "rolled back to 1.39.0 -- with the miss gate",
+    "FromInfo":             "rolled back to 1.39.0 -- with the ClassicAPI work",
+    "MayAsk":               "rolled back to 1.39.0 -- with the miss gate",
+    "ui.SetHelpTip":        "rolled back to 1.39.0 -- it only ever labelled "
+                            "the ClassicAPI requirement, which is gone",
 }
 
 

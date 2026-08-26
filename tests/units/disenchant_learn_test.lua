@@ -191,38 +191,33 @@ H.eq("no materials, no candidates",
 H.isNil("a nil quality gives nothing", de.BandCandidates(nil, { [DUST] = true }))
 
 -- ---------------------------------------------------------------------------
-H.section("what is observed outranks what the client says")
+H.section("what is observed outranks what is shipped")
 -- ---------------------------------------------------------------------------
 
--- The client's item level is the item's own data. What the player SAW is
--- evidence from the server they are on -- and Turtle can change what an item
--- breaks into without changing its level -- so observation wins.
-W.AddItem(950, { name = "Odd Chest", quality = GREEN,
-                 equipLoc = "INVTYPE_CHEST", itemLevel = 22 })
-W.SetClientItemData(true)
+local savedIlvl = A.ilvlData
+A.ilvlData = { [900] = 22 }        -- shipped says band 25; observation says 50
 
--- Only the dust so far, so the evidence is ambiguous -- and an ambiguous
--- observation must NOT displace a real answer, nor be believed itself.
-db.RecordDisenchant(950, DUST, 2)
-local lvl, src = de.ItemLevel(950, GREEN)
-H.eq("an ambiguous observation falls back to the client", lvl, 22)
-H.eq("...and says so", src, "client")
+-- Only the dust so far, so the evidence is still ambiguous -- and an ambiguous
+-- observation must NOT displace the shipped answer, nor be believed itself.
+local lvl, src = de.ItemLevel(900, GREEN)
+H.eq("an ambiguous observation falls back to the shipped table", lvl, 22)
+H.eq("...and says so", src, "itemlevel")
 
-db.RecordDisenchant(950, ESSENCE, 1)
-lvl, src = de.ItemLevel(950, GREEN)
+db.RecordDisenchant(900, ESSENCE, 1)
+lvl, src = de.ItemLevel(900, GREEN)
 H.eq("once the evidence is unambiguous it wins", lvl, 50)
 H.eq("...and says where from", src, "observed")
 
 -- Without a quality there is nothing to match materials against, so the
--- client's number is all that is left.
-lvl, src = de.ItemLevel(950)
-H.eq("no quality means no inference", src, "client")
+-- shipped table is all that is left.
+lvl, src = de.ItemLevel(900)
+H.eq("no quality means no inference", src, "itemlevel")
 
--- An item nothing can answer for: no client data, never disenchanted. There
--- is no shipped table underneath any more, so the answer is nothing.
+-- An item the shipped table has never heard of -- Turtle's custom content --
+-- is answerable ONLY this way. This is the whole reason the phase exists.
 W.AddItem(60001, { name = "Turtle Thing", quality = GREEN,
                    equipLoc = "INVTYPE_CHEST" })
-H.isNil("an item with neither source is unanswerable",
+H.isNil("an unknown Turtle item starts unanswerable",
         de.ItemLevel(60001, GREEN))
 db.RecordDisenchant(60001, ESSENCE, 1)
 lvl, src = de.ItemLevel(60001, GREEN)
@@ -231,7 +226,7 @@ H.eq("...from observation alone", src, "observed")
 H.check("...and it now has a value",
         de.ValueOf(60001, function() return 1000 end) ~= nil)
 
-W.SetClientItemData(false)
+A.ilvlData = savedIlvl
 
 -- ---------------------------------------------------------------------------
 H.section("only observations are persisted")

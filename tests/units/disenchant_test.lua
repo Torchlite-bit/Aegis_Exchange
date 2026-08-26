@@ -354,21 +354,45 @@ H.neq("mutating a yield does not corrupt the table", three[1].itemId, 1)
 H.check("...nor its probabilities", three[1].chance ~= 0.5)
 
 -- ---------------------------------------------------------------------------
-H.section("de.ItemLevel -- two sources, and no third")
+H.section("de.ItemLevel -- the shipped lookup, and its absence")
 -- ---------------------------------------------------------------------------
 
--- There used to be a shipped table of 12,567 item levels here, borrowed from
--- another addon because 1.12's GetItemInfo returns none. The client can be
--- asked for the real number now, so the table is gone -- and with it the
--- question of whether shipping someone else's unlicensed database was all
--- right, which is a better problem to not have than to have answered.
---
--- What is left is: what the player disenchanted, then what the client says.
--- Both can be absent, and then the answer is nothing at all -- never a guess.
+-- core/itemlevel.lua ships EMPTY on purpose: ShaguScore, the obvious source,
+-- carries no licence at all. The point of these is that an absent table is a
+-- clean "I do not know", never a zero and never an error.
+-- An id no client will ever have. Asserting against a plausible-looking id
+-- would only hold until the shipped table happened to grow that entry.
 H.isNil("an unknown item has no level", de.ItemLevel(99999999))
 H.isNil("a nil id has no level", de.ItemLevel(nil))
-H.isNil("...and there is no shipped table to fall back on",
-        de.ItemLevel(12345, GREEN))
+
+-- The SHIPPED lookup. Nothing else notices if a regeneration produces an
+-- empty or malformed file -- the addon loads, every tooltip goes quiet, and
+-- it looks exactly like the deliberate silence of the phase before this one.
+local shipped, worst, inBand = 0, nil, 0
+for id, lvl in pairs(A.ilvlData or {}) do
+    shipped = shipped + 1
+    if type(id) ~= "number" or id < 1 or type(lvl) ~= "number"
+        or lvl < 1 or lvl > 100 then
+        worst = tostring(id) .. "=" .. tostring(lvl)
+    end
+    if lvl <= 65 then inBand = inBand + 1 end
+end
+H.check("the shipped item-level table is populated", shipped >= 10000,
+        "found " .. shipped)
+H.isNil("...with no malformed entry", worst)
+H.check("...and most of it is in a band the rule can use",
+        inBand * 10 >= shipped * 6,
+        inBand .. " of " .. shipped)
+
+local saved = A.ilvlData
+A.ilvlData = { [777] = 42, [778] = 0, [779] = "forty" }
+local lvl, src = de.ItemLevel(777)
+H.eq("a populated table answers", lvl, 42)
+H.eq("...and says where the answer came from", src, "itemlevel")
+H.isNil("a zero level is not a level", de.ItemLevel(778))
+H.isNil("a non-numeric level is not a level", de.ItemLevel(779))
+H.isNil("an id the table lacks is still unknown", de.ItemLevel(780))
+A.ilvlData = saved
 
 -- ---------------------------------------------------------------------------
 H.section("de.Resolve -- one item id, everything the rule needs")
@@ -377,31 +401,25 @@ H.section("de.Resolve -- one item id, everything the rule needs")
 W.FireAddonLoaded(A)
 
 -- A green chest the client knows about, with an item level the table knows.
-W.AddItem(900, { name = "Test Chest", quality = GREEN,
-                 equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
-W.AddItem(901, { name = "Test Sword", quality = GREEN,
-                 equipLoc = "INVTYPE_2HWEAPON", itemLevel = 48 })
-W.AddItem(902, { name = "Test Cloth", quality = 1, equipLoc = "",
-                 itemLevel = 48 })
--- Cached by the client, but with no level to give: the state every item is in
--- without the mod that exposes one.
-W.AddItem(903, { name = "No Level", quality = GREEN,
-                 equipLoc = "INVTYPE_CHEST" })
+W.AddItem(900, { name = "Test Chest", quality = GREEN, equipLoc = "INVTYPE_CHEST" })
+W.AddItem(901, { name = "Test Sword", quality = GREEN, equipLoc = "INVTYPE_2HWEAPON" })
+W.AddItem(902, { name = "Test Cloth", quality = 1,     equipLoc = "" })
+W.AddItem(903, { name = "Uncached Level", quality = GREEN, equipLoc = "INVTYPE_CHEST" })
 W.AddItem(11176, { name = "Dream Dust" })
 W.AddItem(11175, { name = "Greater Nether Essence" })
 W.AddItem(11178, { name = "Large Radiant Shard" })
 
-W.SetClientItemData(true)
+local savedIlvl = A.ilvlData
+A.ilvlData = { [900] = 48, [901] = 48, [902] = 48 }
 
 local lvl, src, q, slot = de.Resolve(900)
 H.eq("resolves the item level", lvl, 48)
-H.eq("...and says where from", src, "client")
+H.eq("...and says where from", src, "itemlevel")
 H.eq("...and the quality", q, GREEN)
 H.eq("...and the equip slot", slot, "INVTYPE_CHEST")
 
 H.isNil("a white shirt resolves to nothing", de.Resolve(902))
-H.isNil("an item the client has no level for resolves to nothing",
-        de.Resolve(903))
+H.isNil("an item with no shipped level resolves to nothing", de.Resolve(903))
 H.isNil("an item the client has never cached resolves to nothing",
         de.Resolve(99999))
 H.isNil("a nil id resolves to nothing", de.Resolve(nil))
@@ -421,7 +439,7 @@ local flatPricer = function() return 1000 end
 local vById, vSrc = de.ValueOf(900, flatPricer)
 H.eq("ValueOf agrees with the rule it wraps", vById,
      de.Value(48, GREEN, "INVTYPE_CHEST", 900, flatPricer))
-H.eq("...and passes the source through", vSrc, "client")
+H.eq("...and passes the source through", vSrc, "itemlevel")
 H.isNil("ValueOf says nothing for an unresolvable item",
         de.ValueOf(903, flatPricer))
 H.isNil("ValueOf says nothing without a pricer", de.ValueOf(900, nil))
@@ -472,11 +490,11 @@ H.check("an unnamed material falls back to its id",
 H.isNil("no rows means no text", de.BreakdownText(nil, function() return "x" end))
 
 -- ---------------------------------------------------------------------------
-H.section("de.ParseReportArgs")
+H.section("de.ParseReportArgs -- the only way to exercise the rule today")
 -- ---------------------------------------------------------------------------
 
--- `/aex de <thing> <level>` is how the rule gets exercised on an item the
--- client has no level for. The first version read the trailing
+-- While core/itemlevel.lua ships empty, `/aex de <thing> <level>` is the ONLY
+-- path that reaches the rule at all. The first version read the trailing
 -- number out of the whole string and then tried to rule out digits belonging
 -- to the link by asking whether the link contained them -- so any item whose
 -- id merely contained the same digits lost its override in silence.
@@ -521,6 +539,109 @@ H.isNil("empty input gives nothing", de.ParseReportArgs(""))
 H.isNil("nil input gives nothing", de.ParseReportArgs(nil))
 H.isNil("prose gives nothing", de.ParseReportArgs("what breaks into what"))
 
-W.SetClientItemData(false)
+-- ---------------------------------------------------------------------------
+H.section("de.CompareBands -- could required level have stood in?")
+-- ---------------------------------------------------------------------------
+
+-- The question this settles: aux feeds GetItemInfo's slot 4 -- which on 1.12
+-- is REQUIRED level -- into a table that wants ITEM level. This addon has
+-- refused to, on the grounds that a band is one material tier wide so a near
+-- miss is not a near miss. That was reasoning; this is the measurement's
+-- judgement half, and it is pure so it can be tested without a client even
+-- though the data cannot be gathered without one.
+
+H.eq("a required level in the same band is a hit",
+     de.CompareBands(48, 46), "same")
+H.eq("...at the band's own boundary too",
+     de.CompareBands(50, 50), "same")
+
+-- Band 50 is Dream Dust / Greater Nether; band 55 is Dream Dust / Lesser
+-- Eternal. One band out is a different material, not a rounding error, which
+-- is why it is counted against the fallback as hard as a wilder miss.
+H.eq("one band out is one MATERIAL TIER out",
+     de.CompareBands(50, 55), "off-by-one")
+H.eq("...in either direction", de.CompareBands(55, 50), "off-by-one")
+H.eq("further than that is worse", de.CompareBands(60, 20), "worse")
+
+-- An item with no level requirement yields no band, so the fallback would
+-- DECLINE rather than answer. That is a safe failure and must never be
+-- tallied as a wrong answer -- doing so would make the fallback look worse
+-- than it is and reject it for the wrong reason.
+H.eq("no level requirement means no guess, not a wrong guess",
+     de.CompareBands(48, 0), "no-guess")
+H.isNil("an item off the top of the ladder cannot be judged",
+        de.CompareBands(80, 60))
+
+-- ---------------------------------------------------------------------------
+H.section("de.AuditSummary -- and the decision it exists to make")
+-- ---------------------------------------------------------------------------
+
+local function tallyOf(same, off, worse, none, uncached)
+    return { same = same, ["off-by-one"] = off, worse = worse,
+             ["no-guess"] = none, uncached = uncached or 0, skipped = 0 }
+end
+
+local _, verdict = de.AuditSummary(tallyOf(10, 0, 0, 0, 5), 10)
+H.eq("too few items judged is not a result", verdict, "unclear")
+
+_, verdict = de.AuditSummary(tallyOf(990, 5, 5, 0), 1000)
+H.eq("agreeing 99% of the time earns a place", verdict, "adopt")
+
+_, verdict = de.AuditSummary(tallyOf(700, 200, 100, 0), 1000)
+H.eq("agreeing 70% of the time does not", verdict, "reject")
+
+-- The boundary is a decision, so it is pinned rather than left to drift.
+_, verdict = de.AuditSummary(tallyOf(950, 30, 20, 0), 1000)
+H.eq("95% is the line, and it is inclusive", verdict, "adopt")
+_, verdict = de.AuditSummary(tallyOf(949, 31, 20, 0), 1000)
+H.eq("...just under it is not", verdict, "reject")
+
+local lines = de.AuditSummary(tallyOf(900, 50, 50, 20, 300), 1000)
+H.check("the summary reports what it could NOT judge",
+        (function()
+            local i = 1
+            while i <= table.getn(lines) do
+                if string.find(lines[i], "uncached", 1, true) then return true end
+                i = i + 1
+            end
+            return false
+        end)(),
+        "a run that saw 200 items measured 200 items, not the game")
+
+-- ---------------------------------------------------------------------------
+H.section("the audit walk")
+-- ---------------------------------------------------------------------------
+
+W.AddItem(1001, { name = "Right", quality = GREEN,
+                  equipLoc = "INVTYPE_CHEST", minLevel = 46 })
+W.AddItem(1002, { name = "Wrong", quality = GREEN,
+                  equipLoc = "INVTYPE_CHEST", minLevel = 22 })
+W.AddItem(1003, { name = "Potion", quality = 1, equipLoc = "", minLevel = 0 })
+-- 1004 is deliberately NOT added: the client has never cached it.
+
+A.ilvlData = { [1001] = 48, [1002] = 48, [1003] = 48, [1004] = 48 }
+
+local got = nil
+H.check("the audit starts", de.AuditStart(nil, function(tally, considered)
+    got = { tally = tally, considered = considered }
+end) == true)
+H.check("...and refuses to start twice",
+        de.AuditStart(nil, function() end) == false)
+
+local guard = 0
+while got == nil and guard < 50 do
+    de.AuditStep()
+    guard = guard + 1
+end
+
+H.check("the walk finished", got ~= nil)
+H.eq("the matching item counted as a hit", got.tally.same, 1)
+H.eq("the mismatched one counted against it", got.tally["off-by-one"]
+     + got.tally.worse, 1)
+H.eq("the potion was skipped, not judged", got.tally.skipped, 1)
+H.eq("the uncached item was counted as uncached", got.tally.uncached, 1)
+H.eq("...and only the two real ones were judged", got.considered, 2)
+
+A.ilvlData = savedIlvl
 
 os.exit(H.report("disenchant"))
