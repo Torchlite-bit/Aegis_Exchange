@@ -2017,31 +2017,57 @@ are facts about the game rather than anyone's expression of them.
 #### The fallback that broke HARD RULE 16 — v1.41.1
 
 v1.41.0's readers (`util.ClientSellPrice`, `util.ClientItemLevel`) asked
-ClassicAPI first and fell back to `util.ItemInfo`, i.e. `GetItemInfo`. That
-fallback **crashed the client to desktop** on the Auctions, History and Crafting
-tabs.
+ClassicAPI first and fell back to `util.ItemInfo`, i.e. `GetItemInfo`.
 
-Worth recording because of how it hid. `GetItemInfo` reads like a local cache
-lookup, and for a cached item it is one. For an **uncached** item on 1.12 it
-sends a query to the server. `db.GetVendor` is called per bag item, per auction
-row and per tooltip, so the cheap-looking fallback multiplied by the length of
-whatever list was being painted. The three tabs that died are the three whose
-items are least likely to be cached — mail, ledger, recipe reagents. Buy was
-fine, which is why nothing caught it before shipping: the Buy tab's items are on
-the auction page the client just loaded.
+`GetItemInfo` reads like a local cache lookup, and for a cached item it is one.
+For an **uncached** item on 1.12 it sends a query to the server. `db.GetVendor`
+is called per bag item, per auction row and per tooltip, so the cheap-looking
+fallback multiplied by the length of whatever list was being painted.
 
 The general shape: **HARD RULE 16 can be broken by a fallback, not just by a
-handler.** The rule names the expensive calls — `GetItemInfo` per item, a
-tooltip `Set*` per item — and reviewing a handler for those is not enough when
-one hides two calls down a chain that starts at a table read. When a function
-is documented as O(1) and is called from loops, the guarantee belongs in the
-function, not in its callers' heads.
+handler.** The rule names the expensive calls, and reviewing a handler for them
+is not enough when one hides two calls down a chain that starts at a table
+read. When a function is documented as O(1) and is called from loops, the
+guarantee belongs in the function, not in its callers' heads.
 
 Now enforced rather than remembered: the test client counts `GetItemInfo` calls
 and `clientdata` requires **zero** from any of these paths, with and without
-ClassicAPI. The `info` argument on `db.GetVendor` / `de.ItemLevel` is a
-caller *handing over* a `util.ItemInfo` it already paid for — never a hint to
-go fetch one.
+ClassicAPI. The `info` argument on `db.GetVendor` / `de.ItemLevel` is a caller
+*handing over* a `util.ItemInfo` it already paid for — never a hint to fetch
+one.
+
+#### The crash to desktop — OPEN, and mis-diagnosed once
+
+**Do not close this by reasoning from plausibility again.** The fix above was
+shipped as the cause and is not: the three tabs that crash (Auctions, History,
+Crafting) are exactly the three that never call `db.GetVendor` on their paint
+path.
+
+What has been RULED OUT, by running the real `ui/frame.lua` against the mock
+client rather than by reading it:
+
+- **A Lua error on the tab-select path.** All six sub-tabs select cleanly, empty
+  and populated, across every sort column in both directions. A crash to desktop
+  was never an addon error anyway — those print red text.
+- **Native ClassicAPI.** Instrumenting `C_Item` shows **zero** calls from
+  selecting any tab. It is reached from tooltips and the Sell/Buy paths, not
+  from painting these three.
+- **Unbounded frame or texture creation.** 178 frames on the first cycle of
+  switching every tab at five window heights, then **0** on every later cycle.
+- **Malformed UI escape sequences.** Only `|c`/`|r` pairs, no `|T` texture
+  escapes anywhere in `core/` or `ui/`.
+- **v1.40.0 as the code cause.** That release changed no UI file at all. What it
+  did change was the *player's setup*: it is the release that asked for the
+  ClassicAPI DLL, so "started at v1.40.0" is equally consistent with the DLL
+  being installed at v1.40.0 rather than with any line Aegis added.
+
+The rig lives in the scratchpad rather than in `tests/`, because it needs a
+stricter widget mock than `tests/support/wow.lua` provides: that file resolves
+**any** unknown key to a fresh no-op function, so `if b.backdrop then` is true
+for every frame and a genuinely nil field read as a method never surfaces. If
+this hunt goes another round, that mock is the thing to fix first — a fixed list
+of real widget methods with nil for everything else, which is what the client
+does.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

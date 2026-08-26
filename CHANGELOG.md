@@ -14,36 +14,39 @@ printed in the window title bar — quote it in bug reports.
 
 ## [1.41.1]
 
-Two bugs from v1.41.0's client-data work, one of them serious.
-
 ### Fixed
-- **The client crashed to desktop on the Auctions, History and Crafting tabs.**
-  v1.41.0 taught Aegis to read the vendor price and item level the client
-  already holds. Both readers asked ClassicAPI first and, when it was absent or
-  had no answer, fell back to `GetItemInfo` — which looks like reading a local
-  cache and is not. On 1.12, `GetItemInfo` for an item the client has **not**
-  cached sends a query to the server.
-
-  `db.GetVendor` is called once per bag item, once per auction row and once per
-  tooltip. So an O(1) table read became a burst of server queries every time a
-  list of uncached items was painted — HARD RULE 16, broken by a fallback that
-  read as harmless. That is exactly the three tabs it hit: their items come from
-  mail, from the ledger and from recipe reagents, none of which the client has
-  necessarily seen this session. The Buy tab was fine because its items are on
-  the auction page the client just loaded, already cached.
-
-  Both readers are now ClassicAPI-only, which is a direct read of the cache
-  record and cheap. A caller that has already paid for a `util.ItemInfo` can
-  hand the result over; nothing fetches one on their behalf. The test suite now
-  counts `GetItemInfo` calls and requires zero from any of these paths, with and
-  without ClassicAPI installed.
-
 - **Auction tooltips degraded to just the item name after leaving and returning
   to the auction house.** Both routes into the tooltip read the auction page the
   client currently holds, and that page is discarded when the auction house
   closes — so a Buy tab still showing your last search had rows whose tooltips
   had nothing behind them until you searched again. There is now a fallback to
   the item link itself, which does not depend on a live page.
+
+### Changed
+- **The client-data readers no longer call `GetItemInfo`.** `util.ClientSellPrice`
+  and `util.ClientItemLevel` fell back to it when ClassicAPI was absent or had no
+  answer. On 1.12 that is a cache read only for an item the client has already
+  seen; for an uncached one it sends a query to the server — and `db.GetVendor`
+  is called once per bag item, once per auction row and once per tooltip, so the
+  fallback multiplied by the length of whatever list was being painted. That is
+  HARD RULE 16 broken by a fallback rather than by a handler, which is worth
+  closing on its own merits.
+
+  Both readers are ClassicAPI-only now. A caller that already holds a
+  `util.ItemInfo` can pass it in; nothing fetches one on their behalf. The suite
+  counts `GetItemInfo` calls and requires zero from these paths, with and
+  without ClassicAPI.
+
+### Still open
+- **The crash to desktop on the Auctions, History and Crafting tabs is NOT
+  fixed, and the change above was mis-attributed to it when this release was
+  cut.** The three tabs that crash are precisely the three that never call
+  `db.GetVendor` on their paint path, so that fallback cannot have been the
+  cause. Driving all six tabs against a mock client — empty and populated,
+  every sort column, both directions — produces no Lua error, reaches no
+  ClassicAPI entry point on tab selection, and creates no unbounded number of
+  frames. v1.40.0, the release the crash was first seen on, changed no UI file
+  at all. Diagnosis continues.
 
 ## [1.41.0] — **restart**
 
