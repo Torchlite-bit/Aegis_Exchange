@@ -12,6 +12,22 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.46.2]
+
+### Added
+- **A second source for the missing equip slot: `C_Item`.** Where ClassicAPI is
+  installed, its wide tuple carries the **real** slot, so a client whose stock
+  `GetItemInfo` omits `equipLoc` gets the exact answer rather than the
+  armour-or-weapon stand-in. Tried first; the stand-in is the last resort.
+
+- **`/aex diag` now prints the whole `GetItemInfo` tuple with types**, plus the
+  item's `type` and `subType`.
+
+  Printing three hand-picked slots is how the previous round ended with the
+  wrong shape assumed — the field that mattered was one nobody had thought to
+  look at. And `type` is what the stand-in is derived from, so without it in the
+  readout a stand-in that failed to fire looks identical to one that never ran.
+
 ## [1.46.1]
 
 **The disenchant line, actually fixed.** Found by `/aex diag` on the affected
@@ -3390,6 +3406,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.46.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

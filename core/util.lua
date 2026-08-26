@@ -295,9 +295,26 @@ local TYPE_SLOT = {
     Armor  = "AEGIS_ANY_ARMOR",
 }
 
--- Fill in an equip slot the client did not give us, where the type allows.
-local function Finish(out)
-    if out and not out.equipLoc and out.type then
+-- Fill in an equip slot the client did not give us.
+--
+-- Two fallbacks, best first. C_Item (ClassicAPI) carries the REAL slot, so a
+-- client that has it gets the real answer and everything downstream that ever
+-- wants a specific slot still works. The type stand-in is the last resort and
+-- answers only armour-or-weapon.
+local function Finish(out, itemId)
+    if not out or out.equipLoc then return out end
+    if itemId and C_Item and C_Item.GetItemInfo then
+        -- Position 9 of the wide tuple. A cache record read, not a query.
+        local ok, slot = pcall(function()
+            local a, b, c, d, e, f, g, h, i = C_Item.GetItemInfo(itemId)
+            return i
+        end)
+        if ok and type(slot) == "string" and slot ~= "" then
+            out.equipLoc = slot
+            return out
+        end
+    end
+    if out.type then
         out.equipLoc = TYPE_SLOT[out.type]
     end
     return out
@@ -317,8 +334,12 @@ function util.ItemInfo(link)
     -- errored, so it read as "the disenchant feature is not finished yet".
     --
     -- Every GetItemInfo call in aux builds an itemstring. That is why.
+    local itemId
     if type(link) == "number" then
+        itemId = link
         link = "item:" .. link .. ":0:0:0"
+    else
+        itemId = util.ItemIdFromLink(link)
     end
 
     local r = { GetItemInfo(link) }
@@ -348,7 +369,7 @@ function util.ItemInfo(link)
             equipLoc   = r[9],
             texture    = r[10],
             sellPrice  = r[11],
-        })
+        }, itemId)
     end
 
     -- Index of the last number = stackCount.
@@ -359,7 +380,7 @@ function util.ItemInfo(link)
     -- Nothing numeric at all means this is not a shape we understand; return
     -- what is safe to read rather than guessing at the rest.
     if s < 4 then
-        return Finish({ name = r[1], link = r[2], quality = r[3] })
+        return Finish({ name = r[1], link = r[2], quality = r[3] }, itemId)
     end
 
     return Finish({
@@ -372,7 +393,7 @@ function util.ItemInfo(link)
         stackCount = r[s],
         equipLoc   = r[s + 1],
         texture    = r[s + 2],
-    })
+    }, itemId)
 end
 
 -- ---------------------------------------------------------------------------

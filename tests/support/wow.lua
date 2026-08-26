@@ -664,6 +664,19 @@ function W.SetClientItemData(on)
             local r = W.items[id]
             return r and r.itemLevel or nil
         end,
+        -- The wide 18-value tuple, with equipLoc at position 9. This is what
+        -- rescues a client whose stock GetItemInfo omits the slot entirely --
+        -- and it gives the REAL slot rather than the armour-or-weapon
+        -- stand-in, so it is tried first.
+        GetItemInfo = function(id)
+            local r = W.items[id]
+            if not r then return nil end
+            return r.name, r.link, r.quality or 1, r.itemLevel or 0,
+                   r.minLevel or 0, r.type or "Trade Goods",
+                   r.subType or "Cloth", r.stackCount or 20,
+                   r.equipLoc or "", r.texture or "icon",
+                   r.sellPrice or 0, 0, 0, 0, 0, nil, false, ""
+        end,
     }
 end
 

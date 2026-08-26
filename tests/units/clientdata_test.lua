@@ -327,6 +327,7 @@ W.AddItem(4343, { name = "Driftwood Club", quality = GREEN, minLevel = 10,
 W.itemInfoShape = "holey"
 local info = util.ItemInfo(4343)
 H.eq("the slot is stood in for", info and info.equipLoc, "AEGIS_ANY_WEAPON")
+H.eq("...and the type it was derived from is carried too", info.type, "Weapon")
 H.eq("...and classifies as a weapon", de.Class(info.equipLoc), "w")
 H.check("...so the item is disenchantable",
         de.CanDisenchant(info.quality, info.equipLoc, 4343))
@@ -340,6 +341,19 @@ local rows = de.YieldOf(4343)
 H.check("and a yield comes out the far end", rows ~= nil)
 H.check("...with materials in it", rows and table.getn(rows) > 0)
 
+W.itemInfoShape = "vanilla"
+
+-- The REAL slot, where the client mod can supply one. Preferred over the
+-- stand-in, because a stand-in answers only armour-or-weapon and anything that
+-- ever wants a specific slot would inherit the approximation.
+W.itemInfoShape = "holey"
+W.SetClientItemData(true)
+local viaCItem = util.ItemInfo(4343)
+H.eq("C_Item supplies the real slot when the stock tuple omits it",
+     viaCItem and viaCItem.equipLoc, "INVTYPE_WEAPONMAINHAND")
+H.eq("...and it still classifies as a weapon",
+     de.Class(viaCItem.equipLoc), "w")
+W.SetClientItemData(false)
 W.itemInfoShape = "vanilla"
 
 os.exit(H.report("clientdata"))

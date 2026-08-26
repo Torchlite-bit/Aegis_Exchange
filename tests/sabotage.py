@@ -1652,11 +1652,19 @@ end
 
     # The same mistake at the name lookup: three sites did this and printed
     # "item:10940" at a player instead of a material name.
+    # The real slot from C_Item ignored, so a client that CAN answer exactly
+    # gets the armour-or-weapon approximation instead. Nothing visibly
+    # changes -- both classify the same -- until something wants a real slot.
+    ("iteminfo-ignores-citem-slot", "core/util.lua",
+     "        if ok and type(slot) == \"string\" and slot ~= \"\" then",
+     "        if false then",
+     "clientdata"),
+
     # A client that omits equipLoc leaves NOTHING to classify by, so every
     # item reports "not disenchantable" and the line never renders. Reported
     # from a real Turtle + ClassicAPI client via /aex diag.
     ("iteminfo-no-slot-standin", "core/util.lua",
-     """    if out and not out.equipLoc and out.type then
+     """    if out.type then
         out.equipLoc = TYPE_SLOT[out.type]
     end""",
      "",

@@ -11201,17 +11201,34 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             return
         end
         ChatMsg("  itemId=" .. tostring(itemId))
+        -- THE WHOLE TUPLE, WITH TYPES. Printing three hand-picked slots is
+        -- how the last round of this ended with the wrong shape assumed: the
+        -- field that mattered was one nobody had thought to look at.
         local raw = { GetItemInfo("item:" .. itemId .. ":0:0:0") }
-        ChatMsg("  GetItemInfo(itemstring) returned " .. table.getn(raw)
-            .. " values; [1]=" .. tostring(raw[1]) .. " [3]=" .. tostring(raw[3])
-            .. " [4]=" .. tostring(raw[4]))
+        ChatMsg("  GetItemInfo returned " .. table.getn(raw) .. " values:")
+        local ri, line = 1, "   "
+        while ri <= 12 do
+            local v = raw[ri]
+            if v ~= nil or ri <= table.getn(raw) then
+                line = line .. " [" .. ri .. "]"
+                    .. string.sub(type(v), 1, 3) .. "=" .. tostring(v)
+            end
+            if ri == 6 then ChatMsg(line); line = "   " end
+            ri = ri + 1
+        end
+        ChatMsg(line)
         local info = A.util.ItemInfo(itemId)
         if not info then
             ChatMsg("  util.ItemInfo -> NIL (client has not cached it)")
             return
         end
+        -- `type` is printed because the equip-slot STAND-IN is derived from
+        -- it (see TYPE_SLOT in core/util.lua). Without it in the readout, a
+        -- stand-in that failed to fire looks identical to one that never ran.
         ChatMsg("  ItemInfo: q=" .. tostring(info.quality)
             .. " minLevel=" .. tostring(info.minLevel)
+            .. " type=" .. tostring(info.type)
+            .. " subType=" .. tostring(info.subType)
             .. " equipLoc=" .. tostring(info.equipLoc))
         if not A.de then ChatMsg("  A.de MISSING \226\128\148 disenchant.lua did not load"); return end
         ChatMsg("  de.Class=" .. tostring(A.de.Class(info.equipLoc))
