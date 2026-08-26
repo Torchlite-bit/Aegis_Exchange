@@ -165,7 +165,7 @@ H.section("...and none of it may touch the item cache")
 -- GetItemInfo. On 1.12 that QUERIES THE SERVER for anything the client has
 -- not cached -- and db.GetVendor is called per bag item by sell.VendorList,
 -- per auction row by the vendor-profit filter, and once per tooltip. So a
--- table read became a burst of server queries whenever a list of uncached
+-- table read became a burst of item-cache lookups whenever a list of uncached
 -- items was painted, and the client crashed to desktop on exactly the tabs
 -- whose items are least likely to be cached: Auctions, History, Crafting.
 --
@@ -269,11 +269,38 @@ H.eq("...and with the mod gone it falls back rather than going silent",
     src3, "required")
 H.eq("...to the approximation", lvl3, 45)
 
--- ...and it must not cost a server round trip either, since it rides the same
--- per-auction-row path everything else here does.
+-- ...and it must not add item-cache traffic of its own, since it rides the
+-- same per-auction-row path everything else here does.
 W.itemInfoCalls = 0
 de.ItemLevel(70900, GREEN, util.ItemInfo(70900))
 H.check("the fallback adds no item-cache traffic of its own",
     W.itemInfoCalls <= 1, "got " .. W.itemInfoCalls)
+
+-- ---------------------------------------------------------------------------
+H.section("harvested facts answer for an item the client has forgotten")
+-- ---------------------------------------------------------------------------
+
+-- THE PAYOFF, and the only reason the harvest exists. de.Resolve starts from
+-- util.ItemInfo, which answers only for items in the CLIENT's cache -- so an
+-- auction row for something this machine has never looked at got no disenchant
+-- answer at all, however much we knew about it last week.
+
+-- An item id the mock client knows nothing about: exactly the state of a row
+-- on a freshly-scanned auction page.
+H.isNil("the client has nothing for it", util.ItemInfo(80001))
+H.isNil("so on its own it cannot be resolved", de.Resolve(80001))
+
+-- ...but a previous session harvested its facts.
+db.SetItemFacts(80001, GREEN, 40, "INVTYPE_CHEST")
+local ilvl, src, q, slot = de.Resolve(80001)
+H.eq("with harvested facts it resolves", ilvl, 45)
+H.eq("...through the required-level fallback", src, "required")
+H.eq("...carrying the quality", q, GREEN)
+H.eq("...and the equip slot", slot, "INVTYPE_CHEST")
+
+-- The harvest must not overrule the live client. An item the client DOES know
+-- is answered from the client, because its facts are current and ours are not.
+H.eq("a cached item is still answered from the client",
+     util.ItemInfo(700).equipLoc, "INVTYPE_CHEST")
 
 os.exit(H.report("clientdata"))

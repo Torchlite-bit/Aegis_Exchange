@@ -237,11 +237,19 @@ local function ItemRec(key)
     return nil
 end
 
--- Every call is COUNTED. On 1.12 this queries the server for an item the
--- client has not cached, so a function that reaches for it from a loop or a
--- tooltip is not merely slow -- v1.40.0 shipped one and crashed the client on
--- the tabs whose items are least likely to be cached. Counting is how a test
--- can say "this path must not touch the item cache" at all.
+-- Every call is COUNTED, so a test can say "this path must not touch the item
+-- cache" at all.
+--
+-- CORRECTION, and it matters: an earlier version of this comment said
+-- GetItemInfo queries the SERVER for an uncached item. It does not. It returns
+-- nil and does nothing else; the call that forces a fetch is a tooltip
+-- SetHyperlink. aux settles it -- its populate_wdb reads
+-- `if not GetItemInfo(id) then SetHyperlink(id) end`, which is only meaningful
+-- if the first is a free probe and the second is the fetch.
+--
+-- The count is still worth keeping. GetItemInfo is a real cost per call and
+-- these paths run per bag item and per auction row, so a loop that reaches for
+-- it is still a loop worth catching -- just not a network one.
 W.itemInfoCalls = 0
 
 function GetItemInfo(key)

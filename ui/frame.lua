@@ -11169,6 +11169,20 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         DisenchantReport(deArgs)
         return
     end
+    if string.find(cmd, "cache", 1, true) then
+        -- How far the item-fact harvest has got. Worth being able to ask,
+        -- because the sweep is silent by design and "is it doing anything"
+        -- has no other answer.
+        local n = A.db.HarvestCount()
+        if A.db.HarvestRunning() then
+            ChatMsg("Aegis: item cache \226\128\148 " .. n .. " items known,"
+                .. " still sweeping (at id " .. tostring(A.db.harvestAt) .. ").")
+        else
+            ChatMsg("Aegis: item cache \226\128\148 " .. n .. " items known,"
+                .. " sweep complete.")
+        end
+        return
+    end
     if string.find(cmd, "debug", 1, true) then
         A.debugScan = not A.debugScan
         if A.debugScan then

@@ -506,7 +506,15 @@ function de.Resolve(itemId)
     -- The numeric id, not an "item:900:0:0:0" string: both are valid on 1.12
     -- but the id needs no formatting and therefore cannot be mis-formatted.
     local info = util.ItemInfo(itemId)
-    if not info then return nil end
+    if not info then
+        -- The client has not cached this item -- but we may have copied its
+        -- facts out of the cache in an earlier session. This is the whole point
+        -- of the harvest: an auction row for something this machine has never
+        -- looked at still gets an answer.
+        local f = A.db and A.db.ItemFacts and A.db.ItemFacts(itemId)
+        if not f then return nil end
+        info = { quality = f.q, minLevel = f.r, equipLoc = f.e }
+    end
     if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end

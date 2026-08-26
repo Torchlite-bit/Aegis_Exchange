@@ -2088,8 +2088,18 @@ a code one:
 ### 3l — The no-ClassicAPI backup, from aux — **BUILDING**
 
 Phase 1 (sell-slot vendor price) shipped in **v1.42.0**; phase 2 (the
-required-level fallback) in **v1.43.0**. Remaining: **3** the passive
-item-cache harvest, **4** the multi-section tooltip.
+required-level fallback) in **v1.43.0**; phase 3 (the item-fact harvest) in
+**v1.44.0**. Remaining: **4** the multi-section tooltip.
+
+**A load-bearing fact was wrong and is now corrected.** `GetItemInfo` does NOT
+query the server for an uncached item -- it returns nil and does nothing else.
+The call that forces a fetch is a tooltip `SetHyperlink`. aux's own
+cache-warming command settles it: `if not GetItemInfo(id) then SetHyperlink(id)
+end` is only meaningful if the first is a free probe and the second is the
+fetch. v1.41.2 asserted the opposite and shipped a throttle for it; that release
+was rolled back, but the claim survived in comments and is now fixed at every
+site. It is the difference between the harvest being free and being
+unshippable.
 
 **The ladder question is settled, and it needed no second table.** The offset
 between aux's required-level bands and our item-level bands was derived by

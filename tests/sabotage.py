@@ -1537,6 +1537,46 @@ end
      "    if util and util.ClientItemLevel then",
      "    if info and type(info.minLevel) == \"number\" and info.minLevel > 0 then\n        return info.minLevel + de.REQ_OFFSET, \"required\"\n    end\n    if util and util.ClientItemLevel then",
      "clientdata"),
+
+    # ---- the item-fact harvest ------------------------------------------
+
+    # The budget ignored: 120,000 ids walked in a single frame. Does not
+    # error, does not look wrong, just hitches the client on login.
+    ("harvest-ignores-its-budget", "core/db.lua",
+     "    while examined < budget and id <= db.HARVEST_MAX_ID do",
+     "    while id <= db.HARVEST_MAX_ID do",
+     "db"),
+
+    # Never resumes: every step re-walks the same first budget, so the sweep
+    # can never reach the top and everything past id 500 stays unknown for
+    # ever. The silent version of "the harvest does nothing".
+    ("harvest-never-resumes", "core/db.lua",
+     "    return id, recorded",
+     "    return fromId, recorded",
+     "db"),
+
+    # Re-reads what it already has, so every login costs the same as the
+    # first one instead of tapering to nothing.
+    ("harvest-rereads-known-items", "core/db.lua",
+     "        if not db.ItemFacts(id) then",
+     "        if true then",
+     "db"),
+
+    # Records a fact with no quality. Quality is the field that decides
+    # whether an item can be disenchanted at all, so a record without one is
+    # worse than no record -- it satisfies the lookup and answers wrong.
+    ("harvest-stores-quality-less-facts", "core/db.lua",
+     "    if type(quality) ~= \"number\" then return end",
+     "",
+     "db"),
+
+    # THE PAYOFF REMOVED. de.Resolve stops falling back to harvested facts,
+    # so every auction row for an item this machine has not personally seen
+    # goes blank again -- which is the state the harvest exists to fix.
+    ("harvest-payoff-not-wired", "core/disenchant.lua",
+     "        local f = A.db and A.db.ItemFacts and A.db.ItemFacts(itemId)",
+     "        local f = nil",
+     "clientdata"),
 ]
 
 SUITES = {

@@ -234,4 +234,65 @@ W.realm = "TestRealm"
 db.Init()
 H.eq("switching back restores the first realm's data", db.MinBuyout(7000), 111)
 
+-- ---------------------------------------------------------------------------
+H.section("the item-fact harvest")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. On 1.12 GetItemInfo answers only for items the client has
+-- already cached, so the disenchant line and the disenchant filters go blank
+-- for every auction row whose item this machine has not happened to see. The
+-- harvest copies what the cache DOES know into SavedVariables, so coverage
+-- accumulates across sessions instead of resetting with the client's cache.
+--
+-- The pacing is the part that can go wrong quietly: a step that ignores its
+-- budget walks 120,000 ids in one frame, and a step that does not resume walks
+-- the same 500 for ever. Neither errors.
+
+db.HARVEST_MAX_ID = 40      -- a small range, so the sweep can actually finish
+db.account.facts = {}
+
+W.AddItem(3, { name = "Cached Chest", quality = 2, minLevel = 40,
+               equipLoc = "INVTYPE_CHEST" })
+-- Deliberately in the SECOND budget window: an item inside the first proves
+-- nothing about resuming, because a step that always restarts at 1 finds it too.
+W.AddItem(15, { name = "Cached Sword", quality = 3, minLevel = 50,
+                equipLoc = "INVTYPE_WEAPON" })
+
+local nextId, recorded = db.HarvestStep(1, 10)
+H.eq("a step stops at its budget", nextId, 11)
+H.eq("...recording only what the client already knows", recorded, 1)
+
+local f = db.ItemFacts(3)
+H.check("the facts are stored", f ~= nil)
+H.eq("...quality", f.q, 2)
+H.eq("...required level", f.r, 40)
+H.eq("...equip slot", f.e, "INVTYPE_CHEST")
+H.isNil("an id the client has never seen stores nothing", db.ItemFacts(4))
+
+-- RESUMING is the whole reason the step returns an id. A version that always
+-- restarts at 1 re-walks the same budget for ever and never reaches the top.
+nextId, recorded = db.HarvestStep(nextId, 10)
+H.eq("the next step resumes where the last stopped", nextId, 21)
+H.eq("...and finds the second cached item", recorded, 1)
+H.eq("both are now known", db.HarvestCount(), 2)
+
+-- Already-known ids are skipped rather than re-read: the sweep is run again on
+-- every login, and re-reading everything it already has would make each one
+-- cost the same as the first.
+W.itemInfoCalls = 0
+db.HarvestStep(1, 10)
+H.check("a second pass does not re-read what it has",
+        W.itemInfoCalls <= 9, "got " .. W.itemInfoCalls)
+
+-- Reaching the top returns nil, which is what stops the driver for good.
+local last = db.HarvestStep(35, 10)
+H.isNil("running past the top of the range ends the sweep", last)
+
+-- An item with no quality is not a record. Quality 0 (grey) IS one -- greys
+-- are a real answer to "can this be disenchanted", namely no.
+db.SetItemFacts(99, nil, 10, "INVTYPE_CHEST")
+H.isNil("a missing quality stores nothing", db.ItemFacts(99))
+db.SetItemFacts(98, 0, 1, "")
+H.check("a grey is a real fact and IS stored", db.ItemFacts(98) ~= nil)
+
 os.exit(H.report("db"))

@@ -12,6 +12,44 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.44.0]
+
+**The item-fact harvest.** `/reload`-safe — no new files.
+
+### Added
+- **Aegis now keeps its own copy of what the client's item cache knows.** On
+  1.12 `GetItemInfo` answers only for items the client has already seen, so the
+  disenchant line and both disenchant search filters went blank for every
+  auction row whose item this machine had never happened to look at — however
+  much Aegis knew about it last week.
+
+  A background sweep copies quality, required level and equip slot into
+  SavedVariables as it finds them. Coverage stops resetting with the client's
+  cache and starts accumulating: **`de.Resolve` now falls back to the harvested
+  facts**, so a row for an unseen item still gets an answer.
+
+  Paced at 500 ids per half second, starting about six seconds after login
+  (login being the busiest the client ever is, and this the least urgent thing
+  in the addon). It skips what it already has, so each session costs less than
+  the last, and it stops for good — frame hidden, script cleared — when it
+  reaches the top of the range. The range runs to 120,000 because Turtle's
+  custom items sit far above where vanilla's stop.
+
+- **`/aex cache`** reports how many items are known and whether the sweep is
+  still running. It is silent by design, and "is it doing anything" had no other
+  answer.
+
+### Correction
+- **An earlier release claimed `GetItemInfo` queries the server for an uncached
+  item. It does not.** It returns nil and does nothing else; the call that
+  forces a fetch is a tooltip `SetHyperlink`. aux settles it — its cache-warming
+  command reads `if not GetItemInfo(id) then SetHyperlink(id) end`, which is
+  only meaningful if the first is a free probe and the second is the fetch.
+
+  That claim shipped in v1.41.2's throttle (since rolled back, so no code
+  carries it) and survived in comments. Corrected where it stood, because it is
+  the difference between this release's sweep being free and being unshippable.
+
 ## [1.43.0]
 
 **Disenchant values now answer without ClassicAPI.** `/reload`-safe.
@@ -3207,6 +3245,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.44.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.43.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.42.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

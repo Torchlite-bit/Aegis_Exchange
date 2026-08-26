@@ -92,6 +92,12 @@ local function DefaultAccountDB()
         -- Game constants, shared by every realm (see header note).
         vendors = {},   -- itemID   -> vendor sell price, per unit
         names   = {},   -- itemName -> itemID
+        -- Item FACTS harvested from the client's own cache: quality, required
+        -- level and equip slot, per item id. Account-wide for the same reason
+        -- as vendors -- these are properties of the item, identical on every
+        -- realm. See db.HarvestStep for where they come from and why the
+        -- sweep that fills this is safe.
+        facts   = {},   -- itemID   -> { q = quality, r = minLevel, e = equipLoc }
         -- Max stack size per item (20 for Mageweave, 10 for Copper Ore, ...).
         -- Account-wide because it is a property of the ITEM, identical on
         -- every realm -- same reasoning as vendor prices above.
@@ -792,6 +798,95 @@ function db.ItemCount()
 end
 
 -- Per-character record of the last completed full scan.
+-- ---------------------------------------------------------------------------
+-- The item-fact harvest
+-- ---------------------------------------------------------------------------
+--
+-- WHAT THIS IS FOR. Answering "what does this disenchant into" needs an item's
+-- quality, equip slot and required level. On 1.12 the only source is
+-- GetItemInfo, which answers ONLY for items already in the client's local
+-- cache -- so the disenchant line, and the disenchant search filters, go blank
+-- for every auction row whose item the client has not happened to see.
+--
+-- The client's cache is also not ours: it is evicted, it varies by machine, and
+-- a fresh install starts empty. Copying what it knows into SavedVariables as we
+-- go turns coverage from a snapshot into a curve that only ever grows.
+--
+-- WHY THE SWEEP IS SAFE, which is the part worth reading before editing it.
+-- GetItemInfo for an item the client has NOT cached returns nil and does
+-- nothing else -- it does not ask the server. The call that DOES force a fetch
+-- is a tooltip SetHyperlink, which is why aux, whose design this follows, uses
+-- GetItemInfo as the probe and SetHyperlink only in a separate, explicit,
+-- opt-in command. We do not have that command and are not adding one: a sweep
+-- that fetches would be thousands of server round trips.
+--
+-- (An earlier release of this addon asserted the opposite -- that GetItemInfo
+-- queries the server -- and shipped a throttle for it. That was wrong, and the
+-- correction matters here more than anywhere: it is the difference between
+-- this sweep being free and being unshippable.)
+
+-- The top of the id range. Vanilla stops near 25000; Turtle's custom items run
+-- far higher, so a vanilla-sized bound would skip exactly the items nothing
+-- else can answer for.
+db.HARVEST_MAX_ID = 120000
+
+-- Ids examined per step. Paced on ids EXAMINED, not ids recorded -- aux paces
+-- on recorded, which means a cold cache walks its whole range in one frame.
+db.HARVEST_BUDGET = 500
+
+-- What we keep, and nothing else: three fields that answer the disenchant
+-- question. Names, textures and stack sizes have their own tables already.
+function db.SetItemFacts(itemId, quality, minLevel, equipLoc)
+    if not db.account or not itemId then return end
+    if not db.account.facts then db.account.facts = {} end
+    -- equipLoc "" is meaningful (a trade good), quality 0 is meaningful (grey).
+    -- Only a missing quality makes the record useless.
+    if type(quality) ~= "number" then return end
+    db.account.facts[itemId] = {
+        q = quality,
+        r = (type(minLevel) == "number") and minLevel or 0,
+        e = equipLoc or "",
+    }
+end
+
+function db.ItemFacts(itemId)
+    if not db.account or not db.account.facts or not itemId then return nil end
+    return db.account.facts[itemId]
+end
+
+function db.HarvestCount()
+    if not db.account or not db.account.facts then return 0 end
+    return A.util.CountKeys(db.account.facts)
+end
+
+-- Examine `budget` ids starting at `fromId`, recording whatever the client
+-- already knows. Returns the next id to resume from and how many were recorded.
+--
+-- Split out from the driver so the pacing arithmetic is testable without a
+-- frame: "does it stop at the budget", "does it resume where it left off",
+-- "does it skip what it already has" are all questions about this function.
+function db.HarvestStep(fromId, budget)
+    local id = fromId or 1
+    budget = budget or db.HARVEST_BUDGET
+    local recorded, examined = 0, 0
+    while examined < budget and id <= db.HARVEST_MAX_ID do
+        if not db.ItemFacts(id) then
+            -- The bare id, not a link: GetItemInfo takes either, and an id
+            -- cannot be mis-formatted. nil here means "the client has never
+            -- seen this item", which is the common case and costs nothing.
+            local info = A.util.ItemInfo(id)
+            if info and type(info.quality) == "number" then
+                db.SetItemFacts(id, info.quality, info.minLevel, info.equipLoc)
+                recorded = recorded + 1
+            end
+        end
+        examined = examined + 1
+        id = id + 1
+    end
+    if id > db.HARVEST_MAX_ID then return nil, recorded end
+    return id, recorded
+end
+
 function db.SetLastScan(pages, auctions, full)
     if not db.char then return end
     db.char.lastScan = {
@@ -803,5 +898,53 @@ function db.GetLastScan()
     return db.char and db.char.lastScan
 end
 
+-- The driver. One frame, one accumulator, and it stops for good when the sweep
+-- reaches the top of the range -- so the steady state is a hidden frame with no
+-- OnUpdate, not a permanent tick.
+--
+-- Deliberately NOT started from db.Init: a fresh login has plenty else to do,
+-- and the harvest is the least urgent thing in the addon. It waits.
+local harvester = CreateFrame("Frame", "AegisExchangeHarvester")
+harvester:Hide()
+db.harvestAt = 1
+
+local HARVEST_DELAY = 0.5
+
+harvester:SetScript("OnUpdate", function()
+    harvester.accum = (harvester.accum or 0) + arg1
+    if harvester.accum < HARVEST_DELAY then return end
+    harvester.accum = 0
+    local nextId = db.HarvestStep(db.harvestAt, db.HARVEST_BUDGET)
+    if not nextId then
+        db.harvestAt = nil
+        harvester:Hide()
+        harvester:SetScript("OnUpdate", nil)
+        return
+    end
+    db.harvestAt = nextId
+end)
+
+-- Begin (or resume) the sweep. Idempotent.
+function db.StartHarvest()
+    if not db.harvestAt then return false end
+    -- A NEGATIVE accumulator is the initial delay. Login is the busiest the
+    -- client ever is, and this is the least urgent thing in the addon, so the
+    -- first step lands about six seconds in rather than half a second.
+    harvester.accum = -5
+    harvester:Show()
+    return true
+end
+
+function db.StopHarvest()
+    harvester:Hide()
+end
+
+function db.HarvestRunning()
+    return harvester:IsShown() and true or false
+end
+
 -- Register the bootstrap with the load queue.
 A.OnLoad(db.Init)
+
+-- ...and the harvest after it, so db.account exists before the first step.
+A.OnLoad(function() db.StartHarvest() end)
