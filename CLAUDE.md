@@ -256,23 +256,29 @@ Aegis_Exchange/
   core/init.lua          -- namespace (AegisExchange) + event dispatcher + OnLoad queue
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
   core/db.lua            -- SavedVariables price DB (daily-min + weighted-median
-                         -- market), settings, ledger, vendor prices
+                         -- market), settings, ledger, vendor prices (what a
+                         -- merchant pays AND what it charges), harvested item
+                         -- facts, deposit calibration, Courier contract
   core/disenchant.lua    -- the disenchant RULE (item level + quality + slot ->
                          -- materials). Constants generated, not typed. Its
                          -- last section is the ONE impure part: it watches the
                          -- player disenchant things and records what it sees
   core/scan.lua          -- page-by-page auction scanner state machine
   core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut),
-                         -- owned auctions, vendor list
+                         -- owned auctions, vendor list, merchant inventory scan
   core/buy.lua           -- search/buy engine + shopping lists; also defines the
                          -- A.craft namespace (recipe capture + profit maths)
   ui/frame.lua           -- standalone Aegis window (replaces the AH) + all six
-                         -- sub-tabs; ~5k lines, the bulk of the addon
+                         -- sub-tabs; ~11.5k lines, the bulk of the addon
   ui/skin.lua            -- OPTIONAL pfUI restyling; every call pcall-guarded so
                          -- a pfUI API change can only cost us the default look
   ui/tooltip.lua         -- GameTooltip price lines (save/replace hooks)
   pfui/Aegis_Exchange.lua-- drop-in for pfUI-addonskinner users. NOT in the .toc
                          -- and NOT loaded by us; it just calls A.skin.Apply()
+  tests/                 -- lint + unit suites + the sabotage layer. NOTHING
+                         -- here ships and nothing is in the .toc; adding a
+                         -- file is never a restart release and never a bump.
+                         -- See tests/README.md
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
                          -- never ported to Lua verbatim, NEVER in the .toc
   tools/                 -- build-time generators. NOTHING here ships and

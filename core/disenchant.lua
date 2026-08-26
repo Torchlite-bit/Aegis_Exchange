@@ -574,10 +574,12 @@ end
 --
 -- The extra returns are additive; every existing caller reads the first two and
 -- is unaffected. They exist so a caller can explain the silence WITHOUT paying
--- for a second de.Resolve: asking de.MissingPriceOf separately resolves the
--- item all over again, which on the tooltip path took the cost from one item
--- lookup to three -- on exactly the items most likely to be unpriced, which is
--- most of them before a scan.
+-- for a second de.Resolve: asking the same question through a separate
+-- by-id helper resolves the item all over again, which on the tooltip path
+-- took the cost from one item lookup to three -- on exactly the items most
+-- likely to be unpriced, which is most of them before a scan. That helper
+-- (de.MissingPriceOf) existed anyway until v1.50.1, unused, next to the
+-- comment explaining why nothing should call it.
 function de.ValueOf(itemId, priceOf, info)
     local ilvl, source, quality, equipLoc = de.Resolve(itemId, info)
     if not ilvl then return nil end
@@ -588,13 +590,6 @@ function de.ValueOf(itemId, priceOf, info)
         return nil, source, unpriced, first
     end
     return value, source
-end
-
--- The same question by item id, for callers that have one rather than a band.
-function de.MissingPriceOf(itemId, priceOf, info)
-    local ilvl, _, quality, equipLoc = de.Resolve(itemId, info)
-    if not ilvl then return nil end
-    return de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
 end
 
 -- ---------------------------------------------------------------------------

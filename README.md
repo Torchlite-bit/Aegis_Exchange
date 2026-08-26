@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.50.0)
+# Aegis: Exchange (v1.50.1)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -484,7 +484,8 @@ Aegis_Exchange/
 ├── core/
 │   ├── init.lua    namespace + event dispatcher
 │   ├── util.lua    Lua 5.0-safe helpers (money, strings, tables)
-│   ├── db.lua      price database, settings, ledger
+│   ├── db.lua      price database, settings, ledger, vendor prices
+│   ├── disenchant.lua  the disenchant rule, and what it learns from play
 │   ├── scan.lua    page-by-page scanner state machine
 │   ├── sell.lua    posting engine + owned auctions
 │   └── buy.lua     search/buy engine + shopping lists + crafting
@@ -510,7 +511,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.50.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.50.1`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.
@@ -535,9 +536,15 @@ Three requests:
 
 1. Keep inside the 1.12 / Lua 5.0 rules in [`CLAUDE.md`](CLAUDE.md) — they're
    there because breaking them fails at *runtime*, not at load.
-2. Bump the version in **both** `core/init.lua` and the `.toc`, so in-game bug
-   reports say which build they came from.
-3. Add a line to [`CHANGELOG.md`](CHANGELOG.md).
+2. Bump the version. It is written in **five** places and they must agree, or
+   the number in the title bar stops matching the release: `core/init.lua`
+   (`A.version`), the `.toc` (`## Version:`), this file's **H1**, this file's
+   "Check the version" line under *Something broken?*, and a
+   [`CHANGELOG.md`](CHANGELOG.md) entry with its link reference at the bottom.
+   `python3 tests/lint/version.py` checks all five agree.
+3. Which number: **patch** for a fix, wording, colour or layout; **minor** for
+   a capability the addon did not have before (and reset patch); major only for
+   a change that breaks an existing setup with no migration.
 
 ## Credits
 

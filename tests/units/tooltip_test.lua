@@ -331,7 +331,6 @@ H.section("a value that cannot resolve says WHY")
 -- This item's level is known; the market's knowledge of one material is not.
 W.AddItem(905, { name = "Unpriced Chest", quality = GREEN,
                  equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
-W.AddItem(11999, { name = "Never Listed Shard" })
 
 local before = A.db.MarketValue(11178)
 A.db.account.realms = {}            -- forget every market price

@@ -2216,21 +2216,6 @@ end
 -- Shared input helpers (used by the Buy and Sell tabs)
 -- ---------------------------------------------------------------------------
 
--- A money entry box. Accepts "1g 50s 20c" style text (util.ParseMoney). The
--- caller can override OnTextChanged; the Sell tab wires it to ui.RefreshSell.
-local function MakeMoneyBox(parent, width)
-    local e = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    e:SetWidth(width)
-    e:SetHeight(18)
-    e:SetAutoFocus(false)   -- InputBoxTemplate already provides the font
-    e:SetScript("OnEnterPressed", function() e:ClearFocus() end)
-    e:SetScript("OnEscapePressed", function() e:ClearFocus() end)
-    e:SetScript("OnTextChanged", function()
-        if ui.RefreshSell then ui.RefreshSell() end
-    end)
-    return e
-end
-
 -- A read-only money READOUT: "6 (gold) 75 (silver) 43 (copper)", the way the
 -- stock money frame prints it, rather than the "6g 75s 43c" text shorthand.
 --
@@ -6640,9 +6625,14 @@ end
 -- The Shopping Lists sidebar and its list-management popups are gone: the
 -- concept has no left column in Advanced, and every entry point into these
 -- functions went with the sidebar. The ENGINE side (buy.Lists / AddList /
--- AddItemToList and friends in core/buy.lua) is deliberately left in place
--- and still tested -- the saved data is untouched, so nothing a user built is
--- lost, and re-homing the feature later costs a UI, not a rewrite.
+-- AddItemToList and friends in core/buy.lua) is deliberately left in place --
+-- the saved data is untouched, so nothing a user built is lost, and re-homing
+-- the feature later costs a UI, not a rewrite.
+--
+-- It is NOT tested, and this comment claimed it was for several releases. No
+-- suite touches those five functions, so they are unreachable AND unchecked:
+-- whatever re-homes the feature has to test them on the way through rather
+-- than assume the coverage is already there.
 
 -- ---- search + results --------------------------------------------------
 
@@ -10520,12 +10510,6 @@ function ui.CollectQueries()
     return queries
 end
 
-function ui.CountChecked()
-    local n = 0
-    for _ in pairs(ui.catChecked) do n = n + 1 end
-    return n
-end
-
 function ui.UpdateSelCount()
     if not ui.scanSelBtn then return end
     local n = ui.CollectQueries()
@@ -11403,10 +11387,12 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         ChatMsg("  de.ValueOf=" .. tostring(v) .. " (" .. tostring(vs) .. ")"
             .. " unpriced=" .. tostring(un) .. " first=" .. tostring(first))
 
-        -- DEPOSIT, ours beside the client's. The only comparison that can
-        -- settle whether TURTLE_DEPOSIT_FACTOR is a real correction or a
-        -- number someone once guessed -- and it needs an item in the sell
-        -- slot, because CalculateAuctionDeposit only answers for that one.
+        -- DEPOSIT, ours beside the client's. This is the readout that
+        -- settled the formula in v1.50.0 -- it came back client=25 against
+        -- formula=48 for one item, which is how the 2x error was found. It
+        -- needs an item in the sell slot, because CalculateAuctionDeposit
+        -- only answers for that one, and `shown` is what the Sell tab would
+        -- actually print for it after both corrections.
         local slotted = A.sell.GetItem()
         if slotted then
             local mins = 480

@@ -938,6 +938,8 @@ end
 -- What this item has actually SOLD for (from the mailbox ledger, matched by
 -- name since AH sale mails carry no item link). Returns (median, count, last)
 -- of the whole-mail amounts, or nil when we've never sold it.
+--
+-- NOT CALLED, and not tested -- same standing as db.PriceSpread below.
 function db.SaleHistory(itemName)
     if not itemName then return nil, 0 end
     local amounts, last = {}, nil
@@ -964,7 +966,12 @@ function db.SaleHistory(itemName)
 end
 
 -- Spread of an item's recorded daily minimum buyouts: (days, low, high).
--- Pairs with db.MarketValue (the time-weighted median) on the Sell tab.
+--
+-- NOT CALLED, and not tested. It was written for a Sell-tab readout that was
+-- never built, and the comment here claimed the pairing as if it existed.
+-- Kept because it is the only implementation of the idea and the History
+-- graph in ROADMAP Phase 3 wants exactly this shape -- but nothing reaches
+-- it today, so treat it as unverified when something finally does.
 function db.PriceSpread(itemId)
     if not db.account or not itemId then return 0 end
     local items = db.Items()

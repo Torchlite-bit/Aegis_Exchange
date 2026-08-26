@@ -121,6 +121,8 @@ tests/
     modebits.py       every Buy-tab widget accounted for by every view
     sharedlayout.py   views sharing a space are placed by ONE function
     anchorchain.py    no two widgets hang off the same anchor
+    palette.py        every C.<colour> the UI reads exists in the palette
+    version.py        the version agrees in all FIVE places it is written
     selftest.py       proves lua50.py fires, and does not over-fire
   units/
     util_test.lua           money, strings, tables, GetItemInfo normalisation
@@ -141,6 +143,16 @@ tests/
                             "what can I post as one stack" are two numbers
     sellslot_test.lua       moving an item into the sell slot without leaving
                             it on the cursor -- the slot button SWAPS
+    clientdata_test.lua     GetItemInfo's tuple shapes, and the slot stand-in
+                            for a client whose tuple has no equipLoc at all
+    disenchant_test.lua     the rule: bands, yields, expected value
+    disenchant_learn_test.lua  what watching a player disenchant teaches, and
+                            what it refuses to conclude from one break
+    tooltip_test.lua        which lines appear, what multiplies by a stack,
+                            and when the addon says nothing rather than "?"
+    vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
+                            cheaper limited one), and the two measured deposit
+                            corrections
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a
@@ -159,7 +171,20 @@ It pins the 1.12 API shapes that this addon has actually broken on, and
 call — name / minLevel / maxLevel must be strings, and `page` must be
 0-indexed — so any query the engine sends is checked simply by being sent.
 
-Two things about it are easy to get wrong and are commented in place:
+**The failure mode to watch for is a mock that is MORE capable than the
+client.** It does not merely fail to catch a bug — it certifies one. Four have
+got through that way: `GetItemInfo` resolving a bare numeric id (which 1.12
+does not), the owner auction list answering unpaged, `UnitFactionGroup`
+ignoring its argument so a neutral auctioneer could not exist, and
+`CursorHasItem` always saying no. Each made a real bug invisible for releases.
+When adding to this file, model what the client *refuses* as carefully as what
+it returns.
+
+One gap is still open and marked in place: **every registered item is
+answerable forever**, so there is no way to model an item the client knows of
+but has no cached data for — the state most of a fresh login is in.
+
+Two other things about it are easy to get wrong and are commented in place:
 
 - **`getglobal` reads `_G`**, not a private registry. Backing it with a side
   table made lookups of client constants (`AUCTION_TIME_LEFT1`) come back nil,

@@ -333,11 +333,15 @@ end
 -- The texture is a path -- it starts with "Interface\" on every 1.12 client --
 -- and minLevel..texture is a contiguous run in ALL the shapes this addon has
 -- met. So finding the texture locates the whole run, and a field appended after
--- it cannot move anything. Checked against all four:
+-- it cannot move anything. Checked against all five the mock offers:
 --
 --   vanilla 9      texture at 9   -> minLevel 4, type 5, sub 6, stack 7, loc 8
 --   vanilla+extra  texture at 9   -> the same, and [10] is ignored
 --   later 10       texture at 10  -> minLevel 5, type 6, sub 7, stack 8, loc 9
+--   holey 10       texture at 10  -> the same, but loc is nil at 9. The run is
+--                                    located correctly and the field is simply
+--                                    absent, which is Finish's job, not this
+--                                    one -- no anchor can find what is missing
 --   wide 18        texture at 10  -> read by fixed position instead
 local function TextureIndex(r, n)
     local i = n

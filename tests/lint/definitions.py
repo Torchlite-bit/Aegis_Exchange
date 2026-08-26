@@ -56,6 +56,18 @@ REMOVED_ON_PURPOSE = {
     "de.CompareBands": "v1.41.0 -- with de.AuditStart",
     "DisenchantAudit": "v1.41.0 -- the /aex de audit command, with the audit "
                        "it drove",
+    # v1.50.1 housekeeping. Each of these was unreachable AND had a survivor
+    # already doing the job -- which is the only shape of dead code this pass
+    # removed rather than flagged.
+    "de.MissingPriceOf": "v1.50.1 -- de.ValueOf returns the diagnosis "
+                         "alongside the failure, so the separate lookup it "
+                         "existed to avoid was already avoided",
+    "scan.FastThrottleSeen": "v1.50.1 -- a second reader of scan.state."
+                             "fastGate; the UI reads it off GetProgress()",
+    "MakeMoneyBox": "v1.50.1 -- every money field is a MakeMoneyGSC triplet; "
+                    "this plain-text box had no callers left",
+    "ui.CountChecked": "v1.50.1 -- UpdateSelCount counts ui.CollectQueries, "
+                       "which is the number the button actually shows",
 }
 
 

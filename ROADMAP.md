@@ -1842,7 +1842,7 @@ The stated top priority of the report, and the last of the Sell-tab restyle.
   and the sabotage system doing exactly what they were built for, on the very
   mistake they were built for.
 
-### 3k — Disenchant value — **BUILDING**, phased from v1.29.0
+### 3k — Disenchant value — ✅ **DONE** (v1.29.0–v1.49.1)
 
 Asked for as a way to tell whether an item is worth more broken than posted.
 Spiked in v1.28.1, answered **no**, and that answer was **wrong** — two of its
@@ -1947,8 +1947,10 @@ reading their source.
 
   It is moot regardless: **v1.40.0 reads the real item level** where a client
   mod exposes it. There is no reason to approximate a number you can read.
-  `/aex de audit` and `de.CompareBands` are kept — they still answer "how good
-  would that guess have been" for anyone curious, and they cost nothing.
+  `/aex de audit` and `de.CompareBands` were **removed** in the same release,
+  not kept — this line said otherwise for nine releases while
+  `tests/lint/definitions.py` carried the removal note the whole time. Two
+  records of one decision, and the one nobody reads was the accurate one.
 
 - **§5b — client-provided item data. DONE, v1.40.0.** 1.12 populates an item's
   vendor sell price AND its item level on every item and displays neither.
@@ -2107,7 +2109,7 @@ a code one:
   its own release, on its own evidence, and let it be tested for what it
   actually does: fewer server queries when hovering lists of uncached items.
 
-### 3l — The no-ClassicAPI backup, from aux — **BUILDING**
+### 3l — The no-ClassicAPI backup, from aux — ✅ **DONE** (v1.42.0–v1.50.0)
 
 Phase 1 (sell-slot vendor price) shipped in **v1.42.0**; phase 2 (the
 required-level fallback) in **v1.43.0**; phase 3 (the item-fact harvest) in
@@ -2387,6 +2389,57 @@ Build the readout first.
 Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
+
+### Housekeeping — v1.50.1
+
+A full read of `core/`, `ui/`, `tests/` and the docs, looking for code that had
+stopped being reachable, true, or worth its space. What it actually found is
+worth recording, because the shape repeated.
+
+**Four things were removed**, and all four fit one rule: unreachable AND with a
+survivor already doing the job. `de.MissingPriceOf` (de.ValueOf returns the
+diagnosis alongside the failure, which the comment two lines above it already
+explained), `scan.FastThrottleSeen` (a second reader of `scan.state.fastGate`;
+the UI reads it off `GetProgress()`), `MakeMoneyBox` (every money field is a
+`MakeMoneyGSC` triplet) and `ui.CountChecked` (`UpdateSelCount` counts
+`CollectQueries`). Anything unreachable that was the ONLY implementation of its
+idea was flagged instead — see below.
+
+**The comments were the real find.** Four asserted things that had stopped
+being true, and each read as reassurance:
+
+- The shopping-list note said the engine was "still tested". No suite has ever
+  touched those five functions. Unreachable AND unchecked, described as safe.
+- `db.PriceSpread` said it "pairs with db.MarketValue on the Sell tab". Nothing
+  calls it; the readout was never built.
+- `scan.FastThrottleSeen` said it was "reported in the UI". The FACT is
+  reported — through a different accessor.
+- The ROADMAP said `/aex de audit` and `de.CompareBands` were "kept". They were
+  deleted in v1.41.0, and `tests/lint/definitions.py` has carried the removal
+  note ever since. **Two records of one decision, and the accurate one was the
+  one nobody reads.** That is the argument for the lint over the prose.
+
+**And two comments had drifted out of position rather than out of date** — the
+mock's `W.items` doc was stranded above `ITEM_QUALITY_COLORS` by an insertion,
+and the "holey" shape's explanation sat above the "trailing" branch. Both read
+as documentation of the code they were no longer next to, which is worse than
+being absent: a reader trusts them.
+
+**What was flagged and deliberately left**, because each is the only
+implementation of its idea and removing it would delete a decision rather than
+tidy one: `sell.Post`, `util.ArrayContains`, `db.SaleHistory`,
+`db.PriceSpread`, `db.StopHarvest`, the five shopping-list engine functions,
+and `ui.StripFitsAt` / `ui.AllCategoriesFitAt` / `ui.TableSlack`.
+
+That last group is its own category and the most interesting one. They are
+**assertions written as code that nothing asserts** — each computes whether a
+layout guarantee holds at a given size, and each was written precisely so the
+arithmetic "lives here, where it can be checked". Nothing checks them. They are
+not dead in the harmless sense; they are a guarantee that reads as enforced and
+is not. `ui.ColumnsFitAt`, right beside them, IS extracted by
+`geometry_test.lua` — so the pattern works, these three just never got wired
+up. Wiring them into the geometry suite is a better answer than deleting them,
+and belongs in its own change.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

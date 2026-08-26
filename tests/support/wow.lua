@@ -196,9 +196,6 @@ AUCTION_TIME_LEFT4 = "Very Long"
 -- Items
 -- ---------------------------------------------------------------------------
 
--- itemId -> record. GetItemInfo answers only for items placed here, which is
--- the behaviour that matters: on 1.12 it returns nil for anything not in the
--- client's cache, and code that assumes otherwise breaks on a fresh login.
 -- The client's quality palette, keyed 0..6. Real global; item names are
 -- written in these colours everywhere in the game, so anything rendering a
 -- list of items reaches for it.
@@ -212,6 +209,16 @@ ITEM_QUALITY_COLORS = {
     [6] = { r = .90, g = .80, b = .50, hex = "|cffe6cc80" },
 }
 
+-- itemId -> record. GetItemInfo answers only for items placed here, which is
+-- the behaviour that matters: on 1.12 it returns nil for anything not in the
+-- client's cache, and code that assumes otherwise breaks on a fresh login.
+--
+-- WHAT THIS STILL DOES NOT MODEL: an item that is registered but NOT cached.
+-- Every W.AddItem is answerable forever, so a test cannot ask what happens
+-- when the client knows an item exists and has no data for it -- which is the
+-- state most of a fresh login is in, and the reason db.facts, the harvest and
+-- util.ItemInfo's guards all exist. Anything relying on that path is checked
+-- by leaving the item unregistered, which is close but not the same thing.
 W.items = {}
 W.tooltipLines = {}
 
@@ -239,17 +246,23 @@ end
 -- slot further along on a later client. util.ItemInfo therefore anchors on
 -- "stackCount is the LAST NUMBER" instead of indexing a fixed position.
 --
--- BOTH shapes are offered here, because a test that only ever sees one cannot
--- tell the anchor apart from a hardcoded index -- and a hardcoded index is
--- exactly the bug that shipped and cost four rounds of "why does /stack do
--- nothing". Flip with W.itemInfoShape.
--- "vanilla" (9) | "later" (10) | "wide" (18, what a client mod may install
--- in place of the global). All three are offered because util.ItemInfo's
--- anchor-on-the-last-number trick is RIGHT for the first two and exactly
--- wrong for the third -- the wide tuple has six numbers after stackCount --
--- and a test that only ever sees one shape cannot tell the anchor apart from
--- a hardcoded index.
-W.itemInfoShape = "vanilla"   -- "later" / "wide" / "holey" / "trailing"
+-- FIVE shapes are offered, because a test that only ever sees one cannot tell
+-- an anchor apart from a hardcoded index -- and a hardcoded index is exactly
+-- the bug that shipped and cost four rounds of "why does /stack do nothing".
+-- Flip with W.itemInfoShape:
+--
+--   "vanilla"   9 values, texture last.
+--   "later"     10, itemLevel inserted at 4 -- everything after 3 shifts one.
+--   "wide"      18, what a client mod may install in place of the global.
+--               Six numbers follow stackCount, which is what made the old
+--               anchor-on-the-last-number trick wrong.
+--   "holey"     10 like "later", but equipLoc is nil -- the slot is simply
+--               absent rather than moved, so a shift-detecting anchor cannot
+--               see it and Finish's stand-in has to cover it.
+--   "trailing"  vanilla's 9 plus an APPENDED number at 10. Reported from a
+--               real client via /aex diag; it is what broke the last-number
+--               anchor and moved every field by three.
+W.itemInfoShape = "vanilla"
 
 -- The client resolves an item from an id, a name, or ANY well-formed link --
 -- the colour code in front of a link is decoration, not identity. Keying only
@@ -309,15 +322,6 @@ function GetItemInfo(key)
                r.subType or "Cloth", r.stackCount or 20,
                r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
     end
-    -- A REAL CLIENT, REPORTED FROM THE FIELD. Turtle 1.12 with ClassicAPI
-    -- returns TEN values with itemLevel at 4 -- and a HOLE where equipLoc
-    -- should be, with the texture still at 10. util.ItemInfo's anchor found
-    -- the right stackCount, counted forward, and read the hole: equipLoc came
-    -- back nil, de.Class went nil, CanDisenchant went false, and the disenchant
-    -- line silently never rendered on that client.
-    --
-    -- No invented shape. This is what `/aex diag` printed: 10 values, [3]=2,
-    -- [4]=5, and equipLoc nil out of util.ItemInfo.
     -- THE SHAPE THE PLAYER ACTUALLY HAS, copied from /aex diag: vanilla's nine
     -- values plus a TRAILING NUMBER at ten. Nothing is shifted or missing --
     -- something is APPENDED -- which is what broke the last-number anchor and
@@ -328,6 +332,12 @@ function GetItemInfo(key)
                r.stackCount or 20, r.equipLoc or "",
                r.texture or "Interface\\Icons\\INV_Misc_QuestionMark", 306
     end
+    -- A HOLE where equipLoc should be, with the texture still at 10. The
+    -- anchor finds the right run and counts forward correctly -- and reads a
+    -- nil, because the field is absent rather than displaced. equipLoc came
+    -- back nil, de.Class went nil, CanDisenchant went false, and the
+    -- disenchant line silently never rendered. This is the case Finish's
+    -- stand-in exists for; no anchor can fix a field that is not there.
     if W.itemInfoShape == "holey" then
         return r.name, r.link, r.quality or 1, r.itemLevel or 5,
                r.minLevel or 1, r.type or "Weapon",

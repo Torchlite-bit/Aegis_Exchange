@@ -12,6 +12,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.50.1]
+
+Housekeeping only — no behaviour change, no new capability.
+
+### Removed
+- Four unreachable functions, each with a survivor already doing the job:
+  `de.MissingPriceOf`, `scan.FastThrottleSeen`, `MakeMoneyBox` and
+  `ui.CountChecked`. All four are registered in `tests/lint/definitions.py`'s
+  `REMOVED_ON_PURPOSE` list, so the guard against accidental deletion still
+  knows the difference between these and a function lost to a bad edit.
+
+### Fixed
+- **Comments that had stopped being true.** Four of them, and each read as
+  reassurance: the shopping-list engine described as "still tested" when no
+  suite has ever touched it, `db.PriceSpread` described as pairing with a
+  Sell-tab readout that was never built, `scan.FastThrottleSeen` described as
+  reported in the UI when a different accessor does that, and the ROADMAP
+  saying `/aex de audit` and `de.CompareBands` were kept when they were deleted
+  in v1.41.0.
+- **Two comments that had drifted out of position** in the test client — the
+  `W.items` note stranded above `ITEM_QUALITY_COLORS`, and the "holey"
+  `GetItemInfo` shape explained above the "trailing" branch.
+- **Docs brought back in line with the code.** `CLAUDE.md` called `ui/frame.lua`
+  "~5k lines" (it is ~11.5k) and left `tests/` out of the project layout;
+  `README.md` left `core/disenchant.lua` out of its tree and told contributors
+  to bump the version in *two* places when it lives in five — two of them in
+  that same file; `tests/README.md` was missing two lints and five suites; the
+  ROADMAP's disenchant and aux sections were still headed **BUILDING** with
+  every phase done.
+
+---
+
 ## [1.50.0]
 
 ### Added
@@ -3722,6 +3754,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
