@@ -12,34 +12,49 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-## [0.59.1] — renumbered (was 1.49.1)
+## [1.22.0]
 
-**No code changed in this entry. The version number was rolled back.**
+**Everything on this branch, as one release.** `main` is at 1.21.1; this adds
+capabilities, so the merge is a single MINOR over it.
 
-The addon had jumped **0.21.1 → 1.1.0** as a declared "first public release",
-skipping 1.0.0 entirely, and then ran 48 more minor bumps to 1.49.1. A major
-version of 1 is a promise that releases will not break a player's setup without
-warning, and this one could not support it: a release crashed the client to
-desktop, another had to be rolled back wholesale, and a shipped feature turned
-out never to have worked on a real client at all.
+The entries below, from 1.49.1 down to 1.22.0, are the development steps that
+make up this release and keep their working numbers. They were never separately
+released — the branch bumped a version per push, which is what took the number
+to 1.49.1 while `main` sat at 1.21.1.
 
-Recounting the 83 releases after 1.1.0 against the rule now written into
-`CLAUDE.md` — MINOR only for a new capability, PATCH for a fix or a polish —
-**38 added something and 45 were fixes or polish**. They were numbered 48 minor
-and 34 patch, so **ten releases were called MINOR that only fixed or polished**.
-Carrying the genuine pre-release line forward from 0.21.1 puts the current code
-at **0.59.1**.
+### The numbering rule, now written down
+Recounting the branch against the rule now in `CLAUDE.md` — MINOR for a new
+capability, PATCH for a fix or a correction — **ten of those steps were numbered
+MINOR for work that only fixed or polished**. A layout change is a PATCH. So is
+a colour, a rename, and a rewritten formula that computes the same quantity more
+correctly.
 
-**Entries below this one keep their original numbers.** They are what was
-quoted in bug reports, and rewriting 107 of them would make every old report
-unmatchable in exchange for a tidiness nobody reads.
-
-### The rule, in short
-- **MAJOR stays 0** until the addon is stable enough that releases will not
-  break a setup without warning. A decision, not a milestone that accumulates.
+- **MAJOR** is 1 and stays there. It moves only for a change that breaks an
+  existing setup without a migration — not for "a lot has changed".
 - **MINOR** — the addon can do something it could not do before.
-- **PATCH** — something was wrong and is now right, or already there and now
-  reads better. Layout, colour, wording and corrected formulas are all PATCH.
+- **PATCH** — bug fixes, security fixes, typos, wording, colour, layout.
+- **One merge is one release**, not one version per commit.
+
+### What this release adds, over 1.21.1
+- **Vendor prices learned from the auction sell slot** — every item you post
+  teaches its exact vendor price, with no merchant visit and no DLL.
+- **Disenchant values without ClassicAPI**, from the level required to equip an
+  item, always labelled as the approximation it is.
+- **An item-fact harvest** that copies what the client's cache knows into
+  SavedVariables, so coverage accumulates across sessions instead of resetting.
+- **A rebuilt tooltip**: sighting count, buyout, market, vendor, crafting cost,
+  class, the disenchant split in quality colours, and a verdict on whether the
+  item is worth more broken than sold.
+- **Crafting Cost** from recipes you have opened, per unit rather than per craft.
+- **`/aex diag`** and **`/aex cache`**, which is how three of the bugs below were
+  found at all.
+
+### And fixes, the notable ones
+- **The disenchant tooltip line had never worked on a real client** — an item id
+  was passed to `GetItemInfo`, which 1.12 does not accept, and separately a
+  client that appends a value to the tuple shifted four fields.
+- **The deposit was computed with an invented formula** and ignored the neutral
+  auction house entirely, where it costs five times as much.
 
 ## [1.49.1]
 
@@ -1609,7 +1624,11 @@ their own boxes now fill them. `/reload`.
   all.** Two written for this pass were deleted rather than papered over — a
   sabotage that cannot fail proves as little as a test that cannot.
 
-## [1.22.0]
+## 1.22.0 — development step
+
+> Not the release above. This was the branch's own numbering, which ran a
+> version per push from here up to 1.49.1; all of it ships as the single
+> [1.22.0] release at the top of this file.
 
 Five of the nine placeholder filter components are real filters now.
 `/reload`.
@@ -3594,7 +3613,6 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
-[0.59.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.48.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -8,8 +8,11 @@ sounds, because "check the version in the title bar" is the first line of
 every bug report, and a stale number sends the reporter and the reader to
 different code.
 
-It also holds the MAJOR-stays-0 rule from CLAUDE.md. That is a claim about
-stability, and a claim is easier to make by accident in a sed than on purpose.
+What it deliberately does NOT check is whether the bump was the RIGHT KIND.
+Minor-versus-patch is a judgement about whether a release added a capability,
+and CLAUDE.md is where that judgement is written down; a lint that guessed at it
+from changelog headings would be wrong often enough to be ignored, and an
+ignored lint is worse than none.
 """
 
 import re
@@ -66,15 +69,6 @@ def main():
     if ("[%s]: " % version) not in changelog:
         print("FAIL CHANGELOG.md has no link reference for [%s]" % version)
         print("version: FAILED")
-        return 1
-
-    major = int(version.split(".")[0])
-    if major != 0:
-        print("FAIL major version is %d, not 0." % major)
-        print("       MAJOR is a promise that releases will not break a")
-        print("       player's setup without warning. Going to 1.0.0 is a")
-        print("       deliberate decision -- see CLAUDE.md. If this is that")
-        print("       decision, change this lint in the same commit.")
         return 1
 
     print("version: ok (%s in all five places)" % version)

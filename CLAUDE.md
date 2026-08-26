@@ -353,47 +353,40 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
 ### WHICH number to bump
 
-`MAJOR.MINOR.PATCH`, and **MAJOR stays 0**.
+`MAJOR.MINOR.PATCH`. **Aegis has had a public release, so MAJOR is 1.**
 
-- **MAJOR (`0`.x.y) — do not touch.** Zero means initial development: the shape
-  of the addon is still moving and a release may change how something behaves
-  without a deprecation path. It goes to **1.0.0** exactly once, when the thing
-  is stable enough that future releases will not break a player's setup without
-  warning. That is a deliberate decision, not a milestone that arrives by
-  accumulation.
+- **MAJOR (`1`.x.y) — stability.** It went to 1 at the public release and stays
+  there. It moves again only for a change that breaks a player's existing setup
+  without a migration — a SavedVariables format they cannot upgrade into, a
+  removed feature people depend on. Not for "a lot has changed": size is not
+  breakage.
 
-- **MINOR (0.`x`.0) — a new capability.** The addon can do something it could
+- **MINOR (1.`x`.0) — a new capability.** The addon can do something it could
   not do before. A new tooltip line, a new filter, a new tab, a new data source.
   The test: *could a player notice a new thing, not merely a better thing?*
   Resets PATCH to 0.
 
-- **PATCH (0.x.`y`) — a fix or a polish.** Something was wrong and is now right,
-  or something already there now looks or reads better. Bug fixes, layout,
-  colour, wording, performance, refactors. **No new capability.**
+- **PATCH (1.x.`y`) — a fix or a small correction.** Bug fixes, security fixes,
+  typos, wording, colour, layout, and a rewritten formula that computes the same
+  quantity more correctly. **No new capability.**
 
-**A layout change is a PATCH.** So is a colour, a rename, and a rewritten
-formula that computes the same quantity more correctly. This is where the
-numbering went wrong before: ten releases were numbered MINOR that only fixed or
-polished, which is why the number ran to 1.49.1 for work that had reached 0.59.1.
+**Where this went wrong before.** A layout change is a PATCH. So is a colour,
+a rename, and a corrected calculation. Ten releases in the 1.x line were
+numbered MINOR for work that only fixed or polished, which is how the number ran
+to 1.49.1 while `main` sat at 1.21.1.
 
 **When a release does both** — adds a capability *and* fixes things — it is a
 MINOR. The larger claim wins.
 
+**One merge is one release.** A branch is not a version per commit. Bump when
+the work lands on `main`, not on every push to a feature branch: whatever the
+branch adds, the merge is a single MINOR (or PATCH) over what `main` had.
+`tests/lint/version.py` cannot see `main`, so this is the one part of the rule
+that stays a habit rather than a check.
+
 **Not a release at all**, and therefore not a bump: anything under `tests/`,
 `tools/` or `design/`, and edits to `CLAUDE.md` / `ROADMAP.md`. None of it ships.
 
-#### The renumber of 2026-08
-
-The version was **rolled back from 1.49.1 to 0.59.1**. It had jumped 0.21.1 →
-1.1.0 as a declared "first public release", skipping 1.0.0 entirely, and the
-addon was not stable in the sense above — a later release crashed the client,
-another had to be rolled back wholesale, and one shipped feature turned out
-never to have worked at all. The 1.x line was a claim the software could not
-support.
-
-`CHANGELOG.md` entries below the renumber keep their original numbers. They are
-what players quoted in bug reports, and rewriting 107 of them would make every
-old report unmatchable to buy tidiness nobody reads.
 
 ---
 
