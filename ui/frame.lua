@@ -11109,7 +11109,11 @@ local function DisenchantReport(rest)
     if override then
         ilvl, source = override, "you said so"
     else
-        ilvl, source = A.de.ItemLevel(itemId)
+        -- `info` is handed over, not re-fetched -- and it MUST be handed over:
+        -- the required-level fallback reads info.minLevel, so a bare
+        -- ItemLevel(itemId) reports "unknown" for exactly the items the
+        -- tooltip is happily answering for.
+        ilvl, source = A.de.ItemLevel(itemId, info.quality, info)
         source = source or "unknown \226\128\148 add one after the link"
     end
 

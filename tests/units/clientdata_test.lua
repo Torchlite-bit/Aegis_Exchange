@@ -198,4 +198,82 @@ de.ItemLevel(700, GREEN)
 H.eq("de.ItemLevel makes none", W.itemInfoCalls, 0)
 W.SetClientItemData(false)
 
+-- ---------------------------------------------------------------------------
+H.section("the required-level fallback -- the answer for players with no mod")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. Without ClassicAPI there is no item level on 1.12 at all,
+-- and de.ItemLevel used to return nil -- so the disenchant line simply never
+-- appeared for most players. The required level is the one number every client
+-- hands over, and de.REQ_OFFSET turns it into a band.
+--
+-- The offset is not a guess: aux keys its entire disenchant table on required
+-- level, and lining its bands against ours by MATERIAL SIGNATURE puts all 20
+-- exactly 5 apart. The alignment cases below are that result, pinned -- if the
+-- offset ever drifts, these say so in terms of real bands rather than a number.
+
+W.SetClientItemData(false)
+
+-- A FRESH id, deliberately: item 700 has a disenchant observation against it
+-- from an earlier section, and "observed" outranks everything here. Reusing it
+-- would have tested the observation path while claiming to test this one.
+W.AddItem(70900, { name = "Plain Chest", quality = GREEN,
+    equipLoc = "INVTYPE_CHEST", minLevel = 40 })
+
+local lvl, src = de.ItemLevel(70900, GREEN, util.ItemInfo(70900))
+H.eq("required level 40 resolves to an item level", lvl, 45)
+H.eq("...and says where it came from", src, "required")
+
+-- The label is the whole safety story. A caller that shows the number without
+-- it presents an estimate as a measurement.
+H.neq("the source is NOT passed off as the client's own", src, "client")
+
+-- ALIGNMENT, band by band, against aux's own boundaries. Left column is the
+-- required level a player's client reports; right is the band ours must pick.
+local ALIGN = {
+    {  1, 15 }, { 10, 15 },      -- aux's <=10 band
+    { 11, 20 }, { 15, 20 },      -- aux's <=15
+    { 16, 25 }, { 20, 25 },      -- aux's <=20
+    { 25, 30 }, { 30, 35 },
+    { 35, 40 }, { 40, 45 },
+    { 45, 50 }, { 50, 55 },
+    { 55, 60 },
+}
+local i = 1
+while i <= table.getn(ALIGN) do
+    local req, want = ALIGN[i][1], ALIGN[i][2]
+    W.AddItem(70000 + req, { name = "Req " .. req, quality = GREEN,
+        equipLoc = "INVTYPE_CHEST", minLevel = req })
+    local got = de.ItemLevel(70000 + req, GREEN, util.ItemInfo(70000 + req))
+    H.eq("required " .. req .. " lands in band " .. want, de.Band(got), want)
+    i = i + 1
+end
+
+-- An item with no required level (most trade goods) stays unanswered rather
+-- than being handed a floor of REQ_OFFSET.
+W.AddItem(70500, { name = "No Req", quality = GREEN,
+    equipLoc = "INVTYPE_CHEST", minLevel = 0 })
+H.isNil("a required level of 0 answers nothing",
+    de.ItemLevel(70500, GREEN, util.ItemInfo(70500)))
+
+-- RANKING. Required level is the WEAKEST source and must lose to every other.
+W.AddItem(70901, { name = "Both Known", quality = GREEN,
+    equipLoc = "INVTYPE_CHEST", minLevel = 40, itemLevel = 48 })
+W.SetClientItemData(true)
+local lvl2, src2 = de.ItemLevel(70901, GREEN, util.ItemInfo(70901))
+H.eq("the client's real level beats the required-level guess", src2, "client")
+H.eq("...and it is the real number, not minLevel + 5", lvl2, 48)
+W.SetClientItemData(false)
+local lvl3, src3 = de.ItemLevel(70901, GREEN, util.ItemInfo(70901))
+H.eq("...and with the mod gone it falls back rather than going silent",
+    src3, "required")
+H.eq("...to the approximation", lvl3, 45)
+
+-- ...and it must not cost a server round trip either, since it rides the same
+-- per-auction-row path everything else here does.
+W.itemInfoCalls = 0
+de.ItemLevel(70900, GREEN, util.ItemInfo(70900))
+H.check("the fallback adds no item-cache traffic of its own",
+    W.itemInfoCalls <= 1, "got " .. W.itemInfoCalls)
+
 os.exit(H.report("clientdata"))

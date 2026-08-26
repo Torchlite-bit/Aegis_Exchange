@@ -12,6 +12,45 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.43.0]
+
+**Disenchant values now answer without ClassicAPI.** `/reload`-safe.
+
+### Added
+- **A fourth item-level source: the required level.** 1.12 hands every addon the
+  level needed to *equip* an item and no item level at all, so without a mod
+  exposing the real one the disenchant line simply never appeared — for most
+  players, on most items. It now falls back to the required level plus 5.
+
+  **Where the 5 comes from.** aux keys its entire disenchant table on required
+  level, so its band boundaries and ours describe the same items on two
+  different scales. Lining the two up by *material signature* — which materials
+  each band yields, independent of any assumed offset — puts every one of aux's
+  20 uncommon and rare bands **exactly** 5 below ours, with no boundary
+  disagreeing. Four of the 20 differ in their material list, and all four are
+  places our own generator dropped a low-probability tail material for having
+  too few items behind it. That is a known thinness in our data and says nothing
+  about the offset.
+
+- **The tooltip says when a value is approximate.** A disenchant line resolved
+  this way reads **Aegis Disenchant (approx)**; one resolved from a real item
+  level or from a disenchant you performed keeps the plain label. Required level
+  moves in steps of 5 where item level does not, so an item near a boundary can
+  land one band out — and adjacent bands differ by more than double in yield.
+  The number is worth showing. It is not worth showing as though it were
+  measured.
+
+### Ranking
+Strongest first, and a caller only ever sees the one that answered:
+**observed** (you disenchanted it) → **client** (ClassicAPI's real number) →
+**required** (this, approximate). The new source is last, and cannot outrank
+either of the others.
+
+### Fixed
+- **`/aex de` reported "unknown" for items the tooltip was answering for.** It
+  called `de.ItemLevel` without passing the item info the required-level
+  fallback reads.
+
 ## [1.42.0]
 
 First of the changes from reading aux. `/reload`-safe — no new files.
@@ -3168,6 +3207,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.43.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.42.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

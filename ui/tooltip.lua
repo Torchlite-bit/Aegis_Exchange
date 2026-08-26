@@ -60,9 +60,9 @@ function tooltip.Extend(gtt, itemId, count)
     -- -- which today is most of a bag. That silence is deliberate: an "Aegis
     -- Disenchant: unknown" line on every grey and every trade good would be
     -- noise on hundreds of items to be informative about a handful.
-    local disenchant, disenchantRows
+    local disenchant, disenchantRows, disenchantSource
     if Want("tipDisenchant") and A.de then
-        disenchant = A.de.ValueOf(itemId, A.de.MarketPrice)
+        disenchant, disenchantSource = A.de.ValueOf(itemId, A.de.MarketPrice)
         if disenchant and IsShiftKeyDown and IsShiftKeyDown() then
             disenchantRows = A.de.YieldOf(itemId)
         end
@@ -107,7 +107,15 @@ function tooltip.Extend(gtt, itemId, count)
         -- disenchant one thing at a time, and each break rolls the table
         -- again -- a stack of five is five separate draws, not five times
         -- this number.
-        gtt:AddDoubleLine("Aegis Disenchant",
+        -- WHERE THE LEVEL CAME FROM IS PART OF THE NUMBER. Source "required"
+        -- means the item level was inferred from the level needed to equip the
+        -- item (see de.REQ_OFFSET), which can land a band out -- and adjacent
+        -- bands differ by more than double in yield. An unlabelled figure would
+        -- read exactly like the measured one next to it, so the label is not
+        -- decoration: it is the difference between an estimate and a claim.
+        gtt:AddDoubleLine(
+            "Aegis Disenchant"
+                .. ((disenchantSource == "required") and " (approx)" or ""),
             util.FormatMoney(disenchant, true),
             ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)
         if disenchantRows then

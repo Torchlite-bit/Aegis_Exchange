@@ -402,15 +402,48 @@ function de.Value(ilvl, quality, equipLoc, itemId, priceOf)
     return math.floor(total + 0.5)
 end
 
+-- How far an item's LEVEL sits above the level needed to equip it.
+--
+-- THIS IS THE NO-CLIENT-MOD FALLBACK, and it is the only number in this file
+-- that is an approximation rather than a measurement. It exists because 1.12
+-- hands every addon the REQUIRED level (GetItemInfo's 4th return) and no item
+-- level at all, so without a mod exposing the real one there is nothing else
+-- to reason from.
+--
+-- WHY 5, and why this is not a guess. aux (shirsig/aux-addon-vanilla) keys its
+-- whole disenchant table on the required level, so its band boundaries and
+-- ours describe the same items on two different scales. Lining the two tables
+-- up by MATERIAL SIGNATURE -- which materials each band yields, independent of
+-- any assumed offset -- puts every one of aux's 20 uncommon and rare bands
+-- exactly 5 below ours. Not approximately: exactly, in all 20, with no
+-- boundary disagreeing.
+--
+-- Four of those 20 differ in their material LIST, and none of them differs in
+-- where the boundary sits. All four are places our generator dropped a
+-- low-probability tail material (a shard at band 55, Nexus Crystal's 0.5% at
+-- the top) for having too few items behind it. That is a known thinness in our
+-- own data and says nothing about the offset.
+--
+-- WHAT IT STILL COSTS. Required level is granular in steps of 5 while item
+-- level is not, so an item sitting near a boundary can land one band out --
+-- and adjacent bands differ by more than double in yield. The answer is
+-- therefore ALWAYS labelled: de.ItemLevel returns source "required", and every
+-- caller that shows a number has to say so. It is the weakest of the four
+-- sources and sits last for that reason.
+de.REQ_OFFSET = 5
+
 -- This item's level, and where it came from. Returns level, source, or nil.
 --
--- TWO sources, in this order:
+-- THREE sources, in this order -- and the order IS the ranking, strongest
+-- first, because a caller only ever sees the one that answered:
 --
 --   "observed"  a disenchant the player performed. First, always: it is
 --               evidence from the server they are actually on, and Turtle can
 --               change what an item breaks into without changing its level.
 --   "client"    the item's own level, where a mod exposes it. 1.12 stores it
 --               on every item and shows it nowhere.
+--   "required"  the required level plus REQ_OFFSET. Approximate, always
+--               labelled, and the only one that answers with no mod at all.
 --
 -- There used to be a third: 12,567 item levels borrowed from another addon,
 -- shipped because there was no other way to get one. There is now, so it is
@@ -443,6 +476,12 @@ function de.ItemLevel(itemId, quality, info)
         -- behind the disenchant filters.
         local lvl = util.ClientItemLevel(itemId, info)
         if lvl then return lvl, "client" end
+    end
+    -- LAST: the REQUIRED level, shifted. The fallback for everyone without the
+    -- client mod, which is most players -- see the block above REQ_OFFSET for
+    -- where the number comes from and what it costs.
+    if info and type(info.minLevel) == "number" and info.minLevel > 0 then
+        return info.minLevel + de.REQ_OFFSET, "required"
     end
     return nil
 end

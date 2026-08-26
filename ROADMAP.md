@@ -2087,11 +2087,23 @@ a code one:
 
 ### 3l — The no-ClassicAPI backup, from aux — **BUILDING**
 
-Phase 1 (sell-slot vendor price) shipped in **v1.42.0**. Remaining, in order:
-**2** required-level ladder as a fourth `de.ItemLevel` source, **3** the passive
-item-cache harvest, **4** the multi-section tooltip. Phase 2 must not start
-until the ladder question below is settled — feeding required level into the
-item-level bands is the one way to get this silently wrong.
+Phase 1 (sell-slot vendor price) shipped in **v1.42.0**; phase 2 (the
+required-level fallback) in **v1.43.0**. Remaining: **3** the passive
+item-cache harvest, **4** the multi-section tooltip.
+
+**The ladder question is settled, and it needed no second table.** The offset
+between aux's required-level bands and our item-level bands was derived by
+aligning the two by MATERIAL SIGNATURE rather than assumed: all 20 of aux's
+uncommon and rare bands sit exactly 5 below ours, with no boundary disagreeing.
+So `de.ItemLevel` returns `minLevel + de.REQ_OFFSET` and the existing `de.Band`
+does the rest. The four bands whose material LISTS differ are all places our
+generator dropped a low-probability tail material for thin data — our own gap,
+unrelated to the offset.
+
+The trap flagged in the research pass was real and is what the derivation
+avoided: feeding required level into the item-level bands raw lands every item
+a band low, and adjacent bands differ by more than double in yield. The
+sabotage `reqlevel-offset-dropped` plants exactly that.
 
 **Settled since the research pass:** `INVTYPE_SHIELD` is **armour**, which is
 what Exchange already has. Aux puts it under WEAPON and aux is wrong; dust is

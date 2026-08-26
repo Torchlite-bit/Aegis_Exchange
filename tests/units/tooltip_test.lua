@@ -170,4 +170,39 @@ H.check("...and still multiplies by the stack",
         string.find(lineFor(both, "Aegis Market").right, "x4", 1, true) ~= nil,
         lineFor(both, "Aegis Market").right)
 
+-- ---------------------------------------------------------------------------
+H.section("an approximated level is LABELLED as one")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. Without a client mod the item level is inferred from the
+-- level needed to equip the item, which can land a band out -- and adjacent
+-- bands differ by more than double in yield. The number is worth showing; it
+-- is not worth showing as though it were measured.
+--
+-- Nothing about the VALUE changes when the label is dropped, which is what
+-- makes this the kind of regression only a test catches. The line still
+-- appears, still holds money, and still looks right.
+
+-- Required level 45 lands in band 50, whose materials are the three priced at
+-- the top of this file -- so the value actually computes rather than going
+-- silent for an unrelated reason.
+W.AddItem(904, { name = "Approx Chest", quality = GREEN,
+                 equipLoc = "INVTYPE_CHEST", minLevel = 45 })
+
+local approx = Capture()
+A.tooltip.Extend(approx, 904, 1)
+H.check("an item known only by its required level still gets a line",
+        lineFor(approx, "Aegis Disenchant (approx)") ~= nil)
+H.isNil("...and NOT the unqualified label",
+        lineFor(approx, "Aegis Disenchant"))
+
+-- The converse, so the label cannot simply be hardcoded on: item 900's level
+-- comes from the client, and that answer is exact.
+local exact = Capture()
+A.tooltip.Extend(exact, 900, 1)
+H.check("a client-measured level keeps the plain label",
+        lineFor(exact, "Aegis Disenchant") ~= nil)
+H.isNil("...and is never marked approximate",
+        lineFor(exact, "Aegis Disenchant (approx)"))
+
 os.exit(H.report("tooltip"))

@@ -1124,10 +1124,18 @@ end
     # beside it DO multiply, which is what makes routing it through the same
     # helper the obvious and wrong edit.
     ("tip-disenchant-multiplied-by-stack", "ui/tooltip.lua",
-     """        gtt:AddDoubleLine("Aegis Disenchant",
-            util.FormatMoney(disenchant, true),""",
-     """        gtt:AddDoubleLine("Aegis Disenchant",
-            money(disenchant),""",
+     """            util.FormatMoney(disenchant, true),
+            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)""",
+     """            money(disenchant),
+            ACCENT_R, ACCENT_G, ACCENT_B, 1, 1, 1)""",
+     "tooltip"),
+
+    # The label that separates an estimate from a measurement. Nothing about
+    # the NUMBER changes when this goes -- a required-level answer just starts
+    # reading exactly like a client-measured one.
+    ("tip-disenchant-approx-unlabelled", "ui/tooltip.lua",
+     '                .. ((disenchantSource == "required") and " (approx)" or ""),',
+     '                .. "",',
      "tooltip"),
 
     ("tip-disenchant-ignores-setting", "ui/tooltip.lua",
@@ -1484,6 +1492,51 @@ end
      "    if A.db and A.db.SetVendor then A.db.SetVendor(itemId, unit) end",
      "",
      "sellslot"),
+
+    # ---- the required-level fallback ------------------------------------
+    #
+    # The offset was derived by aligning aux's required-level bands against
+    # ours by material signature -- all 20 exactly 5 apart. Every sabotage
+    # here is a way for that to silently stop being true.
+
+    # The whole fallback removed: players without ClassicAPI go back to a
+    # disenchant line that never appears, which is what it looked like before
+    # and looks like nothing at all afterwards.
+    ("reqlevel-fallback-removed", "core/disenchant.lua",
+     "        return info.minLevel + de.REQ_OFFSET, \"required\"",
+     "        return nil",
+     "clientdata"),
+
+    # Off by one band. 5 is not a round number picked for looking sensible --
+    # it is the measured alignment, and adjacent bands differ by more than
+    # double in yield.
+    ("reqlevel-offset-wrong", "core/disenchant.lua",
+     "de.REQ_OFFSET = 5",
+     "de.REQ_OFFSET = 10",
+     "clientdata"),
+
+    # Required level used raw. The most plausible-looking mistake of the lot,
+    # since it reads like "the level of the item" right up until every item
+    # lands a band low.
+    ("reqlevel-offset-dropped", "core/disenchant.lua",
+     "        return info.minLevel + de.REQ_OFFSET, \"required\"",
+     "        return info.minLevel, \"required\"",
+     "clientdata"),
+
+    # An estimate presented as the client's own measurement. Nothing about the
+    # number changes -- only whether the UI is allowed to label it -- which is
+    # exactly why a test rather than a reviewer has to catch it.
+    ("reqlevel-lies-about-its-source", "core/disenchant.lua",
+     "        return info.minLevel + de.REQ_OFFSET, \"required\"",
+     "        return info.minLevel + de.REQ_OFFSET, \"client\"",
+     "clientdata"),
+
+    # Outranking the real thing. Ordering bugs do not error; they just make
+    # every answer slightly worse for the people who paid for a DLL.
+    ("reqlevel-outranks-the-client", "core/disenchant.lua",
+     "    if util and util.ClientItemLevel then",
+     "    if info and type(info.minLevel) == \"number\" and info.minLevel > 0 then\n        return info.minLevel + de.REQ_OFFSET, \"required\"\n    end\n    if util and util.ClientItemLevel then",
+     "clientdata"),
 ]
 
 SUITES = {
