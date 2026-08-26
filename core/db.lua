@@ -471,8 +471,15 @@ function db.MarketValue(itemId)
     return samples[n].value
 end
 
--- Vendor sell price (per unit), collected opportunistically from tooltip
--- money while at a merchant (1.12's GetItemInfo has no sell price).
+-- Vendor sell price (per unit), collected opportunistically. TWO sources feed
+-- this, and both are the client stating a fact rather than us deriving one:
+--   * tooltip money while at a merchant (ui/tooltip.lua), and
+--   * the auction house SELL SLOT (sell.LearnVendorFromSlot), which costs the
+--     player nothing because posting is what they came to do.
+-- The merchant figure is the more exact of the two -- see the charge-item note
+-- above sell.VendorUnitFromSlot -- and a later write simply wins, so walking
+-- past a merchant corrects anything the slot rounded.
+--
 -- Account-wide, NOT per realm: an NPC's sell price is the same on every server,
 -- so learning it once should cover all of them.
 function db.SetVendor(itemId, copper)

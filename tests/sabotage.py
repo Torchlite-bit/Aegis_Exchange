@@ -935,7 +935,7 @@ end""",
     # that cannot succeed -- 1.12 has no sell price in GetItemInfo and the only
     # source is a merchant.
     ("vendor-fix-says-search-again", "core/buy.lua",
-     '    ["vendor-profit"] = "learned at a merchant, or install ClassicAPI",',
+     '    ["vendor-profit"] = "learned at a merchant, seen in the sell slot, or install ClassicAPI",',
      '    ["vendor-profit"] = "search again",',
      "post_filter"),
 
@@ -1459,6 +1459,31 @@ end
      "    return FromInfo(info, \"sellPrice\")",
      "    return FromInfo(info, \"sellPrice\") or (util.ItemInfo(itemId)\n        and util.ItemInfo(itemId).sellPrice)",
      "clientdata"),
+
+    # ---- vendor price learned from the sell slot ------------------------
+    #
+    # GetAuctionSellItemInfo reports the price of the WHOLE STACK. This file
+    # has already shipped a stack price presented as a unit price once, so
+    # the division is the part worth attacking.
+    ("sellslot-vendor-not-divided", "core/sell.lua",
+     "    return it.itemId, math.floor(it.price / count)",
+     "    return it.itemId, it.price",
+     "sellslot"),
+
+    # A vendor price of 0 means "cannot be sold", not "is worth nothing".
+    # Recording it makes db.GetVendor answer 0 for grey trash, which then
+    # reads as a known price everywhere downstream.
+    ("sellslot-vendor-records-zero", "core/sell.lua",
+     "    if not it.price or it.price <= 0 then return nil end",
+     "",
+     "sellslot"),
+
+    # Learned nothing at all -- the silent version of this feature, where
+    # every number still looks right because it comes from somewhere else.
+    ("sellslot-vendor-never-learned", "core/sell.lua",
+     "    if A.db and A.db.SetVendor then A.db.SetVendor(itemId, unit) end",
+     "",
+     "sellslot"),
 ]
 
 SUITES = {

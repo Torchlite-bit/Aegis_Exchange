@@ -2085,7 +2085,18 @@ a code one:
   its own release, on its own evidence, and let it be tested for what it
   actually does: fewer server queries when hovering lists of uncached items.
 
-### 3l — The no-ClassicAPI backup, from aux — **RESEARCHED, not built**
+### 3l — The no-ClassicAPI backup, from aux — **BUILDING**
+
+Phase 1 (sell-slot vendor price) shipped in **v1.42.0**. Remaining, in order:
+**2** required-level ladder as a fourth `de.ItemLevel` source, **3** the passive
+item-cache harvest, **4** the multi-section tooltip. Phase 2 must not start
+until the ladder question below is settled — feeding required level into the
+item-level bands is the one way to get this silently wrong.
+
+**Settled since the research pass:** `INVTYPE_SHIELD` is **armour**, which is
+what Exchange already has. Aux puts it under WEAPON and aux is wrong; dust is
+~75% of green armour yields and essence ~75% of green weapons, and shields are
+armour. No change needed, and it is off the open-questions list.
 
 Read `shirsig/aux-addon-vanilla` @ `6b56d0f` in full. Full write-up lives in the
 artifact "Aux, Taken Apart"; what follows is what the repo needs to remember.

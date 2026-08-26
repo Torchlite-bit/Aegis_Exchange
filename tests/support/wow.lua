@@ -385,7 +385,10 @@ end
 function GetAuctionSellItemInfo()
     local s = W.sellSlot
     if not s then return nil end
-    local rec = W.items[s.link] or {}
+    -- Through ItemRec, not W.items[link]: a hand-written link in a test and the
+    -- coloured one W.AddItem generates are the same item to the client, and
+    -- keying on the exact string made the slot read blank for a registered item.
+    local rec = ItemRec(s.link) or {}
     return rec.name or s.link, rec.texture or "icon", s.count or 1,
            rec.quality or 1, 1, rec.sellPrice or 0,
            rec.stackCount or 20, s.link

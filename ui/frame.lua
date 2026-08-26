@@ -11046,6 +11046,11 @@ A.RegisterEvent("PLAYER_MONEY", function()
 end)
 
 A.RegisterEvent("NEW_AUCTION_UPDATE", function()
+    -- The slot just changed, and the client states that item's vendor price in
+    -- GetAuctionSellItemInfo. Learn it before repainting, so the Sell tab's
+    -- vendor line shows it on this very refresh rather than the next one.
+    -- O(1): one API read and one table write. See sell.LearnVendorFromSlot.
+    A.sell.LearnVendorFromSlot()
     ui.RefreshSell()
 end)
 A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()

@@ -144,4 +144,51 @@ H.eq("...and its item id", it.itemId, 1)
 -- over -- which is what the leftover-retention path counts.
 H.eq("the bags hold the rest", sell.CountInBags(1), 3)
 
+-- ---------------------------------------------------------------------------
+H.section("Vendor price learned from the sell slot")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. GetAuctionSellItemInfo's 6th return is the vendor price for
+-- the WHOLE STACK, and this file has already shipped a stack price presented as
+-- a unit price once. The division is the entire feature, so it is the entire
+-- test -- and it is asserted against a stack of more than one, because a stack
+-- of one passes whether or not the division is there at all.
+
+-- 12 Copper Bars are in the slot from the section above. Price them so the
+-- whole stack is 240c, i.e. 20c each.
+W.AddItem(1, { name = "Copper Bar", quality = 1, minLevel = 1,
+    type = "Trade Goods", subType = "Metal & Stone", stackCount = 20,
+    equipLoc = "", texture = "t", sellPrice = 240 })
+
+local id, unit = sell.VendorUnitFromSlot()
+H.eq("the slotted item is identified", id, 1)
+H.eq("a 240c stack of 12 is 20c a unit", unit, 20)
+
+H.isNil("nothing is recorded until it is asked for", A.db.GetVendor(1))
+sell.LearnVendorFromSlot()
+H.eq("...and after learning, the DB has the UNIT price", A.db.GetVendor(1), 20)
+
+-- A price of 0 is "cannot be sold to a vendor", which is a fact about the item
+-- and not a price. Recording it would have db.GetVendor answer 0 for grey
+-- trash it has simply never seen properly.
+W.AddItem(2, { name = "Silk Cloth", quality = 1, minLevel = 1,
+    type = "Trade Goods", subType = "Cloth", stackCount = 20,
+    equipLoc = "", texture = "t", sellPrice = 0 })
+W.sellSlot = { link = SILK, count = 5 }
+H.isNil("an unsellable item yields no unit price", sell.VendorUnitFromSlot())
+sell.LearnVendorFromSlot()
+H.isNil("...and nothing lands in the DB", A.db.GetVendor(2))
+
+-- An empty slot is the common case: this runs on every NEW_AUCTION_UPDATE,
+-- including the one fired when an item is REMOVED.
+W.sellSlot = nil
+H.isNil("an empty slot yields nothing", sell.VendorUnitFromSlot())
+H.survives("...and learning from it is a no-op", function()
+    sell.LearnVendorFromSlot()
+end)
+
+-- The merchant figure is exact where the slot's rounds, so a later write wins.
+A.db.SetVendor(1, 25)
+H.eq("a merchant-learned price overwrites the slot's", A.db.GetVendor(1), 25)
+
 os.exit(H.report("sellslot"))

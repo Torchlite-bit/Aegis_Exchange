@@ -245,7 +245,7 @@ H.eq("an unpriced item: scan for it",
      fixFor("silk/percent/50", unseen), "scan to learn its price")
 H.eq("an unknown vendor price: a merchant, or the DLL that just knows",
      fixFor("silk/vendor-profit/1s", unseen),
-     "learned at a merchant, or install ClassicAPI")
+     "learned at a merchant, seen in the sell slot, or install ClassicAPI")
 
 -- Two kinds of ignorance with two different cures cannot be summed up in one
 -- clause, and picking either would tell half the readers the wrong thing.

@@ -65,6 +65,54 @@ function sell.GetItem()
     }
 end
 
+-- ---------------------------------------------------------------------------
+-- Vendor price, learned from the SELL SLOT
+-- ---------------------------------------------------------------------------
+--
+-- GetAuctionSellItemInfo's 6th return is the item's VENDOR price for the whole
+-- stack in the slot -- the client states it, we do not derive it. sell.GetItem
+-- has always read it (as `price`, the deposit base) and thrown it away.
+--
+-- It is worth keeping because it is the one vendor-price source that costs the
+-- player nothing. Learning at a merchant needs them to walk to a merchant with
+-- the item in their bags; ClassicAPI needs a DLL. This needs them to do the
+-- thing they already opened the auction house to do. Every item anyone ever
+-- posts teaches its exact vendor price.
+--
+-- CHARGE ITEMS ARE THE KNOWN INEXACTNESS. On 1.12 the client reports the
+-- FULL-charge price here, so a partly-used charge item resolves high. There is
+-- no charge count in this API to divide by -- aux carries the same exposure and
+-- ships it -- so the value is recorded anyway rather than the feature being
+-- dropped over a narrow case. A merchant-learned price for the same item
+-- overwrites it, and that one is exact.
+
+-- itemId and per-unit vendor price for whatever is in the sell slot, or nil.
+--
+-- Split out from the recording so the arithmetic is testable without a DB: the
+-- whole function is one division and one floor, and both have been got wrong in
+-- this file before (a stack price shown as a unit price).
+function sell.VendorUnitFromSlot()
+    local it = sell.GetItem()
+    if not it or not it.itemId then return nil end
+    local count = it.count or 1
+    if count < 1 then return nil end
+    -- price 0 means "this cannot be sold to a vendor", which is a fact about
+    -- the item and NOT a price of zero. Recording it would make db.GetVendor
+    -- answer 0 for grey vendor trash it simply has not seen properly.
+    if not it.price or it.price <= 0 then return nil end
+    return it.itemId, math.floor(it.price / count)
+end
+
+-- Record it. Safe to call on every NEW_AUCTION_UPDATE: one API read, one
+-- division, one table write, and nothing when the slot is empty. See HARD
+-- RULE 16 -- this is the O(1) shape, not the dirty-flag one.
+function sell.LearnVendorFromSlot()
+    local itemId, unit = sell.VendorUnitFromSlot()
+    if not itemId or not unit or unit <= 0 then return nil end
+    if A.db and A.db.SetVendor then A.db.SetVendor(itemId, unit) end
+    return itemId, unit
+end
+
 -- Your current number of active auctions (second return of GetNumAuctionItems).
 function sell.OwnerCount()
     local _, total = GetNumAuctionItems("owner")

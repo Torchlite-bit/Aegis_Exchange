@@ -1219,7 +1219,7 @@ local UNANSWERED_FIX = {
     ["seller"]        = "search again",
     ["left"]          = "search again",
     ["percent"]       = "scan to learn its price",
-    ["vendor-profit"] = "learned at a merchant, or install ClassicAPI",
+    ["vendor-profit"] = "learned at a merchant, seen in the sell slot, or install ClassicAPI",
     -- Two causes, one remedy line. A disenchant value needs the item's LEVEL
     -- (which a disenchant teaches) and its materials' PRICES (which a scan
     -- teaches), and the filter cannot tell a caller which half it was missing

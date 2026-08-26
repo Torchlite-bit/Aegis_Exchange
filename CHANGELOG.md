@@ -12,6 +12,36 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.42.0]
+
+First of the changes from reading aux. `/reload`-safe — no new files.
+
+### Added
+- **Vendor prices are now learned from the auction house sell slot.**
+  `GetAuctionSellItemInfo`'s sixth return is the item's vendor price for the
+  whole stack in the slot — the client states it outright. Aegis has always read
+  that value (as the deposit base) and thrown it away; it now records it, divided
+  down to a unit price.
+
+  This is the vendor-price source that costs you nothing. Learning at a merchant
+  needs you to walk to one with the item in your bags; ClassicAPI needs a DLL.
+  This needs you to do the thing you opened the auction house to do — **every
+  item you ever post now teaches Aegis its exact vendor price.**
+
+  It feeds everything that already reads a vendor price: the tooltip's Vendor
+  line, the Sell tab's vendor comparison, the Vendor list, and the
+  `vendor-profit` search filter — whose "no answer" hint now names the new source
+  alongside the old ones.
+
+### Known inexactness
+- **Charge items resolve high.** For an item with charges, 1.12 reports the
+  full-charge price in this slot, and there is no charge count in that API to
+  divide by. A partly-used charge item will therefore read as worth more than it
+  is. Walking past a merchant with it corrects the number — that path is exact,
+  and a later write wins. Recording it anyway is the deliberate call: the
+  alternative was dropping a source that answers for everything else over a
+  narrow case.
+
 ## Restored to 1.41.1 — **restart**
 
 **The crash was the client install, not the addon.** After reinstalling mods,
@@ -3138,6 +3168,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.42.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.41.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
