@@ -12,6 +12,35 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.46.1]
+
+**The disenchant line, actually fixed.** Found by `/aex diag` on the affected
+client. `/reload`-safe.
+
+### Fixed
+- **Some clients send no equip slot at all, and that killed the whole feature.**
+  Turtle 1.12 with ClassicAPI returns ten values from `GetItemInfo` with
+  **nothing** where `equipLoc` belongs — not shifted, absent. `de.Class` returned
+  nil, `CanDisenchant` returned false, and the disenchant line silently never
+  rendered on that client, for every item.
+
+  Nothing errored. The price lines beside it are database reads and kept
+  working, so it read as an unfinished feature rather than a broken one.
+
+  The item's **type** is still present and still says `Weapon` or `Armor` —
+  which is the only question the disenchant rule ever asks a slot. `util.ItemInfo`
+  now stands in a slot from the type when the client omits one. Deliberately
+  *not* a real `INVTYPE_`: substituting `INVTYPE_CHEST` for "some armour" would
+  classify correctly today and be a lie in the code that the next reader
+  inherits.
+
+### Added
+- **`/aex diag <item link>`** — prints the whole disenchant chain for one item:
+  modules loaded, relevant settings, how many values `GetItemInfo` returned,
+  the resolved quality / required level / equip slot, the band, the yield rows
+  and the value. This found the bug above in one line after three rounds of
+  remote guessing had missed it.
+
 ## [1.46.0]
 
 ### Changed
@@ -3361,6 +3390,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.46.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -220,7 +220,7 @@ end
 -- wrong for the third -- the wide tuple has six numbers after stackCount --
 -- and a test that only ever sees one shape cannot tell the anchor apart from
 -- a hardcoded index.
-W.itemInfoShape = "vanilla"          -- or "later" / "wide"
+W.itemInfoShape = "vanilla"   -- or "later" / "wide" / "holey"
 
 -- The client resolves an item from an id, a name, or ANY well-formed link --
 -- the colour code in front of a link is decoration, not identity. Keying only
@@ -279,6 +279,21 @@ function GetItemInfo(key)
                r.minLevel or 0, r.type or "Trade Goods",
                r.subType or "Cloth", r.stackCount or 20,
                r.equipLoc or "", r.texture or "icon"
+    end
+    -- A REAL CLIENT, REPORTED FROM THE FIELD. Turtle 1.12 with ClassicAPI
+    -- returns TEN values with itemLevel at 4 -- and a HOLE where equipLoc
+    -- should be, with the texture still at 10. util.ItemInfo's anchor found
+    -- the right stackCount, counted forward, and read the hole: equipLoc came
+    -- back nil, de.Class went nil, CanDisenchant went false, and the disenchant
+    -- line silently never rendered on that client.
+    --
+    -- No invented shape. This is what `/aex diag` printed: 10 values, [3]=2,
+    -- [4]=5, and equipLoc nil out of util.ItemInfo.
+    if W.itemInfoShape == "holey" then
+        return r.name, r.link, r.quality or 1, r.itemLevel or 5,
+               r.minLevel or 1, r.type or "Weapon",
+               r.subType or "One-Handed Swords", r.stackCount or 1,
+               nil, r.texture or "icon"
     end
     return r.name, r.link, r.quality or 1, r.minLevel or 0,
            r.type or "Trade Goods", r.subType or "Cloth",

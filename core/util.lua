@@ -274,6 +274,35 @@ function util.ItemName(itemId)
     return info and info.name or nil
 end
 
+-- Stand-ins for a missing equip slot.
+--
+-- REPORTED FROM A REAL CLIENT: Turtle 1.12 with ClassicAPI returns ten values
+-- with NOTHING where equipLoc belongs. Not a shifted field -- absent. So there
+-- is no INVTYPE_ string anywhere in the tuple to find, and every consumer that
+-- asks "armour or weapon?" got nil and concluded "neither", which reads as
+-- "this cannot be disenchanted".
+--
+-- `type` is still there and still says "Weapon" or "Armor", and armour-or-
+-- weapon is the ONLY thing the disenchant rule asks a slot for. So when the
+-- slot is missing and the type answers, we stand in a sentinel.
+--
+-- DELIBERATELY NOT A REAL INVTYPE. Substituting INVTYPE_CHEST for "some
+-- armour" would classify correctly today and be a lie in the code, and the
+-- next person to read a slot for anything else would inherit it. These names
+-- announce themselves: core/disenchant.lua maps them, nothing else should.
+local TYPE_SLOT = {
+    Weapon = "AEGIS_ANY_WEAPON",
+    Armor  = "AEGIS_ANY_ARMOR",
+}
+
+-- Fill in an equip slot the client did not give us, where the type allows.
+local function Finish(out)
+    if out and not out.equipLoc and out.type then
+        out.equipLoc = TYPE_SLOT[out.type]
+    end
+    return out
+end
+
 function util.ItemInfo(link)
     if not link then return nil end
 
@@ -307,7 +336,7 @@ function util.ItemInfo(link)
     -- of anchored. Detected by COUNT because that is the only thing that
     -- distinguishes it: vanilla returns 9, later clients 10, modern 17-18.
     if n >= 12 then
-        return {
+        return Finish({
             name       = r[1],
             link       = r[2],
             quality    = r[3],
@@ -319,7 +348,7 @@ function util.ItemInfo(link)
             equipLoc   = r[9],
             texture    = r[10],
             sellPrice  = r[11],
-        }
+        })
     end
 
     -- Index of the last number = stackCount.
@@ -330,10 +359,10 @@ function util.ItemInfo(link)
     -- Nothing numeric at all means this is not a shape we understand; return
     -- what is safe to read rather than guessing at the rest.
     if s < 4 then
-        return { name = r[1], link = r[2], quality = r[3] }
+        return Finish({ name = r[1], link = r[2], quality = r[3] })
     end
 
-    return {
+    return Finish({
         name       = r[1],
         link       = r[2],
         quality    = r[3],
@@ -343,7 +372,7 @@ function util.ItemInfo(link)
         stackCount = r[s],
         equipLoc   = r[s + 1],
         texture    = r[s + 2],
-    }
+    })
 end
 
 -- ---------------------------------------------------------------------------

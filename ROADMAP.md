@@ -2252,6 +2252,41 @@ test that was never written. This one sat in the code asserting the opposite of
 the truth, and the reference addon disagreed with it in every single call site
 -- which was checkable at any point.
 
+#### The tuple is not trustworthy — v1.46.1
+
+`GetItemInfo`'s shape has now cost this project two separate multi-release
+outages, and the second one is the instructive half.
+
+**v1.45.2**: the id was passed as a NUMBER, which 1.12 does not accept.
+**v1.46.1**: a real client returned ten values with **nothing** where `equipLoc`
+belongs -- absent, not shifted -- so `de.Class` went nil, `CanDisenchant` went
+false, and the disenchant line never rendered on that client at all.
+
+Both failed the same way: **nothing errored**, and the price lines beside the
+dead one are DB reads that kept working, so a broken feature looked like an
+unfinished one. That is the signature to watch for -- a feature that is silent
+where it is designed to sometimes be silent has no failure mode a user can
+report except "it does nothing".
+
+**What actually resolved it was a diagnostic, not more reasoning.** Three
+rounds of remote guessing missed it; `/aex diag` printed it in one line. When a
+fault is only observable inside a client we cannot run, **build the readout
+first**. That is cheaper than the third guess, let alone the fourth.
+
+**The design rule this leaves.** `util.ItemInfo` reads positionally, and every
+positional read is a bet on a shape. Fields that have a distinctive marker or
+an alternative source should not take that bet. `equipLoc` now falls back to
+the item's TYPE, which answers the only question the disenchant rule asks it.
+The stand-in is deliberately NOT a real `INVTYPE_` value: substituting
+`INVTYPE_CHEST` for "some armour" would classify correctly today and be a lie
+in the code that the next reader inherits.
+
+**And one piece of speculative code was removed on the way.** A first pass
+added `FindEquipLoc`, scanning the tuple for an `INVTYPE_` string -- which
+would fix a SHIFTED field. The diagnostic showed the field was absent, so it
+could never fire, and the sabotage layer said so by refusing to be caught. An
+unexercised guard is worse than none: it reads as coverage.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

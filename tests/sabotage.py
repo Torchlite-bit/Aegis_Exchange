@@ -1652,6 +1652,24 @@ end
 
     # The same mistake at the name lookup: three sites did this and printed
     # "item:10940" at a player instead of a material name.
+    # A client that omits equipLoc leaves NOTHING to classify by, so every
+    # item reports "not disenchantable" and the line never renders. Reported
+    # from a real Turtle + ClassicAPI client via /aex diag.
+    ("iteminfo-no-slot-standin", "core/util.lua",
+     """    if out and not out.equipLoc and out.type then
+        out.equipLoc = TYPE_SLOT[out.type]
+    end""",
+     "",
+     "clientdata"),
+
+    # The stand-in supplied but unmapped: util hands back AEGIS_ANY_WEAPON and
+    # de.Class does not know it, which is the same silent dead end reached
+    # from the other side.
+    ("de-does-not-map-the-standin", "core/disenchant.lua",
+     '    AEGIS_ANY_WEAPON      = "w",',
+     "",
+     "clientdata"),
+
     ("itemname-bypasses-the-conversion", "core/util.lua",
      "    local info = util.ItemInfo(itemId)\n    return info and info.name or nil",
      "    return GetItemInfo(itemId)",

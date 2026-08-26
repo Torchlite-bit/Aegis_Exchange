@@ -89,6 +89,12 @@ local INVTYPE = {
     INVTYPE_SHIELD        = "a",
     INVTYPE_RELIC         = "a",
     INVTYPE_TABARD        = "a",
+    -- Stand-ins from util.ItemInfo for a client that omits equipLoc entirely
+    -- (Turtle + ClassicAPI does). Never sent by the client; see the TYPE_SLOT
+    -- note in core/util.lua. Armour-or-weapon is all this table decides, and
+    -- the item's TYPE answers that on its own.
+    AEGIS_ANY_WEAPON      = "w",
+    AEGIS_ANY_ARMOR       = "a",
 }
 
 -- Items that pass every test above and still cannot be disenchanted. There is

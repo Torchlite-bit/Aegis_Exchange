@@ -252,4 +252,57 @@ H.eq("and so does a link", byLink and byLink.name, "Linen Cloth")
 H.eq("util.ItemName answers for an id", util.ItemName(2589), "Linen Cloth")
 H.isNil("...and nil for an id nobody knows", util.ItemName(999999))
 
+-- ---------------------------------------------------------------------------
+H.section("a client that sends no equip slot at all")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED FROM A REAL CLIENT. Turtle 1.12 with ClassicAPI returns TEN values
+-- with a HOLE where equipLoc should sit. The anchor found the right
+-- stackCount, counted forward, and read the hole -- so equipLoc came back nil,
+-- de.Class went nil, CanDisenchant went false, and the disenchant line
+-- silently never rendered on that client. Nothing errored.
+--
+-- The slot is not SHIFTED, it is ABSENT -- so it cannot be recovered by
+-- looking harder, only stood in for. `type` is still there and still says
+-- "Weapon" or "Armor", which is the only question the disenchant rule ever
+-- asks a slot.
+
+W.AddItem(4242, { name = "Training Sword", quality = 2, minLevel = 1,
+                  itemLevel = 5, type = "Weapon",
+                  subType = "One-Handed Swords", stackCount = 1,
+                  equipLoc = "INVTYPE_WEAPONMAINHAND", texture = "t" })
+
+W.itemInfoShape = "holey"
+local holey = util.ItemInfo(4242)
+H.check("the item still resolves", holey ~= nil)
+H.eq("...quality is still read absolutely", holey and holey.quality, 2)
+H.eq("...and the type survives", holey and holey.type, "Weapon")
+
+-- The slot is GONE from the tuple, so it cannot be recovered -- only stood in
+-- for. What matters downstream is not the literal slot but the one question
+-- the disenchant rule asks it, so that is what this pins.
+H.eq("a stand-in slot is supplied from the type", holey and holey.equipLoc,
+     "AEGIS_ANY_WEAPON")
+-- What that stand-in has to MEAN is asserted in clientdata_test, which loads
+-- core/disenchant.lua; this suite loads util alone.
+
+-- The same lookup on every other shape, so the marker search cannot be a fix
+-- that only works on the broken one.
+local shapes = { "vanilla", "later", "wide" }
+local si = 1
+while si <= table.getn(shapes) do
+    W.itemInfoShape = shapes[si]
+    local info = util.ItemInfo(4242)
+    H.eq("the real equipLoc is used where the client sends one ("
+         .. shapes[si] .. ")", info and info.equipLoc, "INVTYPE_WEAPONMAINHAND")
+    si = si + 1
+end
+
+-- A trade good has no INVTYPE_ anywhere, and must NOT acquire one.
+W.itemInfoShape = "vanilla"
+local cloth = util.ItemInfo(2589)
+H.check("a trade good still reports no equip slot",
+        cloth.equipLoc == nil or cloth.equipLoc == "",
+        tostring(cloth.equipLoc))
+
 os.exit(H.report("util"))

@@ -303,4 +303,43 @@ H.eq("...and the equip slot", slot, "INVTYPE_CHEST")
 H.eq("a cached item is still answered from the client",
      util.ItemInfo(700).equipLoc, "INVTYPE_CHEST")
 
+-- ---------------------------------------------------------------------------
+H.section("a client that omits equipLoc entirely")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED FROM A REAL CLIENT, via /aex diag: Turtle 1.12 with ClassicAPI
+-- returns ten values with NOTHING where equipLoc belongs. de.Class went nil,
+-- CanDisenchant went false, and the disenchant line silently never rendered --
+-- on every item, for that whole client. Nothing errored; the price lines
+-- beside it are DB reads and kept working, so it read as an unfinished
+-- feature rather than a broken one.
+--
+-- util.ItemInfo stands in a slot from the item's TYPE, which is still present
+-- and answers the only question the rule asks a slot. This is the end-to-end
+-- assertion that the stand-in actually reaches a yield.
+
+W.SetClientItemData(false)
+W.AddItem(4343, { name = "Driftwood Club", quality = GREEN, minLevel = 10,
+                  itemLevel = 15, type = "Weapon",
+                  subType = "One-Handed Maces", stackCount = 1,
+                  equipLoc = "INVTYPE_WEAPONMAINHAND", texture = "t" })
+
+W.itemInfoShape = "holey"
+local info = util.ItemInfo(4343)
+H.eq("the slot is stood in for", info and info.equipLoc, "AEGIS_ANY_WEAPON")
+H.eq("...and classifies as a weapon", de.Class(info.equipLoc), "w")
+H.check("...so the item is disenchantable",
+        de.CanDisenchant(info.quality, info.equipLoc, 4343))
+
+local ilvl, src, q, slot = de.Resolve(4343)
+H.eq("de.Resolve answers", ilvl, 15)
+H.eq("...via the required level", src, "required")
+H.eq("...and carries the stand-in slot through", slot, "AEGIS_ANY_WEAPON")
+
+local rows = de.YieldOf(4343)
+H.check("and a yield comes out the far end", rows ~= nil)
+H.check("...with materials in it", rows and table.getn(rows) > 0)
+
+W.itemInfoShape = "vanilla"
+
 os.exit(H.report("clientdata"))
