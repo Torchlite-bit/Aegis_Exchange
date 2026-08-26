@@ -523,6 +523,42 @@ end
 -- disagreeing, and each of those handlers would silently read the wrong one.
 -- Instead we only replace the ART: the tick is the widget's CHECKED texture,
 -- so the client shows and hides it for us and it can never drift.
+-- What Aegis can and cannot answer without ClassicAPI, said once.
+--
+-- 1.12 stores an item's level and its vendor sell price on every item and
+-- displays NEITHER -- the sell-price field is populated and the engine's
+-- tooltip code simply never reads it. ClassicAPI is a DLL that exposes both.
+--
+-- Two different sentences because they are two different situations, and
+-- saying "needs ClassicAPI" of the vendor price would be untrue: that one
+-- has always worked, just slowly.
+ui.HELP_DISENCHANT = "Needs ClassicAPI to read the item's level \226\128\148 "
+    .. "1.12 has one for every item and shows it nowhere.\n\n"
+    .. "Disenchanting something also teaches Aegis about that item, with or "
+    .. "without ClassicAPI. Where neither applies, Aegis says nothing rather "
+    .. "than guessing."
+ui.HELP_VENDOR = "Learned by visiting a merchant with the item.\n\n"
+    .. "With ClassicAPI installed, Aegis reads the price out of the client "
+    .. "instead \226\128\148 every item, no merchant visit."
+
+-- A hover explanation on any widget.
+--
+-- Assigns rather than chains, and that is only safe because the widgets this
+-- is used on -- settings checkboxes -- own no OnEnter of their own. Anywhere
+-- that is not true, chain: SetScript REPLACES a handler, and the row-hover
+-- work is the story of what that costs when the thing replaced was a tooltip.
+function ui.SetHelpTip(widget, text)
+    if not widget or not text then return end
+    widget.aegisHelp = text
+    widget:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(widget, "ANCHOR_RIGHT")
+        GameTooltip:SetText(widget.aegisHelp, C.gold[1], C.gold[2], C.gold[3],
+            1, true)
+        GameTooltip:Show()
+    end)
+    widget:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
 function ui.MakeCheckBox(parent, size, name)
     size = size or 14
     local c = CreateFrame("CheckButton", name, parent)
@@ -1621,9 +1657,11 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local tipSubs = {
         { key = "tipMarket",     text = "Market value" },
         { key = "tipMinBuyout",  text = "Minimum buyout" },
-        { key = "tipVendor",     text = "Vendor price" },
+        { key = "tipVendor",     text = "Vendor price",
+          help = ui.HELP_VENDOR },
         { key = "tipDisenchant", text = "Disenchant value (hold Shift for the"
-                                        .. " breakdown)" },
+                                        .. " breakdown)",
+          help = ui.HELP_DISENCHANT },
     }
     ui.setTipSubs = {}
     local prevSub = nil
@@ -1637,6 +1675,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
             c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -6)
         end
         c:SetLabel(spec.text, C.goldDim)
+        ui.SetHelpTip(c, spec.help)
         c.settingKey = spec.key
         c:SetScript("OnClick", function()
             A.db.SetSetting(c.settingKey, c:GetChecked() and true or false)
@@ -2766,6 +2805,20 @@ local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 -- `selectable` (Buy tab only) builds a Blizzlike row: no per-row Buy/Bid
 -- buttons, click to select, and the window's bottom bar acts on the selection.
 -- The Crafting tab passes nothing and keeps its own per-row buttons.
+-- How far a table's ROWS are held inside its scroll frame.
+--
+-- A backdrop edge is drawn CENTRED on the frame boundary, so a box's border
+-- straddles its own edge by half the edgeSize. Every table's well is anchored
+-- to its scroll frame's right edge -- which means rows running the full width
+-- of the scroll frame end up UNDER that border, and the last column with them.
+-- That is one bug with two faces: the bag rows visibly poking through the box
+-- edge, and the Buy table's "% Mkt" being shaved by it.
+--
+-- ONE table, read by every row builder and by both layout functions, because
+-- the rows' inset and the width the columns are allowed to use are the same
+-- measurement seen from two ends.
+local ROWPAD = { l = 2, r = 8 }
+
 -- The chrome every results row wears: a zebra stripe, a hairline separator,
 -- and -- where rows can be picked -- a selection tint.
 --
@@ -2859,8 +2912,8 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(rowH)
     if i == 1 then
-        row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+        row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
+        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
     else
         row:SetPoint("TOPLEFT", store[i - 1], "BOTTOMLEFT", 0, 0)
         row:SetPoint("TOPRIGHT", store[i - 1], "BOTTOMRIGHT", 0, 0)
@@ -2975,6 +3028,20 @@ function ui.ShowListingTooltip(owner, r)
         if link and GameTooltip.SetHyperlink then
             shown = pcall(function() GameTooltip:SetHyperlink(link) end)
         end
+    end
+    if not shown and r.itemId and GameTooltip.SetHyperlink then
+        -- Both routes above read the auction page the CLIENT currently holds,
+        -- and that page is gone the moment you close the auction house. Come
+        -- back and the results are still on screen -- they are ours -- but
+        -- every row's tooltip collapsed to just the item's name until a fresh
+        -- Search repopulated the page underneath it.
+        --
+        -- The item itself does not go anywhere, so ask for it by ID. What is
+        -- lost is only the auction-specific part (the bid, the seller); the
+        -- item tooltip is what someone hovering a row is looking for.
+        shown = pcall(function()
+            GameTooltip:SetHyperlink("item:" .. r.itemId .. ":0:0:0")
+        end)
     end
     if not shown then
         -- Nothing authoritative left to read; at least name the item.
@@ -3556,6 +3623,7 @@ function ui.LayoutBuyTable()
     -- minimum while the table grew, leaving a strip of empty table down the
     -- right-hand side that got bigger the more room you gave it.
     local rowW = ui.PanelWidthAt(ui.WindowW()) - left - BUYL.gutter_w
+        - ROWPAD.l - ROWPAD.r
     BUY_NAME_EXTRA = rowW - BUY_COLS_END
     if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
 
@@ -3587,7 +3655,7 @@ function ui.LayoutBuyTable()
     for key, b in pairs(ui.buyHeaders or {}) do
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", panel, "TOPLEFT",
-            left + ColX(key), -hdrTop)
+            left + ROWPAD.l + ColX(key), -hdrTop)
     end
     local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
     local ti = 1
@@ -4565,7 +4633,7 @@ function ui.BuildBuyTab()
         local tk = panel:CreateTexture(nil, "ARTWORK")
         tk:SetWidth(1)
         tk:SetPoint("TOPLEFT", well, "TOPLEFT",
-            6 + RCX_BUY[tickKeys[ti]] - 8, -6)
+            6 + ROWPAD.l + RCX_BUY[tickKeys[ti]] - 8, -6)
         tk:SetPoint("BOTTOMLEFT", well, "TOPLEFT",
             6 + RCX_BUY[tickKeys[ti]] - 8, -(BUYL.hdr_h))
         tk:SetTexture(0.35, 0.30, 0.18, 0.7)
@@ -5698,6 +5766,16 @@ end
 --
 -- Still a set: every reader tests these for truthiness, so a string works
 -- exactly where `true` did.
+-- Components whose answer depends on something outside Aegis. Not PENDING --
+-- these work -- but they go quiet on a client that cannot tell us an item's
+-- level, and a filter that silently narrows to nothing is worse than one that
+-- says why.
+ui.NEEDS_CLIENT_DATA = {
+    ["disenchant-profit"]  = true,
+    ["disenchant-percent"] = true,
+    ["vendor-profit"]      = true,
+}
+
 ui.PENDING_COMPONENTS = {
     ["item"]              = "needs the client's item cache, which only answers "
                             .. "for items it has already seen",
@@ -5733,6 +5811,12 @@ local function BuilderComponentOptions()
         if why then
             tip = "Not wired up \226\128\148 this parses and round-trips, but "
                 .. "it narrows nothing. " .. why .. "."
+        elseif ui.NEEDS_CLIENT_DATA[kind] then
+            if kind == "vendor-profit" then
+                tip = ui.HELP_VENDOR
+            else
+                tip = ui.HELP_DISENCHANT
+            end
         end
         table.insert(out, {
             value = kind, text = kind, colour = { r, g, b }, tip = tip,
@@ -7709,8 +7793,8 @@ ui.GrowAucRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(AUC_ROW_H)
             if i == 1 then
-                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.aucRows[i - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.aucRows[i - 1], "BOTTOMRIGHT", 0, 0)
@@ -8141,8 +8225,8 @@ ui.GrowHistRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(HIST_ROW_H)
             if i == 1 then
-                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.histRows[i - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.histRows[i - 1], "BOTTOMRIGHT", 0, 0)
@@ -8397,6 +8481,7 @@ function ui.LayoutSellTable()
     if not panel then return end
 
     local room = ui.PanelWidthAt(ui.WindowW()) - SELLL.list_x - SELLL.list_right
+        - ROWPAD.l - ROWPAD.r
     SELL_AVAIL_EXTRA = room - SELL_COLS_END
     if SELL_AVAIL_EXTRA < 0 then SELL_AVAIL_EXTRA = 0 end
 
@@ -8409,7 +8494,8 @@ function ui.LayoutSellTable()
         if h then
             h:ClearAllPoints()
             h:SetPoint("TOPLEFT", panel, "TOPLEFT",
-                SELLL.list_x + SellColX(keys[i]), -SELLL.hdr_top)
+                SELLL.list_x + ROWPAD.l + SellColX(keys[i]),
+                -SELLL.hdr_top)
             if keys[i] == "avail" then h:SetWidth(SellColW("avail")) end
         end
         i = i + 1
@@ -8421,7 +8507,7 @@ function ui.LayoutSellTable()
         local t = ui.sellTicks[ti]
         if t and t.aegisKey and ui.sellListWell then
             t:ClearAllPoints()
-            local x = 6 + SellColX(t.aegisKey) - 8
+            local x = 6 + ROWPAD.l + SellColX(t.aegisKey) - 8
             t:SetPoint("TOPLEFT", ui.sellListWell, "TOPLEFT", x, -6)
             t:SetPoint("BOTTOMLEFT", ui.sellListWell, "TOPLEFT", x, -SELLL.hdr_h)
         end
@@ -8446,7 +8532,7 @@ local LIST_ROWS_MAX = 36
 -- in. Long names ("Formula: Enchant Shield - Lesser Protection") used to run
 -- straight past the list into the listings table -- these are what they get
 -- clipped to. See ui.SetTextClipped.
-local BAG_ITEM_TEXT_W = 168
+local BAG_ITEM_TEXT_W = 164
 local BAG_CAT_TEXT_W  = 210
 
 function ui.BuildSellTab()
@@ -8822,12 +8908,13 @@ function ui.BuildSellTab()
     local bagHdr = ui.MakeHeaderCell(panel, false, "Your Bags", "LEFT",
         BAG_ITEM_TEXT_W)
     bagHdr:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        SELLL.bag_x + SELLL.bag_label_x, -SELLL.hdr_top)
+        SELLL.bag_x + ROWPAD.l + SELLL.bag_label_x, -SELLL.hdr_top)
 
     local haveHdr = ui.MakeHeaderCell(panel, false, "Qty", "CENTER",
         SELLL.bag_qty_w)
     haveHdr:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_qty_pad), -(SELLL.hdr_top - SELLL.well_top))
+        -(6 + SELLL.bag_qty_pad + ROWPAD.r),
+        -(SELLL.hdr_top - SELLL.well_top))
 
     -- The rule goes UNDER the heading, not at the top of the box.
     local bagRule = panel:CreateTexture(nil, "ARTWORK")
@@ -8841,10 +8928,11 @@ function ui.BuildSellTab()
     local bagTick = panel:CreateTexture(nil, "ARTWORK")
     bagTick:SetWidth(1)
     bagTick:SetPoint("TOPRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_qty_pad + SELLL.bag_qty_w + SELLL.bag_qty_gap), -6)
+        -(6 + ROWPAD.r + SELLL.bag_qty_pad + SELLL.bag_qty_w
+          + SELLL.bag_qty_gap), -6)
     bagTick:SetPoint("BOTTOMRIGHT", bagWell, "TOPRIGHT",
-        -(6 + SELLL.bag_qty_pad + SELLL.bag_qty_w + SELLL.bag_qty_gap),
-        -SELLL.hdr_h)
+        -(6 + ROWPAD.r + SELLL.bag_qty_pad + SELLL.bag_qty_w
+          + SELLL.bag_qty_gap), -SELLL.hdr_h)
     bagTick:SetTexture(0.35, 0.30, 0.18, 0.7)
 
     -- Vendor list: bag items worth more at a merchant than on the AH.
@@ -8919,8 +9007,8 @@ ui.GrowBagRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(BAG_ROW_H)
             if bi == 1 then
-                row:SetPoint("TOPLEFT", bagScroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", bagScroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.bagRows[bi - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.bagRows[bi - 1], "BOTTOMRIGHT", 0, 0)
@@ -9084,8 +9172,8 @@ ui.GrowListRows = function(n)
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(LIST_ROW_H)
             if li == 1 then
-                row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", listScroll, "TOPRIGHT", 0, 0)
+                row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPRIGHT", listScroll, "TOPRIGHT", -ROWPAD.r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.listRows[li - 1], "BOTTOMLEFT", 0, 0)
                 row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)
@@ -11055,51 +11143,9 @@ local function DisenchantReport(rest)
     end
 end
 
--- Measure whether required level could stand in for item level.
---
--- The one number that decides whether Aegis grows a fourth source of item
--- level. It cannot be taken anywhere but in a client -- minLevel comes from
--- GetItemInfo, which only answers for items this client has cached -- so it
--- ships as something to run rather than something already decided.
-local function DisenchantAudit()
-    local started = A.de.AuditStart(
-        function(done)
-            if math.mod(done, 3000) == 0 then
-                ChatMsg("Aegis: audited " .. done .. " ...")
-            end
-        end,
-        function(tally, considered, done)
-            local lines, verdict = A.de.AuditSummary(tally, considered)
-            ChatMsg("Aegis: required-level audit \226\128\148 walked "
-                .. done .. " item(s) we know the real level of")
-            local i = 1
-            while lines and i <= table.getn(lines) do
-                ChatMsg("  " .. lines[i])
-                i = i + 1
-            end
-            if verdict == "adopt" then
-                ChatMsg("  \226\134\146 required level agrees often enough"
-                    .. " to be worth a last-resort source FOR FILTERS. Never"
-                    .. " for advice: a wrong band is a wrong material tier.")
-            elseif verdict == "reject" then
-                ChatMsg("  \226\134\146 required level is wrong too often"
-                    .. " to use. Rows we cannot answer for stay unanswered,"
-                    .. " which is already what they do.")
-            end
-        end)
-    if not started then
-        ChatMsg("Aegis: nothing to audit \226\128\148 either one is already"
-            .. " running, or core/itemlevel.lua is empty.")
-    else
-        ChatMsg("Aegis: auditing required level against item level"
-            .. " \226\128\148 this takes a few seconds.")
-    end
-end
-
 -- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.
 -- /aex debug                — toggle the scanner's chat trace.
 -- /aex de <link> [ilvl]     — print the disenchant breakdown for one item.
--- /aex de audit             — measure required level against item level.
 -- Deliberately NOT "/aegis": other addons in the user's Aegis series (Aegis:
 -- Rally Power) already own that slash, and when two addons register the same
 -- slash text the client resolves it to only ONE of them.
@@ -11111,11 +11157,7 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
     -- carries a hex colour code and a name, and lowering it breaks both.
     local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
     if deArgs then
-        if string.find(string.lower(deArgs), "^%s*audit") then
-            DisenchantAudit()
-        else
-            DisenchantReport(deArgs)
-        end
+        DisenchantReport(deArgs)
         return
     end
     if string.find(cmd, "debug", 1, true) then

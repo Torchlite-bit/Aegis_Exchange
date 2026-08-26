@@ -1113,10 +1113,26 @@ H.check("...and still fits inside the column it is drawn in",
 -- may be, the gap after it, the count column, and the pad holding that column
 -- off the box edge. Widen any one alone and the name draws underneath the
 -- count, or the count climbs onto the border.
-local BAG_W = BAG_RIGHT - BAG_X
+-- THE ROW INSET. A box's backdrop edge is drawn CENTRED on its own boundary,
+-- and every table's well is anchored to its scroll frame's right edge -- so a
+-- row running the scroll frame's full width ends up UNDER that border, and its
+-- last column with it. One bug, two faces: bag rows poking through the box
+-- edge, and the Buy table's "% Mkt" shaved by it.
+local ROWPAD_L = field("ROWPAD", "l")
+local ROWPAD_R = field("ROWPAD", "r")
+H.check("rows are held clear of the box border on the right",
+        ROWPAD_R >= SELLL.well_overhang,
+        ROWPAD_R .. " does not clear a " .. SELLL.well_overhang
+            .. "px border overhang")
+H.check("...and off the border on the left too", ROWPAD_L > 0, ROWPAD_L)
+
+-- The bag column's contents have to fit in the INSET row, not in the column.
+-- Measuring against the wider number is how the name ends up drawing under
+-- the count when the inset changes.
+local BAG_W = BAG_RIGHT - BAG_X - ROWPAD_L - ROWPAD_R
 local bagUsed = SELLL.bag_label_x + ITEM_TEXT_W + SELLL.bag_qty_gap
     + SELLL.bag_qty_w + SELLL.bag_qty_pad
-H.check("name, gap, count and pad all fit in the bag column",
+H.check("name, gap, count and pad all fit in the bag ROW",
         bagUsed <= BAG_W, bagUsed .. " > " .. BAG_W)
 H.check("the count column is wide enough for a four-digit stack",
         SELLL.bag_qty_w >= 40, SELLL.bag_qty_w .. "px")

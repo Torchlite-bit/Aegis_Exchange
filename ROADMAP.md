@@ -2036,58 +2036,54 @@ ClassicAPI. The `info` argument on `db.GetVendor` / `de.ItemLevel` is a caller
 *handing over* a `util.ItemInfo` it already paid for — never a hint to fetch
 one.
 
-#### The crash to desktop — OPEN. Tree rolled back to 1.39.0.
+#### The crash to desktop — CLOSED. It was the client install.
 
-**Three fixes, three misses. The shipping code is v1.39.0's again.** Do not
-attempt a fourth from reading alone; the record below is what that produces.
+Reinstalling mods, patches and DLLs fixed it. v1.41.1 now runs clean on
+Auctions, History and Crafting, so the tree is restored to v1.41.1 and the
+1.39.0 rollback is undone.
 
-What is actually established, from the player: it is a **freeze of a few
-seconds and then a crash to desktop**; it still happens with the **ClassicAPI
-DLL removed**; **v1.39.1 was the last build that did not do it**; and it fires
-on the Auctions, History and Crafting tabs but never on Buy, Sell or Scan.
+**Three releases claimed a fix for a fault that was never in the addon.** That
+is the thing worth keeping from this, and it is a diagnostic lesson rather than
+a code one:
 
-Ruled out by RUNNING the real `ui/frame.lua` against a mock client:
+- **Every one of the three had a mechanism that genuinely existed in the code.**
+  `db.GetVendor` reaching for `GetItemInfo`; the unbounded query-per-hover.
+  Both were real, both were worth fixing, and neither was the crash. *A found
+  bug that fits the symptom is not thereby the cause.*
+- **The evidence that it was environmental was available early and was not
+  weighed.** v1.40.0, the release the crash was pinned to, changed **no UI file
+  at all**, and the three crashing tabs did not call the code being blamed.
+  Each of those refuted the story being told at the time. Both were noticed and
+  neither was treated as disqualifying, because a plausible mechanism was
+  already in hand.
+- **What eventually produced facts was measurement, not reading.** The rig that
+  loads the real `ui/frame.lua` against a mock client and counts calls settled
+  in one pass what three rounds of reading got wrong. It could not have found
+  this cause — no rig sees a missing DLL — but it did rule out the addon, which
+  is exactly the answer that was needed and was not believed.
+- **The next unexplained crash starts by establishing whether it is ours at
+  all.** A clean-profile / reinstall check is cheap and should come before any
+  code change, not after three.
 
-- **A Lua error on the tab-select path.** All six sub-tabs select cleanly,
-  empty and populated, across every sort column in both directions. (A crash to
-  desktop was never an addon error anyway — those print red text.)
-- **Native ClassicAPI.** Zero `C_Item` calls from selecting any tab, and the
-  player has since confirmed the crash without the DLL present at all.
-- **Unbounded frame or texture creation.** 178 frames on the first cycle of
-  every tab at five window heights, then 0 on every later cycle.
-- **Malformed UI escape sequences.** Only `|c`/`|r` pairs anywhere.
-- **`db.GetVendor`.** The three crashing tabs never call it on their paint path.
-- **`GetItemInfo` storms from hovering.** Real and measured (40 rows cost 32
-  calls; one row re-hovered 20 times cost 20), fixed in v1.41.2 — **and the
-  crash survived it**, so it was a genuine problem but not this one.
+#### What survived the hunt
 
-The three wrong answers each came from reading code and finding something that
-*could* explain it. Every one was refutable before shipping by a check not
-performed. **The next attempt starts with a measurement or a bisect, not a
-hypothesis.**
-
-The cheapest unexploited lead is a **bisect between v1.39.1 and v1.40.0**,
-because the player has pinned the boundary there and v1.40.0's diff is four
-core files and no UI file at all. If the crash really does start at v1.40.0,
-something in that small diff reaches those three tabs by a route not yet found;
-if it does not, the boundary is wrong and that is worth knowing before anything
-else is tried.
-
-**The rig belongs in `tests/`, and one thing blocks it.**
-`tests/support/wow.lua` resolves ANY unknown key to a fresh no-op function, so
-`if b.backdrop then` is true for every frame and a genuinely nil field read as
-a method never surfaces. Driving `ui/frame.lua` needs a fixed list of real
-widget methods with nil for everything else — which is what the client does.
-Until then `ui/frame.lua` is a file no suite loads, and that is why every check
-above had to be built by hand.
-
-#### What the rollback parked
-
-`core/itemlevel.lua` is back, so the provenance question v1.41.0 closed by
-deletion is open again. ClassicAPI vendor prices and item levels, the
-`GetItemInfo` miss gate and the tooltip `SetHyperlink` fallback are all out.
-The miss gate and the tooltip fallback were sound independently of the crash
-and can be re-applied on their own.
+- The **tooltip `SetHyperlink` fallback** (v1.41.1): auction rows kept their
+  tooltips after the AH was closed and reopened. A real bug, really fixed.
+- The **measurement rig** (scratch, not in `tests/`). It counts `GetItemInfo`
+  per tab and per hover and drives every sub-tab through every sort column.
+  Bringing it into the suite needs one change: `tests/support/wow.lua` resolves
+  ANY unknown key to a fresh no-op function, so `if b.backdrop then` is true for
+  every frame and a genuinely nil field read as a method never surfaces. It
+  needs a fixed list of real widget methods with nil for everything else, which
+  is what the client does. Until then `ui/frame.lua` is a file no suite loads.
+- The **`GetItemInfo` miss gate** (v1.41.2), NOT currently shipped. Measured: a
+  40-row sweep cost 32 lookups before and 1 after; re-hovering one row twenty
+  times went 20 to 0; 61 cached items stayed 61, which is the constraint that
+  matters, since pacing cached lookups would break the Buy tab and the bag
+  browser. It is out because it was written to fix a crash it did not fix and
+  has never run in a healthy client — not because it is wrong. Re-apply it as
+  its own release, on its own evidence, and let it be tested for what it
+  actually does: fewer server queries when hovering lists of uncached items.
 
 ### 2h — Session Purchase & Crafting Material Tracker
 

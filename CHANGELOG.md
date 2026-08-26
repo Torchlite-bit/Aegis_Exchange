@@ -12,35 +12,34 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-## Rolled back to 1.39.0 — **restart**
+## Restored to 1.41.1 — **restart**
 
-**The shipping addon is v1.39.0's code again, and the client reports `v1.39.0`.**
-Three attempts at the crash on the Auctions, History and Crafting tabs
-(v1.41.0, v1.41.1, v1.41.2) all failed to fix it, so the tree is back at the
-last build known to run. Nothing is lost — every release below is still in the
-git history and any of it can be brought back once the crash is understood.
+**The crash was the client install, not the addon.** After reinstalling mods,
+patches and DLLs, v1.41.1 runs clean on the Auctions, History and Crafting
+tabs. The 1.39.0 rollback is undone and the shipping code is v1.41.1 again,
+byte-for-byte.
 
-> ⚠️ **Full client restart, not `/reload`.** This restores `core/itemlevel.lua`
-> and puts it back in the `.toc`, and 1.12 reads the file list only at startup.
+> ⚠️ **Full client restart, not `/reload`.** This removes `core/itemlevel.lua`
+> from the `.toc`, and 1.12 reads the file list only at startup.
 
-### What went away with it
-- **ClassicAPI vendor prices and item levels** (v1.40.0). Vendor prices are
-  learned at a merchant again, and item levels come from the shipped table.
-- **`core/itemlevel.lua` is back** — the 12,567-entry item-level table that
-  v1.41.0 deleted. The provenance question it raised is open again along with it.
-- **The `GetItemInfo` miss gate** (v1.41.2) and the tooltip's `SetHyperlink`
-  fallback (v1.41.1). Both were sound on their own merits and neither fixed the
-  crash; they can be re-applied independently.
+So ClassicAPI vendor prices and item levels are back, along with the tooltip's
+`SetHyperlink` fallback for auction rows after the AH has been closed and
+reopened.
 
-### What is known about the crash, for whoever picks this up
-Ruled out by running the real `ui/frame.lua` against a mock client rather than
-by reading it: no Lua error selecting any sub-tab, empty or populated, across
-every sort column; zero ClassicAPI calls on any tab-select path; frame creation
-bounded; no texture escape sequences. The player reports a **freeze of a few
-seconds before the crash**, and that it still happens with the ClassicAPI DLL
-removed. `ROADMAP.md` carries the full account, including what would have to
-change in `tests/support/wow.lua` to drive `ui/frame.lua` from the suite —
-which is the tooling that found what little is actually known here.
+### Not restored
+- **v1.41.2's `GetItemInfo` miss gate.** It is a real improvement and was
+  measured — a sweep down 40 auction rows cost 32 `GetItemInfo` calls before it
+  and 1 after, and re-hovering one row twenty times went from 20 to 0 — but it
+  was written to fix a crash it did not fix, and never ran in a healthy client.
+  v1.41.1 is what has actually been verified, so v1.41.1 is what ships. The gate
+  can be re-applied on its own merits, as its own release, and tested properly.
+
+### What the three failed fixes were worth
+v1.41.0, v1.41.1 and v1.41.2 all claimed a crash that no addon change could
+have fixed. Two things came out of that hunt that stand on their own: the
+tooltip fallback in v1.41.1, and the measurement rig that drives the real
+`ui/frame.lua` against a mock client — see `ROADMAP.md`, which also records
+what would have to change in `tests/support/wow.lua` to bring it into the suite.
 
 ## [1.41.2]
 

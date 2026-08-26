@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.39.0)
+# Aegis: Exchange (v1.41.1)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -330,6 +330,21 @@ not typed by hand; epics and anything above item level 65 are deliberately
 left unanswered, because the data there isn't good enough to trust. See
 `tools/README.md` if you want the workings.
 
+**This line needs [ClassicAPI](https://github.com/brues-code/ClassicAPI)** (a
+DLL, not an addon). 1.12 stores an item level on every item and shows it
+nowhere; ClassicAPI hands it over, and that is the one input the calculation
+needs. With it the line answers for everything, Turtle's custom gear included.
+
+**Disenchanting something also teaches Aegis about that item**, with or without
+ClassicAPI — and what you saw yourself always outranks what the client says,
+because it came from the server you actually play on.
+
+Where neither applies, Aegis says nothing rather than guessing.
+
+ClassicAPI does the same for **vendor prices**: 1.12 stores a sell price on
+every item and never displays it. Without the DLL those are still learned by
+visiting a merchant, exactly as before.
+
 **And it learns.** Disenchant something and Aegis records what came out —
 nothing to switch on. That's the only way it can ever answer for Turtle's
 custom items, and because it's evidence from the server you're actually on, it
@@ -457,7 +472,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.39.0`) — quote it.
+1. Check the **version** in the window's title bar (`v1.41.1`) — quote it.
 2. `/aex debug` turns on a scanner trace if a scan is misbehaving.
 3. Tell us on **[Discord](https://discord.gg/hsgPTNkSX)** or open an
    [issue](https://github.com/Torchlite-bit/Aegis_Exchange/issues). Screenshots
@@ -482,9 +497,10 @@ Three requests:
 
 ## Credits
 
-Item levels in `core/itemlevel.lua` come from
-**[ShaguScore](https://github.com/shagu/ShaguScore)** by **shagu** — 1.12
-gives addons no item level of its own, and the disenchant maths needs one.
+Item levels were shipped from **[ShaguScore](https://github.com/shagu/ShaguScore)**
+by **shagu** in v1.31.0–v1.40.0, when 1.12 gave addons no way to get one.
+ClassicAPI now provides the client's own, so that table has been removed —
+with thanks for the years it covered the gap.
 
 The disenchant probabilities are derived from the community-harvested
 observations in **Enchantrix** (Norganna & contributors); no Enchantrix code

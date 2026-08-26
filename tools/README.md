@@ -11,37 +11,14 @@ better data turns up.
 
 ---
 
-## `gen_itemlevel.py` — `core/itemlevel.lua`
+## Removed: `gen_itemlevel.py`
 
-```sh
-python3 tools/gen_itemlevel.py --ilvl <ShaguScore/Database.lua> \
-    > core/itemlevel.lua
-```
-
-Emits `[itemId] = itemLevel` for every entry with a real level. Only item
-level 0 rows are dropped — those are development stubs ("Kazgrim Test Druid
-Chest 1"). Levels above 65 are **kept** even though the disenchant ladder
-stops there: this is a factual item-level lookup, not a disenchant-band
-lookup, and trimming it to what one consumer needs today is the coupling that
-bites later. It also lets a caller tell *"level known, above our data"* apart
-from *"nothing known"*, which are different things to tell a player.
-
-### Provenance, and the caveat that comes with it
-
-**Source: [ShaguScore](https://github.com/shagu/ShaguScore), by shagu.**
-
-ShaguScore ships with **no licence** — no LICENSE file, no header, nothing in
-its README or `.toc`. Aegis is MIT. Including this data is a judgement the
-project owner made deliberately, with attribution, rather than something that
-happened quietly; ROADMAP 3k parked it as the owner's call precisely because
-it is about someone else's work and not a technical question.
-
-If shagu would rather it were not here, it comes out and the addon keeps
-working — the disenchant rule degrades to what the player has learned by
-disenchanting things themselves, which is the source that outranks this one
-anyway.
-
-The input is **not vendored**. Pass it on the command line.
+It generated `core/itemlevel.lua`, a 141 KB table of item levels borrowed from
+ShaguScore. Both are gone as of v1.41.0: ClassicAPI exposes the client's own
+item level, which is the real number for every item rather than a partial copy
+of one — and deleting it retired the question of whether shipping someone
+else's unlicensed database was all right. `git log` has it if it is ever
+needed again.
 
 ---
 
@@ -74,8 +51,8 @@ Neither source file is in this repository and neither should be added.
 - **`Database.lua`** — from **ShaguScore**. 12,871 `[itemId] = itemLevel`
   entries, which is what groups the observations into bands. It ships with **no
   licence at all**: no LICENSE file, no header, nothing in its README or `.toc`.
-  See the note at the top of `core/itemlevel.lua` for why that matters and what
-  is blocked by it (very little).
+  It is no longer shipped or read — see the note above — so that concern is
+  now historical.
 
 ### What the script does, and the two judgement calls in it
 

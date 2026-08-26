@@ -1219,15 +1219,17 @@ local UNANSWERED_FIX = {
     ["seller"]        = "search again",
     ["left"]          = "search again",
     ["percent"]       = "scan to learn its price",
-    ["vendor-profit"] = "vendor prices are learned at a merchant",
+    ["vendor-profit"] = "learned at a merchant, or install ClassicAPI",
     -- Two causes, one remedy line. A disenchant value needs the item's LEVEL
     -- (which a disenchant teaches) and its materials' PRICES (which a scan
     -- teaches), and the filter cannot tell a caller which half it was missing
     -- without inventing a component name for it. Naming both is honest; the
     -- two strings are identical so the two components still combine into one
     -- sentence rather than tripping the mixed-causes guard.
-    ["disenchant-profit"]  = "disenchant one, or scan its materials",
-    ["disenchant-percent"] = "disenchant one, or scan its materials",
+    ["disenchant-profit"]  = "install ClassicAPI, disenchant one, or scan"
+                             .. " its materials",
+    ["disenchant-percent"] = "install ClassicAPI, disenchant one, or scan"
+                             .. " its materials",
 }
 
 -- How many rows were dropped for want of data, which components could not

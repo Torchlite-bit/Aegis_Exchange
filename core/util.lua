@@ -270,6 +270,32 @@ function util.ItemInfo(link)
     local n = table.getn(r)
     if n < 1 or not r[1] then return nil end
 
+    -- A THIRD shape. A client mod can replace this global with modern WoW's
+    -- WIDE tuple (17-18 values), and the last-number anchor below is exactly
+    -- wrong for it: sellPrice, classID, subclassID, bindType, expansionID and
+    -- setID are all numbers sitting AFTER stackCount, so the anchor would
+    -- land on setID and read classID where minLevel belongs -- silently, with
+    -- plausible-looking small integers.
+    --
+    -- A wide tuple has fixed, known positions, so it is read directly instead
+    -- of anchored. Detected by COUNT because that is the only thing that
+    -- distinguishes it: vanilla returns 9, later clients 10, modern 17-18.
+    if n >= 12 then
+        return {
+            name       = r[1],
+            link       = r[2],
+            quality    = r[3],
+            itemLevel  = r[4],
+            minLevel   = r[5],
+            type       = r[6],
+            subType    = r[7],
+            stackCount = r[8],
+            equipLoc   = r[9],
+            texture    = r[10],
+            sellPrice  = r[11],
+        }
+    end
+
     -- Index of the last number = stackCount.
     local s = n
     while s >= 1 and type(r[s]) ~= "number" do
@@ -292,4 +318,69 @@ function util.ItemInfo(link)
         equipLoc   = r[s + 1],
         texture    = r[s + 2],
     }
+end
+
+-- ---------------------------------------------------------------------------
+-- Data the CLIENT has but 1.12 never shows
+-- ---------------------------------------------------------------------------
+--
+-- 1.12 fills in an item's vendor sell price and its item level on every item
+-- and surfaces NEITHER: the sell-price field is populated and the engine's
+-- tooltip code simply never reads it. A client mod (ClassicAPI) exposes both.
+--
+-- Asked as a CAPABILITY, never as an addon name, a version, or an
+-- IsAddOnLoaded -- the same rule the scanner applies to AuctionQueryThrottle,
+-- where the query gate itself is the detector rather than anything naming the
+-- DLL. And asked per FUNCTION, so a build that provides one and not the other
+-- costs us one feature instead of both.
+--
+-- Both return nil when the client cannot answer, which is also what happens
+-- with no mod installed at all. Everything above them already has a path for
+-- "we do not know", so nothing degrades in its absence.
+
+-- NEITHER OF THESE MAY CALL GetItemInfo. Read this before editing them.
+--
+-- Both are consulted from paths that run in LOOPS and on every tooltip:
+-- db.GetVendor is called per bag item by sell.VendorList and
+-- sell.MarkedInBags, per auction row by the vendor-profit filter, and once
+-- per tooltip by ui/tooltip.lua. On 1.12, GetItemInfo for an item the client
+-- has NOT cached fires a query at the server -- so a version of these that
+-- reaches for GetItemInfo turns an O(1) table read into a burst of server
+-- queries whenever a list of uncached items is painted. That is HARD RULE 16,
+-- and it shipped in v1.40.0: the tabs whose items are least likely to be
+-- cached -- Auctions, History, Crafting -- crashed the client outright.
+--
+-- So: C_Item only, which is a direct read of the cache record and cheap. The
+-- optional `info` is for a caller that has ALREADY paid for a util.ItemInfo
+-- and can hand the result over -- never something to fetch here.
+local function FromInfo(info, key)
+    if info and type(info[key]) == "number" and info[key] > 0 then
+        return info[key]
+    end
+    return nil
+end
+
+-- Vendor sell price in copper, per unit, or nil.
+function util.ClientSellPrice(itemId, info)
+    if not itemId then return nil end
+    if C_Item and C_Item.GetItemSellPriceByID then
+        local p = C_Item.GetItemSellPriceByID(itemId)
+        if type(p) == "number" and p > 0 then return p end
+    end
+    return FromInfo(info, "sellPrice")
+end
+
+-- The item's own level, or nil. THE input the disenchant rule needs and the
+-- one vanilla's GetItemInfo has never returned.
+function util.ClientItemLevel(itemId, info)
+    if not itemId then return nil end
+    if C_Item and C_Item.GetDetailedItemLevelInfo then
+        local lvl = C_Item.GetDetailedItemLevelInfo(itemId)
+        if type(lvl) == "number" and lvl > 0 then return lvl end
+    end
+    if C_Item and C_Item.GetItemInfo then
+        local _, _, _, lvl = C_Item.GetItemInfo(itemId)
+        if type(lvl) == "number" and lvl > 0 then return lvl end
+    end
+    return FromInfo(info, "itemLevel")
 end

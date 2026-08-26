@@ -402,13 +402,22 @@ function de.Value(ilvl, quality, equipLoc, itemId, priceOf)
     return math.floor(total + 0.5)
 end
 
--- This item's level, and where it came from.
+-- This item's level, and where it came from. Returns level, source, or nil.
 --
--- Returns level, "itemlevel" from the shipped table, or nil, nil. Later
--- phases add sources ABOVE this one -- a disenchant the player performed
--- names the band directly and is always preferred, because it is evidence
--- from the server they are actually on rather than from vanilla in 2006.
-function de.ItemLevel(itemId, quality)
+-- TWO sources, in this order:
+--
+--   "observed"  a disenchant the player performed. First, always: it is
+--               evidence from the server they are actually on, and Turtle can
+--               change what an item breaks into without changing its level.
+--   "client"    the item's own level, where a mod exposes it. 1.12 stores it
+--               on every item and shows it nowhere.
+--
+-- There used to be a third: 12,567 item levels borrowed from another addon,
+-- shipped because there was no other way to get one. There is now, so it is
+-- gone -- along with the question of whether shipping someone else's
+-- unlicensed database was all right, which is a better problem to not have
+-- than to have answered.
+function de.ItemLevel(itemId, quality, info)
     -- What the player has actually SEEN outranks anything shipped. It is
     -- evidence from the server they are playing on, where the shipped table
     -- is vanilla data with a partial view of Turtle's items -- and it is the
@@ -424,10 +433,18 @@ function de.ItemLevel(itemId, quality)
         local band, count = de.BandFromObservation(itemId, quality)
         if band and count == 1 then return band, "observed" end
     end
-    if not itemId or not A.ilvlData then return nil end
-    local lvl = A.ilvlData[itemId]
-    if type(lvl) ~= "number" or lvl < 1 then return nil end
-    return lvl, "itemlevel"
+    -- The CLIENT's own item level, where a mod exposes it. Above the shipped
+    -- table because it is the real number for EVERY item -- including the two
+    -- thirds of Turtle's custom gear the borrowed table has never heard of --
+    -- and below observation, which reflects the server actually being played
+    -- on rather than what an item's data says.
+    if util and util.ClientItemLevel then
+        -- `info` is passed through, never fetched: this runs per auction row
+        -- behind the disenchant filters.
+        local lvl = util.ClientItemLevel(itemId, info)
+        if lvl then return lvl, "client" end
+    end
+    return nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -454,7 +471,7 @@ function de.Resolve(itemId)
     if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end
-    local ilvl, source = de.ItemLevel(itemId, info.quality)
+    local ilvl, source = de.ItemLevel(itemId, info.quality, info)
     if not ilvl then return nil end
     return ilvl, source, info.quality, info.equipLoc
 end
@@ -762,153 +779,4 @@ if A.RegisterEvent then
 end
 if A.OnLoad then
     A.OnLoad(function() de.InstallHooks() end)
-end
-
--- ---------------------------------------------------------------------------
--- The required-level audit
--- ---------------------------------------------------------------------------
---
--- WHAT THIS IS FOR. There is a fourth possible source of item level, below the
--- shipped table and below what the player has seen: `minLevel`, the level an
--- item must be worn at, which 1.12 DOES give us. aux uses it -- it feeds
--- GetItemInfo's slot 4 straight into a table that wants item level -- and this
--- addon has refused to, on the grounds that the disenchant bands are narrow
--- enough that guessing wrong gives the wrong MATERIAL TIER rather than a
--- slightly wrong number.
---
--- That refusal was reasoning, not measurement. This measures it: for every
--- item whose real level we ship, compare the band its item level gives against
--- the band its required level would have given.
---
--- It cannot be measured anywhere but in a client, because `minLevel` comes
--- from GetItemInfo and GetItemInfo only answers for items that client has
--- cached. That is also the audit's main limitation and why `uncached` is
--- reported rather than quietly skipped: a run that only saw two hundred items
--- has measured two hundred items, not the game.
-
--- How many ids to classify per frame. The walk is thousands of GetItemInfo
--- calls; doing them in one go is a visible freeze, so it is spread over frames
--- the way the scanner spreads its pages.
-local AUDIT_PER_TICK = 300
-
--- Would required level have landed in the right band? PURE, so the judgement
--- can be tested without a client even though the data cannot be gathered
--- without one.
---
---   nil          -- the item's real level is off the ladder; nothing to judge
---   "no-guess"   -- required level yields no band at all (an item with no
---                   level requirement). The fallback would decline, which is
---                   a SAFE failure and must not be counted as a wrong answer
---   "same"       -- it would have been right
---   "off-by-one" -- one band out: the neighbouring material tier
---   "worse"      -- further than that
-function de.CompareBands(ilvl, minLevel)
-    local truth = de.Band(ilvl)
-    if not truth then return nil end
-    local guess = de.Band(minLevel)
-    if not guess then return "no-guess" end
-    if guess == truth then return "same" end
-    local ti, gi, i, n = nil, nil, 1, table.getn(LADDER)
-    while i <= n do
-        if LADDER[i] == truth then ti = i end
-        if LADDER[i] == guess then gi = i end
-        i = i + 1
-    end
-    if not ti or not gi then return "worse" end
-    if math.abs(ti - gi) == 1 then return "off-by-one" end
-    return "worse"
-end
-
-de.driver = CreateFrame("Frame", "AegisExchangeDisenchantDriver")
-de.driver:Hide()
-
--- Walk the shipped table, one chunk per frame.
-function de.AuditStep()
-    local a = de.audit
-    if not a then de.driver:Hide() return end
-    local n = 0
-    while n < AUDIT_PER_TICK do
-        local key, ilvl = next(A.ilvlData or {}, a.key)
-        if key == nil then
-            de.driver:Hide()
-            de.audit = nil
-            if a.onDone then a.onDone(a.tally, a.considered, a.done) end
-            return
-        end
-        a.key = key
-        a.done = a.done + 1
-        local info = util and util.ItemInfo(key)
-        if not info then
-            -- Not in this client's cache. Counted, never guessed at.
-            a.tally.uncached = a.tally.uncached + 1
-        elseif not de.CanDisenchant(info.quality, info.equipLoc, key) then
-            -- The fallback would never be consulted for this item, so it
-            -- would tell us nothing about how good the fallback is.
-            a.tally.skipped = a.tally.skipped + 1
-        else
-            local verdict = de.CompareBands(ilvl, info.minLevel)
-            if verdict then
-                a.considered = a.considered + 1
-                a.tally[verdict] = a.tally[verdict] + 1
-            end
-        end
-        n = n + 1
-    end
-    if a.onProgress then a.onProgress(a.done) end
-end
-
-de.driver:SetScript("OnUpdate", function() de.AuditStep() end)
-
-function de.AuditStart(onProgress, onDone)
-    if de.audit then return false end
-    if not A.ilvlData or not next(A.ilvlData) then return false end
-    de.audit = {
-        key = nil, done = 0, considered = 0,
-        onProgress = onProgress, onDone = onDone,
-        tally = {
-            same = 0, ["off-by-one"] = 0, worse = 0,
-            ["no-guess"] = 0, uncached = 0, skipped = 0,
-        },
-    }
-    de.driver:Show()
-    return true
-end
-
--- The audit's answer, as display lines plus a one-word verdict. PURE.
---
--- The verdict is the decision the brief asked this to settle:
---
---   "adopt"   -- required level is right often enough to be a last-resort
---                source for the FILTERS, never for advice
---   "reject"  -- it is noise wearing a number's clothes; the unanswered path
---                already handles those rows honestly
---   "unclear" -- too few items were cached to say anything
---
--- A wrong band is not a near miss. Bands are one material tier wide, so
--- "off-by-one" means Dream Dust where the answer was Illusion Dust -- which is
--- why it is counted against the fallback exactly as hard as "worse".
-function de.AuditSummary(tally, considered)
-    if not tally then return nil, "unclear" end
-    considered = considered or 0
-    local lines = {}
-    if considered < 200 then
-        table.insert(lines, "Only " .. considered .. " item(s) could be judged"
-            .. " -- too few to conclude anything. Browse the auction house to"
-            .. " warm the item cache and run it again.")
-        table.insert(lines, "uncached: " .. tally.uncached)
-        return lines, "unclear"
-    end
-    local right = tally.same
-    local pct = math.floor((right / considered) * 1000 + 0.5) / 10
-    table.insert(lines, "judged " .. considered .. " disenchantable item(s)")
-    table.insert(lines, "  right band:  " .. right .. "  (" .. pct .. "%)")
-    table.insert(lines, "  one tier out: " .. tally["off-by-one"])
-    table.insert(lines, "  further out:  " .. tally.worse)
-    table.insert(lines, "  no answer:    " .. tally["no-guess"]
-        .. "  (safe -- it would decline)")
-    table.insert(lines, "  uncached:     " .. tally.uncached
-        .. "  (not judged)")
-    local verdict = "reject"
-    if pct >= 95 then verdict = "adopt" end
-    return lines, verdict, pct
 end

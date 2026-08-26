@@ -632,7 +632,7 @@ end""",
 
     # The name column narrowed back to what truncated most item names.
     ("bag-names-truncate-again", "ui/frame.lua",
-     "local BAG_ITEM_TEXT_W = 168",
+     "local BAG_ITEM_TEXT_W = 164",
      "local BAG_ITEM_TEXT_W = 120",
      "geometry"),
 
@@ -935,7 +935,7 @@ end""",
     # that cannot succeed -- 1.12 has no sell price in GetItemInfo and the only
     # source is a merchant.
     ("vendor-fix-says-search-again", "core/buy.lua",
-     '    ["vendor-profit"] = "vendor prices are learned at a merchant",',
+     '    ["vendor-profit"] = "learned at a merchant, or install ClassicAPI",',
      '    ["vendor-profit"] = "search again",',
      "post_filter"),
 
@@ -1091,8 +1091,8 @@ end
      """    if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end
-    local ilvl, source = de.ItemLevel(itemId, info.quality)""",
-     """    local ilvl, source = de.ItemLevel(itemId, info.quality)""",
+    local ilvl, source = de.ItemLevel(itemId, info.quality, info)""",
+     """    local ilvl, source = de.ItemLevel(itemId, info.quality, info)""",
      "disenchant"),
 
     # 4.7% truncating to "4%" understates every shard line, and the shard is
@@ -1160,10 +1160,6 @@ end
     # be invisible: the addon loads, every disenchant line goes quiet, and it
     # looks exactly like the deliberate silence of the release before the
     # table landed. Nothing else in the suite would notice.
-    ("itemlevel-table-emptied", "core/itemlevel.lua",
-     "A.ilvlData = {\n",
-     "A.ilvlData = {} local DISCARDED = {\n",
-     "disenchant"),
     # ---- disenchant, phase 3 (learning) ----------------------------------
     # Without the spell gate EVERY bag click becomes a disenchant. The DB
     # fills with nonsense within a minute of ordinary play, and a false
@@ -1276,7 +1272,8 @@ end
     # strings trip UnansweredSummary's mixed-causes guard, and a query using
     # both silently loses its advice line.
     ("de-filter-remedies-differ", "core/buy.lua",
-     '    ["disenchant-percent"] = "disenchant one, or scan its materials",',
+     """    ["disenchant-percent"] = "install ClassicAPI, disenchant one, or scan"
+                             .. " its materials",""",
      '    ["disenchant-percent"] = "scan to learn its price",',
      "post_filter"),
     # ---- palette ---------------------------------------------------------
@@ -1379,31 +1376,89 @@ end
     # DECLINE. Counting that as a wrong answer makes the fallback look worse
     # than it is and rejects it for the wrong reason -- the audit exists to
     # settle a decision, so a biased tally is worse than no tally.
-    ("audit-declines-counted-as-wrong", "core/disenchant.lua",
-     '    if not guess then return "no-guess" end',
-     '    if not guess then return "worse" end',
-     "disenchant"),
 
     # One band out is one MATERIAL TIER out -- Dream Dust where the answer was
     # Illusion Dust. Treating it as near enough is exactly the compromise this
     # addon declined to make.
-    ("audit-off-by-one-counted-as-right", "core/disenchant.lua",
-     '    if math.abs(ti - gi) == 1 then return "off-by-one" end',
-     '    if math.abs(ti - gi) == 1 then return "same" end',
-     "disenchant"),
 
     # A handful of cached items is not a measurement. Without the floor the
     # audit will happily "adopt" on a sample of six.
-    ("audit-no-sample-floor", "core/disenchant.lua",
-     "    if considered < 200 then",
-     "    if considered < 0 then",
-     "disenchant"),
 
     # The bar for adopting a source that can be confidently wrong.
-    ("audit-bar-lowered", "core/disenchant.lua",
-     '    if pct >= 95 then verdict = "adopt" end',
-     '    if pct >= 60 then verdict = "adopt" end',
-     "disenchant"),
+    # ---- the row inset ---------------------------------------------------
+    # Rows back out to the scroll frame's edge, which is where the box's
+    # border is drawn. Every row still draws and every column still holds its
+    # value -- the rows simply poke through the box, and the last column gets
+    # shaved by the border.
+    ("rows-under-the-box-border", "ui/frame.lua",
+     "local ROWPAD = { l = 2, r = 8 }",
+     "local ROWPAD = { l = 0, r = 0 }",
+     "geometry"),
+
+    # An inset too small to clear the overhang: half a fix, which looks like
+    # a whole one until someone measures it.
+    ("row-inset-too-small-for-the-border", "ui/frame.lua",
+     "local ROWPAD = { l = 2, r = 8 }",
+     "local ROWPAD = { l = 2, r = 4 }",
+     "geometry"),
+    # ---- client-provided item data ---------------------------------------
+    # The learned price winning over the client's own. Both answer, so the
+    # only visible difference is a number that is subtly wrong wherever a
+    # merchant was ever visited.
+    ("vendor-learned-beats-client", "core/db.lua",
+     """    local known = A.util and A.util.ClientSellPrice
+        and A.util.ClientSellPrice(itemId, info)
+    if known then return known, "client" end""",
+     "",
+     "clientdata"),
+
+    # The source dropped. Everything still works and every caller still gets
+    # its number -- but a price the client stated and one we watched a
+    # merchant offer stop being distinguishable, which is the fact the
+    # unbuilt "destroy this item" advice will have to weigh.
+    ("vendor-source-dropped", "core/db.lua",
+     '    if known then return known, "client" end',
+     "    if known then return known end",
+     "clientdata"),
+
+    # The client's item level ignored, which puts every Turtle custom item
+    # back to unanswerable while looking entirely healthy on vanilla ones.
+    ("itemlevel-ignores-client", "core/disenchant.lua",
+     """    if util and util.ClientItemLevel then
+        -- `info` is passed through, never fetched: this runs per auction row
+        -- behind the disenchant filters.
+        local lvl = util.ClientItemLevel(itemId, info)
+        if lvl then return lvl, "client" end
+    end""",
+     "",
+     "clientdata"),
+
+    # The client's level put ABOVE what the player actually saw. Observation
+    # is server truth; an item's data is not.
+    ("client-level-beats-observation", "core/disenchant.lua",
+     """    if quality then
+        local band, count = de.BandFromObservation(itemId, quality)
+        if band and count == 1 then return band, "observed" end
+    end""",
+     "",
+     "clientdata"),
+
+    # The wide-tuple branch removed, so a widened global falls through to the
+    # last-number anchor -- which lands on setID and reads classID as the
+    # minLevel. Small, plausible, silently wrong integers.
+    ("iteminfo-wide-tuple-anchored", "core/util.lua",
+     "    if n >= 12 then",
+     "    if false then",
+     "clientdata"),
+    # THE v1.40.0 CRASH, planted back. util.ClientSellPrice reaching for
+    # util.ItemInfo looks like a harmless fallback and is not: GetItemInfo
+    # queries the SERVER for anything uncached, and db.GetVendor runs per bag
+    # item, per auction row and once per tooltip. On the tabs whose items are
+    # least likely to be cached the client crashed to desktop.
+    ("clientprice-reaches-for-getiteminfo", "core/util.lua",
+     "    return FromInfo(info, \"sellPrice\")",
+     "    return FromInfo(info, \"sellPrice\") or (util.ItemInfo(itemId)\n        and util.ItemInfo(itemId).sellPrice)",
+     "clientdata"),
 ]
 
 SUITES = {
@@ -1424,6 +1479,7 @@ SUITES = {
     "disenchant": "tests/units/disenchant_test.lua",
     "tooltip": "tests/units/tooltip_test.lua",
     "disenchant.learn": "tests/units/disenchant_learn_test.lua",
+    "clientdata": "tests/units/clientdata_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
