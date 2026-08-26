@@ -12,6 +12,35 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [0.59.1] — renumbered (was 1.49.1)
+
+**No code changed in this entry. The version number was rolled back.**
+
+The addon had jumped **0.21.1 → 1.1.0** as a declared "first public release",
+skipping 1.0.0 entirely, and then ran 48 more minor bumps to 1.49.1. A major
+version of 1 is a promise that releases will not break a player's setup without
+warning, and this one could not support it: a release crashed the client to
+desktop, another had to be rolled back wholesale, and a shipped feature turned
+out never to have worked on a real client at all.
+
+Recounting the 83 releases after 1.1.0 against the rule now written into
+`CLAUDE.md` — MINOR only for a new capability, PATCH for a fix or a polish —
+**38 added something and 45 were fixes or polish**. They were numbered 48 minor
+and 34 patch, so **ten releases were called MINOR that only fixed or polished**.
+Carrying the genuine pre-release line forward from 0.21.1 puts the current code
+at **0.59.1**.
+
+**Entries below this one keep their original numbers.** They are what was
+quoted in bug reports, and rewriting 107 of them would make every old report
+unmatchable in exchange for a tidiness nobody reads.
+
+### The rule, in short
+- **MAJOR stays 0** until the addon is stable enough that releases will not
+  break a setup without warning. A decision, not a milestone that accumulates.
+- **MINOR** — the addon can do something it could not do before.
+- **PATCH** — something was wrong and is now right, or already there and now
+  reads better. Layout, colour, wording and corrected formulas are all PATCH.
+
 ## [1.49.1]
 
 ### Changed
@@ -3565,6 +3594,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[0.59.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.48.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

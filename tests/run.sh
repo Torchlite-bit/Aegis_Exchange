@@ -32,6 +32,11 @@ python3 tests/lint/selftest.py  >/dev/null || { echo "lint selftest FAILED"; \
 python3 tests/lint/lua50.py     || fail=1
 
 # ---------------------------------------------------------------------------
+step "Version, in all five places it is written"
+# A bump touches five files and only attention has ever held them together.
+python3 tests/lint/version.py || fail=1
+
+# ---------------------------------------------------------------------------
 step "Syntax"
 for f in core/*.lua ui/*.lua; do
     if ! luac5.1 -p "$f" 2>/tmp/aegis-luac-err; then
