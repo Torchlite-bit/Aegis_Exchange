@@ -497,9 +497,12 @@ end
 -- we watched a merchant offer are different KINDS of fact, and advising
 -- someone to destroy an item -- the one feature still unbuilt -- will have to
 -- tell them apart.
-function db.GetVendor(itemId)
+-- `info` is optional and is only ever a util.ItemInfo the caller ALREADY had.
+-- Nothing here fetches one: see the note above util.ClientSellPrice for what
+-- that cost when it did.
+function db.GetVendor(itemId, info)
     local known = A.util and A.util.ClientSellPrice
-        and A.util.ClientSellPrice(itemId)
+        and A.util.ClientSellPrice(itemId, info)
     if known then return known, "client" end
     if not db.account or not db.account.vendors then return nil end
     local learned = db.account.vendors[itemId]

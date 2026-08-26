@@ -131,12 +131,15 @@ H.eq("minLevel is minLevel, not a subclass id", info.minLevel, 40)
 H.eq("...and the wide shape carries the two extra facts", info.itemLevel, 48)
 H.eq("...both of them", info.sellPrice, 1234)
 
--- ...and they are reachable through the same two readers, with no C_Item at
--- all, so a widened global alone is enough.
+-- ...and a caller that already HAS that info can hand it over, which is the
+-- only way those two extra facts reach the readers. They will not fetch it
+-- themselves -- see the next section for why that matters more than it looks.
 W.SetClientItemData(false)
-H.eq("a widened global alone yields a sell price",
-     util.ClientSellPrice(700), 1234)
-H.eq("...and an item level", util.ClientItemLevel(700), 48)
+H.isNil("the readers do not go looking for a widened global",
+        util.ClientSellPrice(700))
+H.eq("...but take one that is handed to them",
+     util.ClientSellPrice(700, info), 1234)
+H.eq("...for the item level too", util.ClientItemLevel(700, info), 48)
 
 -- The older two shapes still read correctly, or the anchor has been broken
 -- in the name of defending against a third case.
@@ -151,5 +154,48 @@ info = util.ItemInfo(700)
 H.eq("later: stack count", info.stackCount, 20)
 H.eq("later: equip slot", info.equipLoc, "INVTYPE_CHEST")
 W.itemInfoShape = "vanilla"
+
+-- ---------------------------------------------------------------------------
+H.section("...and none of it may touch the item cache")
+-- ---------------------------------------------------------------------------
+
+-- THE ASSERTION THIS FILE EXISTS FOR, after the fact.
+--
+-- v1.40.0 had util.ClientSellPrice fall back to util.ItemInfo, which calls
+-- GetItemInfo. On 1.12 that QUERIES THE SERVER for anything the client has
+-- not cached -- and db.GetVendor is called per bag item by sell.VendorList,
+-- per auction row by the vendor-profit filter, and once per tooltip. So a
+-- table read became a burst of server queries whenever a list of uncached
+-- items was painted, and the client crashed to desktop on exactly the tabs
+-- whose items are least likely to be cached: Auctions, History, Crafting.
+--
+-- Nothing about that was visible in the code. It looked like a fallback.
+W.itemInfoShape = "vanilla"
+W.SetClientItemData(false)
+
+W.itemInfoCalls = 0
+util.ClientSellPrice(700)
+util.ClientItemLevel(700)
+H.eq("the readers make no item query with no mod installed",
+     W.itemInfoCalls, 0)
+
+W.itemInfoCalls = 0
+db.GetVendor(700)
+db.GetVendor(999999)
+H.eq("db.GetVendor makes none either -- it is called in loops",
+     W.itemInfoCalls, 0)
+
+W.SetClientItemData(true)
+W.itemInfoCalls = 0
+util.ClientSellPrice(700)
+util.ClientItemLevel(700)
+db.GetVendor(700)
+H.eq("...nor with one installed", W.itemInfoCalls, 0)
+
+-- de.ItemLevel is behind the disenchant filters, which run per auction row.
+W.itemInfoCalls = 0
+de.ItemLevel(700, GREEN)
+H.eq("de.ItemLevel makes none", W.itemInfoCalls, 0)
+W.SetClientItemData(false)
 
 os.exit(H.report("clientdata"))

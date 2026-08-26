@@ -417,7 +417,7 @@ end
 -- gone -- along with the question of whether shipping someone else's
 -- unlicensed database was all right, which is a better problem to not have
 -- than to have answered.
-function de.ItemLevel(itemId, quality)
+function de.ItemLevel(itemId, quality, info)
     -- What the player has actually SEEN outranks anything shipped. It is
     -- evidence from the server they are playing on, where the shipped table
     -- is vanilla data with a partial view of Turtle's items -- and it is the
@@ -439,7 +439,9 @@ function de.ItemLevel(itemId, quality)
     -- and below observation, which reflects the server actually being played
     -- on rather than what an item's data says.
     if util and util.ClientItemLevel then
-        local lvl = util.ClientItemLevel(itemId)
+        -- `info` is passed through, never fetched: this runs per auction row
+        -- behind the disenchant filters.
+        local lvl = util.ClientItemLevel(itemId, info)
         if lvl then return lvl, "client" end
     end
     return nil
@@ -469,7 +471,7 @@ function de.Resolve(itemId)
     if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end
-    local ilvl, source = de.ItemLevel(itemId, info.quality)
+    local ilvl, source = de.ItemLevel(itemId, info.quality, info)
     if not ilvl then return nil end
     return ilvl, source, info.quality, info.equipLoc
 end

@@ -3029,6 +3029,20 @@ function ui.ShowListingTooltip(owner, r)
             shown = pcall(function() GameTooltip:SetHyperlink(link) end)
         end
     end
+    if not shown and r.itemId and GameTooltip.SetHyperlink then
+        -- Both routes above read the auction page the CLIENT currently holds,
+        -- and that page is gone the moment you close the auction house. Come
+        -- back and the results are still on screen -- they are ours -- but
+        -- every row's tooltip collapsed to just the item's name until a fresh
+        -- Search repopulated the page underneath it.
+        --
+        -- The item itself does not go anywhere, so ask for it by ID. What is
+        -- lost is only the auction-specific part (the bid, the seller); the
+        -- item tooltip is what someone hovering a row is looking for.
+        shown = pcall(function()
+            GameTooltip:SetHyperlink("item:" .. r.itemId .. ":0:0:0")
+        end)
+    end
     if not shown then
         -- Nothing authoritative left to read; at least name the item.
         GameTooltip:SetText(r.name or "")

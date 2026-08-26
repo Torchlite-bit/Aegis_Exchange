@@ -1091,8 +1091,8 @@ end
      """    if not de.CanDisenchant(info.quality, info.equipLoc, itemId) then
         return nil
     end
-    local ilvl, source = de.ItemLevel(itemId, info.quality)""",
-     """    local ilvl, source = de.ItemLevel(itemId, info.quality)""",
+    local ilvl, source = de.ItemLevel(itemId, info.quality, info)""",
+     """    local ilvl, source = de.ItemLevel(itemId, info.quality, info)""",
      "disenchant"),
 
     # 4.7% truncating to "4%" understates every shard line, and the shard is
@@ -1407,7 +1407,7 @@ end
     # merchant was ever visited.
     ("vendor-learned-beats-client", "core/db.lua",
      """    local known = A.util and A.util.ClientSellPrice
-        and A.util.ClientSellPrice(itemId)
+        and A.util.ClientSellPrice(itemId, info)
     if known then return known, "client" end""",
      "",
      "clientdata"),
@@ -1425,7 +1425,9 @@ end
     # back to unanswerable while looking entirely healthy on vanilla ones.
     ("itemlevel-ignores-client", "core/disenchant.lua",
      """    if util and util.ClientItemLevel then
-        local lvl = util.ClientItemLevel(itemId)
+        -- `info` is passed through, never fetched: this runs per auction row
+        -- behind the disenchant filters.
+        local lvl = util.ClientItemLevel(itemId, info)
         if lvl then return lvl, "client" end
     end""",
      "",
@@ -1447,6 +1449,15 @@ end
     ("iteminfo-wide-tuple-anchored", "core/util.lua",
      "    if n >= 12 then",
      "    if false then",
+     "clientdata"),
+    # THE v1.40.0 CRASH, planted back. util.ClientSellPrice reaching for
+    # util.ItemInfo looks like a harmless fallback and is not: GetItemInfo
+    # queries the SERVER for anything uncached, and db.GetVendor runs per bag
+    # item, per auction row and once per tooltip. On the tabs whose items are
+    # least likely to be cached the client crashed to desktop.
+    ("clientprice-reaches-for-getiteminfo", "core/util.lua",
+     "    return FromInfo(info, \"sellPrice\")",
+     "    return FromInfo(info, \"sellPrice\") or (util.ItemInfo(itemId)\n        and util.ItemInfo(itemId).sellPrice)",
      "clientdata"),
 ]
 

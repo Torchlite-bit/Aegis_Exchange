@@ -2014,6 +2014,35 @@ The derived yield constants carry no such problem: Enchantrix's GPL v2 file is
 never vendored, and a few dozen probabilities computed from public observation
 are facts about the game rather than anyone's expression of them.
 
+#### The fallback that broke HARD RULE 16 — v1.41.1
+
+v1.41.0's readers (`util.ClientSellPrice`, `util.ClientItemLevel`) asked
+ClassicAPI first and fell back to `util.ItemInfo`, i.e. `GetItemInfo`. That
+fallback **crashed the client to desktop** on the Auctions, History and Crafting
+tabs.
+
+Worth recording because of how it hid. `GetItemInfo` reads like a local cache
+lookup, and for a cached item it is one. For an **uncached** item on 1.12 it
+sends a query to the server. `db.GetVendor` is called per bag item, per auction
+row and per tooltip, so the cheap-looking fallback multiplied by the length of
+whatever list was being painted. The three tabs that died are the three whose
+items are least likely to be cached — mail, ledger, recipe reagents. Buy was
+fine, which is why nothing caught it before shipping: the Buy tab's items are on
+the auction page the client just loaded.
+
+The general shape: **HARD RULE 16 can be broken by a fallback, not just by a
+handler.** The rule names the expensive calls — `GetItemInfo` per item, a
+tooltip `Set*` per item — and reviewing a handler for those is not enough when
+one hides two calls down a chain that starts at a table read. When a function
+is documented as O(1) and is called from loops, the guarantee belongs in the
+function, not in its callers' heads.
+
+Now enforced rather than remembered: the test client counts `GetItemInfo` calls
+and `clientdata` requires **zero** from any of these paths, with and without
+ClassicAPI. The `info` argument on `db.GetVendor` / `de.ItemLevel` is a
+caller *handing over* a `util.ItemInfo` it already paid for — never a hint to
+go fetch one.
+
 ### 2h — Session Purchase & Crafting Material Tracker
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

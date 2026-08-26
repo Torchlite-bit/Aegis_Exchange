@@ -237,7 +237,15 @@ local function ItemRec(key)
     return nil
 end
 
+-- Every call is COUNTED. On 1.12 this queries the server for an item the
+-- client has not cached, so a function that reaches for it from a loop or a
+-- tooltip is not merely slow -- v1.40.0 shipped one and crashed the client on
+-- the tabs whose items are least likely to be cached. Counting is how a test
+-- can say "this path must not touch the item cache" at all.
+W.itemInfoCalls = 0
+
 function GetItemInfo(key)
+    W.itemInfoCalls = W.itemInfoCalls + 1
     local r = ItemRec(key)
     if not r then return nil end
     if W.itemInfoShape == "wide" then
@@ -513,6 +521,7 @@ function W.Reset()
     W.loot          = {}
     W.equipped      = {}
     W.itemInfoShape = "vanilla"
+    W.itemInfoCalls = 0
     C_Item          = nil
     AegisExchangeDB     = nil
     AegisExchangeCharDB = nil

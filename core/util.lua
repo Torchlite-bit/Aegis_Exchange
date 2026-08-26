@@ -338,24 +338,41 @@ end
 -- with no mod installed at all. Everything above them already has a path for
 -- "we do not know", so nothing degrades in its absence.
 
+-- NEITHER OF THESE MAY CALL GetItemInfo. Read this before editing them.
+--
+-- Both are consulted from paths that run in LOOPS and on every tooltip:
+-- db.GetVendor is called per bag item by sell.VendorList and
+-- sell.MarkedInBags, per auction row by the vendor-profit filter, and once
+-- per tooltip by ui/tooltip.lua. On 1.12, GetItemInfo for an item the client
+-- has NOT cached fires a query at the server -- so a version of these that
+-- reaches for GetItemInfo turns an O(1) table read into a burst of server
+-- queries whenever a list of uncached items is painted. That is HARD RULE 16,
+-- and it shipped in v1.40.0: the tabs whose items are least likely to be
+-- cached -- Auctions, History, Crafting -- crashed the client outright.
+--
+-- So: C_Item only, which is a direct read of the cache record and cheap. The
+-- optional `info` is for a caller that has ALREADY paid for a util.ItemInfo
+-- and can hand the result over -- never something to fetch here.
+local function FromInfo(info, key)
+    if info and type(info[key]) == "number" and info[key] > 0 then
+        return info[key]
+    end
+    return nil
+end
+
 -- Vendor sell price in copper, per unit, or nil.
-function util.ClientSellPrice(itemId)
+function util.ClientSellPrice(itemId, info)
     if not itemId then return nil end
     if C_Item and C_Item.GetItemSellPriceByID then
         local p = C_Item.GetItemSellPriceByID(itemId)
         if type(p) == "number" and p > 0 then return p end
     end
-    -- ...or from a global that has been widened in place.
-    local info = util.ItemInfo(itemId)
-    if info and type(info.sellPrice) == "number" and info.sellPrice > 0 then
-        return info.sellPrice
-    end
-    return nil
+    return FromInfo(info, "sellPrice")
 end
 
 -- The item's own level, or nil. THE input the disenchant rule needs and the
 -- one vanilla's GetItemInfo has never returned.
-function util.ClientItemLevel(itemId)
+function util.ClientItemLevel(itemId, info)
     if not itemId then return nil end
     if C_Item and C_Item.GetDetailedItemLevelInfo then
         local lvl = C_Item.GetDetailedItemLevelInfo(itemId)
@@ -365,9 +382,5 @@ function util.ClientItemLevel(itemId)
         local _, _, _, lvl = C_Item.GetItemInfo(itemId)
         if type(lvl) == "number" and lvl > 0 then return lvl end
     end
-    local info = util.ItemInfo(itemId)
-    if info and type(info.itemLevel) == "number" and info.itemLevel > 0 then
-        return info.itemLevel
-    end
-    return nil
+    return FromInfo(info, "itemLevel")
 end
