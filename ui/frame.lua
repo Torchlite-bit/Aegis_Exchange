@@ -9676,12 +9676,36 @@ function ui.RefreshSell()
         ui.sellNet:SetText("")
     end
 
-    -- Vendor comparison, shown ONLY as a warning. "1371% of vendor - above
-    -- vendor" was reassurance nobody needed holding a permanent line; the
-    -- vendor figure itself is on the context line either way. Below vendor is
-    -- the case worth interrupting for: you would make more at a merchant.
+    -- THE WARNING LINE. One line, shown only when there is something worth
+    -- interrupting for -- "1371% of vendor, above vendor" was reassurance
+    -- nobody needed holding a permanent line, and the vendor figure is on the
+    -- context line either way.
+    --
+    -- Two things can want it, and disenchanting wins. Below-vendor says you
+    -- picked the wrong PRICE; worth-more-disenchanted says you picked the
+    -- wrong ACTION, and the larger mistake goes first.
+    --
+    -- What you would actually KEEP from selling, which is what the advice has
+    -- to beat: the buyout after the consignment cut, or the vendor price if
+    -- that is higher. Comparing against the raw buyout would recommend
+    -- disenchanting on a margin the cut was already eating.
+    local netPerItem = (unitBuy and unitBuy > 0)
+        and math.floor(unitBuy * (1 - A.sell.CUT)) or nil
+    local vendorUnit = A.db.GetVendor(it.itemId)
+    local bestSale = netPerItem
+    if vendorUnit and vendorUnit > 0
+        and (not bestSale or vendorUnit > bestSale) then
+        bestSale = vendorUnit
+    end
+
+    local deWorth = A.de and A.de.ShouldDisenchant
+        and A.de.ShouldDisenchant(it.itemId, bestSale, A.de.MarketPrice) or nil
+
     local vc = A.sell.VendorCompare(it.itemId, unitBuy)
-    if vc and not vc.above then
+    if deWorth then
+        ui.sellVendor:SetText("Worth more disenchanted: "
+            .. util.FormatMoney(deWorth, true))
+    elseif vc and not vc.above then
         ui.sellVendor:SetText(string.format(
             "Below vendor price (%d%%)", vc.pct))
     else

@@ -46,6 +46,13 @@ correctly.
   class, the disenchant split in quality colours, and a verdict on whether the
   item is worth more broken than sold.
 - **Crafting Cost** from recipes you have opened, per unit rather than per craft.
+- **"Worth more disenchanted" on the Sell tab** — a warning before you post
+  something you should be breaking. It answers only from an **exact** item
+  level (one you observed by disenchanting, or one the client stated) and never
+  from the required-level approximation, because this recommends an
+  irreversible act rather than showing a number. It also wants a **25%** edge,
+  where the tooltip's verdict wants 10%: the value is an average over a
+  probability table, and one break can return the cheapest row.
 - **`/aex diag`** and **`/aex cache`**, which is how three of the bugs below were
   found at all.
 

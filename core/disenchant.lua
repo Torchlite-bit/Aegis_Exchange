@@ -597,6 +597,58 @@ function de.MissingPriceOf(itemId, priceOf, info)
     return de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
 end
 
+-- ---------------------------------------------------------------------------
+-- Advice: is this worth more destroyed than sold?
+-- ---------------------------------------------------------------------------
+--
+-- THE CERTAINTY GATE IS THE WHOLE FEATURE, and it is why this was the last
+-- thing built rather than the first. Every other consumer of this file SHOWS a
+-- number and lets the player decide. This one tells them to destroy an item,
+-- and there is no undo -- a wrong answer here does not mislead, it deletes.
+--
+-- So it answers only from an EXACT item level:
+--
+--   "observed"  the player disenchanted this exact item on this realm. The
+--               band is confirmed by their own evidence.
+--   "client"    ClassicAPI's real item level. Exact by construction.
+--
+-- and never from "required", which is inferred from the level needed to equip
+-- the item and can land a band out -- where yields differ by more than double.
+-- An approximation is fine for a tooltip that says "about this much". It is not
+-- fine for "break this".
+--
+-- THIS RESTATES THE GATE THE ROADMAP RECORDED, which was "shipped item level
+-- AND a local observation". That table no longer exists (deleted in the 1.x
+-- line), and demanding both an observation and a DLL would make the advice
+-- appear so rarely as to be decorative. Either exact source is enough; the
+-- approximation is never enough. That is stricter where it matters and looser
+-- only where the original wording had been overtaken.
+
+-- How much better disenchanting has to be before Aegis will say so.
+--
+-- 25%, where the tooltip's verdict uses 10%, and the gap is deliberate. The
+-- tooltip states a comparison; this recommends an irreversible action. And the
+-- value being compared is an EXPECTATION over a probability table -- one break
+-- can return the cheapest row -- so a thin expected edge is not an edge at all
+-- on a single item.
+de.ADVICE_MARGIN = 1.25
+
+-- Returns value, source when disenchanting clearly beats selling, and nil
+-- otherwise -- including when we are simply not certain enough to say.
+--
+-- `bestSale` is what the caller would actually KEEP from selling: the auction
+-- price after the consignment cut, or the vendor price, whichever is larger.
+-- Computing it here would mean this function knowing about cuts and vendors,
+-- which is the Sell tab's business, not the rule's.
+function de.ShouldDisenchant(itemId, bestSale, priceOf, info)
+    if not itemId or not bestSale or bestSale <= 0 then return nil end
+    local value, source = de.ValueOf(itemId, priceOf, info)
+    if not value then return nil end
+    if source ~= "observed" and source ~= "client" then return nil end
+    if value <= bestSale * de.ADVICE_MARGIN then return nil end
+    return value, source
+end
+
 -- The default pricer: what one of a material is worth, best source first.
 --
 -- ONE writer, shared by the tooltip and /aex de, so the two can never quote

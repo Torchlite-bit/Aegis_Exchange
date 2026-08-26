@@ -1549,6 +1549,49 @@ end
      "            if total > 0 then",
      "tooltip"),
 
+    # ---- advice to destroy an item ---------------------------------------
+    #
+    # The gate is the feature. Every one of these makes Aegis recommend an
+    # irreversible act on evidence that does not support it, and none of them
+    # changes anything a reviewer would see -- the line still appears, still
+    # holds a plausible number.
+
+    # THE CERTAINTY GATE REMOVED. Advice from a level inferred out of the
+    # level needed to equip the item, which can land a band out -- where
+    # yields differ by more than double.
+    ("advice-accepts-an-approximate-level", "core/disenchant.lua",
+     '    if source ~= "observed" and source ~= "client" then return nil end',
+     "",
+     "clientdata"),
+
+    # ...and the narrower version: the approximation admitted by name, which
+    # reads like a deliberate widening rather than a deletion.
+    ("advice-admits-the-required-source", "core/disenchant.lua",
+     '    if source ~= "observed" and source ~= "client" then return nil end',
+     '    if source ~= "observed" and source ~= "client"\n        and source ~= "required" then return nil end',
+     "clientdata"),
+
+    # The margin gone: advise on a single copper of expected edge, against a
+    # value that is an average over a probability table.
+    ("advice-has-no-margin", "core/disenchant.lua",
+     "    if value <= bestSale * de.ADVICE_MARGIN then return nil end",
+     "    if value <= bestSale then return nil end",
+     "clientdata"),
+
+    # The margin quietly reduced to the tooltip's. A tooltip states a
+    # comparison; this recommends destroying something.
+    ("advice-margin-is-the-tooltips", "core/disenchant.lua",
+     "de.ADVICE_MARGIN = 1.25",
+     "de.ADVICE_MARGIN = 1.1",
+     "clientdata"),
+
+    # A missing sale price treated as a low one, so anything the player has
+    # never seen sold is advised for destruction.
+    ("advice-treats-no-price-as-cheap", "core/disenchant.lua",
+     "    if not itemId or not bestSale or bestSale <= 0 then return nil end",
+     "    if not itemId then return nil end\n    bestSale = bestSale or 0",
+     "clientdata"),
+
     # ---- the deposit formula --------------------------------------------
     #
     # Replaced a home-grown 2.5% plus a stack-size fudge that appeared in no

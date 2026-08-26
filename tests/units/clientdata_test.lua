@@ -356,4 +356,71 @@ H.eq("...and it still classifies as a weapon",
 W.SetClientItemData(false)
 W.itemInfoShape = "vanilla"
 
+-- ---------------------------------------------------------------------------
+H.section("advice to DESTROY an item, and what it refuses to say")
+-- ---------------------------------------------------------------------------
+
+-- THE GATE IS THE FEATURE. Every other consumer of the disenchant rule shows a
+-- number and lets the player decide. This one recommends an irreversible act,
+-- so it answers only from an EXACT item level -- one the player observed, or
+-- one the client stated -- and never from the required-level approximation,
+-- which can land a band out where yields differ by more than double.
+
+W.SetClientItemData(false)
+W.itemInfoShape = "vanilla"
+W.AddItem(11176, { name = "Dream Dust", quality = 1,
+                   texture = "Interface\\Icons\\i" })
+W.AddItem(11175, { name = "Greater Nether Essence", quality = 1,
+                   texture = "Interface\\Icons\\i" })
+W.AddItem(11178, { name = "Large Radiant Shard", quality = 3,
+                   texture = "Interface\\Icons\\i" })
+db.RecordAuction(11176, 5000, "Dream Dust")
+db.RecordAuction(11175, 20000, "Greater Nether Essence")
+db.RecordAuction(11178, 300000, "Large Radiant Shard")
+
+-- Band 50 materials, priced high. Required level 45 -> approximated ilvl 50.
+W.AddItem(7100, { name = "Approx Chest", quality = GREEN, minLevel = 45,
+                  equipLoc = "INVTYPE_CHEST", type = "Armor",
+                  subType = "Cloth",
+                  texture = "Interface\\Icons\\i" })
+
+-- The value is enormous next to a 1c sale, so ONLY the gate can be stopping it.
+H.isNil("an approximated level never advises destroying anything",
+        de.ShouldDisenchant(7100, 1, de.MarketPrice))
+local approxVal, approxSrc = de.ValueOf(7100, de.MarketPrice)
+H.check("...even though the value itself resolves", approxVal ~= nil)
+H.eq("...via the approximation", approxSrc, "required")
+
+-- The SAME item, once the client can state its real level.
+W.AddItem(7101, { name = "Exact Chest", quality = GREEN, minLevel = 45,
+                  itemLevel = 48, equipLoc = "INVTYPE_CHEST",
+                  type = "Armor", subType = "Cloth",
+                  texture = "Interface\\Icons\\i" })
+W.SetClientItemData(true)
+local v, src = de.ShouldDisenchant(7101, 1, de.MarketPrice)
+H.check("an exact level does advise", v ~= nil)
+H.eq("...and says the level was the client's", src, "client")
+
+-- THE MARGIN. 25%, and it is not the tooltip's 10%: this recommends an
+-- irreversible act, and the value is an EXPECTATION over a probability table
+-- -- one break can return the cheapest row.
+H.isNil("a sale worth the same is not beaten",
+        de.ShouldDisenchant(7101, v, de.MarketPrice))
+H.isNil("...nor is one only 10% behind",
+        de.ShouldDisenchant(7101, math.floor(v / 1.1), de.MarketPrice))
+H.check("...but 25% behind is",
+        de.ShouldDisenchant(7101, math.floor(v / 1.5), de.MarketPrice) ~= nil)
+
+-- No sale figure at all is not an argument for destroying it.
+H.isNil("no sale price, no advice", de.ShouldDisenchant(7101, nil, de.MarketPrice))
+H.isNil("a zero sale price is not a low one",
+        de.ShouldDisenchant(7101, 0, de.MarketPrice))
+
+-- An unpriced material takes the value away, and with it the advice.
+db.account.realms = {}
+db.Init()
+H.isNil("unpriced materials mean no advice either",
+        de.ShouldDisenchant(7101, 1, de.MarketPrice))
+W.SetClientItemData(false)
+
 os.exit(H.report("clientdata"))

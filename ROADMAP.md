@@ -1975,9 +1975,28 @@ reading their source.
   often is the shipped table still the answer? Do not delete on the strength
   of the argument alone; §5 is what that mistake looks like.
 
-- **§6 — "worth more disenchanted" on the Sell tab. Not committed.** A wrong
-  answer here destroys something unrecoverable, so it needs shipped item level
-  **and** a local observation, or it says nothing.
+- **§6 — "worth more disenchanted" on the Sell tab. DONE.** `de.ShouldDisenchant`
+  plus one warning line on the Sell tab, sharing the slot the below-vendor
+  warning already uses -- disenchanting wins the line, because below-vendor says
+  you picked the wrong PRICE and this says you picked the wrong ACTION.
+
+  **The gate was restated, and this records why.** The original wording was
+  "shipped item level AND a local observation". That table no longer exists,
+  and demanding both an observation and a DLL would make the advice appear so
+  rarely as to be decorative. The rule now: **either exact source is enough --
+  observed or client -- and the approximation is never enough.** Stricter where
+  it matters (required level cannot advise at all, where the old wording did not
+  mention it) and looser only where the original had been overtaken by the
+  deletion.
+
+  The margin is **25%**, not the tooltip's 10%. A tooltip states a comparison;
+  this recommends an irreversible act, and the value is an EXPECTATION over a
+  probability table -- one break can return the cheapest row, so a thin expected
+  edge is not an edge on a single item.
+
+  Five sabotages guard it, and all five share a shape worth noting: none of them
+  changes anything a reviewer would see. The line still appears and still holds
+  a plausible number; only the evidence behind it gets worse.
 
 #### The two limits that are not going away
 
