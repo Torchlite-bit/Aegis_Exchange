@@ -46,6 +46,16 @@ REMOVED_ON_PURPOSE = {
     "ui.RowsFor": "v1.23.0 -- measured a two-edge-anchored scroll frame, "
                   "which is the trap four separate bugs walked into; "
                   "replaced by ui.ListRowsAt",
+    # The required-level audit. It existed to decide whether minLevel could
+    # stand in for item level; the client can be asked for the real one now,
+    # so the question it answered no longer gets asked.
+    "de.AuditStart":   "v1.41.0 -- see de.ItemLevel; the fallback it measured "
+                       "was dropped once the client could be asked directly",
+    "de.AuditStep":    "v1.41.0 -- with de.AuditStart",
+    "de.AuditSummary": "v1.41.0 -- with de.AuditStart",
+    "de.CompareBands": "v1.41.0 -- with de.AuditStart",
+    "DisenchantAudit": "v1.41.0 -- the /aex de audit command, with the audit "
+                       "it drove",
 }
 
 

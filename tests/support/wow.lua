@@ -521,7 +521,7 @@ end
 -- Load the addon's core modules in .toc order under this simulated client.
 -- `upTo` stops early, e.g. W.LoadCore("util") for the pure-Lua layer only.
 function W.LoadCore(upTo)
-    local order = { "init", "util", "db", "itemlevel", "disenchant",
+    local order = { "init", "util", "db", "disenchant",
                     "scan", "sell", "buy" }
     -- This list is a SECOND copy of the .toc's load order, and two copies of
     -- one order is how a file gets added to the addon but never to the tests

@@ -56,11 +56,11 @@ end
 -- A green chest whose item level the shipped table knows, and priced
 -- materials so the value can actually be computed.
 W.AddItem(900, { name = "Test Chest", quality = GREEN,
-                 equipLoc = "INVTYPE_CHEST" })
+                 equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
 W.AddItem(11176, { name = "Dream Dust" })
 W.AddItem(11175, { name = "Greater Nether Essence" })
 W.AddItem(11178, { name = "Large Radiant Shard" })
-A.ilvlData = { [900] = 48 }
+W.SetClientItemData(true)
 A.db.RecordAuction(11176, 5000, "Dream Dust")
 A.db.RecordAuction(11175, 20000, "Greater Nether Essence")
 A.db.RecordAuction(11178, 300000, "Large Radiant Shard")
@@ -106,6 +106,8 @@ A.tooltip.Extend(cloth, 902, 5)
 H.isNil("a trade good gets no disenchant line",
         lineFor(cloth, "Aegis Disenchant"))
 
+-- Cached, disenchantable, and the client has no level for it: the state of
+-- every item on a client with no mod exposing one.
 W.AddItem(903, { name = "Unknown Level", quality = GREEN,
                  equipLoc = "INVTYPE_CHEST" })
 local noLevel = Capture()

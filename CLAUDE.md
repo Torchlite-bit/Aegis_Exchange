@@ -244,8 +244,6 @@ Aegis_Exchange/
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
   core/db.lua            -- SavedVariables price DB (daily-min + weighted-median
                          -- market), settings, ledger, vendor prices
-  core/itemlevel.lua     -- [itemId] = itemLevel. SHIPS EMPTY on purpose; read
-                         -- its header before filling it in
   core/disenchant.lua    -- the disenchant RULE (item level + quality + slot ->
                          -- materials). Constants generated, not typed. Its
                          -- last section is the ONE impure part: it watches the
@@ -272,8 +270,8 @@ Aegis_Exchange/
                          -- starting a large feature
 ```
 
-Load order is fixed by the `.toc`: `init` → `util` → `db` → `itemlevel` →
-`disenchant` → `scan` → `sell` → `buy` → `frame` → `skin` → `tooltip`.
+Load order is fixed by the `.toc`: `init` → `util` → `db` → `disenchant` →
+`scan` → `sell` → `buy` → `frame` → `skin` → `tooltip`.
 **`tests/support/wow.lua` keeps a second copy of that order and checks itself
 against the `.toc` at load** — two copies of one order is how a file gets added
 to the addon but never to the tests. `init.lua` must load first (it creates

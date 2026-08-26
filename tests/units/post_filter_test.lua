@@ -243,9 +243,9 @@ H.eq("an unresolved seller: search again",
      fixFor("silk/seller/Bobby", Row({ owner = NIL })), "search again")
 H.eq("an unpriced item: scan for it",
      fixFor("silk/percent/50", unseen), "scan to learn its price")
-H.eq("an unknown vendor price: go to a merchant",
+H.eq("an unknown vendor price: a merchant, or the DLL that just knows",
      fixFor("silk/vendor-profit/1s", unseen),
-     "vendor prices are learned at a merchant")
+     "learned at a merchant, or install ClassicAPI")
 
 -- Two kinds of ignorance with two different cures cannot be summed up in one
 -- clause, and picking either would tell half the readers the wrong thing.
@@ -423,12 +423,12 @@ H.section("disenchant-profit / disenchant-percent")
 -- the right side of the operator, in the right units.
 local DE_ITEM = 5501
 W.AddItem(DE_ITEM, { name = "Test Chest", quality = 2,
-                     equipLoc = "INVTYPE_CHEST" })
+                     equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
 W.AddItem(11176, { name = "Dream Dust" })
 W.AddItem(11175, { name = "Greater Nether Essence" })
 W.AddItem(11178, { name = "Large Radiant Shard" })
-A.ilvlData = A.ilvlData or {}
-A.ilvlData[DE_ITEM] = 48                 -- band 50
+-- Item levels come from the client now; there is no shipped table to seed.
+W.SetClientItemData(true)
 A.db.RecordAuction(11176, 10000, "Dream Dust")
 A.db.RecordAuction(11175, 10000, "Greater Nether Essence")
 A.db.RecordAuction(11178, 10000, "Large Radiant Shard")
@@ -493,8 +493,7 @@ H.eq("...and named", dwho, "disenchant-profit")
 -- Known item, unpriced materials: the other half of the ignorance. Band 15's
 -- materials are deliberately not in the DB.
 W.AddItem(5502, { name = "Cheap Shirt", quality = 2,
-                  equipLoc = "INVTYPE_CHEST" })
-A.ilvlData[5502] = 10
+                  equipLoc = "INVTYPE_CHEST", itemLevel = 10 })
 local uk, ublind, uwho = keeps("silk/disenchant-profit/1c",
                                Row({ itemId = 5502, unit = 100 }))
 H.check("an item whose materials have no price is dropped", not uk, "")

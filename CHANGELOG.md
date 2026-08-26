@@ -12,6 +12,52 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.41.0] — **restart**
+
+The scaffolding around a missing number comes out. **Removes a `.lua` file, so
+this one needs a full client restart, not `/reload`.**
+
+### Removed
+- **`core/itemlevel.lua`** — 12,567 item levels borrowed from ShaguScore,
+  shipped since v1.31.0 because 1.12 gave addons no way to get one. ClassicAPI
+  provides the client's own: the real number, for **every** item, including the
+  two thirds of Turtle's custom gear the borrowed table never had. A partial
+  copy of a number you can read directly has nothing left to do.
+
+  Deleting it also retires the question of whether shipping someone else's
+  unlicensed database was all right — a better way for that question to end
+  than any answer to it would have been. Thanks to shagu for the years it
+  covered the gap.
+
+- **`/aex de audit`** and the required-level comparison behind it. It existed
+  to decide whether required level could stand in for item level; that question
+  is not asked any more. `tools/gen_itemlevel.py` goes with the file it
+  generated.
+
+### The trade, stated plainly
+**Without ClassicAPI the disenchant line now answers only for items you have
+disenchanted yourself.** It previously answered for vanilla items from the
+borrowed table. That is the cost of the deletion and it is deliberate.
+
+### Added
+- **The UI says so.** The *Disenchant value* setting and both Filter Builder
+  components (`disenchant-profit`, `disenchant-percent`) carry a hover
+  explanation naming the requirement — and noting that disenchanting something
+  teaches Aegis about it regardless. A feature that goes quiet without saying
+  why reads as broken.
+- **Vendor price gets the same treatment**, worded honestly: it is *learned at
+  a merchant*, and ClassicAPI makes it instant for every item. It has never
+  required the DLL and the tooltip does not claim it does.
+- `ui.SetHelpTip`, since checkboxes had no hover explanation of any kind.
+
+### Not covered by tests
+The help tooltips are not asserted anywhere — no suite loads `ui/frame.lua`.
+The strings and the tables behind them are shared single writers, which is
+mitigation rather than coverage, and worth saying rather than implying
+otherwise.
+
+---
+
 ## [1.40.0]
 
 Aegis stops guessing two numbers the client has had all along. `/reload`.
@@ -2989,6 +3035,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.41.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.40.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.39.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.39.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

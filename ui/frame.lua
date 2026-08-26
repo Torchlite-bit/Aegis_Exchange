@@ -523,6 +523,42 @@ end
 -- disagreeing, and each of those handlers would silently read the wrong one.
 -- Instead we only replace the ART: the tick is the widget's CHECKED texture,
 -- so the client shows and hides it for us and it can never drift.
+-- What Aegis can and cannot answer without ClassicAPI, said once.
+--
+-- 1.12 stores an item's level and its vendor sell price on every item and
+-- displays NEITHER -- the sell-price field is populated and the engine's
+-- tooltip code simply never reads it. ClassicAPI is a DLL that exposes both.
+--
+-- Two different sentences because they are two different situations, and
+-- saying "needs ClassicAPI" of the vendor price would be untrue: that one
+-- has always worked, just slowly.
+ui.HELP_DISENCHANT = "Needs ClassicAPI to read the item's level \226\128\148 "
+    .. "1.12 has one for every item and shows it nowhere.\n\n"
+    .. "Disenchanting something also teaches Aegis about that item, with or "
+    .. "without ClassicAPI. Where neither applies, Aegis says nothing rather "
+    .. "than guessing."
+ui.HELP_VENDOR = "Learned by visiting a merchant with the item.\n\n"
+    .. "With ClassicAPI installed, Aegis reads the price out of the client "
+    .. "instead \226\128\148 every item, no merchant visit."
+
+-- A hover explanation on any widget.
+--
+-- Assigns rather than chains, and that is only safe because the widgets this
+-- is used on -- settings checkboxes -- own no OnEnter of their own. Anywhere
+-- that is not true, chain: SetScript REPLACES a handler, and the row-hover
+-- work is the story of what that costs when the thing replaced was a tooltip.
+function ui.SetHelpTip(widget, text)
+    if not widget or not text then return end
+    widget.aegisHelp = text
+    widget:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(widget, "ANCHOR_RIGHT")
+        GameTooltip:SetText(widget.aegisHelp, C.gold[1], C.gold[2], C.gold[3],
+            1, true)
+        GameTooltip:Show()
+    end)
+    widget:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
 function ui.MakeCheckBox(parent, size, name)
     size = size or 14
     local c = CreateFrame("CheckButton", name, parent)
@@ -1621,9 +1657,11 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local tipSubs = {
         { key = "tipMarket",     text = "Market value" },
         { key = "tipMinBuyout",  text = "Minimum buyout" },
-        { key = "tipVendor",     text = "Vendor price" },
+        { key = "tipVendor",     text = "Vendor price",
+          help = ui.HELP_VENDOR },
         { key = "tipDisenchant", text = "Disenchant value (hold Shift for the"
-                                        .. " breakdown)" },
+                                        .. " breakdown)",
+          help = ui.HELP_DISENCHANT },
     }
     ui.setTipSubs = {}
     local prevSub = nil
@@ -1637,6 +1675,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
             c:SetPoint("TOPLEFT", tipChk, "BOTTOMLEFT", 18, -6)
         end
         c:SetLabel(spec.text, C.goldDim)
+        ui.SetHelpTip(c, spec.help)
         c.settingKey = spec.key
         c:SetScript("OnClick", function()
             A.db.SetSetting(c.settingKey, c:GetChecked() and true or false)
@@ -5713,6 +5752,16 @@ end
 --
 -- Still a set: every reader tests these for truthiness, so a string works
 -- exactly where `true` did.
+-- Components whose answer depends on something outside Aegis. Not PENDING --
+-- these work -- but they go quiet on a client that cannot tell us an item's
+-- level, and a filter that silently narrows to nothing is worse than one that
+-- says why.
+ui.NEEDS_CLIENT_DATA = {
+    ["disenchant-profit"]  = true,
+    ["disenchant-percent"] = true,
+    ["vendor-profit"]      = true,
+}
+
 ui.PENDING_COMPONENTS = {
     ["item"]              = "needs the client's item cache, which only answers "
                             .. "for items it has already seen",
@@ -5748,6 +5797,12 @@ local function BuilderComponentOptions()
         if why then
             tip = "Not wired up \226\128\148 this parses and round-trips, but "
                 .. "it narrows nothing. " .. why .. "."
+        elseif ui.NEEDS_CLIENT_DATA[kind] then
+            if kind == "vendor-profit" then
+                tip = ui.HELP_VENDOR
+            else
+                tip = ui.HELP_DISENCHANT
+            end
         end
         table.insert(out, {
             value = kind, text = kind, colour = { r, g, b }, tip = tip,
@@ -11074,51 +11129,9 @@ local function DisenchantReport(rest)
     end
 end
 
--- Measure whether required level could stand in for item level.
---
--- The one number that decides whether Aegis grows a fourth source of item
--- level. It cannot be taken anywhere but in a client -- minLevel comes from
--- GetItemInfo, which only answers for items this client has cached -- so it
--- ships as something to run rather than something already decided.
-local function DisenchantAudit()
-    local started = A.de.AuditStart(
-        function(done)
-            if math.mod(done, 3000) == 0 then
-                ChatMsg("Aegis: audited " .. done .. " ...")
-            end
-        end,
-        function(tally, considered, done)
-            local lines, verdict = A.de.AuditSummary(tally, considered)
-            ChatMsg("Aegis: required-level audit \226\128\148 walked "
-                .. done .. " item(s) we know the real level of")
-            local i = 1
-            while lines and i <= table.getn(lines) do
-                ChatMsg("  " .. lines[i])
-                i = i + 1
-            end
-            if verdict == "adopt" then
-                ChatMsg("  \226\134\146 required level agrees often enough"
-                    .. " to be worth a last-resort source FOR FILTERS. Never"
-                    .. " for advice: a wrong band is a wrong material tier.")
-            elseif verdict == "reject" then
-                ChatMsg("  \226\134\146 required level is wrong too often"
-                    .. " to use. Rows we cannot answer for stay unanswered,"
-                    .. " which is already what they do.")
-            end
-        end)
-    if not started then
-        ChatMsg("Aegis: nothing to audit \226\128\148 either one is already"
-            .. " running, or core/itemlevel.lua is empty.")
-    else
-        ChatMsg("Aegis: auditing required level against item level"
-            .. " \226\128\148 this takes a few seconds.")
-    end
-end
-
 -- /aex (or /aegisexchange)  — escape hatch: show the default Blizzard AH.
 -- /aex debug                — toggle the scanner's chat trace.
 -- /aex de <link> [ilvl]     — print the disenchant breakdown for one item.
--- /aex de audit             — measure required level against item level.
 -- Deliberately NOT "/aegis": other addons in the user's Aegis series (Aegis:
 -- Rally Power) already own that slash, and when two addons register the same
 -- slash text the client resolves it to only ONE of them.
@@ -11130,11 +11143,7 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
     -- carries a hex colour code and a name, and lowering it breaks both.
     local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
     if deArgs then
-        if string.find(string.lower(deArgs), "^%s*audit") then
-            DisenchantAudit()
-        else
-            DisenchantReport(deArgs)
-        end
+        DisenchantReport(deArgs)
         return
     end
     if string.find(cmd, "debug", 1, true) then

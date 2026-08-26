@@ -935,7 +935,7 @@ end""",
     # that cannot succeed -- 1.12 has no sell price in GetItemInfo and the only
     # source is a merchant.
     ("vendor-fix-says-search-again", "core/buy.lua",
-     '    ["vendor-profit"] = "vendor prices are learned at a merchant",',
+     '    ["vendor-profit"] = "learned at a merchant, or install ClassicAPI",',
      '    ["vendor-profit"] = "search again",',
      "post_filter"),
 
@@ -1160,10 +1160,6 @@ end
     # be invisible: the addon loads, every disenchant line goes quiet, and it
     # looks exactly like the deliberate silence of the release before the
     # table landed. Nothing else in the suite would notice.
-    ("itemlevel-table-emptied", "core/itemlevel.lua",
-     "A.ilvlData = {\n",
-     "A.ilvlData = {} local DISCARDED = {\n",
-     "disenchant"),
     # ---- disenchant, phase 3 (learning) ----------------------------------
     # Without the spell gate EVERY bag click becomes a disenchant. The DB
     # fills with nonsense within a minute of ordinary play, and a false
@@ -1276,7 +1272,8 @@ end
     # strings trip UnansweredSummary's mixed-causes guard, and a query using
     # both silently loses its advice line.
     ("de-filter-remedies-differ", "core/buy.lua",
-     '    ["disenchant-percent"] = "disenchant one, or scan its materials",',
+     """    ["disenchant-percent"] = "install ClassicAPI, disenchant one, or scan"
+                             .. " its materials",""",
      '    ["disenchant-percent"] = "scan to learn its price",',
      "post_filter"),
     # ---- palette ---------------------------------------------------------
@@ -1379,31 +1376,15 @@ end
     # DECLINE. Counting that as a wrong answer makes the fallback look worse
     # than it is and rejects it for the wrong reason -- the audit exists to
     # settle a decision, so a biased tally is worse than no tally.
-    ("audit-declines-counted-as-wrong", "core/disenchant.lua",
-     '    if not guess then return "no-guess" end',
-     '    if not guess then return "worse" end',
-     "disenchant"),
 
     # One band out is one MATERIAL TIER out -- Dream Dust where the answer was
     # Illusion Dust. Treating it as near enough is exactly the compromise this
     # addon declined to make.
-    ("audit-off-by-one-counted-as-right", "core/disenchant.lua",
-     '    if math.abs(ti - gi) == 1 then return "off-by-one" end',
-     '    if math.abs(ti - gi) == 1 then return "same" end',
-     "disenchant"),
 
     # A handful of cached items is not a measurement. Without the floor the
     # audit will happily "adopt" on a sample of six.
-    ("audit-no-sample-floor", "core/disenchant.lua",
-     "    if considered < 200 then",
-     "    if considered < 0 then",
-     "disenchant"),
 
     # The bar for adopting a source that can be confidently wrong.
-    ("audit-bar-lowered", "core/disenchant.lua",
-     '    if pct >= 95 then verdict = "adopt" end',
-     '    if pct >= 60 then verdict = "adopt" end',
-     "disenchant"),
     # ---- the row inset ---------------------------------------------------
     # Rows back out to the scroll frame's edge, which is where the box's
     # border is drawn. Every row still draws and every column still holds its

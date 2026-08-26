@@ -82,11 +82,8 @@ H.eq("an item never seen at a merchant is answerable now",
 H.section("item level: where the client's number sits")
 -- ---------------------------------------------------------------------------
 
-local savedIlvl = A.ilvlData
-A.ilvlData = { [700] = 22 }        -- the shipped table says band 25
-
 local lvl, isrc = de.ItemLevel(700, GREEN)
-H.eq("the client's level beats the shipped table", lvl, 48)
+H.eq("the client states the level", lvl, 48)
 H.eq("...and says so", isrc, "client")
 
 -- Observation still wins. It reflects the server actually being played on,
@@ -97,9 +94,7 @@ lvl, isrc = de.ItemLevel(700, GREEN)
 H.eq("what the player saw still outranks the client", isrc, "observed")
 H.eq("...at the band the evidence names", lvl, 50)
 
--- The whole point: a Turtle item nothing shipped knows about.
-H.isNil("the shipped table has never heard of the Turtle item",
-        A.ilvlData[60001])
+-- The whole point: a Turtle item no borrowed table would have known about.
 W.SetClientItemData(true)
 lvl, isrc = de.ItemLevel(60001, GREEN)
 H.eq("the client answers for it anyway", lvl, 58)
@@ -108,10 +103,12 @@ H.check("...so it now has a disenchant value",
         de.ValueOf(60001, function() return 1000 end) ~= nil)
 
 W.SetClientItemData(false)
-H.isNil("and without the mod it is unanswerable again, as before",
+H.isNil("and without the mod it is unanswerable again",
         de.ItemLevel(60001, GREEN))
-
-A.ilvlData = savedIlvl
+W.AddItem(701, { name = "Never Broken", quality = GREEN,
+                 equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
+H.isNil("...and so is anything never disenchanted, since nothing is shipped",
+        de.ItemLevel(701, GREEN))
 
 -- ---------------------------------------------------------------------------
 H.section("util.ItemInfo survives a widened global")

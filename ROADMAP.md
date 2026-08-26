@@ -1987,23 +1987,28 @@ reading their source.
   no rule predicts. Turtle will have its own and only a failed disenchant
   reveals them.
 
-#### The item-level provenance decision — SETTLED, v1.31.0
+#### The item-level provenance decision — CLOSED by deletion, v1.41.0
 
-`core/itemlevel.lua` shipped **empty** in v1.29.0 and is **populated** as of
-v1.31.0 with 12,567 entries from **ShaguScore** (shagu), attributed in the
-file header, `tools/README.md` and the README's Credits section.
+`core/itemlevel.lua` shipped **empty** in v1.29.0, was **populated** in v1.31.0
+with 12,567 entries from ShaguScore, and is **gone** as of v1.41.0.
 
-ShaguScore carries **no licence at all**. The owner made the call knowingly
-and on the record; it was parked here as theirs precisely because it is about
-someone else's work rather than a technical question. It is reversible at any
-time: delete the table's contents and the rule degrades to what the player has
-learned by disenchanting things themselves, which is the source that outranks
-it anyway.
+ClassicAPI exposes the client's own item level — the real number, for every
+item, including the two thirds of Turtle's custom gear the borrowed table never
+had. A partial copy of a number you can read directly has nothing left to do,
+so it was deleted, and the question of whether shipping someone else's
+unlicensed database was all right went with it. That is a better way for that
+question to end than any answer to it would have been.
 
-Two releases shipped with nothing visible before this landed (§1 by design, §2
-as a consequence), which is worth remembering as a sequencing lesson: a phase
-whose payoff depends on a parked decision should not be followed by another one
-that depends on the same decision.
+The consequence, stated plainly: **without ClassicAPI the disenchant line now
+answers only for items the player has disenchanted themselves.** That is the
+trade the owner chose, and the UI says so — the setting and both Filter Builder
+components carry a tooltip naming the requirement rather than going quiet
+unexplained.
+
+Two releases shipped with nothing visible before the table landed (§1 by
+design, §2 as a consequence), which is worth remembering as a sequencing
+lesson: a phase whose payoff depends on a parked decision should not be
+followed by another that depends on the same one.
 
 The derived yield constants carry no such problem: Enchantrix's GPL v2 file is
 never vendored, and a few dozen probabilities computed from public observation
