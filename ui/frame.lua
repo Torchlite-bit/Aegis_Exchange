@@ -11137,8 +11137,14 @@ local function DisenchantReport(rest)
     end
     -- Same formatter and same pricer the tooltip uses, so the two can never
     -- disagree about the item in front of you.
+    -- Same colours as the tooltip, from the same seam -- /aex de exists to be
+    -- checked against what a player sees, so it must not read differently.
     local lines = A.de.BreakdownText(rows, function(matId)
-        return util.ItemName(matId)
+        local mi = util.ItemInfo(matId)
+        if not mi or not mi.name then return nil end
+        local c = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[mi.quality]
+        if c and c.hex then return c.hex .. mi.name .. "|r" end
+        return mi.name
     end)
     local i = 1
     while lines and i <= table.getn(lines) do

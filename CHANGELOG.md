@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.47.0]
+
+### Fixed
+- **A client that APPENDS a value to `GetItemInfo` shifted four fields.**
+  Reported via `/aex diag`: Turtle 1.12 with ClassicAPI returns vanilla's nine
+  values **plus a trailing number**. The old "last value that is a number"
+  anchor landed on that trailing value and everything moved by three —
+  `minLevel` read the stack size, `type` read the equip slot, `subType` read the
+  texture path, `equipLoc` read off the end.
+
+  Nothing errored. The visible symptoms were bag categories named
+  `INVTYPE_2HWEAPON` and a disenchant line that never appeared.
+
+  **The texture is the anchor now.** It starts with `Interface\` on every 1.12
+  client, and `minLevel`..`texture` is one contiguous run in every shape — so a
+  field appended *after* it cannot move anything. Verified against all four
+  shapes this addon has met.
+
+### Changed
+- **The material breakdown reads as a sentence and carries quality colour.**
+
+  ```
+  78%  Dream Dust  x1.5
+  19%  Greater Nether Essence  x1.5
+   4%  Large Radiant Shard  x1.0
+  ```
+
+  How often, what, how many — the order the question is asked. The old form put
+  the quantity first, which reads as arithmetic and buried the material a player
+  is scanning for in the middle of the line. Names now use their item-quality
+  colour, the way every other item name in the game is written: a list of items
+  in flat grey was the only place in this UI that did not say at a glance which
+  one was the valuable one. `/aex de` uses the same seam, so it cannot drift.
+
 ## [1.46.2]
 
 ### Added
@@ -3406,6 +3440,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.47.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.46.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

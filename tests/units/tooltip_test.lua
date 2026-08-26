@@ -44,6 +44,20 @@ local function lineFor(t, label)
     return nil
 end
 
+-- A BREAKDOWN row specifically -- "78%  Dream Dust  x1.5" -- not merely a line
+-- that mentions a material. The diagnosis line names a material too ("no price
+-- yet for Dream Dust"), and matching on the name alone caught that instead,
+-- which made a test of the breakdown pass on a line that is not one.
+local function breakdownLineFor(t, needle)
+    for i = 1, table.getn(t.lines) do
+        local L = t.lines[i].left or ""
+        if string.find(L, "%d+%%") and string.find(L, needle, 1, true) then
+            return t.lines[i]
+        end
+    end
+    return nil
+end
+
 local function anyLineWith(t, needle)
     for i = 1, table.getn(t.lines) do
         if string.find(t.lines[i].left or "", needle, 1, true) then
@@ -57,9 +71,9 @@ end
 -- materials so the value can actually be computed.
 W.AddItem(900, { name = "Test Chest", quality = GREEN,
                  equipLoc = "INVTYPE_CHEST", itemLevel = 48 })
-W.AddItem(11176, { name = "Dream Dust" })
-W.AddItem(11175, { name = "Greater Nether Essence" })
-W.AddItem(11178, { name = "Large Radiant Shard" })
+W.AddItem(11176, { name = "Dream Dust", quality = 1 })
+W.AddItem(11175, { name = "Greater Nether Essence", quality = 1 })
+W.AddItem(11178, { name = "Large Radiant Shard", quality = 3 })
 W.SetClientItemData(true)
 A.db.RecordAuction(11176, 5000, "Dream Dust")
 A.db.RecordAuction(11175, 20000, "Greater Nether Essence")
@@ -304,19 +318,19 @@ shiftHeld = false
 A.db.SetSetting("tipDisenchantRows", false)
 local quiet = Capture()
 A.tooltip.Extend(quiet, 900, 1)
-H.isNil("off and no Shift: no breakdown", anyLineWith(quiet, "x "))
+H.isNil("off and no Shift: no breakdown", breakdownLineFor(quiet, "Dream Dust"))
 
 A.db.SetSetting("tipDisenchantRows", true)
 local always = Capture()
 A.tooltip.Extend(always, 900, 1)
-H.check("the setting alone shows it", anyLineWith(always, "x ") ~= nil)
+H.check("the setting alone shows it", breakdownLineFor(always, "Dream Dust") ~= nil)
 
 A.db.SetSetting("tipDisenchantRows", false)
 shiftHeld = true
 local shifted = Capture()
 A.tooltip.Extend(shifted, 900, 1)
 H.check("Shift alone still shows it, whatever the setting says",
-        anyLineWith(shifted, "x ") ~= nil)
+        breakdownLineFor(shifted, "Dream Dust") ~= nil)
 shiftHeld = false
 
 -- ---------------------------------------------------------------------------
@@ -332,5 +346,41 @@ local cheap = Capture()
 A.tooltip.Extend(cheap, 905, 1)
 H.check("an unresolvable value still costs one item lookup, not two",
         W.itemInfoCalls <= 2, "got " .. W.itemInfoCalls)
+
+-- ---------------------------------------------------------------------------
+H.section("the breakdown reads as a sentence, in quality colour")
+-- ---------------------------------------------------------------------------
+
+-- ORDER. "78% Dream Dust x1.5" answers how often, what, how many -- the order
+-- the question is asked. The old form put the quantity before the name, which
+-- reads as arithmetic and buries the material a player is scanning for in the
+-- middle of the line.
+A.db.SetSetting("tipDisenchantRows", true)
+shiftHeld = false
+local fmt = Capture()
+A.tooltip.Extend(fmt, 900, 1)
+local row = breakdownLineFor(fmt, "Dream Dust")
+H.check("a material line exists", row ~= nil)
+H.check("...the quantity is a SUFFIX, not a prefix",
+        row and string.find(row.left, "x1.5", 1, true) ~= nil, row and row.left)
+H.check("...and the name comes before it",
+        row and string.find(row.left, "Dream Dust", 1, true)
+             < string.find(row.left, "x1.5", 1, true))
+
+-- COLOUR. A breakdown is a list of items, and a list of items in flat grey is
+-- the only place in this UI that does not say at a glance which of them is the
+-- valuable one. Large Radiant Shard is rare; Dream Dust is not.
+H.check("names carry a quality colour escape",
+        row and string.find(row.left, "|c", 1, true) ~= nil, row and row.left)
+local shard = breakdownLineFor(fmt, "Large Radiant Shard")
+H.check("the shard line exists", shard ~= nil)
+-- A rare shard and a common dust must not read the same. Comparing the escape
+-- itself, because that IS the difference a player sees.
+local function colourOf(line)
+    local a = string.find(line, "|c", 1, true)
+    return a and string.sub(line, a, a + 9) or nil
+end
+H.neq("...and a rare shard does not share the common dust's colour",
+      shard and colourOf(shard.left), row and colourOf(row.left))
 
 os.exit(H.report("tooltip"))

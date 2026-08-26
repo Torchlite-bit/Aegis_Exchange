@@ -192,8 +192,19 @@ function tooltip.Extend(gtt, itemId, count)
     -- Outside both branches: the breakdown is a fact about the item and stands
     -- whether or not the market can price it.
     if disenchantRows then
+        -- Material names in their QUALITY COLOUR, the way every other item
+        -- name in the game is written. A breakdown is a list of items, and a
+        -- list of items in flat grey is the only place in this UI that does
+        -- not say at a glance which of them is the valuable one.
+        --
+        -- Wrapped HERE rather than in de.BreakdownText: core/ stays free of UI
+        -- escape codes, and /aex de gets the same colours from the same seam.
         local lines = A.de.BreakdownText(disenchantRows, function(matId)
-            return util.ItemName(matId)
+            local mi = util.ItemInfo(matId)
+            if not mi or not mi.name then return nil end
+            local c = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[mi.quality]
+            if c and c.hex then return c.hex .. mi.name .. "|r" end
+            return mi.name
         end)
         local i = 1
         while lines and i <= table.getn(lines) do

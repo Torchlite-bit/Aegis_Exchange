@@ -602,20 +602,28 @@ function de.MarketPrice(matId)
     return A.db.MarketValue(matId) or A.db.MinBuyout(matId)
 end
 
--- The breakdown as display lines: { "78%  1.5 x Dream Dust", ... }, or nil.
+-- The breakdown as display lines: { "78% Dream Dust x1.5", ... }, or nil.
+--
+-- READS AS A SENTENCE, in the order the question is asked: how often, what,
+-- how many. The old form put the quantity before the name ("78%  1.5 x Dream
+-- Dust"), which reads as arithmetic and buries the material -- the one part a
+-- player is actually scanning for -- in the middle of the line. The quantity
+-- moves to the end as a suffix, where it qualifies rather than interrupts.
 --
 -- `nameOf(materialId)` supplies the names and is a PARAMETER for the same
 -- reason de.Value takes a pricer: it keeps this testable without a client, and
 -- it keeps the one decision about how a yield READS out of the UI, where two
--- callers would otherwise each grow their own version of it.
+-- callers would otherwise each grow their own version of it. It is also where
+-- colour comes from -- a caller that wants quality-coloured names returns them
+-- already wrapped, so this stays free of UI escape codes.
 function de.BreakdownText(rows, nameOf)
     if not rows then return nil end
     local out, i, n = {}, 1, table.getn(rows)
     while i <= n do
         local r = rows[i]
         local name = (nameOf and nameOf(r.itemId)) or ("item:" .. r.itemId)
-        table.insert(out, string.format("%2d%%  %.1f x %s",
-            math.floor(r.chance * 100 + 0.5), r.mean, name))
+        table.insert(out, string.format("%2d%%  %s  x%.1f",
+            math.floor(r.chance * 100 + 0.5), name, r.mean))
         i = i + 1
     end
     return out

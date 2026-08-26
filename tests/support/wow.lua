@@ -183,6 +183,19 @@ AUCTION_TIME_LEFT4 = "Very Long"
 -- itemId -> record. GetItemInfo answers only for items placed here, which is
 -- the behaviour that matters: on 1.12 it returns nil for anything not in the
 -- client's cache, and code that assumes otherwise breaks on a fresh login.
+-- The client's quality palette, keyed 0..6. Real global; item names are
+-- written in these colours everywhere in the game, so anything rendering a
+-- list of items reaches for it.
+ITEM_QUALITY_COLORS = {
+    [0] = { r = .62, g = .62, b = .62, hex = "|cff9d9d9d" },
+    [1] = { r = 1,   g = 1,   b = 1,   hex = "|cffffffff" },
+    [2] = { r = .12, g = 1,   b = 0,   hex = "|cff1eff00" },
+    [3] = { r = 0,   g = .44, b = .87, hex = "|cff0070dd" },
+    [4] = { r = .64, g = .21, b = .93, hex = "|cffa335ee" },
+    [5] = { r = 1,   g = .50, b = 0,   hex = "|cffff8000" },
+    [6] = { r = .90, g = .80, b = .50, hex = "|cffe6cc80" },
+}
+
 W.items = {}
 W.tooltipLines = {}
 
@@ -220,7 +233,7 @@ end
 -- wrong for the third -- the wide tuple has six numbers after stackCount --
 -- and a test that only ever sees one shape cannot tell the anchor apart from
 -- a hardcoded index.
-W.itemInfoShape = "vanilla"   -- or "later" / "wide" / "holey"
+W.itemInfoShape = "vanilla"   -- "later" / "wide" / "holey" / "trailing"
 
 -- The client resolves an item from an id, a name, or ANY well-formed link --
 -- the colour code in front of a link is decoration, not identity. Keying only
@@ -271,14 +284,14 @@ function GetItemInfo(key)
         return r.name, r.link, r.quality or 1, r.itemLevel or 0,
                r.minLevel or 0, r.type or "Trade Goods",
                r.subType or "Cloth", r.stackCount or 20,
-               r.equipLoc or "", r.texture or "icon",
+               r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark",
                r.sellPrice or 0, 0, 0, 0, 0, nil, false, ""
     end
     if W.itemInfoShape == "later" then
         return r.name, r.link, r.quality or 1, r.itemLevel or 55,
                r.minLevel or 0, r.type or "Trade Goods",
                r.subType or "Cloth", r.stackCount or 20,
-               r.equipLoc or "", r.texture or "icon"
+               r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
     end
     -- A REAL CLIENT, REPORTED FROM THE FIELD. Turtle 1.12 with ClassicAPI
     -- returns TEN values with itemLevel at 4 -- and a HOLE where equipLoc
@@ -289,15 +302,26 @@ function GetItemInfo(key)
     --
     -- No invented shape. This is what `/aex diag` printed: 10 values, [3]=2,
     -- [4]=5, and equipLoc nil out of util.ItemInfo.
+    -- THE SHAPE THE PLAYER ACTUALLY HAS, copied from /aex diag: vanilla's nine
+    -- values plus a TRAILING NUMBER at ten. Nothing is shifted or missing --
+    -- something is APPENDED -- which is what broke the last-number anchor and
+    -- moved every field by three.
+    if W.itemInfoShape == "trailing" then
+        return r.name, r.link, r.quality or 1, r.minLevel or 0,
+               r.type or "Trade Goods", r.subType or "Cloth",
+               r.stackCount or 20, r.equipLoc or "",
+               r.texture or "Interface\\Icons\\INV_Misc_QuestionMark", 306
+    end
     if W.itemInfoShape == "holey" then
         return r.name, r.link, r.quality or 1, r.itemLevel or 5,
                r.minLevel or 1, r.type or "Weapon",
                r.subType or "One-Handed Swords", r.stackCount or 1,
-               nil, r.texture or "icon"
+               nil, r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
     end
     return r.name, r.link, r.quality or 1, r.minLevel or 0,
            r.type or "Trade Goods", r.subType or "Cloth",
-           r.stackCount or 20, r.equipLoc or "", r.texture or "icon"
+           r.stackCount or 20, r.equipLoc or "",
+           r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
 end
 
 -- ---------------------------------------------------------------------------
@@ -674,7 +698,7 @@ function W.SetClientItemData(on)
             return r.name, r.link, r.quality or 1, r.itemLevel or 0,
                    r.minLevel or 0, r.type or "Trade Goods",
                    r.subType or "Cloth", r.stackCount or 20,
-                   r.equipLoc or "", r.texture or "icon",
+                   r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark",
                    r.sellPrice or 0, 0, 0, 0, 0, nil, false, ""
         end,
     }

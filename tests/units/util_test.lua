@@ -305,4 +305,51 @@ H.check("a trade good still reports no equip slot",
         cloth.equipLoc == nil or cloth.equipLoc == "",
         tostring(cloth.equipLoc))
 
+-- ---------------------------------------------------------------------------
+H.section("a client that APPENDS a value to the tuple")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED FROM A REAL CLIENT via /aex diag. Turtle 1.12 with ClassicAPI
+-- returns vanilla's nine values plus a TRAILING NUMBER at ten. Nothing is
+-- shifted and nothing is missing -- something is appended -- and the old
+-- "last value that is a number" anchor landed on it, moving every field by
+-- three: minLevel read the stack size, type read the equip slot, subType read
+-- the texture path, equipLoc read off the end.
+--
+-- Nothing errored. The visible symptom was bag categories named
+-- "INVTYPE_2HWEAPON" and a disenchant line that never appeared.
+--
+-- The texture is the anchor now: it starts with "Interface\\" on every 1.12
+-- client, and minLevel..texture is one contiguous run in every shape, so a
+-- field appended AFTER it cannot move anything.
+
+W.AddItem(8178, { name = "Training Sword", quality = 2, minLevel = 5,
+                  type = "Weapon", subType = "Two-Handed Swords",
+                  stackCount = 1, equipLoc = "INVTYPE_2HWEAPON",
+                  texture = "Interface\\Icons\\INV_Sword_45" })
+
+W.itemInfoShape = "trailing"
+local t = util.ItemInfo(8178)
+H.eq("name still reads absolutely", t.name, "Training Sword")
+H.eq("quality still reads absolutely", t.quality, 2)
+H.eq("minLevel is NOT the stack size", t.minLevel, 5)
+H.eq("type is NOT the equip slot", t.type, "Weapon")
+H.eq("subType is NOT the texture path", t.subType, "Two-Handed Swords")
+H.eq("stackCount is the stack size", t.stackCount, 1)
+H.eq("equipLoc survives the appended field", t.equipLoc, "INVTYPE_2HWEAPON")
+
+-- The same item on every other shape, so the texture anchor is not a fix that
+-- only works on the one that reported the bug.
+local shapes = { "vanilla", "later", "wide" }
+local si = 1
+while si <= table.getn(shapes) do
+    W.itemInfoShape = shapes[si]
+    local info = util.ItemInfo(8178)
+    H.eq("minLevel on " .. shapes[si], info.minLevel, 5)
+    H.eq("type on " .. shapes[si], info.type, "Weapon")
+    H.eq("equipLoc on " .. shapes[si], info.equipLoc, "INVTYPE_2HWEAPON")
+    si = si + 1
+end
+W.itemInfoShape = "vanilla"
+
 os.exit(H.report("util"))

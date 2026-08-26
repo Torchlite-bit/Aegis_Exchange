@@ -1098,8 +1098,8 @@ end
     # 4.7% truncating to "4%" understates every shard line, and the shard is
     # the part of a breakdown people actually read.
     ("de-breakdown-truncates-percent", "core/disenchant.lua",
-     "            math.floor(r.chance * 100 + 0.5), r.mean, name))",
-     "            math.floor(r.chance * 100), r.mean, name))",
+     "            math.floor(r.chance * 100 + 0.5), name, r.mean))",
+     "            math.floor(r.chance * 100), name, r.mean))",
      "disenchant"),
 
     # The source is how a caller knows whether it may ADVISE on the number or
@@ -1659,6 +1659,36 @@ end
      "        if ok and type(slot) == \"string\" and slot ~= \"\" then",
      "        if false then",
      "clientdata"),
+
+    # THE TRAILING-VALUE SHAPE. A real client appends a number to vanilla's
+    # nine, and anchoring on the last number lands on it -- shifting minLevel,
+    # type, subType and equipLoc by three. Nothing errors; bag categories just
+    # quietly become "INVTYPE_2HWEAPON".
+    ("iteminfo-anchors-on-the-last-number", "core/util.lua",
+     "    local t = TextureIndex(r, n)\n    if t then",
+     "    local t = nil\n    if t then",
+     "util"),
+
+    # The texture anchor found, then read off by one -- the classic version of
+    # this bug rather than the exotic one.
+    ("iteminfo-texture-anchor-off-by-one", "core/util.lua",
+     "            minLevel   = r[t - 5],",
+     "            minLevel   = r[t - 4],",
+     "util"),
+
+    # The breakdown back to arithmetic order, burying the material a player is
+    # scanning for in the middle of the line.
+    ("de-breakdown-quantity-first", "core/disenchant.lua",
+     '        table.insert(out, string.format("%2d%%  %s  x%.1f",\n            math.floor(r.chance * 100 + 0.5), name, r.mean))',
+     '        table.insert(out, string.format("%2d%%  %.1f x %s",\n            math.floor(r.chance * 100 + 0.5), r.mean, name))',
+     "tooltip"),
+
+    # Material names in flat grey. A list of items that does not say which one
+    # is valuable is the only such list in this UI.
+    ("tip-breakdown-loses-quality-colour", "ui/tooltip.lua",
+     '            if c and c.hex then return c.hex .. mi.name .. "|r" end',
+     "",
+     "tooltip"),
 
     # A client that omits equipLoc leaves NOTHING to classify by, so every
     # item reports "not disenchantable" and the line never renders. Reported

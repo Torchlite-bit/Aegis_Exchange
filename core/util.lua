@@ -320,6 +320,36 @@ local function Finish(out, itemId)
     return out
 end
 
+-- Index of the TEXTURE, which is the one field every shape ends its run with.
+--
+-- WHY NOT THE LAST NUMBER, which is what this used to anchor on. A real client
+-- (Turtle 1.12 with ClassicAPI, reported via /aex diag) returns vanilla's nine
+-- values plus a TRAILING NUMBER at position ten. The last-number anchor landed
+-- on that trailing value and every field shifted by three: minLevel read the
+-- stack size, type read the equip slot, subType read the texture path, and
+-- equipLoc read off the end. Nothing errored, and bag categories quietly became
+-- "INVTYPE_2HWEAPON".
+--
+-- The texture is a path -- it starts with "Interface\" on every 1.12 client --
+-- and minLevel..texture is a contiguous run in ALL the shapes this addon has
+-- met. So finding the texture locates the whole run, and a field appended after
+-- it cannot move anything. Checked against all four:
+--
+--   vanilla 9      texture at 9   -> minLevel 4, type 5, sub 6, stack 7, loc 8
+--   vanilla+extra  texture at 9   -> the same, and [10] is ignored
+--   later 10       texture at 10  -> minLevel 5, type 6, sub 7, stack 8, loc 9
+--   wide 18        texture at 10  -> read by fixed position instead
+local function TextureIndex(r, n)
+    local i = n
+    while i >= 6 do
+        if type(r[i]) == "string" and string.find(r[i], "^Interface\\") then
+            return i
+        end
+        i = i - 1
+    end
+    return nil
+end
+
 function util.ItemInfo(link)
     if not link then return nil end
 
@@ -381,6 +411,23 @@ function util.ItemInfo(link)
     -- what is safe to read rather than guessing at the rest.
     if s < 4 then
         return Finish({ name = r[1], link = r[2], quality = r[3] }, itemId)
+    end
+
+    -- Prefer the texture anchor; fall back to the stack-count one for a client
+    -- that returns a texture we cannot recognise.
+    local t = TextureIndex(r, n)
+    if t then
+        return Finish({
+            name       = r[1],
+            link       = r[2],
+            quality    = r[3],
+            minLevel   = r[t - 5],
+            type       = r[t - 4],
+            subType    = r[t - 3],
+            stackCount = r[t - 2],
+            equipLoc   = r[t - 1],
+            texture    = r[t],
+        }, itemId)
     end
 
     return Finish({
