@@ -184,10 +184,16 @@ local SETTING_DEFAULTS = {
     -- Expected disenchant value on tooltips. Only ever appears for an item we
     -- can actually answer for, so leaving it on costs nothing on the rest.
     tipDisenchant  = true,
-    -- The material breakdown under the disenchant value. OFF by default: it is
-    -- three extra lines on every disenchantable item, and holding Shift still
-    -- shows it on demand whatever this is set to.
-    tipDisenchantRows = false,
+    -- The material breakdown under the disenchant value. ON by default.
+    --
+    -- It was off, and that was wrong. The split is a fact about the ITEM --
+    -- required level gives the band, the band gives the probabilities -- and it
+    -- needs no market data at all. So it is exactly what is left to show when
+    -- the VALUE cannot be computed, which is most items until a scan has run.
+    -- Defaulting it off meant the common case showed a bare "?" while the one
+    -- thing Aegis actually knew about the item sat behind a checkbox nobody
+    -- had been told about.
+    tipDisenchantRows = true,
 }
 
 -- Read a user setting, falling back to its default when unset.

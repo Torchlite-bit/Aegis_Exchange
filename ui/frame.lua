@@ -1663,7 +1663,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
                                         .. " breakdown)",
           help = ui.HELP_DISENCHANT },
         { key = "tipDisenchantRows",
-          text = "...and always show the breakdown",
+          text = "...with the material breakdown",
           help = ui.HELP_DISENCHANT },
     }
     ui.setTipSubs = {}
@@ -11170,6 +11170,61 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
     local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
     if deArgs then
         DisenchantReport(deArgs)
+        return
+    end
+    -- Why is there no disenchant line on this item?
+    --
+    -- EXISTS BECAUSE THE ANSWER WAS UNREACHABLE FROM HERE. The disenchant line
+    -- is silent for a dozen legitimate reasons -- not disenchantable, no band,
+    -- no item level, no material price, setting off -- and silence looks the
+    -- same for all of them AND for a bug. Three rounds of remote guessing went
+    -- into a fault this prints in one line.
+    --
+    -- Defensive at every step on purpose: if a module failed to load, saying
+    -- WHICH one is the whole answer, and erroring here would take that away.
+    local _, _, diagArgs = string.find(msg or "", "^%s*[dD][iI][aA][gG]%s*(.*)$")
+    if diagArgs then
+        ChatMsg("Aegis diag \226\128\148 v" .. tostring(A.version))
+        ChatMsg("  modules: util=" .. tostring(A.util ~= nil)
+            .. " db=" .. tostring(A.db ~= nil)
+            .. " de=" .. tostring(A.de ~= nil)
+            .. " tooltip=" .. tostring(A.tooltip ~= nil)
+            .. " hooked=" .. tostring(A.tooltip and A.tooltip.hooked))
+        ChatMsg("  settings: tooltip=" .. tostring(A.db.Setting("tooltip"))
+            .. " tipDisenchant=" .. tostring(A.db.Setting("tipDisenchant"))
+            .. " tipVendor=" .. tostring(A.db.Setting("tipVendor")))
+        ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
+            .. "  cached items=" .. tostring(A.db.HarvestCount and A.db.HarvestCount()))
+        local itemId = A.de and A.de.ParseReportArgs and A.de.ParseReportArgs(diagArgs)
+        if not itemId then
+            ChatMsg("  give it an item: /aex diag <shift-clicked link or item id>")
+            return
+        end
+        ChatMsg("  itemId=" .. tostring(itemId))
+        local raw = { GetItemInfo("item:" .. itemId .. ":0:0:0") }
+        ChatMsg("  GetItemInfo(itemstring) returned " .. table.getn(raw)
+            .. " values; [1]=" .. tostring(raw[1]) .. " [3]=" .. tostring(raw[3])
+            .. " [4]=" .. tostring(raw[4]))
+        local info = A.util.ItemInfo(itemId)
+        if not info then
+            ChatMsg("  util.ItemInfo -> NIL (client has not cached it)")
+            return
+        end
+        ChatMsg("  ItemInfo: q=" .. tostring(info.quality)
+            .. " minLevel=" .. tostring(info.minLevel)
+            .. " equipLoc=" .. tostring(info.equipLoc))
+        if not A.de then ChatMsg("  A.de MISSING \226\128\148 disenchant.lua did not load"); return end
+        ChatMsg("  de.Class=" .. tostring(A.de.Class(info.equipLoc))
+            .. " CanDisenchant=" .. tostring(
+                A.de.CanDisenchant(info.quality, info.equipLoc, itemId)))
+        local lvl, src = A.de.ItemLevel(itemId, info.quality, info)
+        ChatMsg("  de.ItemLevel=" .. tostring(lvl) .. " (" .. tostring(src) .. ")"
+            .. "  band=" .. tostring(lvl and A.de.Band(lvl)))
+        local rows = A.de.Yield(lvl, info.quality, info.equipLoc, itemId)
+        ChatMsg("  de.Yield rows=" .. tostring(rows and table.getn(rows)))
+        local v, vs, un, first = A.de.ValueOf(itemId, A.de.MarketPrice)
+        ChatMsg("  de.ValueOf=" .. tostring(v) .. " (" .. tostring(vs) .. ")"
+            .. " unpriced=" .. tostring(un) .. " first=" .. tostring(first))
         return
     end
     if string.find(cmd, "cache", 1, true) then

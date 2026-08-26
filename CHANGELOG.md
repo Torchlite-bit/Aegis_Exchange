@@ -12,6 +12,41 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.46.0]
+
+### Changed
+- **The material breakdown is now ON by default, and that is the real fix for
+  "no disenchant info".** The split is a fact about the *item*: required level
+  gives the band, the band gives the probabilities. It needs **no market data at
+  all**. So it is exactly what is left to show when the value cannot be
+  computed — which is most items until a scan has run.
+
+  Defaulting it off meant the common case showed a bare `?` while the one thing
+  Aegis actually knew about the item sat behind a checkbox nobody had been told
+  about. A green Main Hand requiring level 10 now reads:
+
+  ```
+  Aegis Disenchant   ?
+    no price yet for Lesser Magic Essence
+    81%  1.5 x Lesser Magic Essence
+    19%  1.5 x Strange Dust
+  ```
+
+  Shift still shows it when the setting is off, so the checkbox never takes away
+  the gesture.
+
+### Added
+- **`/aex diag <item link>`** — prints the whole disenchant chain for one item:
+  which modules loaded, the relevant settings, what `GetItemInfo` returned, the
+  resolved quality / required level / equip slot, the band, the yield rows and
+  the value. It is defensive at every step, so a module that failed to load is
+  reported rather than throwing.
+
+  It exists because the answer was unreachable from outside the client. A silent
+  disenchant line has a dozen legitimate causes and they all look identical from
+  a screenshot; several rounds of remote guessing went into faults this prints in
+  one line.
+
 ## [1.45.2]
 
 **The disenchant tooltip line has never worked. This is why.**
@@ -3326,6 +3361,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.46.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.45.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

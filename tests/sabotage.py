@@ -1159,6 +1159,15 @@ end
      "        local wantRows = (A.db.Setting and A.db.Setting(\"tipDisenchantRows\") == true)",
      "        local wantRows = (false)",
      "tooltip"),
+
+    # The breakdown defaulted OFF again. The split needs no market data, so it
+    # is the ONLY thing left to show on an item whose value cannot be priced --
+    # which is most of them until a scan has run. Off by default put a bare "?"
+    # in front of the player and hid the one fact Aegis had.
+    ("tip-breakdown-off-by-default", "core/db.lua",
+     "    tipDisenchantRows = true,",
+     "    tipDisenchantRows = false,",
+     "tooltip"),
     # The exact bug that shipped in 1.30.0: read the override out of the WHOLE
     # string, then try to rule out digits belonging to the link by asking
     # whether the link contains them. Any item whose id merely contains the

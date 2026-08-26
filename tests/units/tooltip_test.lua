@@ -137,26 +137,41 @@ H.eq("the master switch silences it too", table.getn(master.lines), 0)
 A.db.SetSetting("tooltip", true)
 
 -- ---------------------------------------------------------------------------
-H.section("the breakdown is behind Shift")
+H.section("the breakdown, on by default and gated when turned off")
 -- ---------------------------------------------------------------------------
 
+-- ON BY DEFAULT, and that default is the point. The split is a fact about the
+-- ITEM -- required level gives the band, the band gives the probabilities --
+-- and it needs no market data at all, so it is exactly what is left to show
+-- when the VALUE cannot be computed. It was off, which meant the common case
+-- showed a bare "?" while the one thing Aegis knew sat behind a checkbox.
+
 shiftHeld = false
+local onByDefault = Capture()
+A.tooltip.Extend(onByDefault, 900, 1)
+H.check("the breakdown shows with no Shift and no setting touched",
+        anyLineWith(onByDefault, "Dream Dust") ~= nil)
+H.check("...with a percentage", anyLineWith(onByDefault, "%") ~= nil)
+H.check("...alongside the value rather than replacing it",
+        lineFor(onByDefault, "Aegis Disenchant") ~= nil)
+
+-- Turned off, it goes -- and Shift still brings it back, so the checkbox
+-- never takes away the gesture.
+A.db.SetSetting("tipDisenchantRows", false)
 local plain = Capture()
 A.tooltip.Extend(plain, 900, 1)
-H.isNil("without Shift there is no breakdown",
+H.isNil("turned off, there is no breakdown",
         anyLineWith(plain, "Dream Dust"))
+H.check("...and it is fewer lines, not the same ones",
+        table.getn(plain.lines) < table.getn(onByDefault.lines))
 
 shiftHeld = true
 local expanded = Capture()
 A.tooltip.Extend(expanded, 900, 1)
-H.check("with Shift the materials are listed",
+H.check("Shift shows it whatever the setting says",
         anyLineWith(expanded, "Dream Dust") ~= nil)
-H.check("...with a percentage", anyLineWith(expanded, "%") ~= nil)
-H.check("the breakdown adds lines rather than replacing the value",
-        lineFor(expanded, "Aegis Disenchant") ~= nil)
-H.check("...one per material",
-        table.getn(expanded.lines) > table.getn(plain.lines))
 shiftHeld = false
+A.db.SetSetting("tipDisenchantRows", true)
 
 -- ---------------------------------------------------------------------------
 H.section("it does not disturb the price lines it sits with")
