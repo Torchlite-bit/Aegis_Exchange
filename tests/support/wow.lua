@@ -546,6 +546,23 @@ function GetAuctionItemTimeLeft(list, i)
     return r and (r.timeLeft or 4) or nil
 end
 
+-- Every posting attempt, recorded. Vanilla allows a start bid EQUAL to the
+-- buyout -- only a bid ABOVE it is rejected -- so a suite has to be able to see
+-- what was actually sent rather than only that nothing errored.
+-- The cursor is already modelled (W.cursor); this is the client's own way of
+-- asking about it. Missing until now, which meant sell.StartPosting -- the
+-- whole multi-stack path -- errored the moment a test touched it, so it never
+-- had one.
+function CursorHasItem()
+    return W.cursor and true or nil
+end
+
+W.posted = {}
+function StartAuction(bid, buyout, minutes)
+    table.insert(W.posted, { bid = bid, buyout = buyout, minutes = minutes })
+    W.sellSlot = nil
+end
+
 function CanSendAuctionQuery() return W.queryOpen end
 
 function QueryAuctionItems(name, minLevel, maxLevel, invType,
@@ -623,6 +640,7 @@ function W.Reset()
     W.bags          = {}
     W.cursor        = nil
     W.sellSlot      = nil
+    W.posted        = {}
     W.owned         = {}
     W.ownerPage     = 0
     W.tooltipLines  = {}

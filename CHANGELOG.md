@@ -12,6 +12,43 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.49.3]
+
+### Fixed
+- **The Filter Builder's component dropdown hung over the next tab.** Its option
+  list is parented to the window and put on `FULLSCREEN_DIALOG` so it can cover
+  the form beneath it — which also means it is not a child of the panel that
+  owns it and did not go away when that panel hid. Leave the Builder with a list
+  open and it floated over Auctions, on top of rows it had nothing to do with,
+  still swallowing clicks. Any tab change now closes it.
+
+### Added
+- **Right-click an auction row to price it against the market.** The "vs market"
+  column reads the price DB, and nothing on the Auctions tab could fill it —
+  Refresh re-reads *your* auctions from the client and never asks the auction
+  house what anyone else is charging, which is why undercuts only appeared after
+  a manual Buy search. Right-click searches for that item and lands you on the
+  answer, one item at a time, the way aux does it.
+
+  Not a whole-book re-price: 120 auctions is dozens of queries behind
+  `CanSendAuctionQuery`, and the answer you want is nearly always about the row
+  under the cursor. The status line says so now instead of leaving it to be
+  discovered.
+
+### Not a bug in Aegis
+- **A start bid equal to the buyout was already allowed.** Reported as refused;
+  both posting paths use `>` not `>=`, and a test now sends equal values through
+  `sell.Post` and `sell.StartPosting` and confirms both reach `StartAuction`. If
+  your client still refuses it, the rule is the client's or the server's and not
+  something this addon can override — tell me the exact message and I will dig
+  further. Two sabotages pin the `>` so a future tidy-up cannot introduce the
+  rule the report describes.
+
+### Internal
+- The test client gained `StartAuction`, `CursorHasItem` and a record of what
+  was posted. Without `CursorHasItem` the whole multi-stack posting path errored
+  the moment a test touched it, so it had never had one.
+
 ## [1.49.2]
 
 ### Added
@@ -3640,6 +3677,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.49.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

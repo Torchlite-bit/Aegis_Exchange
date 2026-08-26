@@ -2413,6 +2413,19 @@ local function MakeMoneyDisplay(parent)
 end
 
 local openDropdown
+
+-- Shut whatever dropdown is open, wherever it is.
+--
+-- WHY THIS IS NEEDED AT ALL. The option list is parented to the WINDOW and put
+-- on FULLSCREEN_DIALOG, so that it can cover the form beneath it -- which also
+-- means it is not a child of the panel that owns the dropdown and does not go
+-- away when that panel hides. Leave the Builder with a list open and it hangs
+-- over the Auctions tab, on top of rows it has nothing to do with, still
+-- swallowing the clicks it was told to swallow.
+function ui.CloseOpenDropdown()
+    if openDropdown then openDropdown:Close() end
+end
+
 -- `noAll` suppresses the implicit "All" row. Class / Subclass / Slot /
 -- Quality all want it -- "no filter" is a real choice there. Component does
 -- not: there is no such thing as "all components", and the row only offered
@@ -7856,6 +7869,17 @@ ui.GrowAucRows = function(n)
                 if row.entry then ui.ConfirmCancelAuction(row.entry) end
             end)
             row.cancelBtn = cancel
+            -- RIGHT-CLICK PRICES THE ROW. The undercut column is only as
+            -- good as the price DB, and nothing on this tab could fill it --
+            -- see ui.PriceAuctionRow. Left-click stays free for the row's own
+            -- selection behaviour.
+            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            row:SetScript("OnClick", function()
+                if arg1 == "RightButton" and row.entry then
+                    ui.PriceAuctionRow(row.entry)
+                end
+            end)
+
             -- Hover tooltip, read from the "owner" list rather than "list".
             row:EnableMouse(true)
             row:SetScript("OnEnter", function()
@@ -7908,6 +7932,32 @@ function ui.SortAuctions(all, sortKey, dir)
         return r.unit
     end
     return ui.SortByKey(all, keyOf, dir)
+end
+
+-- Price ONE of your auctions against the market, by searching for it.
+--
+-- WHY THIS EXISTS. The "vs market" column reads the price DB, and the price DB
+-- only knows what a scan or a search has put there -- so on a fresh install it
+-- says "lowest" for everything, which is the most dangerous wrong answer this
+-- table can give. Refresh does not help: it re-reads YOUR auctions from the
+-- client and never asks the auction house what anyone else is charging.
+--
+-- One item at a time, on demand, the way aux does it: a full re-price of a
+-- 120-auction book would be dozens of queries behind CanSendAuctionQuery, and
+-- the answer you want is almost always about the row you are looking at.
+function ui.PriceAuctionRow(entry)
+    if not entry or not entry.name then return end
+    if not A.buy then return end
+    -- Land on the answer. Searching from the Auctions tab and leaving the
+    -- player there would look like nothing happened.
+    ui.SelectSubTab("Buy")
+    if ui.buyMode == "advanced" and ui.buyQueryBox then
+        ui.buyQueryBox:SetText(entry.name)
+    else
+        local sb = ui.ActiveSearchBox()
+        if sb then sb:SetText(entry.name) end
+    end
+    ui.DoBuySearch()
 end
 
 -- Read the owner list into ui.aucAuctions; `request` also pings the server.
@@ -7981,7 +8031,7 @@ function ui.UpdateAuctionsList()
             .. " \226\128\148 undercut counts are for this page.")
     else
         ui.aucStatus:SetText("Cancel refunds the item (deposit is forfeit)."
-            .. "  Undercut = someone is cheaper than you.")
+            .. "  Right-click a row to price it against the market.")
     end
 
     local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.auc,
@@ -10735,6 +10785,10 @@ function ui.SelectSubTab(name)
     if name ~= "Sell" then
         ui.HideVendorList()
     end
+    -- ...and an open dropdown belongs to whatever form you just left. Not
+    -- conditional on the tab: no dropdown should survive a tab change, and
+    -- the list is on FULLSCREEN_DIALOG so hiding the panel does not touch it.
+    ui.CloseOpenDropdown()
     ui.RefreshCurrentTab(true)
 end
 

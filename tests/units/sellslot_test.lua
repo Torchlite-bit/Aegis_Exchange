@@ -303,4 +303,37 @@ W.SetOwned({})
 local _, pg0 = sell.OwnerPageInfo()
 H.eq("no auctions still reports one page", pg0, 1)
 
+-- ---------------------------------------------------------------------------
+H.section("a start bid EQUAL to the buyout is legal")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED AS "it won't let me post bid and buyout at the same value". Vanilla
+-- allows it -- only a bid ABOVE the buyout is a typo -- and this pins that our
+-- side agrees, at both layers, so a future "tidy" > into >= cannot quietly
+-- introduce the rule the report describes.
+
+W.SetBags({ [0] = { { link = "|Hitem:2589:0:0:0|h[Linen Cloth]|h", count = 20 } } })
+W.AddItem(2589, { name = "Linen Cloth", quality = 1, stackCount = 20,
+                  texture = "Interface\\Icons\\i" })
+W.sellSlot = { link = "|Hitem:2589:0:0:0|h[Linen Cloth]|h", count = 20 }
+
+W.posted = {}
+H.check("Post accepts bid == buyout", sell.Post(100, 100, 480))
+H.eq("...and sends them equal", W.posted[1] and W.posted[1].bid,
+     W.posted[1] and W.posted[1].buyout)
+
+W.sellSlot = { link = "|Hitem:2589:0:0:0|h[Linen Cloth]|h", count = 20 }
+W.posted = {}
+local ok, why = sell.Post(100, 200, 480)
+H.check("...but a bid ABOVE the buyout is still refused", not ok)
+H.check("...with a reason", why ~= nil)
+H.eq("...and nothing was sent", table.getn(W.posted), 0)
+
+-- The multi-stack path has its own copy of the rule, which is exactly how two
+-- validations drift apart.
+W.SetBags({ [0] = { { link = "|Hitem:2589:0:0:0|h[Linen Cloth]|h", count = 20 } } })
+H.check("StartPosting accepts bid == buyout",
+        sell.StartPosting(2589, "Linen Cloth", 20, 1, 100, 100, 480, {}))
+if sell.StopPosting then sell.StopPosting() end
+
 os.exit(H.report("sellslot"))

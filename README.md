@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.49.2)
+# Aegis: Exchange (v1.49.3)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -503,7 +503,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.49.2`) — quote it.
+1. Check the **version** in the window's title bar (`v1.49.3`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.

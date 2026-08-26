@@ -1592,6 +1592,21 @@ end
      "    if not itemId then return nil end\n    bestSale = bestSale or 0",
      "clientdata"),
 
+    # A start bid EQUAL to the buyout is legal in vanilla -- only a bid ABOVE
+    # it is a typo. Tightening > into >= is the tidy-looking edit that
+    # introduces the bug a player reported.
+    ("post-refuses-equal-bid-and-buyout", "core/sell.lua",
+     "    if buyout > 0 and start > buyout then",
+     "    if buyout > 0 and start >= buyout then",
+     "sellslot"),
+
+    # ...and the multi-stack path's own copy of the same rule, which is
+    # exactly how two validations drift apart.
+    ("startposting-refuses-equal-bid", "core/sell.lua",
+     "    if unitStartUse > unitBuyout then",
+     "    if unitStartUse >= unitBuyout then",
+     "sellslot"),
+
     # ---- the paged owner list --------------------------------------------
     #
     # The batch read as the total is what hid two thirds of a full auction
