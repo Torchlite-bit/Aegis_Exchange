@@ -578,6 +578,19 @@ function GetOwnerAuctionItems(page)
     W.ownerPage = page or 0
 end
 
+-- CancelAuction indexes into the BATCH the client is holding, and removing one
+-- shifts every later index down by one. Modelling that shift is the whole
+-- point: a mock that just marked a row "cancelled" in place would let a pass
+-- that walks UPWARD look like it worked, when on a real client it skips one
+-- auction for every one it takes.
+W.cancelled = {}
+function CancelAuction(i)
+    local batch = ownerBatch()
+    if not batch[i] then return end
+    table.insert(W.cancelled, batch[i])
+    table.remove(W.owned, W.ownerPage * W.OWNER_PAGE + i)
+end
+
 function GetNumAuctionItems(list)
     if list == "owner" then
         return table.getn(ownerBatch()), table.getn(W.owned)
@@ -715,6 +728,7 @@ function W.Reset()
     W.sellSlot      = nil
     W.posted        = {}
     W.owned         = {}
+    W.cancelled     = {}
     W.ownerPage     = 0
     W.tooltipLines  = {}
     W.money         = 500000

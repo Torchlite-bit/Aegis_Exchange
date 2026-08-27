@@ -12,6 +12,39 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.51.0]
+
+### Added
+- **Cancel All on the Auctions tab.** Clears your whole book, not just the page
+  you are looking at.
+  - **The button carries the count** — `Cancel all 47`. Past page one the total
+    is the one number you cannot see, and it is exactly the number you want
+    before pressing a button with no undo. It disables itself when you have
+    nothing up.
+  - **It always asks**, even with *Ask before cancelling* switched off on the
+    Aegis tab. That switch exists so you can clear a pile of undercuts one
+    click at a time; this is a different act — every deposit on every auction
+    is gone, and the one guard it has does not get to be optional. The
+    confirmation names the total and what the current page is worth at buyout.
+  - **The list refills, it does not page.** `CancelAuction` indexes into the
+    page the client is holding, and cancelling 50 auctions off page 0 pulls the
+    next 50 up into page 0 — there is never a page 1 to walk to. So this is a
+    loop over rounds rather than over pages, bounded so an auction the server
+    refuses to cancel cannot be retried forever.
+  - Walking away from the auctioneer ends it. A run left armed would resume
+    against whatever the owner list holds next, which may be another
+    character's book.
+
+### Internal
+- The cancel ORDER is a function now (`sell.CancelOrder`) rather than a
+  `table.sort` written twice: cancelling shifts every later index down by one,
+  so a pass that walked upward would take every other auction and report
+  success for all of them. Five sabotages, including that one — and the test
+  client now models the index shift, without which a walk in the wrong
+  direction looks like it worked.
+
+---
+
 ## [1.50.3]
 
 ### Fixed
@@ -3814,6 +3847,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
