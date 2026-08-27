@@ -2564,10 +2564,11 @@ and belongs in its own change.
   `Texture` pixels vs. a `StatusBar`-based sparkline) before committing to
   an approach. **Phase 0.3 is settled (v1.4.0)**, so this is unblocked; read
   its note about plotting a median before designing the axes.
-- **Disenchant value** in the tooltip — **building**, as §2 of 3k. The v1.28.1
-  "no" was overturned: see 3k for which of its claims did not survive checking.
-  v1.29.0 shipped the rule and v1.30.0 the tooltip line; learning item levels
-  from play is next.
+- **Disenchant value** in the tooltip — ✅ **DONE**. See 3k, which shipped all
+  six of its phases between v1.29.0 and v1.49.2. This line said "building, §2 of
+  3k, learning item levels from play is next" for twenty releases after that
+  became untrue; the housekeeping pass caught 3k's own heading and missed the
+  forward reference to it here.
 
 ---
 
