@@ -2390,7 +2390,7 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
-### The buttons on somebody else's window — v1.51.0
+### The buttons on somebody else's window — v1.50.2
 
 Four buttons Aegis puts on frames it does not own: "Add to Aegis" on both
 profession windows, "Aegis: sell N marked" on the merchant, "Aegis UI" on the
@@ -2438,6 +2438,13 @@ decoration, and "it is a local" is not a reason to leave one that way.**
 **What is still not testable, and is not pretended to be:** whether 10px up
 actually clears the Create row, and whether 4px right actually lands on the tab
 line. That needs a client and a person looking at it.
+
+**And it was numbered wrong first.** This went out as 1.51.0 — MINOR — on the
+size of the change: a different widget template, a rewritten styling path, a new
+suite. None of that is a capability. The player got the same three buttons doing
+the same three things in a better-looking box, which is a PATCH, and it shipped
+again as 1.50.2. The test in CLAUDE.md is what the player can now DO, never how
+much moved.
 
 ### Housekeeping — v1.50.1
 

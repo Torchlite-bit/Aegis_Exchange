@@ -12,7 +12,7 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
-## [1.51.0]
+## [1.50.2]
 
 ### Changed
 - **The buttons Aegis puts on Blizzard's windows now look like Blizzard's
@@ -3783,7 +3783,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

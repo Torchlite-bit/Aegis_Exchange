@@ -401,6 +401,13 @@ a rename, and a corrected calculation. Ten releases in the 1.x line were
 numbered MINOR for work that only fixed or polished, which is how the number ran
 to 1.49.1 while `main` sat at 1.21.1.
 
+**Changing HOW something is built is not a capability.** v1.51.0 was numbered
+MINOR for rebuilding three buttons on a different widget template and moving two
+of them a few pixels — a large diff, a rewrite of one file's styling path, and a
+new test suite. The player got the same three buttons doing the same three
+things, in a better-looking box. It shipped again as **1.50.2**. Ask what the
+player can now DO, never how much moved.
+
 **When a release does both** — adds a capability *and* fixes things — it is a
 MINOR. The larger claim wins.
 
