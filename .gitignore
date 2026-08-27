@@ -39,3 +39,7 @@ luac.out
 *.x86_64
 *.hex
 
+
+# Python bytecode caches (tests/lint and tools are both importable)
+__pycache__/
+*.pyc

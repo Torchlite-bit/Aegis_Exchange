@@ -58,13 +58,6 @@ function scan.PageDelay()
     return scan.FAST_DELAY
 end
 
--- True once we've seen the client's gate open fast enough that the vanilla
--- throttle is clearly not in play. Reported in the UI so it's obvious whether
--- AuctionQueryThrottle is actually working.
-function scan.FastThrottleSeen()
-    return scan.state.fastGate and true or false
-end
-
 -- Seconds to wait for AUCTION_ITEM_LIST_UPDATE before re-sending the same
 -- page (lost replies happen on laggy servers).
 scan.REPLY_TIMEOUT = 15

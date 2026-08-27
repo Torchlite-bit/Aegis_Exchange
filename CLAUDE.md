@@ -227,9 +227,22 @@ Turtle exposes a global **`TURTLE_WOW_VERSION`** — use it to detect Turtle
 - **Cross-faction AH.** Turtle's auction house is a **single shared economy**.
   Do **not** split the price DB by faction.
 - **Auction durations are ×3 vanilla** — max **72h**.
-- **Deposit is inflated** in what the client shows. Apply a **~0.6 factor** as
-  an approximation and **label it "approx"** in the UI. Never present it as
-  exact.
+- **Deposit is MEASURED, not guessed.** Two corrections, and they are different
+  claims — do not collapse them into one factor:
+  1. **Formula → client.** The vanilla formula is wrong for this server by
+     roughly 2x (a real client said `client=25 formula=48` for the same item at
+     the same duration). `sell.LearnDepositRatio` measures the ratio wherever an
+     item is in the sell slot, because that is the one place both answers exist,
+     and `sell.DepositFor` applies it to the bag preview, which can only reach
+     the formula. **The client's own figure is used RAW** — scaling it by this
+     correction double-counts, and was the bug that made the two paths disagree.
+  2. **Client → charged.** `sell.TURTLE_DEPOSIT_FACTOR = 0.6` is now only a
+     starting guess. The deposit watch (`sell.ArmDepositWatch` /
+     `sell.SettleDepositWatch`) compares what the client quoted against the
+     money that actually left the bags on a real post, and that measurement
+     replaces it.
+
+  Still **label the result "approx"** in the UI. Never present it as exact.
 - **120-auction account cap.**
 - **5% faction consignment cut** on sales.
 
@@ -243,28 +256,44 @@ Aegis_Exchange/
   core/init.lua          -- namespace (AegisExchange) + event dispatcher + OnLoad queue
   core/util.lua          -- Lua 5.0 safe helpers (money fmt/parse, split, table utils)
   core/db.lua            -- SavedVariables price DB (daily-min + weighted-median
-                         -- market), settings, ledger, vendor prices
+                         -- market), settings, ledger, vendor prices (what a
+                         -- merchant pays AND what it charges), harvested item
+                         -- facts, deposit calibration, Courier contract
+  core/disenchant.lua    -- the disenchant RULE (item level + quality + slot ->
+                         -- materials). Constants generated, not typed. Its
+                         -- last section is the ONE impure part: it watches the
+                         -- player disenchant things and records what it sees
   core/scan.lua          -- page-by-page auction scanner state machine
   core/sell.lua          -- posting engine (StartAuction wrap + deposit/cap/cut),
-                         -- owned auctions, vendor list
+                         -- owned auctions, vendor list, merchant inventory scan
   core/buy.lua           -- search/buy engine + shopping lists; also defines the
                          -- A.craft namespace (recipe capture + profit maths)
   ui/frame.lua           -- standalone Aegis window (replaces the AH) + all six
-                         -- sub-tabs; ~5k lines, the bulk of the addon
+                         -- sub-tabs; ~11.5k lines, the bulk of the addon
   ui/skin.lua            -- OPTIONAL pfUI restyling; every call pcall-guarded so
                          -- a pfUI API change can only cost us the default look
   ui/tooltip.lua         -- GameTooltip price lines (save/replace hooks)
   pfui/Aegis_Exchange.lua-- drop-in for pfUI-addonskinner users. NOT in the .toc
                          -- and NOT loaded by us; it just calls A.skin.Apply()
+  tests/                 -- lint + unit suites + the sabotage layer. NOTHING
+                         -- here ships and nothing is in the .toc; adding a
+                         -- file is never a restart release and never a bump.
+                         -- See tests/README.md
   design/                -- VISUAL REFERENCE ONLY (mockup renders + source);
                          -- never ported to Lua verbatim, NEVER in the .toc
+  tools/                 -- build-time generators. NOTHING here ships and
+                         -- nothing is in the .toc; adding a file is never a
+                         -- restart release and never a version bump
   CLAUDE.md              -- this file
   ROADMAP.md             -- phased, dependency-ordered plan; check before
                          -- starting a large feature
 ```
 
-Load order is fixed by the `.toc`: `init` → `util` → `db` → `scan` → `sell` →
-`buy` → `frame` → `skin` → `tooltip`. `init.lua` must load first (it creates
+Load order is fixed by the `.toc`: `init` → `util` → `db` → `disenchant` →
+`scan` → `sell` → `buy` → `frame` → `skin` → `tooltip`.
+**`tests/support/wow.lua` keeps a second copy of that order and checks itself
+against the `.toc` at load** — two copies of one order is how a file gets added
+to the addon but never to the tests. `init.lua` must load first (it creates
 the namespace and dispatcher); `util` second (every other module takes a
 file-scope `local util = A.util`); `sell` and `buy` before `frame` because the
 tabs drive `A.sell` / `A.buy` / `A.craft`. `skin` and `tooltip` are only
@@ -296,19 +325,26 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
 - **The badge block at the top of `README.md` is maintained by the project
   owner.** It is grouped deliberately:
-  1. Discord (`5865F2`), then the 1.18.1 servers — Octo WoW purple (`8A2BE2`),
-     Capy WoW brown (`8B5A2B`).
-     Also a **Client** badge (`c79c6e`, WoW 1.12 vanilla).
-  2. **AuctionQueryThrottle** alone, orange (`ff8c00`), labelled "Highly
-     Recommended" — it is the ONLY external thing that changes Aegis's behaviour
-     (scan speed) — followed by a `<sub>` caption saying Aegis needs no mods or
-     DLLs.
+  1. Discord (`5865F2`), then the 1.18.1 servers — Raven (`1e1e1e`), Octo WoW
+     purple (`8A2BE2`), Capy WoW brown (`8B5A2B`).
+  2. The two OPTIONAL DLLs, on their own row: **ClassicAPI** green (`3fb950`,
+     "Recommended") and **AuctionQueryThrottle** orange (`ff8c00`, "Highly
+     Recommended"), followed by a `<sub>` caption saying Aegis runs on a stock
+     client and naming what each one buys.
 
-  **Nothing is Required, and the loader badges were deliberately REMOVED.**
-  SuperWoW, Nampower, UnitXP_SP3 and ClassicAPI badges used to sit here; a grep
-  of `core/` and `ui/` finds no calls to any of them, so the owner removed them
-  rather than imply a relationship. Do not re-add them, and do not reinstate a
-  "Required" badge, without a code change that actually depends on one.
+  **The Client badge was removed** (`c79c6e`, "WoW 1.12 vanilla). It restated
+  what the server badges and the intro already say, and the row it sat in is now
+  the optional-DLL row, where a client badge does not belong.
+
+  **ClassicAPI earned its badge in code and nothing else has.** SuperWoW,
+  Nampower and UnitXP_SP3 badges used to sit here; a grep of `core/` and `ui/`
+  finds no calls to any of them, so they were removed rather than imply a
+  relationship. `C_Item` IS called (`util.ClientSellPrice`,
+  `util.ClientItemLevel`), which is why ClassicAPI came back. Same test for
+  anything else: a code change that actually depends on it, or no badge.
+
+  **Nothing is Required.** Both DLLs are optional and the addon states what it
+  loses without them — do not reinstate a "Required" badge.
 
   There is **no version badge** — but the **H1 carries the version**
   (`# Aegis: Exchange (v1.1.2)`), so it is a bump site. See the checklist below.
@@ -339,8 +375,56 @@ are done in practice — **imitate the approach, do not copy code blindly**:
   5. `CHANGELOG.md` — a new entry plus the link ref at the bottom
 
   The window title bar and the load message both read `A.version`, so they
-  follow automatically. Versions are `MAJOR.MINOR.PATCH`; 1.1.0 was the first
-  public release (everything below it was pre-release development).
+  follow automatically.
+
+### WHICH number to bump
+
+`MAJOR.MINOR.PATCH`. **Aegis has had a public release, so MAJOR is 1.**
+
+- **MAJOR (`1`.x.y) — stability.** It went to 1 at the public release and stays
+  there. It moves again only for a change that breaks a player's existing setup
+  without a migration — a SavedVariables format they cannot upgrade into, a
+  removed feature people depend on. Not for "a lot has changed": size is not
+  breakage.
+
+- **MINOR (1.`x`.0) — a new capability.** The addon can do something it could
+  not do before. A new tooltip line, a new filter, a new tab, a new data source.
+  The test: *could a player notice a new thing, not merely a better thing?*
+  Resets PATCH to 0.
+
+- **PATCH (1.x.`y`) — a fix or a small correction.** Bug fixes, security fixes,
+  typos, wording, colour, layout, and a rewritten formula that computes the same
+  quantity more correctly. **No new capability.**
+
+**Where this went wrong before.** A layout change is a PATCH. So is a colour,
+a rename, and a corrected calculation. Ten releases in the 1.x line were
+numbered MINOR for work that only fixed or polished, which is how the number ran
+to 1.49.1 while `main` sat at 1.21.1.
+
+**Changing HOW something is built is not a capability.** v1.51.0 was numbered
+MINOR for rebuilding three buttons on a different widget template and moving two
+of them a few pixels — a large diff, a rewrite of one file's styling path, and a
+new test suite. The player got the same three buttons doing the same three
+things, in a better-looking box. It shipped again as **1.50.2**. Ask what the
+player can now DO, never how much moved.
+
+**When a release does both** — adds a capability *and* fixes things — it is a
+MINOR. The larger claim wins.
+
+**Every shipped change bumps.** Not once per merge — once per piece of work.
+Fix a bug on a feature branch and the PATCH goes up; add a capability and the
+MINOR goes up and PATCH resets. The merge lands at whatever the branch has
+reached, so a branch that adds a feature and then fixes three things in it
+merges as `1.50.3`, not `1.50.0`.
+
+The number is a running account of what happened, which is what makes
+"quote the version in the title bar" worth asking for: a player on 1.49.2 and a
+player on 1.49.5 are not running the same code, and a scheme that only bumps at
+merge time cannot tell them apart.
+
+**Not a release at all**, and therefore not a bump: anything under `tests/`,
+`tools/` or `design/`, and edits to `CLAUDE.md` / `ROADMAP.md`. None of it ships.
+
 
 ---
 
@@ -370,6 +454,9 @@ the `.toc`, so it is never a **restart** release and never a version bump.
 - [ ] No function exceeds **32 upvalues** (`python3 tests/lint/upvalues.py`, or
       by hand `luac5.1 -l -p f.lua | grep upvalues`). `luac -p` and a 5.1
       harness will NOT catch this; the client refuses to load the file.
+- [ ] No `C.<colour>` was invented (`python3 tests/lint/palette.py`). The UI
+      file is never loaded by a suite, so a colour that is not in the palette
+      passes every check and throws when a player opens that tab.
 - [ ] No top-level definition was lost to a scripted edit
       (`python3 tests/lint/definitions.py`). Run this after ANY multi-line or
       scripted edit — the file still compiles when a function goes missing, so

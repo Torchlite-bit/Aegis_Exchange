@@ -157,10 +157,26 @@ W.realm   = "TestRealm"
 W.player  = "Tester"
 function GetRealmName() return W.realm end
 function UnitName(unit) if unit == "player" then return W.player end return nil end
-function UnitFactionGroup() return "Alliance" end
+-- "npc" answers only at a FACTION auctioneer; at a neutral (goblin) one the
+-- client returns nil. The old version ignored its argument and always said
+-- "Alliance", so the 25% neutral deposit could not be modelled at all -- and
+-- the addon ignored that case for just as long.
+W.npcFaction = "Alliance"
+function UnitFactionGroup(unit)
+    if unit == "npc" then return W.npcFaction end
+    return "Alliance"
+end
 
 W.money = 500000                      -- 50g
 function GetMoney() return W.money end
+
+-- Change the balance the way the client does: the number moves and PLAYER_MONEY
+-- fires. Tests that only assign W.money are testing a client that never told
+-- the addon anything, which is not one that exists.
+function W.SpendMoney(copper, frame)
+    W.money = W.money - copper
+    if frame then W.FireEvent(frame, "PLAYER_MONEY") end
+end
 
 ITEM_QUALITY_COLORS = {
     [0] = { r = 0.62, g = 0.62, b = 0.62 },
@@ -180,9 +196,29 @@ AUCTION_TIME_LEFT4 = "Very Long"
 -- Items
 -- ---------------------------------------------------------------------------
 
+-- The client's quality palette, keyed 0..6. Real global; item names are
+-- written in these colours everywhere in the game, so anything rendering a
+-- list of items reaches for it.
+ITEM_QUALITY_COLORS = {
+    [0] = { r = .62, g = .62, b = .62, hex = "|cff9d9d9d" },
+    [1] = { r = 1,   g = 1,   b = 1,   hex = "|cffffffff" },
+    [2] = { r = .12, g = 1,   b = 0,   hex = "|cff1eff00" },
+    [3] = { r = 0,   g = .44, b = .87, hex = "|cff0070dd" },
+    [4] = { r = .64, g = .21, b = .93, hex = "|cffa335ee" },
+    [5] = { r = 1,   g = .50, b = 0,   hex = "|cffff8000" },
+    [6] = { r = .90, g = .80, b = .50, hex = "|cffe6cc80" },
+}
+
 -- itemId -> record. GetItemInfo answers only for items placed here, which is
 -- the behaviour that matters: on 1.12 it returns nil for anything not in the
 -- client's cache, and code that assumes otherwise breaks on a fresh login.
+--
+-- WHAT THIS STILL DOES NOT MODEL: an item that is registered but NOT cached.
+-- Every W.AddItem is answerable forever, so a test cannot ask what happens
+-- when the client knows an item exists and has no data for it -- which is the
+-- state most of a fresh login is in, and the reason db.facts, the harvest and
+-- util.ItemInfo's guards all exist. Anything relying on that path is checked
+-- by leaving the item unregistered, which is close but not the same thing.
 W.items = {}
 W.tooltipLines = {}
 
@@ -193,6 +229,9 @@ function W.AddItem(id, rec)
     W.items[id] = rec
     W.items[rec.name] = rec
     W.items[rec.link] = rec
+    -- The client answers GetItemInfo for the bare item STRING too, and code
+    -- that builds one by hand would otherwise look broken only here.
+    W.items["item:" .. id .. ":0:0:0"] = rec
     return rec
 end
 
@@ -207,24 +246,291 @@ end
 -- slot further along on a later client. util.ItemInfo therefore anchors on
 -- "stackCount is the LAST NUMBER" instead of indexing a fixed position.
 --
--- BOTH shapes are offered here, because a test that only ever sees one cannot
--- tell the anchor apart from a hardcoded index -- and a hardcoded index is
--- exactly the bug that shipped and cost four rounds of "why does /stack do
--- nothing". Flip with W.itemInfoShape.
-W.itemInfoShape = "vanilla"          -- or "later"
+-- FIVE shapes are offered, because a test that only ever sees one cannot tell
+-- an anchor apart from a hardcoded index -- and a hardcoded index is exactly
+-- the bug that shipped and cost four rounds of "why does /stack do nothing".
+-- Flip with W.itemInfoShape:
+--
+--   "vanilla"   9 values, texture last.
+--   "later"     10, itemLevel inserted at 4 -- everything after 3 shifts one.
+--   "wide"      18, what a client mod may install in place of the global.
+--               Six numbers follow stackCount, which is what made the old
+--               anchor-on-the-last-number trick wrong.
+--   "holey"     10 like "later", but equipLoc is nil -- the slot is simply
+--               absent rather than moved, so a shift-detecting anchor cannot
+--               see it and Finish's stand-in has to cover it.
+--   "trailing"  vanilla's 9 plus an APPENDED number at 10. Reported from a
+--               real client via /aex diag; it is what broke the last-number
+--               anchor and moved every field by three.
+W.itemInfoShape = "vanilla"
 
-function GetItemInfo(key)
+-- The client resolves an item from an id, a name, or ANY well-formed link --
+-- the colour code in front of a link is decoration, not identity. Keying only
+-- on the exact string a test happened to build made a hand-written link miss
+-- while the generated one hit, which looks exactly like a bug in the addon.
+local function ItemRec(key)
     local r = W.items[key]
+    if r then return r end
+    if type(key) == "string" then
+        local _, _, id = string.find(key, "Hitem:(%d+)")
+        if not id then _, _, id = string.find(key, "^item:(%d+)") end
+        if id then return W.items[tonumber(id)] end
+    end
+    return nil
+end
+
+-- Every call is COUNTED, so a test can say "this path must not touch the item
+-- cache" at all.
+--
+-- CORRECTION, and it matters: an earlier version of this comment said
+-- GetItemInfo queries the SERVER for an uncached item. It does not. It returns
+-- nil and does nothing else; the call that forces a fetch is a tooltip
+-- SetHyperlink. aux settles it -- its populate_wdb reads
+-- `if not GetItemInfo(id) then SetHyperlink(id) end`, which is only meaningful
+-- if the first is a free probe and the second is the fetch.
+--
+-- The count is still worth keeping. GetItemInfo is a real cost per call and
+-- these paths run per bag item and per auction row, so a loop that reaches for
+-- it is still a loop worth catching -- just not a network one.
+W.itemInfoCalls = 0
+
+-- A BARE NUMBER IS NOT A LOOKUP KEY, and this mock used to pretend it was.
+--
+-- 1.12's GetItemInfo takes an item NAME, an item LINK or an item STRING
+-- ("item:2586:0:0:0"). It does not take an item id as a number. Every call in
+-- aux builds an itemstring for exactly this reason.
+--
+-- Resolving numbers here hid a real bug for many releases: de.Resolve passed
+-- the raw numeric id, so the disenchant tooltip line never appeared on a real
+-- client while every test said it did. The mock being MORE capable than the
+-- client is the worst kind of mock.
+function GetItemInfo(key)
+    W.itemInfoCalls = W.itemInfoCalls + 1
+    if type(key) == "number" then return nil end
+    local r = ItemRec(key)
     if not r then return nil end
+    if W.itemInfoShape == "wide" then
+        return r.name, r.link, r.quality or 1, r.itemLevel or 0,
+               r.minLevel or 0, r.type or "Trade Goods",
+               r.subType or "Cloth", r.stackCount or 20,
+               r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark",
+               r.sellPrice or 0, 0, 0, 0, 0, nil, false, ""
+    end
     if W.itemInfoShape == "later" then
         return r.name, r.link, r.quality or 1, r.itemLevel or 55,
                r.minLevel or 0, r.type or "Trade Goods",
                r.subType or "Cloth", r.stackCount or 20,
-               r.equipLoc or "", r.texture or "icon"
+               r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
+    end
+    -- THE SHAPE THE PLAYER ACTUALLY HAS, copied from /aex diag: vanilla's nine
+    -- values plus a TRAILING NUMBER at ten. Nothing is shifted or missing --
+    -- something is APPENDED -- which is what broke the last-number anchor and
+    -- moved every field by three.
+    if W.itemInfoShape == "trailing" then
+        return r.name, r.link, r.quality or 1, r.minLevel or 0,
+               r.type or "Trade Goods", r.subType or "Cloth",
+               r.stackCount or 20, r.equipLoc or "",
+               r.texture or "Interface\\Icons\\INV_Misc_QuestionMark", 306
+    end
+    -- A HOLE where equipLoc should be, with the texture still at 10. The
+    -- anchor finds the right run and counts forward correctly -- and reads a
+    -- nil, because the field is absent rather than displaced. equipLoc came
+    -- back nil, de.Class went nil, CanDisenchant went false, and the
+    -- disenchant line silently never rendered. This is the case Finish's
+    -- stand-in exists for; no anchor can fix a field that is not there.
+    if W.itemInfoShape == "holey" then
+        return r.name, r.link, r.quality or 1, r.itemLevel or 5,
+               r.minLevel or 1, r.type or "Weapon",
+               r.subType or "One-Handed Swords", r.stackCount or 1,
+               nil, r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
     end
     return r.name, r.link, r.quality or 1, r.minLevel or 0,
            r.type or "Trade Goods", r.subType or "Cloth",
-           r.stackCount or 20, r.equipLoc or "", r.texture or "icon"
+           r.stackCount or 20, r.equipLoc or "",
+           r.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+-- ---------------------------------------------------------------------------
+-- Bags
+-- ---------------------------------------------------------------------------
+
+-- Just enough of the container API for core/sell.lua's bag walks.
+--
+-- W.SetBags takes { [bagIndex] = { {link=, count=, texture=}, ... } }, the
+-- inner array indexed by SLOT. Bag 0 is the backpack, as on the real client.
+--
+-- sell.IsAuctionable reads a scanning tooltip, and the stub tooltip reports
+-- zero lines -- so everything here counts as auctionable, which is what these
+-- tests want. A soulbound case would need tooltip lines, not bag entries.
+W.bags = {}
+
+-- Establishing a fresh set of bags also empties the cursor and the sell slot.
+--
+-- Without that, an item still held from a previous case gets put BACK into
+-- the new bags when something clears the slot -- so five copper bars become
+-- ten and the test reads as a duplication bug in the addon rather than as one
+-- world leaking into the next.
+function W.SetBags(t)
+    W.bags     = t or {}
+    W.cursor   = nil
+    W.sellSlot = nil
+end
+
+function GetContainerNumSlots(bag)
+    local b = W.bags[bag]
+    return b and table.getn(b) or 0
+end
+
+function GetContainerItemLink(bag, slot)
+    local b = W.bags[bag]
+    local s = b and b[slot]
+    return s and s.link or nil
+end
+
+function GetContainerItemInfo(bag, slot)
+    local b = W.bags[bag]
+    local s = b and b[slot]
+    if not s or not s.link then return nil end
+    return s.texture or "icon", s.count or 1
+end
+
+-- ---------------------------------------------------------------------------
+-- The cursor and the auction sell slot
+-- ---------------------------------------------------------------------------
+--
+-- MODELLED, not stubbed, because the bug this exists for is a property of how
+-- the client MOVES items: ClickAuctionSellItemButton SWAPS the cursor with
+-- whatever is already in the sell slot. Place an item while the slot is
+-- occupied and the old one comes back onto the cursor -- where it silently
+-- stays until something puts it down.
+--
+-- A no-op stub would have made the fix untestable and the bug unreproducible,
+-- which is how it stayed a guess for one whole release.
+--
+-- An emptied bag slot keeps its place in the array as a table with no link,
+-- so GetContainerNumSlots (which is table.getn) does not change when an item
+-- leaves a bag.
+W.cursor   = nil    -- { link, count, bag, slot } or nil
+W.sellSlot = nil    -- { link, count, bag, slot } or nil
+
+local function bagCell(bag, slot)
+    local b = W.bags[bag]
+    if not b then return nil end
+    if not b[slot] then b[slot] = {} end
+    return b[slot]
+end
+
+function PickupContainerItem(bag, slot)
+    local cell = bagCell(bag, slot)
+    if not cell then return end
+    local held = W.cursor
+    if cell.link then
+        W.cursor = { link = cell.link, count = cell.count or 1,
+                     bag = bag, slot = slot }
+    else
+        W.cursor = nil
+    end
+    cell.link  = held and held.link or nil
+    cell.count = held and held.count or nil
+end
+
+function ClickAuctionSellItemButton()
+    local held, slotted = W.cursor, W.sellSlot
+    W.sellSlot = held
+    W.cursor   = slotted
+end
+
+-- Puts a held item back where it came from, which is what the real client
+-- does: the cursor is never simply emptied of a real item.
+function ClearCursor()
+    local held = W.cursor
+    W.cursor = nil
+    if not held then return end
+    local cell = bagCell(held.bag, held.slot)
+    if cell and not cell.link then
+        cell.link, cell.count = held.link, held.count
+        return
+    end
+    -- Its origin is occupied: drop it in the first free slot, as the client
+    -- would. If there is nowhere at all it stays put, which is a full-bags
+    -- case rather than a lost item.
+    for bag = 0, 4 do
+        local b = W.bags[bag]
+        for i = 1, table.getn(b or {}) do
+            if not b[i].link then
+                b[i].link, b[i].count = held.link, held.count
+                return
+            end
+        end
+    end
+    W.cursor = held
+end
+
+function GetAuctionSellItemInfo()
+    local s = W.sellSlot
+    if not s then return nil end
+    -- Through ItemRec, not W.items[link]: a hand-written link in a test and the
+    -- coloured one W.AddItem generates are the same item to the client, and
+    -- keying on the exact string made the slot read blank for a registered item.
+    local rec = ItemRec(s.link) or {}
+    return rec.name or s.link, rec.texture or "icon", s.count or 1,
+           rec.quality or 1, 1, rec.sellPrice or 0,
+           rec.stackCount or 20, s.link
+end
+
+-- ---------------------------------------------------------------------------
+-- Merchants
+-- ---------------------------------------------------------------------------
+
+-- An open vendor's inventory. Each row is { link, price, quantity,
+-- numAvailable } where `price` is for the whole BUNDLE of `quantity`, and
+-- numAvailable is -1 for unlimited stock -- which is the client's convention
+-- and the reason "limited" is `>= 0` rather than `> 0`.
+W.merchant = {}
+function W.SetMerchant(rows) W.merchant = rows or {} end
+
+function GetMerchantNumItems() return table.getn(W.merchant) end
+
+function GetMerchantItemInfo(index)
+    local r = W.merchant[index]
+    if not r then return nil end
+    local rec = ItemRec(r.link) or {}
+    return rec.name or r.link, rec.texture or "icon", r.price or 0,
+           r.quantity or 1,
+           r.numAvailable == nil and -1 or r.numAvailable,
+           1, r.extendedCost
+end
+
+function GetMerchantItemLink(index)
+    local r = W.merchant[index]
+    return r and r.link or nil
+end
+
+-- ---------------------------------------------------------------------------
+-- The client's own deposit maths
+-- ---------------------------------------------------------------------------
+
+-- CalculateAuctionDeposit answers for the SLOTTED item only, which is exactly
+-- why the addon cannot use it for a bag preview.
+--
+-- The rate is settable because the whole point of the calibration work is that
+-- we do NOT know this client's rule. A real Turtle client was measured saying
+-- 25 where vanilla's 5% says 48, so a test can set 0.025 and reproduce that
+-- disagreement rather than assert against a number someone typed.
+--
+-- Set W.clientDepositRate to nil to model a client with no such function at
+-- all, which is what the addon sees before the AH UI has loaded.
+W.clientDepositRate = 0.05
+
+function CalculateAuctionDeposit(minutes)
+    if W.clientDepositRate == nil then return nil end
+    local s = W.sellSlot
+    if not s then return 0 end
+    local rec = ItemRec(s.link) or {}
+    local unit = (rec.sellPrice or 0)
+    if unit <= 0 then return 0 end
+    local count = s.count or 1
+    return math.floor(unit * W.clientDepositRate * count * (minutes / 120))
 end
 
 -- ---------------------------------------------------------------------------
@@ -243,7 +549,39 @@ function W.SetPage(rows, totalAuctions)
     W.totalAuctions = totalAuctions or table.getn(W.page)
 end
 
+-- YOUR OWN auctions, and they are PAGED like the browse list. The client hands
+-- back a BATCH of at most 50 plus the TOTAL you actually own, and CancelAuction
+-- indexes into the batch -- which is why the addon shows one page rather than
+-- gathering them all.
+--
+-- The mock returned 0 for "owner", so a suite could not tell a paged list from
+-- an unpaged one, and the addon read only page 0 for its whole life.
+W.owned = {}          -- every auction you own, across all pages
+W.ownerPage = 0
+W.OWNER_PAGE = 50
+
+function W.SetOwned(rows) W.owned = rows or {}; W.ownerPage = 0 end
+
+local function ownerBatch()
+    local out, first = {}, W.ownerPage * W.OWNER_PAGE
+    local i = 1
+    while i <= W.OWNER_PAGE do
+        local r = W.owned[first + i]
+        if not r then break end
+        table.insert(out, r)
+        i = i + 1
+    end
+    return out
+end
+
+function GetOwnerAuctionItems(page)
+    W.ownerPage = page or 0
+end
+
 function GetNumAuctionItems(list)
+    if list == "owner" then
+        return table.getn(ownerBatch()), table.getn(W.owned)
+    end
     if list ~= "list" then return 0, 0 end
     return table.getn(W.page), W.totalAuctions
 end
@@ -251,6 +589,13 @@ end
 -- EXACTLY the 1.12 twelve, in order. `owner` is nil until the name resolves,
 -- and rows may say so by setting ownerUnresolved.
 function GetAuctionItemInfo(list, i)
+    if list == "owner" then
+        local r = ownerBatch()[i]
+        if not r then return nil end
+        return r.name, r.texture or "icon", r.count or 1, r.quality or 1,
+               nil, r.level or 1, r.minBid or 0, 0,
+               r.buyout or 0, r.bidAmount or 0, r.highBidder, "me"
+    end
     if list ~= "list" then return nil end
     local r = W.page[i]
     if not r then return nil end
@@ -262,14 +607,33 @@ function GetAuctionItemInfo(list, i)
 end
 
 function GetAuctionItemLink(list, i)
-    local r = (list == "list") and W.page[i]
+    local r
+    if list == "owner" then r = ownerBatch()[i] else r = W.page[i] end
     return r and r.link or nil
 end
 
 -- 1-4 on 1.12, indexing AUCTION_TIME_LEFT1..4. Never a string.
 function GetAuctionItemTimeLeft(list, i)
-    local r = (list == "list") and W.page[i]
+    local r
+    if list == "owner" then r = ownerBatch()[i] else r = W.page[i] end
     return r and (r.timeLeft or 4) or nil
+end
+
+-- Every posting attempt, recorded. Vanilla allows a start bid EQUAL to the
+-- buyout -- only a bid ABOVE it is rejected -- so a suite has to be able to see
+-- what was actually sent rather than only that nothing errored.
+-- The cursor is already modelled (W.cursor); this is the client's own way of
+-- asking about it. Missing until now, which meant sell.StartPosting -- the
+-- whole multi-stack path -- errored the moment a test touched it, so it never
+-- had one.
+function CursorHasItem()
+    return W.cursor and true or nil
+end
+
+W.posted = {}
+function StartAuction(bid, buyout, minutes)
+    table.insert(W.posted, { bid = bid, buyout = buyout, minutes = minutes })
+    W.sellSlot = nil
 end
 
 function CanSendAuctionQuery() return W.queryOpen end
@@ -346,9 +710,25 @@ function W.Reset()
     W.queryOpen     = true
     W.bids          = {}
     W.items         = {}
+    W.bags          = {}
+    W.cursor        = nil
+    W.sellSlot      = nil
+    W.posted        = {}
+    W.owned         = {}
+    W.ownerPage     = 0
     W.tooltipLines  = {}
     W.money         = 500000
     W.now           = 1700000000
+    W.uptime        = 1000
+    W.spellTargeting = false
+    W.loot          = {}
+    W.equipped      = {}
+    W.itemInfoShape = "vanilla"
+    W.itemInfoCalls = 0
+    W.merchant      = {}
+    W.clientDepositRate = 0.05
+    W.npcFaction    = "Alliance"
+    C_Item          = nil
     AegisExchangeDB     = nil
     AegisExchangeCharDB = nil
 end
@@ -356,11 +736,126 @@ end
 -- Load the addon's core modules in .toc order under this simulated client.
 -- `upTo` stops early, e.g. W.LoadCore("util") for the pure-Lua layer only.
 function W.LoadCore(upTo)
-    local order = { "init", "util", "db", "scan", "sell", "buy" }
+    local order = { "init", "util", "db", "disenchant",
+                    "scan", "sell", "buy" }
+    -- This list is a SECOND copy of the .toc's load order, and two copies of
+    -- one order is how a file gets added to the addon but never to the tests
+    -- -- which presents as "the suite passes and the client errors". Read the
+    -- .toc and refuse to run if they have drifted.
+    local toc, i = io.open("Aegis_Exchange.toc"), 1
+    if toc then
+        for line in toc:lines() do
+            local _, _, name = string.find(line, "^core\\(%a+)%.lua")
+            if name then
+                if order[i] ~= name then
+                    error("tests/support/wow.lua load order has drifted from"
+                        .. " Aegis_Exchange.toc: expected '" .. name
+                        .. "' at position " .. i .. ", found '"
+                        .. tostring(order[i]) .. "'")
+                end
+                i = i + 1
+            end
+        end
+        toc:close()
+        if i - 1 ~= table.getn(order) then
+            error("tests/support/wow.lua lists " .. table.getn(order)
+                .. " core files, Aegis_Exchange.toc lists " .. (i - 1))
+        end
+    end
     for i = 1, table.getn(order) do
         dofile("core/" .. order[i] .. ".lua")
         if order[i] == upTo then break end
     end
+    return AegisExchange
+end
+
+-- ---------------------------------------------------------------------------
+-- Clock, spell targeting, loot
+-- ---------------------------------------------------------------------------
+
+-- A clock the test drives, so a time WINDOW can actually be tested rather
+-- than assumed. Real GetTime is seconds since LOGIN, and is a different clock
+-- from time()'s epoch seconds -- kept separate here for that reason, and
+-- because advancing one to test a timeout must not silently move the calendar
+-- the price DB buckets its dailies by.
+W.uptime = 1000
+function GetTime() return W.uptime end
+function W.Advance(seconds) W.uptime = W.uptime + seconds end
+
+-- True while a spell is waiting for the player to click an item -- what
+-- Disenchant, Enchant and Pick Lock all do. This is the signal that separates
+-- "clicked a bag item" from "clicked a bag item AT something".
+W.spellTargeting = false
+function SpellIsTargeting() return W.spellTargeting end
+
+-- The open loot window: { { link = , quantity = , money = } , ... }
+W.loot = {}
+function W.SetLoot(rows) W.loot = rows or {} end
+
+function GetNumLootItems() return table.getn(W.loot) end
+function LootSlotIsItem(i)
+    local r = W.loot[i]
+    return (r and not r.money) and 1 or nil
+end
+function GetLootSlotLink(i)
+    local r = W.loot[i]
+    return r and r.link or nil
+end
+function GetLootSlotInfo(i)
+    local r = W.loot[i]
+    if not r then return nil end
+    return "icon", r.name or "loot", r.quantity or 1, r.quality or 1, nil
+end
+
+function GetInventoryItemLink(unit, slot)
+    local r = W.equipped and W.equipped[slot]
+    return r and r.link or nil
+end
+W.equipped = {}
+
+-- ---------------------------------------------------------------------------
+-- C_Item: the data 1.12 has and never shows
+-- ---------------------------------------------------------------------------
+
+-- A client mod (ClassicAPI) exposes an item's vendor sell price and its item
+-- level -- both of which the client fills in on every item and displays for
+-- neither. Aegis must work with it and WITHOUT it, so the harness has to be
+-- able to take it away again: `W.SetClientItemData(false)` removes the global
+-- entirely, which is the state of every client that has no such mod.
+function W.SetClientItemData(on)
+    if not on then C_Item = nil return end
+    C_Item = {
+        GetItemSellPriceByID = function(id)
+            local r = W.items[id]
+            return r and r.sellPrice or nil
+        end,
+        GetDetailedItemLevelInfo = function(id)
+            local r = W.items[id]
+            return r and r.itemLevel or nil
+        end,
+        -- The wide 18-value tuple, with equipLoc at position 9. This is what
+        -- rescues a client whose stock GetItemInfo omits the slot entirely --
+        -- and it gives the REAL slot rather than the armour-or-weapon
+        -- stand-in, so it is tried first.
+        GetItemInfo = function(id)
+            local r = W.items[id]
+            if not r then return nil end
+            return r.name, r.link, r.quality or 1, r.itemLevel or 0,
+                   r.minLevel or 0, r.type or "Trade Goods",
+                   r.subType or "Cloth", r.stackCount or 20,
+                   r.equipLoc or "", r.texture or "Interface\\Icons\\INV_Misc_QuestionMark",
+                   r.sellPrice or 0, 0, 0, 0, 0, nil, false, ""
+        end,
+    }
+end
+
+-- Load a ui/ module on top of the core ones.
+--
+-- Kept separate from W.LoadCore because most suites want nothing to do with
+-- the UI, and ui/frame.lua in particular builds a window on load. The files
+-- reachable this way are the ones that only DEFINE things at file scope.
+function W.LoadUI(name)
+    dofile("ui/" .. name .. ".lua")
     return AegisExchange
 end
 

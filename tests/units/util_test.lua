@@ -216,4 +216,140 @@ H.eq("equipLoc survives the shift", laterOne.equipLoc, "INVTYPE_CHEST")
 
 W.itemInfoShape = "vanilla"          -- leave the client as we found it
 
+-- ---------------------------------------------------------------------------
+H.section("ItemInfo takes an ID, because half the addon has one")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR, and it is the most expensive one in this project so
+-- far measured in releases: 1.12's GetItemInfo takes an item NAME, an item
+-- LINK or an item STRING. It does NOT take an id as a number.
+--
+-- de.Resolve passed the raw numeric id, carrying a comment asserting "both are
+-- valid on 1.12". They are not. So util.ItemInfo returned nil for every item
+-- reached by id, de.Resolve returned nil, and THE DISENCHANT TOOLTIP LINE
+-- NEVER APPEARED ON A REAL CLIENT -- across every release that shipped it,
+-- while the price lines beside it (DB reads keyed by id) worked perfectly.
+-- Nothing errored. It read as "that feature must not be finished".
+--
+-- Every GetItemInfo call in aux builds an itemstring. That is why.
+--
+-- The mock hid it by resolving numbers, which the client does not. It no
+-- longer does, and this section is what holds that line.
+
+local byId = util.ItemInfo(2589)
+H.check("a numeric id resolves", byId ~= nil)
+H.eq("...to the right item", byId and byId.name, "Linen Cloth")
+
+local byString = util.ItemInfo("item:2589:0:0:0")
+H.eq("an itemstring resolves the same", byString and byString.name, "Linen Cloth")
+
+local byLink = util.ItemInfo(W.items[2589].link)
+H.eq("and so does a link", byLink and byLink.name, "Linen Cloth")
+
+-- The name-only helper the tooltip and the /aex de report use. Three sites
+-- passed a bare number to GetItemInfo and silently got nothing; two of them
+-- then printed "item:10940" at a player instead of a material name.
+H.eq("util.ItemName answers for an id", util.ItemName(2589), "Linen Cloth")
+H.isNil("...and nil for an id nobody knows", util.ItemName(999999))
+
+-- ---------------------------------------------------------------------------
+H.section("a client that sends no equip slot at all")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED FROM A REAL CLIENT. Turtle 1.12 with ClassicAPI returns TEN values
+-- with a HOLE where equipLoc should sit. The anchor found the right
+-- stackCount, counted forward, and read the hole -- so equipLoc came back nil,
+-- de.Class went nil, CanDisenchant went false, and the disenchant line
+-- silently never rendered on that client. Nothing errored.
+--
+-- The slot is not SHIFTED, it is ABSENT -- so it cannot be recovered by
+-- looking harder, only stood in for. `type` is still there and still says
+-- "Weapon" or "Armor", which is the only question the disenchant rule ever
+-- asks a slot.
+
+W.AddItem(4242, { name = "Training Sword", quality = 2, minLevel = 1,
+                  itemLevel = 5, type = "Weapon",
+                  subType = "One-Handed Swords", stackCount = 1,
+                  equipLoc = "INVTYPE_WEAPONMAINHAND", texture = "t" })
+
+W.itemInfoShape = "holey"
+local holey = util.ItemInfo(4242)
+H.check("the item still resolves", holey ~= nil)
+H.eq("...quality is still read absolutely", holey and holey.quality, 2)
+H.eq("...and the type survives", holey and holey.type, "Weapon")
+
+-- The slot is GONE from the tuple, so it cannot be recovered -- only stood in
+-- for. What matters downstream is not the literal slot but the one question
+-- the disenchant rule asks it, so that is what this pins.
+H.eq("a stand-in slot is supplied from the type", holey and holey.equipLoc,
+     "AEGIS_ANY_WEAPON")
+-- What that stand-in has to MEAN is asserted in clientdata_test, which loads
+-- core/disenchant.lua; this suite loads util alone.
+
+-- The same lookup on every other shape, so the marker search cannot be a fix
+-- that only works on the broken one.
+local shapes = { "vanilla", "later", "wide" }
+local si = 1
+while si <= table.getn(shapes) do
+    W.itemInfoShape = shapes[si]
+    local info = util.ItemInfo(4242)
+    H.eq("the real equipLoc is used where the client sends one ("
+         .. shapes[si] .. ")", info and info.equipLoc, "INVTYPE_WEAPONMAINHAND")
+    si = si + 1
+end
+
+-- A trade good has no INVTYPE_ anywhere, and must NOT acquire one.
+W.itemInfoShape = "vanilla"
+local cloth = util.ItemInfo(2589)
+H.check("a trade good still reports no equip slot",
+        cloth.equipLoc == nil or cloth.equipLoc == "",
+        tostring(cloth.equipLoc))
+
+-- ---------------------------------------------------------------------------
+H.section("a client that APPENDS a value to the tuple")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED FROM A REAL CLIENT via /aex diag. Turtle 1.12 with ClassicAPI
+-- returns vanilla's nine values plus a TRAILING NUMBER at ten. Nothing is
+-- shifted and nothing is missing -- something is appended -- and the old
+-- "last value that is a number" anchor landed on it, moving every field by
+-- three: minLevel read the stack size, type read the equip slot, subType read
+-- the texture path, equipLoc read off the end.
+--
+-- Nothing errored. The visible symptom was bag categories named
+-- "INVTYPE_2HWEAPON" and a disenchant line that never appeared.
+--
+-- The texture is the anchor now: it starts with "Interface\\" on every 1.12
+-- client, and minLevel..texture is one contiguous run in every shape, so a
+-- field appended AFTER it cannot move anything.
+
+W.AddItem(8178, { name = "Training Sword", quality = 2, minLevel = 5,
+                  type = "Weapon", subType = "Two-Handed Swords",
+                  stackCount = 1, equipLoc = "INVTYPE_2HWEAPON",
+                  texture = "Interface\\Icons\\INV_Sword_45" })
+
+W.itemInfoShape = "trailing"
+local t = util.ItemInfo(8178)
+H.eq("name still reads absolutely", t.name, "Training Sword")
+H.eq("quality still reads absolutely", t.quality, 2)
+H.eq("minLevel is NOT the stack size", t.minLevel, 5)
+H.eq("type is NOT the equip slot", t.type, "Weapon")
+H.eq("subType is NOT the texture path", t.subType, "Two-Handed Swords")
+H.eq("stackCount is the stack size", t.stackCount, 1)
+H.eq("equipLoc survives the appended field", t.equipLoc, "INVTYPE_2HWEAPON")
+
+-- The same item on every other shape, so the texture anchor is not a fix that
+-- only works on the one that reported the bug.
+local shapes = { "vanilla", "later", "wide" }
+local si = 1
+while si <= table.getn(shapes) do
+    W.itemInfoShape = shapes[si]
+    local info = util.ItemInfo(8178)
+    H.eq("minLevel on " .. shapes[si], info.minLevel, 5)
+    H.eq("type on " .. shapes[si], info.type, "Weapon")
+    H.eq("equipLoc on " .. shapes[si], info.equipLoc, "INVTYPE_2HWEAPON")
+    si = si + 1
+end
+W.itemInfoShape = "vanilla"
+
 os.exit(H.report("util"))

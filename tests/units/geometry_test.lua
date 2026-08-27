@@ -54,11 +54,28 @@ local function field(tableName, fieldName)
         if not inside then
             if string.find(line, "^local " .. tableName .. "%s*=%s*{") then
                 inside = true
+                -- The FIRST field may share the opening line -- `local SCX =
+                -- { unit = 4, ... }` is written that way, and so is ACX. The
+                -- reader used to start looking on the NEXT line and reported
+                -- the field missing, which reads as "the table moved" rather
+                -- than "the table is formatted differently".
+                local _, _, v0 = string.find(line,
+                    "[{,]%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
+                if v0 then value = tonumber(v0); break end
             end
         else
             if string.find(line, "^}") then break end
-            local _, _, v = string.find(line,
-                "^%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
+            -- A field can sit ANYWHERE on a line, not just at the start of
+            -- one: RCX_BUY and RCW_BUY pack several per line. Anchoring at
+            -- the line start found the first of them and reported every
+            -- other as missing -- which reads as "the table moved" rather
+            -- than "the table is formatted differently", and sent the last
+            -- reader fix chasing the wrong thing. The leading comma lets one
+            -- pattern serve a field at the start of a line and one after a
+            -- separator, and the [{,] prefix is what stops `lvl` matching
+            -- inside `mylvl`.
+            local _, _, v = string.find("," .. line,
+                "[{,]%s*" .. fieldName .. "%s*=%s*([%-%d]+)")
             if v then value = tonumber(v); break end
         end
     end
@@ -716,5 +733,565 @@ H.check("the leftmost settings widget is inside the scroll frame",
 H.check("the chain does step left of its root, so the inset is load-bearing",
         worst ~= nil and worst < SET_INSET,
         "root " .. SET_INSET .. ", leftmost " .. tostring(worst))
+
+-- ---------------------------------------------------------------------------
+H.section("Every list fills its own box at every window height")
+-- ---------------------------------------------------------------------------
+
+-- THE FAULT THIS REPLACES. Until v1.23.0 six lists -- Crafting, its recipe
+-- tree, Auctions, History, and the Sell tab's bag and listings columns --
+-- counted their rows with ui.RowsFor, which measured the scroll frame. Every
+-- one of those frames is anchored by two corners, so GetHeight() reports the
+-- height it was last LAID OUT at, which is the window's CREATION size. Drag
+-- the window taller and the box grew with its anchors while the list kept the
+-- count it worked out at startup.
+--
+-- That is the same trap that took the Buy table, the Advanced widths and the
+-- Saved Searches columns. It is arithmetic on the window's own height now,
+-- and the numbers come out of the file rather than being restated here --
+-- every one of them is also a SetPoint offset.
+
+-- LISTBOX is loaded and RUN, not re-typed: `bag` and `sellList` are written
+-- as SELL_TOP_H plus a gap, and a copy here would not notice SELL_TOP_H
+-- moving.
+SELL_TOP_H = constant("SELL_TOP_H")
+
+-- Load a `local NAME = { ... }` layout table by RUNNING the real literal, so
+-- fields written as arithmetic on another constant come out right. SELLL's
+-- vertical bands are SELL_TOP_H plus a gap, and LISTBOX.sellList reads SELLL
+-- -- a copy here would not notice either of them moving.
+--
+-- ORDER MATTERS: a table that reads another must be loaded after it.
+local function loadTable(name)
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local body, grabbing = {}, false
+    for line in f:lines() do
+        if not grabbing then
+            if string.find(line, "^local " .. name .. " = {") then
+                grabbing = true
+                table.insert(body, name .. " = {")
+            end
+        else
+            table.insert(body, line)
+            if string.find(line, "^}") then break end
+        end
+    end
+    f:close()
+    if not grabbing then error("did not find: local " .. name .. " = {") end
+    local fn, err = loadstring(table.concat(body, "\n"), name)
+    if not fn then error(name .. " will not compile: " .. tostring(err)) end
+    fn()
+end
+
+loadTable("SELLL")
+loadTable("LISTBOX")
+
+do
+    local fn, err = loadstring(extract("function ui.ListRowsAt("), "ListRowsAt")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- `local NAME, NAME_H = n, n` -- the paired form the row constants use, which
+-- `constant` cannot read.
+local function pairConst(a, b)
+    local f = assert(io.open(SRC, "r"))
+    local x, y
+    for line in f:lines() do
+        local _, _, u, v = string.find(line,
+            "^local " .. a .. "%s*,%s*" .. b .. "%s*=%s*(%d+)%s*,%s*(%d+)")
+        if u then x, y = tonumber(u), tonumber(v); break end
+    end
+    f:close()
+    if not y then error("did not find: local " .. a .. ", " .. b) end
+    return x, y
+end
+
+local LISTS = {}
+do
+    local _, h
+    _, h = pairConst("CSIDE_ROWS", "CSIDE_ROW_H")
+    table.insert(LISTS, { name = "craft recipe tree", box = LISTBOX.craftSide,
+                          rowH = h, max = constant("CSIDE_ROWS_MAX") })
+    _, h = pairConst("CRAFT_ROWS", "CRAFT_ROW_H")
+    table.insert(LISTS, { name = "Crafting", box = LISTBOX.craft,
+                          rowH = h, max = constant("CRAFT_ROWS_MAX") })
+    _, h = pairConst("AUC_ROWS", "AUC_ROW_H")
+    table.insert(LISTS, { name = "Auctions", box = LISTBOX.auc,
+                          rowH = h, max = constant("AUC_ROWS_MAX") })
+    _, h = pairConst("HIST_ROWS", "HIST_ROW_H")
+    table.insert(LISTS, { name = "History", box = LISTBOX.hist,
+                          rowH = h, max = constant("HIST_ROWS_MAX") })
+    _, h = pairConst("BAG_ROWS", "BAG_ROW_H")
+    table.insert(LISTS, { name = "Sell bags", box = LISTBOX.bag,
+                          rowH = h, max = constant("BAG_ROWS_MAX") })
+    _, h = pairConst("LIST_ROWS", "LIST_ROW_H")
+    table.insert(LISTS, { name = "Sell listings", box = LISTBOX.sellList,
+                          rowH = h, max = constant("LIST_ROWS_MAX") })
+end
+
+H.eq("every list is accounted for", table.getn(LISTS), 6)
+
+for _, L in ipairs(LISTS) do
+    local function area(winH)
+        return ui.PanelHeightAt(winH) - L.box.top - L.box.bot
+    end
+
+    -- A box with no room at the smallest allowed window is a list with a
+    -- minimum size nobody wrote down.
+    H.check(L.name .. ": its box has room at MIN_H", area(MIN_H) >= L.rowH,
+            "area " .. area(MIN_H) .. ", row " .. L.rowH)
+
+    for _, winH in ipairs({ MIN_H, 600, 700, MAX_H }) do
+        local n = ui.ListRowsAt(winH, L.box, L.rowH, L.max)
+        H.check(L.name .. ": at least one row at " .. winH, n >= 1, n)
+        -- Nothing hangs out of the box. These rows are not the scroll
+        -- frame's scroll child, so nothing clips one -- it draws over
+        -- whatever is below it.
+        H.check(L.name .. ": " .. n .. " rows fit the box at " .. winH,
+                n * L.rowH <= area(winH),
+                n .. " x " .. L.rowH .. " > " .. area(winH))
+        -- ...and no whole row of empty space is left, which is the visible
+        -- half of the bug: a full-height box with a half-full list.
+        H.check(L.name .. ": no wasted row at " .. winH,
+                n == L.max or (n + 1) * L.rowH > area(winH),
+                n .. " rows in " .. area(winH) .. "px of " .. L.rowH)
+    end
+
+    -- THE REGRESSION ITSELF. The measuring version returned the same count
+    -- however tall the window was; this assertion is the one a revert fails.
+    H.check(L.name .. ": a taller window shows MORE rows",
+            ui.ListRowsAt(MAX_H, L.box, L.rowH, L.max)
+                > ui.ListRowsAt(MIN_H, L.box, L.rowH, L.max),
+            ui.ListRowsAt(MIN_H, L.box, L.rowH, L.max) .. " -> "
+                .. ui.ListRowsAt(MAX_H, L.box, L.rowH, L.max))
+
+    -- The cap is a cap.
+    H.eq(L.name .. ": the row pool ceiling holds",
+         ui.ListRowsAt(100000, L.box, L.rowH, L.max), L.max)
+end
+
+-- Degenerate input must not produce a zero or negative row count: a list that
+-- draws no rows at all reads as a broken tab, and this runs before UIParent
+-- has been measured on some logins.
+H.eq("an unmeasured window still shows a row",
+     ui.ListRowsAt(0, LISTBOX.auc, 21, 32), 1)
+H.eq("...and so does a nonsense one",
+     ui.ListRowsAt(-500, LISTBOX.auc, 21, 32), 1)
+H.eq("a missing box is survivable", ui.ListRowsAt(MAX_H, nil, 21, 32), 1)
+H.eq("...and a zero row height", ui.ListRowsAt(MAX_H, LISTBOX.auc, 0, 32), 1)
+
+-- ---------------------------------------------------------------------------
+H.section("The window OPENS at a size it was designed for")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR, and it shipped for several releases. The frame was
+-- created with literal `SetWidth(832) / SetHeight(460)` -- the size it used
+-- when MIN_W was 832 -- and those literals stayed put when MIN_W rose to 1000
+-- and MIN_H to 492. Every character who had ever dragged the window had a
+-- saved size and was fine; every FRESH INSTALL opened 168px under the minimum
+-- and the Buy table's right-hand columns ran off the panel.
+--
+-- It hid behind the resize grip: SetMinResize snaps the frame to MIN the
+-- moment sizing begins and OnMouseUp saves that, so one drag fixed it forever
+-- and nobody who had ever resized could reproduce it. Two users reported it;
+-- neither screen resolution nor pfUI had anything to do with it.
+--
+-- Read out of the source, both sides, because a copy of either number here
+-- would pass against a default that had drifted again.
+local function creationSize()
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local w, h
+    for line in f:lines() do
+        local _, _, wv = string.find(line, "^%s*f:SetWidth%(([%w_]+)%)")
+        if wv and not w then w = wv end
+        local _, _, hv = string.find(line, "^%s*f:SetHeight%(([%w_]+)%)")
+        if hv and not h then h = hv end
+        if w and h then break end
+    end
+    f:close()
+    if not w or not h then error("did not find the frame's SetWidth/SetHeight") end
+    -- Either a bare number or the name of a constant this file already knows.
+    local function value(tok)
+        local n = tonumber(tok)
+        if n then return n end
+        if tok == "MIN_W" then return MIN_W end
+        if tok == "MIN_H" then return MIN_H end
+        if tok == "MAX_W" then return MAX_W end
+        if tok == "MAX_H" then return MAX_H end
+        error("unrecognised size token: " .. tok)
+    end
+    return value(w), value(h)
+end
+
+-- ColumnsFitAt reads BUYL's gutters and BUY_COLS_END; extract it here with
+-- those fields filled in from the file rather than restated.
+BUYL.gut_w    = field("BUYL", "gut_w")
+BUYL.gutter_w = field("BUYL", "gutter_w")
+BUY_COLS_END  = constant("BUY_COLS_END")
+ROWPAD = { l = field("ROWPAD", "l"), r = field("ROWPAD", "r") }
+do
+    local fn, err = loadstring(extract("function ui.ColumnsFitAt("),
+                               "ColumnsFitAt")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- ---------------------------------------------------------------------------
+H.section("rows are held clear of the box border they sit inside")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. A backdrop edge is drawn CENTRED on the frame boundary, so
+-- a well's border reaches WELL_BLEED px INWARD from its own edge. Anything the
+-- rows draw inside that band is under the border: on the Buy tab that was the
+-- tick box on the left and the right-justified "% Mkt" on the right, and it
+-- looks like a rendering fault rather than a layout one.
+--
+-- The two sides are anchored differently, which is why the two pads are not
+-- equal and why this cannot be checked as "l == r":
+--
+--   left   the well is offset -WELL_BLEED from the scroll frame, so its
+--          border's inner edge lands ON the scroll frame's edge. Clearance is
+--          ROWPAD.l itself.
+--   right  the well is FLUSH with the scroll frame, so the border reaches
+--          WELL_BLEED past that edge into the rows. Clearance is
+--          ROWPAD.r - WELL_BLEED.
+-- GLOBAL, not local: constant() evaluates the source expression through
+-- loadstring, and WELL_EDGE is written as `WELL_BLEED * 2` -- so the name has
+-- to be reachable from that chunk. Reading the relationship out of the file is
+-- the point; restating `12` here would let the two drift.
+WELL_BLEED = constant("WELL_BLEED")
+
+H.eq("a well's border reaches half its edgeSize inward",
+     constant("WELL_EDGE"), WELL_BLEED * 2)
+
+-- "% Mkt" is right-justified and the Item column absorbs every surplus pixel,
+-- so the last column ALWAYS ends exactly on the row's right edge. Nothing sits
+-- between it and the border, which is why the right pad has to carry a full
+-- border width on its own.
+H.check("% Mkt clears the right border",
+        ROWPAD.r - WELL_BLEED >= WELL_BLEED,
+        "% Mkt clearance " .. (ROWPAD.r - WELL_BLEED)
+            .. ", need " .. WELL_BLEED)
+
+-- The LEFT is NOT symmetric, and that is deliberate. Six tables read ROWPAD
+-- and only the Buy tab puts a CONTROL against the left edge; the rest start
+-- with text, which 2px clears. So the clearance the tick box needs is bought
+-- in RCX_BUY rather than in ROWPAD, where it would cost every table 4px of
+-- row -- and the Sell bag column has none to give.
+--
+-- Assert the SUM, so either half may pay for it and neither may quietly stop.
+local TICK_X = ROWPAD.l + field("RCX_BUY", "check")
+H.check("the tick box clears the left border",
+        TICK_X >= WELL_BLEED,
+        "tick box " .. TICK_X .. "px in, border reaches " .. WELL_BLEED)
+
+-- ...and the columns after the tick box did NOT move to pay for it. The three
+-- leading columns shifted right together and `name` gave the width back, so a
+-- change that shoved the whole table sideways would show up here.
+H.eq("Lvl is where it was", field("RCX_BUY", "lvl"), 290)
+H.eq("...and the Item column gave back exactly what the shift took",
+     field("RCX_BUY", "name") + field("RCW_BUY", "name"), 280)
+
+-- The gaps inside the leading cluster are unchanged: box, then icon, then
+-- text, 6px apart. Shifting three columns by hand is exactly where one of
+-- them gets left behind.
+H.eq("tick box to icon", field("RCX_BUY", "icon") - (field("RCX_BUY", "check") + 14), 6)
+H.eq("icon to name", field("RCX_BUY", "name") - (field("RCX_BUY", "icon") + 16), 6)
+
+-- ---------------------------------------------------------------------------
+-- The Buy results table's columns
+-- ---------------------------------------------------------------------------
+
+-- ONE gutter between every pair. Uneven gutters are why a table reads as
+-- assembled rather than designed: the eye finds the rhythm, loses it, and
+-- reads the break as a mistake in the data. These grew into a 6/8/18 mix.
+local BUY_ORDER = { "name", "lvl", "left", "bid", "stack", "unit", "pct" }
+local gutters, firstGut = {}, nil
+for i = 1, table.getn(BUY_ORDER) - 1 do
+    local a, b = BUY_ORDER[i], BUY_ORDER[i + 1]
+    local gut = field("RCX_BUY", b) - (field("RCX_BUY", a) + field("RCW_BUY", a))
+    gutters[i] = a .. "->" .. b .. "=" .. gut
+    firstGut = firstGut or gut
+    H.eq("gutter " .. a .. " -> " .. b .. " matches the first one",
+         gut, firstGut)
+end
+H.check("...and that gutter is big enough to read as a gap",
+        firstGut >= 8, tostring(firstGut))
+
+-- BUY_COLS_END is what decides whether the table fits, and it is written as a
+-- sum rather than derived -- so it can go stale the moment a column moves,
+-- and the only symptom is a table that quietly clips under the scrollbar.
+H.eq("BUY_COLS_END is where the last column actually ends",
+     constant("BUY_COLS_END"),
+     field("RCX_BUY", "pct") + field("RCW_BUY", "pct"))
+
+local defW, defH = creationSize()
+H.check("the window is not created narrower than its own minimum",
+        defW >= MIN_W, defW .. " < MIN_W " .. MIN_W)
+H.check("...nor shorter than it", defH >= MIN_H,
+        defH .. " < MIN_H " .. MIN_H)
+H.check("...nor wider than its maximum", defW <= MAX_W,
+        defW .. " > MAX_W " .. MAX_W)
+H.check("...nor taller", defH <= MAX_H, defH .. " > MAX_H " .. MAX_H)
+
+-- The consequence, spelled out: the result columns have to fit at whatever
+-- size the window opens at. This is the assertion that actually describes the
+-- clipping, rather than describing the number that caused it.
+H.check("the result columns fit at the size the window opens at",
+        ui.ColumnsFitAt(defW), "columns overflow at " .. defW)
+
+-- ...and the old default really did fail it, so the check above cannot be
+-- passing for the wrong reason.
+H.check("the 832 the window used to open at does NOT fit",
+        not ui.ColumnsFitAt(832),
+        "832 fits, so this pair of assertions proves nothing")
+
+-- AND it measures the ROW, not the scroll frame. Those differ by the two pads,
+-- and the pair above cannot tell them apart: 832 fails either way and the
+-- default passes either way, so a ColumnsFitAt that forgot the pads would sit
+-- here looking green while promising a fit at a width where "% Mkt" is under
+-- the border. That is the same mistake the pads exist to correct, made one
+-- level up.
+--
+-- The width below is the inverse of the function's own arithmetic: the one at
+-- which the columns exactly fill the SCROLL FRAME. The row is then short by
+-- exactly ROWPAD.l + ROWPAD.r, so the honest answer is no.
+local ROWLEFT = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
+local frameExactW = BUY_COLS_END + 22 + ROWLEFT + BUYL.gutter_w
+H.check("a width where the FRAME fits but the ROW does not is refused",
+        not ui.ColumnsFitAt(frameExactW),
+        frameExactW .. " accepted, so the pads are not being counted")
+H.check("...and the same width plus the pads is accepted",
+        ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r),
+        "the columns never fit, so the check above proves nothing")
+
+-- ---------------------------------------------------------------------------
+H.section("...and it can never be dragged or restored outside that range")
+-- ---------------------------------------------------------------------------
+
+do
+    local fn, err = loadstring(extract("function ui.ClampWindowSize("),
+                               "ClampWindowSize")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+local cw, ch = ui.ClampWindowSize(MIN_W - 200, MIN_H - 100)
+H.eq("a width under the minimum comes back at it", cw, MIN_W)
+H.eq("...and a height", ch, MIN_H)
+
+cw, ch = ui.ClampWindowSize(MAX_W + 500, MAX_H + 500)
+H.eq("a width over the maximum comes back at it", cw, MAX_W)
+H.eq("...and a height", ch, MAX_H)
+
+cw, ch = ui.ClampWindowSize(1200, 700)
+H.eq("a size already in range is left alone", cw, 1200)
+H.eq("...both of it", ch, 700)
+
+-- NO SAVED SIZE is the case that shipped broken: a character who has never
+-- resized has no stored width at all, and returning early there is what let
+-- the window open at 832.
+cw, ch = ui.ClampWindowSize(nil, nil)
+H.eq("no saved width falls back to the minimum", cw, MIN_W)
+H.eq("...and no saved height", ch, MIN_H)
+
+-- Each axis independently, because a half-written saved table is a real state.
+H.eq("a saved width with no height keeps the width",
+     ui.ClampWindowSize(1200, nil), 1200)
+local _, onlyH = ui.ClampWindowSize(nil, 700)
+H.eq("...and the reverse keeps the height", onlyH, 700)
+
+-- ---------------------------------------------------------------------------
+H.section("The Sell tab's two columns fit beside each other")
+-- ---------------------------------------------------------------------------
+
+-- The bag column was widened in v1.26.0 so item names stopped truncating to
+-- "Pattern: Fine Leather Bo...", and the listings column moved right to make
+-- room. Those are two numbers that have to stay in step: widen the bag column
+-- again without moving the listings and they overlap; move the listings
+-- without widening and the gap grows for no reason.
+--
+-- All of it read out of the file. SELLL's fields are also SetPoint offsets and
+-- SCX/SCW are also the row cells' geometry, so a copy here would pass against
+-- a layout that had moved.
+local BAG_X      = SELLL.bag_x
+local BAG_RIGHT  = SELLL.bag_right
+local LIST_X     = SELLL.list_x
+local LIST_RIGHT = SELLL.list_right
+
+H.check("the bag column starts inside the panel", BAG_X > 0, BAG_X)
+H.check("...and has width", BAG_RIGHT > BAG_X, BAG_RIGHT .. " <= " .. BAG_X)
+H.check("the listings column starts after the bag column ends",
+        LIST_X > BAG_RIGHT, LIST_X .. " <= " .. BAG_RIGHT)
+
+-- A FauxScrollFrame's scrollbar sits just OUTSIDE its right edge, so the
+-- gutter is not decoration -- too small and the bar draws over the prices.
+H.check("...with room for the bag list's scrollbar",
+        LIST_X - BAG_RIGHT >= 16,
+        "gutter is only " .. (LIST_X - BAG_RIGHT) .. "px")
+
+-- THE SCROLLBAR AND THE TWO BORDERS IT RUNS BETWEEN.
+--
+-- A backdrop edge is drawn CENTRED on the frame boundary, so an edgeSize of 12
+-- hangs `well_overhang` outside the box. The template anchors the bar 2px
+-- INSIDE the scroll frame's right edge -- the same line -- so by default the
+-- bar runs straight through the border and into the box. That is what the
+-- clipping was. Three numbers have to agree, and one of them is the gutter.
+H.check("the scrollbar clears its own box's border",
+        SELLL.bar_x >= SELLL.well_overhang,
+        SELLL.bar_x .. " < " .. SELLL.well_overhang)
+H.check("...and clears the NEXT box's border on the far side",
+        SELLL.bar_x + SELLL.bar_w + SELLL.well_overhang <= LIST_X - BAG_RIGHT,
+        SELLL.bar_x .. " + " .. SELLL.bar_w .. " + " .. SELLL.well_overhang
+            .. " > " .. (LIST_X - BAG_RIGHT))
+
+-- The listings table's own columns have to fit in what is left, at the
+-- SMALLEST window. This is the assertion that fails if the bag column is
+-- widened again without checking.
+local function sellCol(f) return field("SCX", f) end
+local function sellW(f) return field("SCW", f) end
+local listEnd = sellCol("you") + sellW("you")
+
+-- ONE gutter between every adjacent pair, the same rule the Buy table follows.
+-- The old set had identical 4px gutters and still read badly, because what
+-- varied was the JUSTIFICATION either side of them -- so this assertion is
+-- necessary and was never sufficient. The alignment half lives in
+-- SELL_HEADER_DEFS and in the row builder, and the two have to agree.
+local SELL_ORDER = { "unit", "avail", "stack", "pct", "you" }
+local sellGut = nil
+for i = 1, table.getn(SELL_ORDER) - 1 do
+    local a, b = SELL_ORDER[i], SELL_ORDER[i + 1]
+    local gut = sellCol(b) - (sellCol(a) + sellW(a))
+    sellGut = sellGut or gut
+    H.eq("listings gutter " .. a .. " -> " .. b .. " matches the first",
+         gut, sellGut)
+end
+H.check("...and it is big enough to read as a gap",
+        sellGut >= 8, tostring(sellGut))
+
+-- SELL_COLS_END drives the stretch: surplus is measured from it, so a stale
+-- value hands the wrong amount to the column that absorbs it.
+H.eq("SELL_COLS_END is where the last column actually ends",
+     constant("SELL_COLS_END"), listEnd)
+local avail = ui.PanelWidthAt(MIN_W) - LIST_X - LIST_RIGHT
+H.check("the listings columns fit beside the bag column at MIN_W",
+        listEnd <= avail,
+        "columns end at " .. listEnd .. ", only " .. avail .. "px available")
+
+-- The item name column has to be worth having. 156px was the old bag width
+-- and it truncated most names; assert the text column is meaningfully wider
+-- than the icon and dot that precede it.
+local ITEM_TEXT_W = constant("BAG_ITEM_TEXT_W")
+H.check("the bag list's name column has room for a name",
+        ITEM_TEXT_W >= 160, ITEM_TEXT_W .. "px")
+H.check("...and still fits inside the column it is drawn in",
+        ITEM_TEXT_W + SELLL.bag_label_x <= (BAG_RIGHT - BAG_X),
+        ITEM_TEXT_W .. " + " .. SELLL.bag_label_x
+            .. " > " .. (BAG_RIGHT - BAG_X))
+
+-- The bag list is a TABLE now, with a count column beside the name, so FIVE
+-- numbers have to add up rather than two: where the name starts, how wide it
+-- may be, the gap after it, the count column, and the pad holding that column
+-- off the box edge. Widen any one alone and the name draws underneath the
+-- count, or the count climbs onto the border.
+-- THE ROW INSET. A box's backdrop edge is drawn CENTRED on its own boundary,
+-- and every table's well is anchored to its scroll frame's right edge -- so a
+-- row running the scroll frame's full width ends up UNDER that border, and its
+-- last column with it. One bug, two faces: bag rows poking through the box
+-- edge, and the Buy table's "% Mkt" shaved by it.
+local ROWPAD_L = field("ROWPAD", "l")
+local ROWPAD_R = field("ROWPAD", "r")
+H.check("rows are held clear of the box border on the right",
+        ROWPAD_R >= SELLL.well_overhang,
+        ROWPAD_R .. " does not clear a " .. SELLL.well_overhang
+            .. "px border overhang")
+H.check("...and off the border on the left too", ROWPAD_L > 0, ROWPAD_L)
+
+-- The bag column's contents have to fit in the INSET row, not in the column.
+-- Measuring against the wider number is how the name ends up drawing under
+-- the count when the inset changes.
+local BAG_W = BAG_RIGHT - BAG_X - ROWPAD_L - ROWPAD_R
+local bagUsed = SELLL.bag_label_x + ITEM_TEXT_W + SELLL.bag_qty_gap
+    + SELLL.bag_qty_w + SELLL.bag_qty_pad
+H.check("name, gap, count and pad all fit in the bag ROW",
+        bagUsed <= BAG_W, bagUsed .. " > " .. BAG_W)
+H.check("the count column is wide enough for a four-digit stack",
+        SELLL.bag_qty_w >= 40, SELLL.bag_qty_w .. "px")
+
+-- The count is CENTRED in its column, so the pad is what keeps the column --
+-- heading and cells together -- off the border. At zero the numbers sit on
+-- the edge, which is what "scrunched against the boarder" looked like.
+H.check("the count column is held off the box edge",
+        SELLL.bag_qty_pad > 0, SELLL.bag_qty_pad .. "px")
+H.check("...and the name is held off the count",
+        SELLL.bag_qty_gap >= 6, SELLL.bag_qty_gap .. "px")
+
+-- The "Your Bags" heading lines up with the item NAMES under it, not with the
+-- box edge -- the same rule the numeric columns follow, applied to the left
+-- edge. Flush against the border it read as falling out of the table, which
+-- is the same complaint the count column had on the other side.
+H.check("the bag heading is indented to meet its own cells",
+        SELLL.bag_label_x > 0, SELLL.bag_label_x .. "px")
+
+-- Both halves of the Sell tab are boxes now, and they are only a matched
+-- pair if they start and end on the same lines.
+H.eq("the bag box starts where the listings box starts",
+     LISTBOX.bag.top, LISTBOX.sellList.top)
+H.eq("...and ends where it ends", LISTBOX.bag.bot, LISTBOX.sellList.bot)
+
+-- The bag rows are the Buy table's height now, which is what gives a 20px
+-- icon and a quality-coloured name room to read.
+local _, bagRowH = pairConst("BAG_ROWS", "BAG_ROW_H")
+local _, buyRowH = pairConst("BUY_ROWS", "BUY_ROW_H")
+H.eq("bag rows are as tall as the Buy table's", bagRowH, buyRowH)
+local _, listRowH = pairConst("LIST_ROWS", "LIST_ROW_H")
+H.eq("...and so are the listings table's", listRowH, buyRowH)
+
+-- ---------------------------------------------------------------------------
+H.section("The listings table's box encloses its own headings")
+-- ---------------------------------------------------------------------------
+
+-- The table is drawn the way the Buy table is now: ONE box around the
+-- headings AND the rows, a rule under the headings, the status line hanging
+-- below. Four numbers have to stay in step for that to hold together, and
+-- getting any of them wrong leaves headings floating outside the box or a
+-- rule drawn across its top edge -- which is what the Buy table did before
+-- v1.15.0 and is recorded in the ROADMAP.
+
+H.check("the box starts above the headings",
+        SELLL.well_top < SELLL.hdr_top,
+        SELLL.well_top .. " >= " .. SELLL.hdr_top)
+H.check("...with the same gap the Buy table uses",
+        SELLL.hdr_top - SELLL.well_top == field("BUYL", "hdr_top")
+                                        - field("BUYL", "well_top"),
+        "gap " .. (SELLL.hdr_top - SELLL.well_top))
+
+-- The rule sits at well_top + hdr_h, and the first row must clear it.
+local ruleAt = SELLL.well_top + SELLL.hdr_h
+H.check("the headings fit above the rule",
+        SELLL.hdr_top < ruleAt, SELLL.hdr_top .. " >= " .. ruleAt)
+H.check("the first row starts BELOW the rule",
+        SELLL.rows_top > ruleAt,
+        "rows at " .. SELLL.rows_top .. ", rule at " .. ruleAt)
+H.check("...with room to breathe",
+        SELLL.rows_top - ruleAt >= 6,
+        "only " .. (SELLL.rows_top - ruleAt) .. "px under the rule")
+
+-- The scroll frame and the row count read the SAME top, or the box and its
+-- contents disagree about where the table begins.
+H.eq("the scroll frame's top is the row band's top",
+     LISTBOX.sellList.top, SELLL.rows_top)
+H.eq("...and its bottom leaves room for the status line",
+     LISTBOX.sellList.bot, SELLL.table_bot)
+H.check("that room is enough for a line of text",
+        SELLL.table_bot >= 20, SELLL.table_bot .. "px")
+
+-- And the whole thing still fits at the smallest window: the box's top is
+-- fixed, so a table_bot that grew past the panel would leave no rows at all.
+local listArea = ui.PanelHeightAt(MIN_H) - SELLL.rows_top - SELLL.table_bot
+H.check("the listings table has room for rows at MIN_H",
+        listArea >= listRowH,
+        "area " .. listArea .. ", row " .. listRowH)
 
 os.exit(H.report("geometry"))

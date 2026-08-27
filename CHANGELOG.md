@@ -12,6 +12,1859 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.50.3]
+
+### Fixed
+- **The Buy table's "% Mkt" column was drawn under the box border.** A backdrop
+  edge is drawn *centred* on the frame it belongs to, so the well's border
+  reaches 6px inward — and the rows were held only 2px clear of it. "% Mkt" is
+  right-justified and the Item column absorbs every surplus pixel, so the last
+  column always ends exactly on the row's right edge, with nothing between it
+  and the border. The rows are held a full border width clear now.
+- **The Buy table's tick box sat on the left border**, 4px from where the border
+  reaches. The tick box, icon and item name all shift 4px right and the Item
+  column gives the width back, so every column from *Lvl* onward is exactly
+  where it was. The left row pad is deliberately unchanged: six tables read it
+  and only this one puts a control against the edge, and raising it costs the
+  Sell tab's bag column width it does not have.
+- **The header separators between Buy columns leaned by 2px.** The top of each
+  1px line included the row pad and the bottom did not, so the line was drawn
+  between two different x — which reads as a rendering artefact rather than as
+  a mistake anyone made.
+- **`ui.ColumnsFitAt` measured the scroll frame instead of the row**, so it
+  promised the columns fit at widths where the last one is under the border.
+  That is the same mistake the row pads exist to correct, made one level up.
+
+### Internal
+- The border overhang is a named constant (`WELL_BLEED`) that both wells draw
+  from, so the border's thickness and the pads that clear it cannot drift apart
+  again. Six new sabotages, and four existing ones rewritten against the new
+  numbers rather than deleted.
+
+---
+
+## [1.50.2]
+
+### Changed
+- **The buttons Aegis puts on Blizzard's windows now look like Blizzard's
+  buttons.** "Add to Aegis" on the two profession windows, "Aegis: sell N
+  marked" on the merchant, and "Aegis UI" on the stock auction house were all
+  drawn as Aegis plates — dark, flat, and right at home on the Aegis window,
+  but the only dark flat rectangle on a sheet of gold and parchment everywhere
+  else. They are stock `UIPanelButtonTemplate` buttons now.
+  - **And that hands the pfUI case to pfUI.** Its `SkinButton` is written for
+    exactly this template, which is what pfUI's own addon-skinner does to every
+    Blizzard button it meets. Our plate had to opt *out* of that path
+    precisely because it wasn't one, then needed its own backdrop handling to
+    look right; a stock button needs none of that.
+
+### Fixed
+- **"Add to Aegis" sat flush against the profession window's bottom-right
+  border under pfUI**, where it clears it comfortably on the stock frame. It
+  moves up 10px when pfUI is skinning, and not at all when it isn't. The
+  profit/loss lines anchor to the button, so they follow.
+- **"Aegis: sell N marked" rode high and tight against the merchant tabs under
+  pfUI.** It moves 4px right and 4px down when skinned.
+  - Both offsets are eyeballed against a real pfUI client and are meant to be:
+    pfUI's border is a hairline where vanilla's is thick ornate art, and there
+    is nothing to compute the difference from. They live in one table
+    (`skin.EXTERNAL_NUDGE`) so tuning them is a one-line change.
+
+---
+
+## [1.50.1]
+
+Housekeeping only — no behaviour change, no new capability.
+
+### Removed
+- Four unreachable functions, each with a survivor already doing the job:
+  `de.MissingPriceOf`, `scan.FastThrottleSeen`, `MakeMoneyBox` and
+  `ui.CountChecked`. All four are registered in `tests/lint/definitions.py`'s
+  `REMOVED_ON_PURPOSE` list, so the guard against accidental deletion still
+  knows the difference between these and a function lost to a bad edit.
+
+### Fixed
+- **Comments that had stopped being true.** Four of them, and each read as
+  reassurance: the shopping-list engine described as "still tested" when no
+  suite has ever touched it, `db.PriceSpread` described as pairing with a
+  Sell-tab readout that was never built, `scan.FastThrottleSeen` described as
+  reported in the UI when a different accessor does that, and the ROADMAP
+  saying `/aex de audit` and `de.CompareBands` were kept when they were deleted
+  in v1.41.0.
+- **Two comments that had drifted out of position** in the test client — the
+  `W.items` note stranded above `ITEM_QUALITY_COLORS`, and the "holey"
+  `GetItemInfo` shape explained above the "trailing" branch.
+- **Docs brought back in line with the code.** `CLAUDE.md` called `ui/frame.lua`
+  "~5k lines" (it is ~11.5k) and left `tests/` out of the project layout;
+  `README.md` left `core/disenchant.lua` out of its tree and told contributors
+  to bump the version in *two* places when it lives in five — two of them in
+  that same file; `tests/README.md` was missing two lints and five suites; the
+  ROADMAP's disenchant and aux sections were still headed **BUILDING** with
+  every phase done.
+
+---
+
+## [1.50.0]
+
+### Added
+- **Vendor buy prices — what a merchant *charges*.** Open any vendor and Aegis
+  reads the whole inventory in one bounded pass, recording the per-unit asking
+  price for everything on the shelf. It shows up as a **Buy from Vendor:** line
+  on the tooltip, beside the existing *Sell to Vendor:* line — one is money in,
+  the other money out, and they are never the same number.
+  - **Limited stock is flagged, and it outranks price.** A vendor with three of
+    something is not a *source* of it; a vendor with an endless supply is, even
+    at a worse price. So an unlimited price replaces a limited one even when it
+    is dearer, and only when both readings agree about availability does the
+    cheaper win. Limited prices read **Buy from Vendor (limited):** so they
+    can't be mistaken for a supply you can go back to.
+  - Items bought with tokens, marks or honour are skipped rather than recorded
+    as free, and a bundle price is divided down to a per-unit one.
+  - Its own tooltip switch on the Aegis tab: **What a vendor charges**.
+
+### Fixed
+- **The deposit estimate disagreed with itself, by about 2×.** The Sell tab has
+  two ways to reach a deposit: ask the client about the item in the slot, or
+  compute one from the vendor price. On a real Turtle client those answered
+  **25** and **48** for the same item at the same duration — so which number you
+  saw depended on whether Aegis happened to know the vendor price.
+  - The formula is now **calibrated against the client**. Whenever an item is in
+    the sell slot both answers exist, so Aegis measures the ratio between them
+    and applies it where only the formula can reach. The two paths now land on
+    the same figure.
+  - The client's own figure is used **raw**. It used to be scaled by the same
+    correction, which double-counted: that correction exists to move the
+    *formula* towards the client, so applying it to the client pushed the one
+    reliable number away from the truth.
+- **`TURTLE_DEPOSIT_FACTOR` is measured now, not guessed.** The 0.6 has been
+  carried since before the formula underneath it was right, and nothing in the
+  addon ever checked it. Posting an auction now compares the deposit the client
+  quoted against the money that actually left your bags, and the measurement
+  replaces the constant — which becomes a starting guess used only until your
+  first post. Readings average over the last twenty posts, so one odd result
+  can't take the number over, and a reading that isn't plausibly a deposit is
+  discarded rather than averaged in.
+- `/aex diag` prints both learned corrections with their sample counts, plus
+  the vendor buy price for the item you named and how many the addon knows.
+
+---
+
+## [1.49.3]
+
+### Fixed
+- **The Filter Builder's component dropdown hung over the next tab.** Its option
+  list is parented to the window and put on `FULLSCREEN_DIALOG` so it can cover
+  the form beneath it — which also means it is not a child of the panel that
+  owns it and did not go away when that panel hid. Leave the Builder with a list
+  open and it floated over Auctions, on top of rows it had nothing to do with,
+  still swallowing clicks. Any tab change now closes it.
+
+### Added
+- **Right-click an auction row to price it against the market.** The "vs market"
+  column reads the price DB, and nothing on the Auctions tab could fill it —
+  Refresh re-reads *your* auctions from the client and never asks the auction
+  house what anyone else is charging, which is why undercuts only appeared after
+  a manual Buy search. Right-click searches for that item and lands you on the
+  answer, one item at a time, the way aux does it.
+
+  Not a whole-book re-price: 120 auctions is dozens of queries behind
+  `CanSendAuctionQuery`, and the answer you want is nearly always about the row
+  under the cursor. The status line says so now instead of leaving it to be
+  discovered.
+
+### Not a bug in Aegis
+- **A start bid equal to the buyout was already allowed.** Reported as refused;
+  both posting paths use `>` not `>=`, and a test now sends equal values through
+  `sell.Post` and `sell.StartPosting` and confirms both reach `StartAuction`. If
+  your client still refuses it, the rule is the client's or the server's and not
+  something this addon can override — tell me the exact message and I will dig
+  further. Two sabotages pin the `>` so a future tidy-up cannot introduce the
+  rule the report describes.
+
+### Internal
+- The test client gained `StartAuction`, `CursorHasItem` and a record of what
+  was posted. Without `CursorHasItem` the whole multi-stack posting path errored
+  the moment a test touched it, so it had never had one.
+
+## [1.49.2]
+
+### Added
+- **"Worth more disenchanted" on the Sell tab** — a warning before you post
+  something you should be breaking. It answers only from an **exact** item level
+  (one you observed by disenchanting, or one the client stated) and never from
+  the required-level approximation, because this recommends an irreversible act
+  rather than showing a number. It also wants a **25%** edge where the tooltip's
+  verdict wants 10%: the value is an average over a probability table, and one
+  break can return the cheapest row.
+
+### Fixed
+- **The Auctions tab showed only 50 of your auctions.**
+  `GetNumAuctionItems("owner")` returns *(batch, total)* and the batch was read
+  as the whole list, so with Turtle's 120-auction cap two thirds of a full book
+  were invisible with nothing saying so. There is a `< Page 1/3 >` control now,
+  and the summary counts what you **own** rather than what the page holds.
+
+  Deliberately paged rather than gathered into one list: `CancelAuction` indexes
+  into the page the *client* is holding, so a combined list would point row 80's
+  Cancel at a different auction — destroying the wrong one, forfeiting its
+  deposit and mailing the wrong item back. Showing exactly the client's page
+  makes every index correct by construction. The trade is that undercut counts
+  are per page, which the status line states.
+
+- **Row heights on the Auctions, Crafting and History tables** now match the Buy
+  and Sell tabs (26px). They were 20–21 and read as a denser, separate UI.
+
+### Note on numbering
+The 1.x line continues. An earlier attempt in this branch renumbered to 0.59.1
+and then to 1.22.0 on the reasoning that the branch should merge as a single
+release; that was reverted. **Every shipped change bumps** — a fix moves PATCH,
+a new capability moves MINOR and resets PATCH — so the branch carries a running
+account of what happened rather than one number applied at merge time. See
+`CLAUDE.md`.
+
+## [1.49.1]
+
+### Changed
+- **The sighting count is amber, not grey.** It reads in the same register as
+  1.12's "Alt+Click to …" hints. Grey in a tooltip means *ignore me*, and this
+  line is context for every figure beneath it.
+
+- **The verdict is coloured: green for "worth more than …", red for "sells for
+  more than it breaks for".** They are opposite advice about an irreversible
+  action, so they must not read alike at a glance — the colour lands before the
+  words do. Written as an inline escape because `AddDoubleLine` takes one colour
+  for the whole left string and only the parenthesised clause is being coloured.
+
+## [1.49.0]
+
+### Changed
+- **Tooltip layout: values right, everything else hard left.**
+
+  ```
+  Seen 18 times at auction total
+
+  Aegis Buyout:                        11s 96c
+  Aegis Market:                        11s 96c
+  Sell to Vendor:                       7s 40c
+
+  Crafting Cost:                            36s
+
+  Class: Weapon
+  Disenchants Into (approx, from required level):
+      81%  Lesser Magic Essence  x1.5
+      19%  Strange Dust  x1.5
+
+  Disenchant (worth more than the AH):  39s 41c
+  ```
+
+  The three prices are one group now. **Class** is a plain left line rather than
+  a label/value pair — a double line reserves the right column whether or not
+  anything sits in it, so the label reads as half a pair with a missing value
+  instead of a statement.
+
+  **The provenance moved onto the "Disenchants Into" heading and says what it
+  means**: *(approx, from required level)* rather than a bare *(approx)*. When
+  the breakdown is switched off it rides on the value line instead, so it can
+  never be dropped.
+
+  **The verdict moved into the label** — *Disenchant (worth more than the AH):*.
+  On its own line it read as a footnote to a number the reader had already moved
+  past; beside the figure it is the answer to why they hovered.
+
+### Added
+- **Crafting Cost**, when a recipe you have opened makes the item. Per unit, not
+  per craft: a recipe that makes four costs a quarter as much each, and this
+  line sits beside per-unit auction prices.
+
+  Silent unless **every** reagent is priced. A partial total is smaller than the
+  real one, and a crafting cost that reads low is the direction that loses money.
+
+## [1.48.0]
+
+### Fixed
+- **The deposit was computed with an invented formula.** It used 2.5% of vendor
+  value plus a stack-size fudge that appears in no client and matches nothing,
+  then scaled the result by 0.6. The real vanilla rule is
+
+  ```
+  floor(vendorUnit * rate * stackSize) * stackCount * (minutes / 120)
+  ```
+
+  with `rate` **5%** at your own faction's auctioneer and **25%** at a neutral
+  one — and the neutral case was not handled at all, understating the cost of
+  the one auction house where it matters most. `minutes / 120` turns the
+  duration into two-hour units, which is how Turtle's ×3 durations flow
+  straight through.
+
+  One writer now, shared by the sell slot and the bag preview, so the two
+  cannot drift apart the way they had.
+
+- **`TURTLE_DEPOSIT_FACTOR` is flagged as unverified.** It is a claim about what
+  the server charges, carried since before the formula above was right, and
+  nothing measured it. **`/aex diag` now prints our figure beside the client's
+  own `CalculateAuctionDeposit`** for whatever is in the sell slot — the
+  comparison that would settle it. Left at 0.6 rather than tuned on a guess.
+
+### Changed
+- **The tooltip is laid out in three groups**, label left and value right:
+  auction house, vendor, disenchant.
+
+  ```
+  Seen 18 times at auction total
+
+  Aegis Buyout:                        11s 96c
+  Aegis Market:                        11s 96c
+
+  Sell to Vendor:                       7s 40c
+
+  Class:                                Weapon
+  Disenchant Value: (approx)           39s 41c
+    worth more than the AH
+  Disenchants Into:
+      81%  Lesser Magic Essence  x1.5
+      19%  Strange Dust  x1.5
+  ```
+
+  The sighting count leads instead of riding as a suffix on the market value:
+  it qualifies every figure below it, not one of them. Buyout sits above Market
+  because today's cheapest is what a buyer acts on and the median is context
+  for it. **Class** is new — armour and weapons break into different things, so
+  it is part of reading the split rather than trivia.
+
+  The inline `2d` and `(100% of mkt)` suffixes are gone, replaced by the
+  sighting line. Say the word if you want the percentage back.
+
+## [1.47.1]
+
+### Fixed
+- **Harvested item facts written by the broken reader are discarded on load.**
+  The v1.44.0 sweep copies fields straight out of `util.ItemInfo`, so the anchor
+  bug fixed in v1.47.0 was **written into SavedVariables** — thousands of records
+  per player with the stack size stored where the required level belongs.
+
+  Fixing the reader could not fix the records, and `de.Resolve` reads them
+  precisely when the client's own cache comes up empty, which is when they
+  matter most. They are now thrown away once and the sweep refills from the
+  corrected reader. Nothing else in the database is touched.
+
+## [1.47.0]
+
+### Fixed
+- **A client that APPENDS a value to `GetItemInfo` shifted four fields.**
+  Reported via `/aex diag`: Turtle 1.12 with ClassicAPI returns vanilla's nine
+  values **plus a trailing number**. The old "last value that is a number"
+  anchor landed on that trailing value and everything moved by three —
+  `minLevel` read the stack size, `type` read the equip slot, `subType` read the
+  texture path, `equipLoc` read off the end.
+
+  Nothing errored. The visible symptoms were bag categories named
+  `INVTYPE_2HWEAPON` and a disenchant line that never appeared.
+
+  **The texture is the anchor now.** It starts with `Interface\` on every 1.12
+  client, and `minLevel`..`texture` is one contiguous run in every shape — so a
+  field appended *after* it cannot move anything. Verified against all four
+  shapes this addon has met.
+
+### Changed
+- **The material breakdown reads as a sentence and carries quality colour.**
+
+  ```
+  78%  Dream Dust  x1.5
+  19%  Greater Nether Essence  x1.5
+   4%  Large Radiant Shard  x1.0
+  ```
+
+  How often, what, how many — the order the question is asked. The old form put
+  the quantity first, which reads as arithmetic and buried the material a player
+  is scanning for in the middle of the line. Names now use their item-quality
+  colour, the way every other item name in the game is written: a list of items
+  in flat grey was the only place in this UI that did not say at a glance which
+  one was the valuable one. `/aex de` uses the same seam, so it cannot drift.
+
+## [1.46.2]
+
+### Added
+- **A second source for the missing equip slot: `C_Item`.** Where ClassicAPI is
+  installed, its wide tuple carries the **real** slot, so a client whose stock
+  `GetItemInfo` omits `equipLoc` gets the exact answer rather than the
+  armour-or-weapon stand-in. Tried first; the stand-in is the last resort.
+
+- **`/aex diag` now prints the whole `GetItemInfo` tuple with types**, plus the
+  item's `type` and `subType`.
+
+  Printing three hand-picked slots is how the previous round ended with the
+  wrong shape assumed — the field that mattered was one nobody had thought to
+  look at. And `type` is what the stand-in is derived from, so without it in the
+  readout a stand-in that failed to fire looks identical to one that never ran.
+
+## [1.46.1]
+
+**The disenchant line, actually fixed.** Found by `/aex diag` on the affected
+client. `/reload`-safe.
+
+### Fixed
+- **Some clients send no equip slot at all, and that killed the whole feature.**
+  Turtle 1.12 with ClassicAPI returns ten values from `GetItemInfo` with
+  **nothing** where `equipLoc` belongs — not shifted, absent. `de.Class` returned
+  nil, `CanDisenchant` returned false, and the disenchant line silently never
+  rendered on that client, for every item.
+
+  Nothing errored. The price lines beside it are database reads and kept
+  working, so it read as an unfinished feature rather than a broken one.
+
+  The item's **type** is still present and still says `Weapon` or `Armor` —
+  which is the only question the disenchant rule ever asks a slot. `util.ItemInfo`
+  now stands in a slot from the type when the client omits one. Deliberately
+  *not* a real `INVTYPE_`: substituting `INVTYPE_CHEST` for "some armour" would
+  classify correctly today and be a lie in the code that the next reader
+  inherits.
+
+### Added
+- **`/aex diag <item link>`** — prints the whole disenchant chain for one item:
+  modules loaded, relevant settings, how many values `GetItemInfo` returned,
+  the resolved quality / required level / equip slot, the band, the yield rows
+  and the value. This found the bug above in one line after three rounds of
+  remote guessing had missed it.
+
+## [1.46.0]
+
+### Changed
+- **The material breakdown is now ON by default, and that is the real fix for
+  "no disenchant info".** The split is a fact about the *item*: required level
+  gives the band, the band gives the probabilities. It needs **no market data at
+  all**. So it is exactly what is left to show when the value cannot be
+  computed — which is most items until a scan has run.
+
+  Defaulting it off meant the common case showed a bare `?` while the one thing
+  Aegis actually knew about the item sat behind a checkbox nobody had been told
+  about. A green Main Hand requiring level 10 now reads:
+
+  ```
+  Aegis Disenchant   ?
+    no price yet for Lesser Magic Essence
+    81%  1.5 x Lesser Magic Essence
+    19%  1.5 x Strange Dust
+  ```
+
+  Shift still shows it when the setting is off, so the checkbox never takes away
+  the gesture.
+
+### Added
+- **`/aex diag <item link>`** — prints the whole disenchant chain for one item:
+  which modules loaded, the relevant settings, what `GetItemInfo` returned, the
+  resolved quality / required level / equip slot, the band, the yield rows and
+  the value. It is defensive at every step, so a module that failed to load is
+  reported rather than throwing.
+
+  It exists because the answer was unreachable from outside the client. A silent
+  disenchant line has a dozen legitimate causes and they all look identical from
+  a screenshot; several rounds of remote guessing went into faults this prints in
+  one line.
+
+## [1.45.2]
+
+**The disenchant tooltip line has never worked. This is why.**
+
+### Fixed
+- **1.12's `GetItemInfo` does not take an item id as a number.** It takes a
+  NAME, a LINK, or an item STRING (`item:2586:0:0:0`). `de.Resolve` passed the
+  raw numeric id — carrying a comment asserting "both are valid on 1.12" —
+  so `util.ItemInfo` returned nil for every item reached by id, `de.Resolve`
+  returned nil, and **the disenchant line never appeared on a real client**, in
+  every release that has ever shipped it.
+
+  Nothing errored. The price lines beside it are database reads keyed by id and
+  worked perfectly, so the tooltip looked healthy and the disenchant feature
+  looked unfinished. Every GetItemInfo call in aux builds an itemstring; that is
+  why.
+
+  `util.ItemInfo` now converts an id to an itemstring. That one fix reaches
+  everything that resolves an item by id: the tooltip line, the disenchant
+  search filters, `/aex de`, and the item-fact harvest — which had been
+  recording **nothing at all** since v1.44.0 for the same reason.
+
+- **Material names printed as `item:10940`.** Three call sites passed a bare id
+  to `GetItemInfo` for a name and silently got nothing. They now go through
+  `util.ItemName`, which exists so no caller has to remember this rule again.
+
+### Why no test caught it
+`tests/support/wow.lua` resolved bare numbers, which the client does not. **A
+mock more capable than the client is the worst kind**, and this one hid a
+whole feature being dead across many releases while reporting it fine. It now
+returns nil for a number, exactly as 1.12 does, and two sabotages hold the line.
+
+## [1.45.1]
+
+### Changed
+- **The disenchant diagnosis no longer resolves the item twice.** v1.45.0 asked
+  `de.MissingPriceOf` separately from `de.ValueOf`, which repeated the whole
+  resolve — taking an unpriced item's tooltip from one item lookup to three, on
+  exactly the items most likely to be unpriced, which is most of them before a
+  scan. `de.ValueOf` now hands back *why* it failed alongside the failure.
+
+## [1.45.0]
+
+**The tooltip, rebuilt as sections.** Last of the aux work. `/reload`-safe.
+
+### Added
+- **Every number now carries what qualifies it.**
+  - *Market* shows how many **days** the median rests on. One day and thirty
+    produce the same-looking figure and are not the same claim, and the tooltip
+    is the only place a player ever sees either.
+  - *Min Buyout* shows today's cheapest **as a percentage of market**, which is
+    the only thing it means. A bare figure made every reader do that division.
+
+- **A verdict on the disenchant line.** *worth more than vendor*, *worth more
+  than the AH*, or *sells for more than it breaks for* — the comparison that
+  made you hover in the first place, rather than a number you then have to
+  compare yourself. Silent when there is nothing to compare against, and silent
+  when the two are within 10% of each other, because a verdict on a 3%
+  difference is noise.
+
+- **An unresolvable value now says why.** `de.Value` is all-or-nothing: one
+  unpriced material and the whole figure disappears. That is right for the
+  number — a partial sum understates, and an understated gold figure is worse
+  than none — but it made a useless explanation. The line now appears with a
+  grey `?` and **names the material standing in the way**: *no price yet for
+  Large Radiant Shard*.
+
+  This is the long-standing "that item has never worked" complaint, and it was
+  never a bug in the rule. aux has the same behaviour and the same silence.
+
+- **"Always show the breakdown" setting.** The material list is off by default —
+  three extra lines on every disenchantable item — and **Shift still shows it on
+  demand whatever the setting says**. The two gates are independent, so turning
+  the setting off does not take away the gesture.
+
+### Not built
+- **Vendor *buy* prices.** aux learns what a merchant charges as well as what it
+  pays, and flags limited stock. Aegis never scans a merchant's inventory, so
+  there is nothing to show — that is a feature, not a line, and it can have its
+  own release rather than a half-built one here.
+
+## [1.44.0]
+
+**The item-fact harvest.** `/reload`-safe — no new files.
+
+### Added
+- **Aegis now keeps its own copy of what the client's item cache knows.** On
+  1.12 `GetItemInfo` answers only for items the client has already seen, so the
+  disenchant line and both disenchant search filters went blank for every
+  auction row whose item this machine had never happened to look at — however
+  much Aegis knew about it last week.
+
+  A background sweep copies quality, required level and equip slot into
+  SavedVariables as it finds them. Coverage stops resetting with the client's
+  cache and starts accumulating: **`de.Resolve` now falls back to the harvested
+  facts**, so a row for an unseen item still gets an answer.
+
+  Paced at 500 ids per half second, starting about six seconds after login
+  (login being the busiest the client ever is, and this the least urgent thing
+  in the addon). It skips what it already has, so each session costs less than
+  the last, and it stops for good — frame hidden, script cleared — when it
+  reaches the top of the range. The range runs to 120,000 because Turtle's
+  custom items sit far above where vanilla's stop.
+
+- **`/aex cache`** reports how many items are known and whether the sweep is
+  still running. It is silent by design, and "is it doing anything" had no other
+  answer.
+
+### Correction
+- **An earlier release claimed `GetItemInfo` queries the server for an uncached
+  item. It does not.** It returns nil and does nothing else; the call that
+  forces a fetch is a tooltip `SetHyperlink`. aux settles it — its cache-warming
+  command reads `if not GetItemInfo(id) then SetHyperlink(id) end`, which is
+  only meaningful if the first is a free probe and the second is the fetch.
+
+  That claim shipped in v1.41.2's throttle (since rolled back, so no code
+  carries it) and survived in comments. Corrected where it stood, because it is
+  the difference between this release's sweep being free and being unshippable.
+
+## [1.43.0]
+
+**Disenchant values now answer without ClassicAPI.** `/reload`-safe.
+
+### Added
+- **A fourth item-level source: the required level.** 1.12 hands every addon the
+  level needed to *equip* an item and no item level at all, so without a mod
+  exposing the real one the disenchant line simply never appeared — for most
+  players, on most items. It now falls back to the required level plus 5.
+
+  **Where the 5 comes from.** aux keys its entire disenchant table on required
+  level, so its band boundaries and ours describe the same items on two
+  different scales. Lining the two up by *material signature* — which materials
+  each band yields, independent of any assumed offset — puts every one of aux's
+  20 uncommon and rare bands **exactly** 5 below ours, with no boundary
+  disagreeing. Four of the 20 differ in their material list, and all four are
+  places our own generator dropped a low-probability tail material for having
+  too few items behind it. That is a known thinness in our data and says nothing
+  about the offset.
+
+- **The tooltip says when a value is approximate.** A disenchant line resolved
+  this way reads **Aegis Disenchant (approx)**; one resolved from a real item
+  level or from a disenchant you performed keeps the plain label. Required level
+  moves in steps of 5 where item level does not, so an item near a boundary can
+  land one band out — and adjacent bands differ by more than double in yield.
+  The number is worth showing. It is not worth showing as though it were
+  measured.
+
+### Ranking
+Strongest first, and a caller only ever sees the one that answered:
+**observed** (you disenchanted it) → **client** (ClassicAPI's real number) →
+**required** (this, approximate). The new source is last, and cannot outrank
+either of the others.
+
+### Fixed
+- **`/aex de` reported "unknown" for items the tooltip was answering for.** It
+  called `de.ItemLevel` without passing the item info the required-level
+  fallback reads.
+
+## [1.42.0]
+
+First of the changes from reading aux. `/reload`-safe — no new files.
+
+### Added
+- **Vendor prices are now learned from the auction house sell slot.**
+  `GetAuctionSellItemInfo`'s sixth return is the item's vendor price for the
+  whole stack in the slot — the client states it outright. Aegis has always read
+  that value (as the deposit base) and thrown it away; it now records it, divided
+  down to a unit price.
+
+  This is the vendor-price source that costs you nothing. Learning at a merchant
+  needs you to walk to one with the item in your bags; ClassicAPI needs a DLL.
+  This needs you to do the thing you opened the auction house to do — **every
+  item you ever post now teaches Aegis its exact vendor price.**
+
+  It feeds everything that already reads a vendor price: the tooltip's Vendor
+  line, the Sell tab's vendor comparison, the Vendor list, and the
+  `vendor-profit` search filter — whose "no answer" hint now names the new source
+  alongside the old ones.
+
+### Known inexactness
+- **Charge items resolve high.** For an item with charges, 1.12 reports the
+  full-charge price in this slot, and there is no charge count in that API to
+  divide by. A partly-used charge item will therefore read as worth more than it
+  is. Walking past a merchant with it corrects the number — that path is exact,
+  and a later write wins. Recording it anyway is the deliberate call: the
+  alternative was dropping a source that answers for everything else over a
+  narrow case.
+
+## Restored to 1.41.1 — **restart**
+
+**The crash was the client install, not the addon.** After reinstalling mods,
+patches and DLLs, v1.41.1 runs clean on the Auctions, History and Crafting
+tabs. The 1.39.0 rollback is undone and the shipping code is v1.41.1 again,
+byte-for-byte.
+
+> ⚠️ **Full client restart, not `/reload`.** This removes `core/itemlevel.lua`
+> from the `.toc`, and 1.12 reads the file list only at startup.
+
+So ClassicAPI vendor prices and item levels are back, along with the tooltip's
+`SetHyperlink` fallback for auction rows after the AH has been closed and
+reopened.
+
+### Not restored
+- **v1.41.2's `GetItemInfo` miss gate.** It is a real improvement and was
+  measured — a sweep down 40 auction rows cost 32 `GetItemInfo` calls before it
+  and 1 after, and re-hovering one row twenty times went from 20 to 0 — but it
+  was written to fix a crash it did not fix, and never ran in a healthy client.
+  v1.41.1 is what has actually been verified, so v1.41.1 is what ships. The gate
+  can be re-applied on its own merits, as its own release, and tested properly.
+
+### What the three failed fixes were worth
+v1.41.0, v1.41.1 and v1.41.2 all claimed a crash that no addon change could
+have fixed. Two things came out of that hunt that stand on their own: the
+tooltip fallback in v1.41.1, and the measurement rig that drives the real
+`ui/frame.lua` against a mock client — see `ROADMAP.md`, which also records
+what would have to change in `tests/support/wow.lua` to bring it into the suite.
+
+## [1.41.2]
+
+**The crash to desktop, found and fixed.**
+
+### Fixed
+- **Hovering rows on the Auctions, History and Crafting tabs froze the client
+  and then killed it.** On 1.12, `GetItemInfo` answers from the client's item
+  cache — and for an item that is **not** in it, the client asks the **server**
+  and returns `nil` in the meantime. Nothing remembered that `nil`, so every
+  hover asked again.
+
+  Measured against the real window: re-hovering **one** auction row twenty times
+  cost twenty `GetItemInfo` calls, and sweeping forty rows cost thirty-two. Where
+  the items are cached that is free, which is why the Buy tab was always fine —
+  its rows sit on the auction page the client just loaded. Auctions, History and
+  Crafting draw from mail, the ledger and recipe reagents, none of which the
+  client has necessarily seen this session, and those are exactly the lists you
+  sweep the mouse down. Forty rows is forty server queries in about two seconds.
+
+  Misses are now paced by a per-item cooldown *and* a burst budget, so a sweep
+  costs a bounded few queries instead of one per row. Only misses pay either
+  limit: sixty-one cached items still resolve in sixty-one calls, so the Buy tab
+  and the bag browser are untouched. Nothing is blocked permanently — the query
+  that does go out warms the cache, and the next lookup past the cooldown picks
+  the answer up. Same bargain the scanner strikes with `CanSendAuctionQuery`:
+  progress, paced.
+
+  Same measurements after the fix: forty rows **1**, twenty re-hovers of one row
+  **0**, sixty-one cached items **61**.
+
+### Note on v1.41.1
+- v1.41.1 said it fixed this and did not. The three crashing tabs are precisely
+  the three that never call `db.GetVendor`, so the fallback it removed was not on
+  the path. What v1.41.1 *did* do is real and worth having: v1.40.0 had tripled
+  the per-hover cost (1 → 3) by adding two more lookups to the same tooltip path,
+  which is the regression that made a long-standing problem suddenly fatal, and
+  removing them put it back to 1. This release removes the remaining one.
+
+## [1.41.1]
+
+### Fixed
+- **Auction tooltips degraded to just the item name after leaving and returning
+  to the auction house.** Both routes into the tooltip read the auction page the
+  client currently holds, and that page is discarded when the auction house
+  closes — so a Buy tab still showing your last search had rows whose tooltips
+  had nothing behind them until you searched again. There is now a fallback to
+  the item link itself, which does not depend on a live page.
+
+### Changed
+- **The client-data readers no longer call `GetItemInfo`.** `util.ClientSellPrice`
+  and `util.ClientItemLevel` fell back to it when ClassicAPI was absent or had no
+  answer. On 1.12 that is a cache read only for an item the client has already
+  seen; for an uncached one it sends a query to the server — and `db.GetVendor`
+  is called once per bag item, once per auction row and once per tooltip, so the
+  fallback multiplied by the length of whatever list was being painted. That is
+  HARD RULE 16 broken by a fallback rather than by a handler, which is worth
+  closing on its own merits.
+
+  Both readers are ClassicAPI-only now. A caller that already holds a
+  `util.ItemInfo` can pass it in; nothing fetches one on their behalf. The suite
+  counts `GetItemInfo` calls and requires zero from these paths, with and
+  without ClassicAPI.
+
+### Still open
+- **The crash to desktop on the Auctions, History and Crafting tabs is NOT
+  fixed, and the change above was mis-attributed to it when this release was
+  cut.** The three tabs that crash are precisely the three that never call
+  `db.GetVendor` on their paint path, so that fallback cannot have been the
+  cause. Driving all six tabs against a mock client — empty and populated,
+  every sort column, both directions — produces no Lua error, reaches no
+  ClassicAPI entry point on tab selection, and creates no unbounded number of
+  frames. v1.40.0, the release the crash was first seen on, changed no UI file
+  at all. Diagnosis continues.
+
+## [1.41.0] — **restart**
+
+The scaffolding around a missing number comes out. **Removes a `.lua` file, so
+this one needs a full client restart, not `/reload`.**
+
+### Removed
+- **`core/itemlevel.lua`** — 12,567 item levels borrowed from ShaguScore,
+  shipped since v1.31.0 because 1.12 gave addons no way to get one. ClassicAPI
+  provides the client's own: the real number, for **every** item, including the
+  two thirds of Turtle's custom gear the borrowed table never had. A partial
+  copy of a number you can read directly has nothing left to do.
+
+  Deleting it also retires the question of whether shipping someone else's
+  unlicensed database was all right — a better way for that question to end
+  than any answer to it would have been. Thanks to shagu for the years it
+  covered the gap.
+
+- **`/aex de audit`** and the required-level comparison behind it. It existed
+  to decide whether required level could stand in for item level; that question
+  is not asked any more. `tools/gen_itemlevel.py` goes with the file it
+  generated.
+
+### The trade, stated plainly
+**Without ClassicAPI the disenchant line now answers only for items you have
+disenchanted yourself.** It previously answered for vanilla items from the
+borrowed table. That is the cost of the deletion and it is deliberate.
+
+### Added
+- **The UI says so.** The *Disenchant value* setting and both Filter Builder
+  components (`disenchant-profit`, `disenchant-percent`) carry a hover
+  explanation naming the requirement — and noting that disenchanting something
+  teaches Aegis about it regardless. A feature that goes quiet without saying
+  why reads as broken.
+- **Vendor price gets the same treatment**, worded honestly: it is *learned at
+  a merchant*, and ClassicAPI makes it instant for every item. It has never
+  required the DLL and the tooltip does not claim it does.
+- `ui.SetHelpTip`, since checkboxes had no hover explanation of any kind.
+
+### Not covered by tests
+The help tooltips are not asserted anywhere — no suite loads `ui/frame.lua`.
+The strings and the tables behind them are shared single writers, which is
+mitigation rather than coverage, and worth saying rather than implying
+otherwise.
+
+---
+
+## [1.40.0]
+
+Aegis stops guessing two numbers the client has had all along. `/reload`.
+
+### Added
+1.12 fills in an item's **vendor sell price** and its **item level** on every
+item and displays **neither** — the sell-price field is populated and the
+engine's tooltip code simply never reads it. Where a client mod
+([ClassicAPI](https://github.com/brues-code/ClassicAPI), a DLL) exposes them,
+Aegis now reads both.
+
+- **Vendor prices are known, not learned.** Previously Aegis only knew what a
+  merchant paid if you had stood at one with that item. Ranking is now
+  `client` → `merchant` (what we learned) → unknown, and `db.GetVendor` returns
+  the source alongside the number — a price the client states and one we
+  watched a merchant offer are different kinds of fact.
+- **Item level is read, not borrowed.** The disenchant rule has always been
+  exact *given* a level; the level was the only missing input. Ranking is
+  `observed` (what you disenchanted) → `client` → the shipped table → unknown.
+  Observation stays on top because it reflects the server you actually play on.
+- **Turtle's custom items become answerable.** Roughly two thirds of them are
+  absent from the shipped item-level table. The client knows all of them.
+
+Detected as **capabilities**, never by addon name or version — the same rule
+the scanner applies to AuctionQueryThrottle, where the query gate itself is the
+detector. Asked per function, so a build providing one and not the other costs
+one feature rather than both.
+
+**Nothing degrades without it.** Every path behaves exactly as v1.39.1 did when
+no such mod is present, which is the case for most players, and a test asserts
+that directly rather than assuming it.
+
+### Dropped
+- **The required-level fallback (§5) will not be built.** Its measurement,
+  shipped in v1.39.0, came back **0 items judged, 12,135 uncached** — 1.12's
+  item cache only holds what your client has seen, so a bulk sweep cannot
+  work. And it is moot now: there is no reason to approximate a number you can
+  read. `/aex de audit` stays, since it still answers "how good would that
+  guess have been".
+
+### Hardened
+- `util.ItemInfo` now handles a **third** `GetItemInfo` shape. It anchors on
+  "the last value that is a number" — right for vanilla's 9 and later clients'
+  10, and exactly wrong for modern WoW's 18, where six numbers sit *after*
+  stack count. A mod that replaced the global rather than namespacing it would
+  have had Aegis read the class id where the required level belongs: small,
+  plausible, silently wrong integers. Defended rather than trusted.
+
+---
+
+## [1.39.1]
+
+Rows and their last column stop running under the box border. `/reload`.
+
+### Fixed
+- **Table rows drew underneath their own box's right border.** A backdrop edge
+  is drawn *centred* on the frame boundary, and every table's box is anchored
+  to its scroll frame's right edge — so a row spanning the scroll frame's full
+  width ended up half under that border, and its rightmost column with it.
+
+  One bug, two faces: the **bag rows visibly poking through the box edge**, and
+  the Buy table's **"% Mkt" being shaved** by it. Both are fixed by the same
+  `ROWPAD`, which every row builder and both layout functions read — the rows'
+  inset and the width the columns may use are one measurement seen from two
+  ends.
+
+- **Every heading would have drifted off its column** as a result, by 2px on
+  the left of each table and 8px on the count column in the bag list — headings
+  anchor to the panel and the box, and it was the *rows* that moved. Caught
+  before shipping and fixed at all six anchor points; a heading that disagrees
+  with its cells is the defect these tables keep being fixed for.
+
+Also applied to Auctions and History, which have the same construction and
+therefore had the same overhang, unreported.
+
+---
+
+## [1.39.0]
+
+The measurement that decides whether Aegis gets a fourth source of item level.
+`/reload`.
+
+**This release does not build that source.** It builds the thing that says
+whether it should exist, because the brief for it said not to build it until
+the number was in hand.
+
+### Added
+- **`/aex de audit`** — walks the shipped item-level table and, for every item
+  your client has cached, compares the band the item's *real* level gives
+  against the band its **required** level would have given.
+
+  That is the open question from the disenchant work. aux feeds `GetItemInfo`'s
+  slot 4 — which on 1.12 is required level — into a table that wants item
+  level. Aegis has refused to, on the grounds that a disenchant band is one
+  material tier wide so a near miss is not a near miss. That was **reasoning,
+  not measurement**. This measures it.
+
+  It cannot be measured anywhere but in a client: `minLevel` comes from
+  `GetItemInfo`, which only answers for items that client has already cached.
+  So the audit reports what it could **not** judge rather than quietly skipping
+  it — a run that saw 200 items has measured 200 items, not the game — and
+  declines to conclude anything under 200.
+
+### How it scores, and why that way
+- The bar is **95% agreement**, deliberately high.
+- **One band out counts against it as hard as a wilder miss.** A band is one
+  material tier wide: "off by one" is Dream Dust where the answer was Illusion
+  Dust, not a rounding error.
+- An item with **no level requirement** yields no band at all, so the fallback
+  would *decline* rather than answer. That is a safe failure and is tallied
+  separately — counting it as wrong would reject the fallback for the wrong
+  reason.
+
+If it clears the bar, required level becomes a last-resort source **for the
+filters only** — never the tooltip, and never for advising you to destroy
+something.
+
+---
+
+## [1.38.0]
+
+Rows light up under the cursor in every table, not one. `/reload`.
+
+### Changed
+- **The hover highlight is part of the shared row chrome now**, so Buy results,
+  Crafting results, Your Bags, Auctions and History all get it — previously the
+  Sell tab's listings were the only data table in the window that had one.
+
+  Worth naming what the inconsistency was actually signalling: the highlight
+  read as *"this row is interactive"* when it really meant *"this row happened
+  to be built as a Button"*. Every one of these rows is interactive.
+
+- **Four row types are Buttons instead of Frames.** `SetHighlightTexture` is a
+  Button method and does not exist on a Frame, which is why those tables had no
+  hover. The change also removes the reason `BuildResultRow` needed
+  `EnableMouse` to get a tooltip at all, and the reason selecting a Buy result
+  goes through `OnMouseDown` — its own comment reads *"A Frame has no
+  OnClick"*. Those workarounds are left in place for now: frame type first,
+  simplify once it has been seen working.
+
+- **History rows had no mouse enabled at all**, so they received no hover
+  events of any kind. A ledger line is not clickable, but it should still light
+  up like every other row.
+
+### The bug this deliberately avoided
+The obvious implementation is `row:SetScript("OnEnter", …)` to show a texture.
+In WoW `SetScript` **replaces** a handler rather than adding to it — and four
+of these tables already own their `OnEnter` **to show an item tooltip**. That
+patch would have silently deleted the tooltips on all four: nothing errors,
+every row draws, the highlight works perfectly. Asking the client for a
+highlight instead needs no script at all, which is why it is done that way.
+There is a sabotage planting the script version.
+
+### Not covered by tests
+`rowchrome_test.lua` asserts the highlight is requested, that it does not join
+the three ordered BACKGROUND textures, and that a Frame-shaped row degrades
+instead of erroring. It **cannot** tell you whether the highlight looks right
+beside the listings table, or whether making a row clickable broke a click that
+used to reach a child — the Buy tab's batch tick boxes are the place to check.
+Both need the client and a person.
+
+---
+
+## [1.37.0]
+
+The listings table uses its window, and every layout runs on resize. `/reload`.
+
+### Fixed
+- **The Buy table's "use the whole window" fix, shipped in v1.35.0, never ran
+  when you resized the window.** It lived in `ui.LayoutBuyTable()`, and the
+  resize grip re-laid out four things — not that one. So dragging wider grew
+  the table and left its columns at their minimum until a Blizzlike/Advanced
+  toggle happened to fix them, at which point they jumped. The fix was inert in
+  exactly the situation it was written for.
+
+  There were **two lists** of "things to re-lay out" — one in the grip, one in
+  `ui.SetBuyMode` — and they disagreed. There is one now, `ui.LayoutAll()`, and
+  both callers use it. Two lists of the same thing is how the next entry gets
+  forgotten.
+
+### Changed — the Sell tab's listings columns
+- **One gutter (14px) and one alignment rule.** Worth understanding before
+  editing them: the old set already had *identical* 4px gutters and still read
+  badly. What varied was the **justification** either side of each one.
+  RIGHT-then-LEFT (`Unit price → Available`, `% mkt → You?`) put two texts 4px
+  apart; LEFT-then-RIGHT (`Available → Stack price`) put a short value at the
+  far left of a 156px column and the next at the far right of the one after —
+  about **178px of void out of 4px of gutter**. Both complaints, one cause.
+- **`You?` is centred**, which is what stops it colliding with the
+  right-aligned `% mkt` before it. Same medicine as the Buy table's `Lvl`.
+- **`Available` absorbs the surplus width**, so `Stack price`, `% mkt` and
+  `You?` sit against the right edge where the eye looks for totals. The columns
+  were a fixed 490px block in a box that is ~630px at the *smallest* window and
+  unbounded above — everything past that was dead table that grew the wider you
+  dragged.
+
+### A note on what is and is not guarded
+The column geometry is asserted: one gutter between every pair, and
+`SELL_COLS_END` checked against where the last column actually ends rather than
+a hand-written sum. **The resize wiring is not.** No suite loads `ui/frame.lua`
+or simulates a drag, so nothing would catch `ui.LayoutAll()` losing a line. The
+mitigation is structural — one list instead of two — not a test, and it is
+worth saying so plainly rather than implying coverage that does not exist.
+
+---
+
+## [1.36.0]
+
+The Sell tab's bag column: headings, indent, scrollbar. `/reload`.
+
+### Fixed
+- **"Your Bags" and "Qty" rendered grey while the listings headings two inches
+  away rendered tan — from the identical palette entry.** The colour was never
+  wrong. These were bare FontStrings on the panel, and in WoW every child
+  *frame* draws above **all** of its parent's regions whatever draw layer they
+  claim — so the headings were drawn underneath their own table's 85%-opaque
+  backdrop and came out darkened. The listings headings escaped it only because
+  they happened to be built as Buttons.
+
+  Both now go through one `ui.MakeHeaderCell`, so a heading is a child frame
+  wherever it appears and the difference cannot come back. Setting the colour
+  again would have fixed nothing.
+
+- **The bag list's scrollbar cut through the box's right border.**
+  `FauxScrollFrameTemplate` anchors its bar 2px *inside* the scroll frame's
+  right edge; a backdrop edge is drawn *centred* on that same line and so hangs
+  6px outside it. The bar therefore ran through the border and 2px into the
+  box. It is pushed clear now, and the gutter widened so it also clears the
+  **listings** box's border on the far side — three numbers that are really one
+  measurement, with an assertion tying them together.
+
+### Changed
+- **"Your Bags" is indented to line up with the item names beneath it**, rather
+  than sitting flush on the box edge. Same rule the numeric columns follow — a
+  heading is placed the way its cells are — applied to the left edge.
+
+---
+
+## [1.35.0]
+
+Spacing and alignment across both tables. `/reload`.
+
+### Sell tab
+- **The bag column got wider, the listings narrower.** The listings table had
+  ~170px of slack at the minimum window size while the bag column had none and
+  was clipping item names. The two now split the space nearer to how they use
+  it.
+- **"Have" is "Qty"**, and it is a proper column: wider, **centred** under a
+  centred heading, and held off the box edge. A right-aligned number flush to
+  a border reads as though it is falling out of the table.
+- **"Your Bags" and "Qty" are the same colour as the listings headings.** They
+  were the same *literal* before and could drift apart; both now read one
+  palette entry, `C.header`, so they cannot.
+- **Your gold sits bottom-left**, as it does on the Buy tab. Posting is the one
+  place in the addon where you watch a number go up, and the tab that does it
+  was the only one that never showed you the number. **Vendor** and **Scan**
+  moved right to make room, and up slightly.
+- Gold now refreshes on `PLAYER_MONEY`, so a sale, a repair or a trade updates
+  both tabs. Previously the Buy tab's figure only refreshed when you switched
+  to it or bought something.
+
+### Buy tab — results table
+- **One gutter between every pair of columns**, instead of the 6/8/18 mix these
+  had grown into. Uneven gutters are why a table reads as assembled: the eye
+  finds the rhythm and then loses it, and reads the break as a mistake in the
+  data.
+- **Lvl is centred**, not right-aligned. It sat right-aligned immediately
+  before a left-aligned Time Left, which pushed the two columns into the gap
+  between them and left air on the outside of both. A level is a two-digit
+  label, not a magnitude read digit by digit.
+- **The table uses the whole window now.** Column widths were measured against
+  the difference between the two view modes, which is the same number as the
+  row width only at the minimum size — so dragging the window wider grew the
+  table but not its columns, leaving a strip of empty table down the right
+  that got bigger the more room you gave it.
+
+### Fixed
+- `ui.MakeSortHeaders` had no `CENTER` case, so a centred column's heading fell
+  through to left-aligned and sat over the left edge of centred cells — which
+  looks like a mistake in the data rather than in the layout. Found while
+  centring Lvl.
+- The geometry suite's table reader could only find a field that **started** a
+  line, so the Buy table's packed column definitions read as "the table moved"
+  rather than "the table is formatted differently". Eight new assertions
+  depended on it.
+
+---
+
+## [1.34.0]
+
+The Sell tab's bag list is a table now, not a list of text. `/reload`.
+
+### Changed
+- **"Your Bags" gets the same treatment the listings table got**: one box
+  around the heading and the rows, a rule under the heading, and the scrollbar
+  hanging outside the box. Both halves of the tab now start and end on the same
+  lines, which is asserted so they cannot drift apart again.
+- **The count moved into its own right-aligned "Have" column** instead of being
+  glued to the end of the name as `Ice Cold Milk x35`. A number you have to
+  read out of the middle of a sentence is not a column, and this list sits
+  beside one whose numerics all line up.
+- A holding of **one shows blank** rather than `1`. A column of ones down the
+  side of a bag list is noise; the interesting fact is a stack, and spelling
+  out the dull case hides it.
+- **Vendor** and **Scan** moved below the box. They used to float over the top
+  edge on the row the heading now occupies, and under it they line up with the
+  listings' status line.
+
+### Added
+- `tests/lint/palette.py` — every `C.<colour>` the UI reads must exist in the
+  palette.
+
+  **This one has a story.** `C.textDim` does not exist; the palette has
+  `goldDim`. That typo passed the Lua parser, all eight lints, all 16 suites
+  and 140 sabotages, because `ui/frame.lua` builds a window on load and so no
+  suite loads it — the line would simply have thrown the first time anyone
+  opened the Sell tab. Now it is caught before a commit, with its own selftest
+  and a sabotage that plants the exact mistake back.
+
+---
+
+## [1.33.0]
+
+`disenchant-profit` stops being pending, and brings a sibling. `/reload`.
+
+### Added
+- **`disenchant-profit/<price>`** — gear worth at least that much more broken
+  than bought. `wristbands/disenchant-profit/1g`.
+- **`disenchant-percent/<n>`** — the same question as a ratio: at most `n`%
+  of what it breaks into. `wristbands/disenchant-percent/70`.
+
+Both are **per item**, because each disenchant rolls the table again — a stack
+of five is five separate breaks, not five times one number.
+
+`ui.PENDING_COMPONENTS` is down to a single entry (`item`), which is the first
+time since the Builder was written that almost everything in it works.
+
+### An unknown value is not zero
+A row Aegis cannot value is **counted and confessed**, never silently dropped.
+Treating an unknown disenchant value as zero would make
+`disenchant-profit/1g` quietly reject every item Aegis has not learned yet —
+which reads as "nothing here is profitable", the most misleading answer
+available and indistinguishable from a filter that works.
+
+The status line says which remedy applies: *"disenchant one, or scan its
+materials"*. Both components deliberately share that wording, because
+`UnansweredSummary` withholds advice when two components want different
+remedies, and a query using both would otherwise lose its advice line
+entirely.
+
+A **bid-only** auction still is not in that count. It has no buyout because
+the seller set none; that is a fact about the auction, not our ignorance, and
+no amount of scanning or disenchanting changes it.
+
+### Notes
+- These are the first components that cost a `GetItemInfo` per row — everything
+  else reads page data the client already holds. Affordable because it happens
+  only when one of them is in the term, and because the `tooltip` component
+  beside them already scans a whole tooltip per row. It is **not** affordable
+  unconditionally, so it must not be hoisted into `ReadPage`.
+- Five new sabotages, including both operators inverted and the unknown-as-zero
+  shortcut. 140 caught in total.
+
+---
+
+## [1.32.0]
+
+Aegis now learns what things disenchant into by watching you do it. `/reload`.
+
+### Added
+- **Disenchanting an item teaches Aegis about it.** No configuration, nothing
+  to turn on. This is the only source that can ever answer for the two thirds
+  of Turtle's custom items the shipped table has never heard of — and it is
+  evidence from the server you actually play on, so it **outranks** the
+  shipped item levels rather than filling gaps around them.
+
+- **Evidence accumulates; it is not believed on the first result.** An essence
+  names an item's band outright, but a dust does not — Strange Dust belongs to
+  bands 15, 20 and 25, whose yields differ by more than double. Of the 30
+  material/quality combinations the table can produce, 21 pin a band and 9
+  leave two or three open. Until the evidence narrows to one, Aegis keeps
+  saying nothing rather than picking.
+
+### How it knows what you disenchanted
+1.12 never reports it: a spell is cast, a bag item is clicked, and neither step
+names the item. Aegis remembers what the click landed on and attributes a loot
+window to it only when **all four** hold — a spell was awaiting an item target,
+the item can actually be disenchanted, the loot arrived within 15 seconds, and
+**every** loot slot is an enchanting reagent.
+
+That last one is what makes it work without reading a spell name (which is
+localised, and would have needed an answer about Turtle's cast bar that the
+client source does not give). The second is what stops a lockbox being
+"learned" from the shard you picked out of it.
+
+Cost is one table write per bag click and a read of one or two loot slots —
+nothing walks your bags, so HARD RULE 16 holds by construction.
+
+### Corrected
+- A claim in ROADMAP 3k that "one disenchant identifies the band for 46 of 53
+  material signatures" was **wrong** — it conflated a full signature (every
+  material an item can yield, which takes many breaks) with a single
+  observation (one material). The measured figure is 21 of 30 combinations.
+  Corrected in place rather than quietly dropped.
+
+### Notes
+- **Observations only** are saved. No band, no item level, no guess is ever
+  written — everything above the counts is derived at read time, every time. A
+  derived value stored beside real evidence becomes indistinguishable from it a
+  month later, and there is no way back from that. A test asserts the store
+  holds nothing else.
+- Observations are per realm, because what an item breaks into is server
+  behaviour.
+- New suite (34 checks) and eight sabotages, most of them about cases where
+  **nothing** should be recorded — a false observation is permanent, so those
+  matter more than the happy path.
+
+---
+
+## [1.31.0]
+
+**The disenchant line actually appears now.** `/reload` — no new files, because
+`core/itemlevel.lua` has been in the `.toc` since 1.29.0 waiting for exactly
+this.
+
+### Added
+- **12,567 item levels**, in `core/itemlevel.lua`. That is the one input 1.12
+  does not give addons and the whole disenchant calculation turns on, so with
+  it in place the tooltip line — shipped inert in 1.30.0 — starts answering for
+  vanilla items and roughly a third of Turtle's custom ones.
+
+  Source: **[ShaguScore](https://github.com/shagu/ShaguScore)** by **shagu**,
+  with thanks. ShaguScore carries no licence of any kind, so including it was a
+  deliberate call by this project's owner rather than something done quietly —
+  see the header of `core/itemlevel.lua` and ROADMAP 3k. If shagu would rather
+  it were not there, it comes out and the addon keeps working.
+
+- `tools/gen_itemlevel.py`, so the file is regenerable rather than a 141 KB
+  blob nobody can check. The input is not vendored.
+
+### Notes
+- Item levels **above 65 are kept** even though the disenchant ladder stops
+  there. This is an item-level lookup, not a disenchant-band lookup, and
+  knowing something is item level 70 is different from knowing nothing about
+  it — `/aex de` now tells you which of those it is.
+- Anything with no entry still says **nothing at all**. That has not changed
+  and is not a gap waiting to be filled with "unknown".
+- A sabotage now plants an emptied table, because a regeneration that produced
+  a truncated file would otherwise be invisible: the addon loads, every line
+  goes quiet, and it looks exactly like the release before this one.
+
+---
+
+## [1.30.1]
+
+A fix to the one command that could show 1.30.0 working at all. `/reload`.
+
+### Fixed
+- **`/aex de <link> <item level>` silently ignored the item level** for any
+  item whose id happened to contain the same digits — `48` was dropped on item
+  4801, on 7448, and on a good slice of the table besides. The override was
+  being read from the whole string and then filtered by asking whether the link
+  contained those digits, which is not a question that can distinguish them.
+  It now reads only what follows the link.
+
+  This mattered more than a normal parser bug: with `core/itemlevel.lua`
+  shipping empty, this command is the **only** path that reaches the
+  disenchant rule, so the fault made the entire 1.29.0/1.30.0 feature look
+  like it did nothing.
+
+### Added
+- `/aex de` now accepts a **bare item id** as well as a link —
+  `/aex de 12345 48` — so the rule can be tried on items you do not own.
+- The parsing is extracted as `de.ParseReportArgs` and tested (18 checks,
+  including the exact regression above) instead of living inline in the slash
+  handler where nothing could see it.
+
+---
+
+## [1.30.0]
+
+The disenchant value reaches the tooltip. `/reload`.
+
+### Added
+- **Expected disenchant value on item tooltips**, with the full material
+  breakdown while **Shift** is held:
+
+  ```
+  Aegis Disenchant     1g 84s
+    78%  1.5 x Dream Dust
+    18%  1.5 x Greater Nether Essence
+     4%  1.0 x Large Radiant Shard
+  ```
+
+  Toggle it on the Aegis tab beside the other three tooltip lines.
+
+- **The value is per ITEM, and deliberately does not multiply by the stack.**
+  The price lines beside it do, which is exactly what makes this easy to get
+  wrong — but each disenchant rolls the table again, so a stack of twenty is
+  twenty separate draws rather than twenty times one number. There is a test
+  and a sabotage holding that line.
+
+### It says nothing far more often than it says something
+The line appears only where the rule can genuinely answer: a cached,
+disenchantable item whose **item level** some source knows. Today that is rare,
+because `core/itemlevel.lua` ships empty on purpose — see 1.29.0. Everything
+else gets **no line at all**, rather than "unknown" on every grey, trade good
+and uncached item in a full bag.
+
+That is not a placeholder for a better message. Silence is the message.
+
+### Under the hood
+- `de.Resolve` / `de.YieldOf` / `de.ValueOf` — one place that turns an item id
+  into everything the rule needs, so the tooltip and `/aex de` cannot drift
+  apart. `de.MarketPrice` and `de.BreakdownText` are shared by both for the
+  same reason.
+- `de.ValueOf` returns **value, source** — where the *item level* came from,
+  never where a price did. That is the fact a later phase weighs when deciding
+  whether it may advise on a number or merely show it.
+- The test harness can now load `ui/` modules, so tooltip behaviour is testable
+  at all. First suite in (17 checks) plus three sabotages; the disenchant suite
+  grew to 466.
+
+---
+
+## [1.29.0] — **restart**
+
+The disenchant rule. **Adds two `.lua` files, so this one needs a full client
+restart, not `/reload`.**
+
+Nothing is visible in the window yet — this release is the arithmetic that
+later ones stand on, plus one slash command to look at it.
+
+### What 1.28.1 got wrong
+The previous entry said a disenchant breakdown was not buildable. Two of its
+three reasons were mistaken, and this release exists because of what turned up
+when they were checked properly:
+
+- *"There is no item level and no way to get one."* True of the client, and
+  still true. But a **shipped lookup** is an addon-visible source, and 1.28.1
+  named exactly that as an unblocker before dismissing it.
+- *"Learning it from play needs a bag walk on a spell event."* Simply wrong.
+  The way the era's addons did it costs **one** call — remember the item the
+  click landed on, gate it behind the Disenchant cast, read the loot. Every
+  step is O(1). That is a later phase, but it is not the obstacle it was
+  written up as.
+
+What survives is the part that mattered least to the decision: item level is
+missing from `GetItemInfo` and has to come from somewhere.
+
+### The rule
+There is no disenchant table. There is a **rule** — item level, quality and
+weapon-or-armour fully determine what an item breaks into — and the whole
+problem is knowing the item level.
+
+The constants behind it are **generated**, not typed: `tools/gen_disenchant.py`
+derives them from **8.8 million observed disenchants**, and the band boundaries
+land exactly on vanilla's 5-wide ladder with no fuzz. The armour/weapon split
+is read off the data too (~82/17), which is close to but not the same as the
+75/20 the era's addons hand-typed.
+
+### What it will not answer, and why that is the point
+- **Item level above 65.** The observations thin to a few dozen there and stop
+  being monotone, while Turtle's item levels run to 99.
+- **Epics.** The source data holds nine epic items, with yields no real item
+  produces (4.14 Large Brilliant Shards per disenchant). Dropped entirely.
+- **Weapons in a few bands.** Where no usable weapon data survives, the band
+  ships armour only rather than lending armour's numbers to weapons — armour
+  is dust-led, weapons essence-led, so borrowing would be confidently wrong
+  instead of roughly right.
+
+Each of those returns "I do not know" rather than a plausible number.
+
+### `core/itemlevel.lua` ships empty, on purpose
+The obvious source of item levels is another addon's database that carries **no
+licence at all**. That is a decision about someone else's work, so it is the
+owner's to make rather than something to do quietly. The file is in the `.toc`
+from today so data can be dropped in later **without a second restart release**,
+and learning item levels from your own disenchants — a later phase — fills it
+from the server you actually play on, which is better than any 2006 table.
+
+### Also
+- `/aex de <item link> [item level]` prints the breakdown for one item. A
+  verification hook, not a feature.
+- `tests/support/wow.lua` now reads `Aegis_Exchange.toc` and refuses to run if
+  its own load order has drifted from it — two copies of one order is how a
+  file gets added to the addon but never to the tests.
+- New suite (441 checks) and six sabotages. One of those immediately caught a
+  real fault: the new suite printed its failures but exited zero, so nothing
+  downstream would ever have noticed a regression in it.
+
+---
+
+## [1.28.1]
+
+A feasibility answer, and the small change that records it. `/reload`.
+
+### Not building: the disenchant breakdown
+Asked for as a tooltip line predicting what an item will disenchant into. The
+answer is **no, and not for want of effort** — 1.12 exposes no disenchant API,
+and the formula's key input is missing: vanilla's `GetItemInfo` returns **no
+item level**, which this addon already knows because `util.ItemInfo` is built
+around that gap. Required level is not a substitute; the disenchant buckets are
+narrow enough that guessing wrong gives the wrong *material tier*, not a
+slightly wrong answer.
+
+Shipping a static table keyed by item id would sidestep that — it is what the
+era's addons did — but it means shipping thousands of unverified entries onto
+servers that add their own items and can change drop tables, where a wrong
+entry is indistinguishable from a right one. Learning it from your own
+disenchants fits this addon far better, but vanilla never says *which* item was
+disenchanted, so it needs a bag diff hung off a spell event to find out.
+
+Written up in full in `ROADMAP.md` (3k), including the three things that would
+unblock it, so the question does not get re-asked from scratch.
+
+### Changed
+- **The greyed-out components in the Builder now say WHY.** "Not wired up yet"
+  was true of both remaining ones and useful about neither: `item` is
+  *unbuilt*, `disenchant-profit` is *unbuildable* with what the client
+  provides. Each carries its own reason in its dropdown tooltip.
+
+### Internal
+- The engine's pending list and the UI's are **two tables in two files**, and
+  nothing made them agree — a component implemented in one and still listed in
+  the other either works while looking broken or looks fine while doing
+  nothing. The suite now reads the UI's list out of the source and checks it
+  against what the parser actually leaves inert, **in both directions**.
+- Three sabotages for that pairing; **112 caught in all.**
+
+## [1.28.0]
+
+Three Sell-tab flow fixes. `/reload`.
+
+### Fixed
+- **An item you moved on from stayed stuck to the cursor.** Click a second bag
+  item while the first is still in the sell slot and the first one never went
+  back to your bag — you had to put it down by hand.
+
+  `ClickAuctionSellItemButton` does not *put*, it **swaps**: it gives the slot
+  what the cursor holds and hands back what was already there. So the second
+  placement handed the first item straight onto the cursor, where it silently
+  stayed. The `ClearCursor()` that was already there could not have helped —
+  it ran *before* the pickup and was long finished by the time the swap
+  happened. The slot is emptied first now, which turns the click back into the
+  plain placement it was always assumed to be.
+
+### Added
+- **Leftovers stay ready to post.** Post two stacks of ten out of
+  twenty-five and the remaining five are re-slotted **at the same price**, so
+  the small stack goes straight out without finding it in the bags and pricing
+  it again.
+
+  Gated on the item matching — that gate is the whole safety of it, because
+  carrying the price across a *different* item would post that one at a stale
+  price. Off while walking a scanned bag list (the queue owns what comes next)
+  and after a cancel. New **Keep leftovers ready to post** toggle on the Aegis
+  tab, defaulting on.
+- **A "Max" button** beside the stack count, filling in every stack of the
+  chosen size that can actually be assembled. Not the total divided by the
+  size: 1.12 cannot merge partial stacks, so thirty held as three tens gives
+  three stacks of ten and none of thirty.
+
+### Internal
+- The cursor and the sell slot are **modelled** in the simulated client now,
+  not stubbed. `ClickAuctionSellItemButton` swaps, `ClearCursor` returns a
+  held item to where it came from, and bags are mutable — which is the only
+  reason the bug above was reproducible instead of guessed at. It had been
+  guessed at for a release.
+- `ui.SetStackCount` is the single writer for the stack count. The count box
+  and its slider are re-ranged against each other on every repaint, so writing
+  the box directly left the two showing different numbers until something else
+  repainted them.
+- `W.SetBags` clears the cursor and slot as well: an item still held from a
+  previous case got put *back* into the new bags, so five copper bars became
+  ten and read as a duplication bug in the addon rather than one test world
+  leaking into the next.
+- New `sellslot` suite (26 checks). Three sabotages there plus a stale
+  anchor-chain entry rewritten — inserting the new checkbox into the settings
+  chain moved the anchor the lint watches, which is exactly the mistake that
+  lint exists for. **109 sabotages caught in all.**
+
+## [1.27.0]
+
+The Sell tab's listings table, drawn the way the Buy table is. `/reload`.
+
+### Changed
+- **The listings table has a box.** One border around the column headings AND
+  the rows, a rule under the headings, and separators between the header
+  cells — exactly the Buy table's construction. It had no box at all before:
+  headings and rows sat on the bare panel, so the tab read as a list of text
+  rather than as a table.
+- **The status line moved BELOW the box.** It used to float above the
+  headings, competing with them for the same eye and leaving the table
+  unanchored at its top.
+- **26px rows**, the Buy table's height, instead of 19.
+- **Numeric columns are right-aligned** — Unit price, Stack price and % mkt.
+  Every column was left-aligned, so the money ran ragged down the page while
+  the Buy table's lined up. The headings follow automatically: a right-aligned
+  column's heading sits over the right edge of its cells, from the same flag.
+
+### Internal
+- The Sell tab's vertical bands join its horizontal ones in `SELLL`, and
+  `LISTBOX.sellList` reads them rather than carrying its own copy — so the box,
+  the scroll frame and the row count cannot disagree about where the table
+  starts or stops.
+- The geometry suite asserts the four numbers that have to stay in step: the
+  box starts above the headings *by the same gap the Buy table uses*, the
+  headings fit above the rule, the first row clears it, and there is room
+  under the box for the status line — plus that the whole thing still holds
+  rows at the smallest window.
+- Its table-loader now runs a layout table's real literal instead of parsing
+  fields one at a time, which is what lets `SELLL`'s bands be arithmetic on
+  `SELL_TOP_H` and `LISTBOX` read `SELLL`.
+- Five new sabotages; **106 caught in all.**
+
+## [1.26.0]
+
+The Sell tab's bag list: one row per item, and the Buy table's look.
+`/reload`.
+
+### Fixed
+- **Your Bags drew one row per bag SLOT.** Thirty Lesser Magic Essence held as
+  three stacks of ten showed as three identical lines — and it was not only
+  cosmetic: the **Vendor list**, the **Scan-all batch** and the **post-scan
+  sell queue** each processed the same item three times over. One row per item
+  now, showing the total across every bag.
+
+  Present since the feature was written.
+
+- **The stack-size slider could ask for a stack that cannot exist.** It ranged
+  up to your *total* holdings, and 1.12 has no way to merge two partial
+  stacks — so with thirty held as three tens, asking for a stack of thirty
+  gave zero postable stacks with no explanation. It ranges to the **largest
+  single stack** now. The total is still shown; it is the ceiling that had to
+  be honest.
+
+### Changed
+- **The bag list matches the Buy table.** 26px rows instead of 19, the same
+  zebra banding and hairline separators every other table wears, 20px icons,
+  and **quality-coloured item names**.
+- **Category headers are banded**, so they read as the dividers they are
+  rather than as text that happened to land there.
+- **The bag column is wider** — 156px truncated most names to "Pattern: Fine
+  Leather Bo…". The listings column moved right to match.
+
+### Internal
+- `sell.ScanBags` entries now carry three separate numbers, and keeping them
+  separate is the whole design: `count` is the **holdings total**, `stackMax`
+  the **largest single stack** — the only one that bounds what can be posted
+  as one auction — and `slots` every physical stack behind the row. `bag` and
+  `slot` point at the largest stack, so every caller that places or hovers an
+  item keeps working and gets the most useful stack while doing it.
+- **`sell.MarkedInBags` deliberately still emits one row per physical stack.**
+  `SellMarkedToVendor` calls `UseContainerItem(bag, slot)` once per row and
+  that sells exactly one stack — an aggregated row there would sell a third of
+  what was marked and report success.
+- `sell.LargestStack` is new and is not `sell.CountInBags`; the suite asserts
+  the difference directly.
+- The Sell tab's two column positions were four literals across five call
+  sites (`168`, and `200` three times). One `SELLL` table now, read by every
+  `SetPoint` and by the geometry suite, which requires the listings columns to
+  fit beside the bag column **at the smallest window** and the gutter to clear
+  the bag list's scrollbar.
+- New `bags` suite (36 checks) with a bag model added to the simulated client.
+  It covers the aggregate, the three counts, uneven stacks, vendor marks, and
+  a **cold item cache** — which must still produce a row, must not claim a
+  quality it does not know (quality 1 would paint an epic white), and still
+  recovers the name from the item link.
+- The geometry suite's table-field reader could not see a field on a table's
+  **opening line**, so `SCX`/`ACX`-shaped tables reported their first field
+  missing. Fixed; it read as "the table moved" rather than "the table is
+  formatted differently".
+- Eight new sabotages; **101 caught in all.**
+
+## [1.25.1]
+
+The window opened smaller than it was designed for on a fresh install.
+`/reload`.
+
+### Fixed
+- **The window opened clipped until you touched the resize grip.** The frame
+  was created at a literal **832 × 460** — the size it used back when `MIN_W`
+  was 832 — and those literals were left behind when the minimum rose to
+  **1000 × 492**. Anyone with a saved size was clamped up on login and never
+  saw it; anyone **without** one got a window 168px narrower than its own
+  declared minimum, with the Buy table's right-hand columns running off the
+  panel. `ui.ColumnsFitAt` puts the true column floor at ~970.
+
+  It hid behind the grip: `SetMinResize` snaps the frame to the minimum the
+  instant sizing starts, and releasing saves that size — so **one drag fixed
+  it permanently**, and nobody who had ever resized the window could reproduce
+  it.
+
+  Reported by two people on different setups. **Neither screen resolution nor
+  pfUI had anything to do with it** — the common factor was simply never
+  having dragged the window, which a clean settings reset guarantees.
+
+  The window is created at the minimum now, and the size is clamped into range
+  on every restore rather than only when there is a saved size to restore —
+  so the next drift in a default cannot ship as a clipped window again.
+
+### Internal
+- `ui.ClampWindowSize` is split out as pure arithmetic so "the window is never
+  below the minimum" is an assertion rather than a comment. The geometry suite
+  now also reads the frame's **creation** size out of the source and requires
+  it to sit inside the range, and requires the result columns to fit at it —
+  paired with a check that the old 832 genuinely fails, so the pair cannot
+  pass for the wrong reason.
+- Four sabotages: the old default restored whole, the height alone put back
+  (half the bug, and far more innocent in a diff), the unsaved-size case
+  skipped, and the lower clamp dropped. **93 caught in all.**
+
+## [1.25.0]
+
+The two filter components that need the price database. `/reload`.
+
+### Added
+- **`percent`** — at most this percentage of market value.
+  `linen/percent/70` is "a third under the going rate or better", measured
+  against what Aegis has actually seen the item sell for.
+
+  A ceiling rather than a band, for the same reason `left` is a bound: it
+  answers the question people actually have, and `not/percent/70` still gives
+  the other side of it. A trailing `%` is taken and dropped, because that is
+  what people type.
+- **`vendor-profit`** — at least this much per item over what a merchant pays.
+  `linen/vendor-profit/50s` finds what you can buy and sell straight to a
+  vendor for 50s more each. Both figures are per unit, which is the only
+  comparison that survives different stack sizes.
+
+Both now appear in normal colour in the Builder's **Component** dropdown
+rather than dimmed, and the Post Filter list draws each one in its own terms —
+`70% of market, or less`, `50s per item, or more`.
+
+### Changed
+- **The status line now gives advice that works.** Rows a filter cannot judge
+  were already counted and named; the note ended `— search again`, which is
+  right for a seller name and **wrong for a vendor price**. There is no sell
+  price in 1.12's `GetItemInfo`; the only source is standing at a merchant, so
+  "search again" was sending people round a loop that cannot succeed.
+
+  Each cause carries its own remedy now — *search again*, *scan to learn its
+  price*, *vendor prices are learned at a merchant* — and when two causes want
+  two different cures, **no advice is offered at all** rather than advice that
+  is half wrong.
+
+### Not counted, on purpose
+- **A bid-only auction is not a row we failed to judge.** It has no unit price
+  because the seller set no buyout — a fact about the auction, visible on the
+  row, that no amount of scanning changes. Confessing those would put the note
+  on nearly every search until it stopped meaning anything. The count is for
+  data *we* are missing; this is the same treatment `max-unit-buy` has always
+  given them.
+
+### Still pending
+`item` needs the client's item cache. `disenchant-profit` needs a data source
+1.12 does not provide and remains unscheduled — deliberately alone.
+
+### Internal
+- Nine new sabotages, **89 caught in all**: `percent` as a floor, its ratio
+  inverted, the ×100 dropped, `vendor-profit` subtracting the wrong way round
+  and as a ceiling, unknown data hidden instead of confessed, the wrong remedy
+  offered for a vendor price, advice given for mixed causes, and a bid-only
+  row counted as ignorance.
+
+## [1.24.0]
+
+Every column on every table sorts now. `/reload`.
+
+### Added
+- **Auctions sorts.** Item, Qty, Unit, Buyout, Time and **vs market** are all
+  clickable. They were bare grey text before — not pressable at all, and the
+  grey read as a disabled band rather than as the table's headings.
+
+  *vs market* sorts by how far above the cheapest known listing each auction
+  sits, so descending puts the ones you have been undercut hardest on at the
+  top — which is the question that column exists to answer.
+- **History sorts.** When, Type, Item and Amount. It still opens most-recent
+  first; that is the sort's default now rather than a fixed reversal, which is
+  what makes it changeable at all.
+
+  *Amount* sorts by **size**, not by sign: the sign is already carried by
+  Sold/Bought in the Type column, and a 40g sale and a 40g purchase are the
+  same size of transaction.
+
+### Changed
+- **The Sell tab's listings headers go through the shared builder**, so they
+  are warm tan like every other table's instead of grey, and a numeric
+  column's header sits over the right edge of its cells.
+
+### Internal
+- **One nil rule, five tables.** `ui.SortByKey` holds the rule this addon has
+  already got wrong once: a row whose value is missing **always** sinks, in
+  both directions. Fold the guards into the direction branch instead and a
+  descending sort floats priceless rows to the top, where a bid-only auction
+  presents as the dearest listing on the page. It was one table's private
+  comparator; now every table borrows it, and it has its own assertions rather
+  than only being tested through the Buy tab.
+- **One direction rule.** `ui.NextSort` — same column flips, new column starts
+  ascending. There were three hand-written copies before Auctions and History
+  wanted a fourth and a fifth.
+- **The Sell tab's column x and widths were two disagreeing sets of numbers**
+  (panel-relative in the headers, row-relative in the rows, a few pixels apart
+  on every numeric column). One pair now, read by both.
+- **A sabotage found a hole it was not aiming at.** The entry meant to invert
+  Auctions' *vs market* ratio matched an identical line in the Buy tab's
+  *% Mkt* sort first — and the suite did not notice *that* either, because
+  nothing checked pct **ordering**, only that bid-only rows sank. Both
+  functions have their own sabotage now, and pct is asserted to be a ratio
+  rather than unit price wearing a different name.
+- One assertion was written against an **unstable sort's tie order** and
+  replaced. `table.sort` is not stable in Lua, so naming which of two equal
+  rows lands second pins an accident.
+- Ten new sabotages; **80 caught in all.**
+
+### Not changed, on purpose
+- **History's item names stay uncoloured.** The ledger stores a name and an
+  item id, never a quality, so colouring them would mean a `GetItemInfo` per
+  row inside a repaint that can run while the client is storming
+  `MAIL_INBOX_UPDATE` and resolving item data — exactly the shape HARD RULE 16
+  forbids, and what froze Courier. Every other table's item column is
+  quality-coloured already; the Type column carries the colour that matters
+  here and costs nothing.
+
+## [1.23.0]
+
+Every table now looks like the Buy table, and six lists that stopped short of
+their own boxes now fill them. `/reload`.
+
+### Fixed
+- **Six lists kept the row count they worked out when the window was
+  created.** Crafting, its recipe tree, Auctions, History, and the Sell tab's
+  bag and listings columns all counted their rows by measuring their scroll
+  frame — and every one of those frames is anchored by two corners, so
+  `GetHeight()` reports the height it was last *laid out* at. Drag the window
+  taller and the box grew with its anchors while the list did not: a
+  full-height box with a half-full list, and empty space below the last row.
+
+  This is the same trap that took the Buy results table, the Advanced column
+  widths and the Saved Searches lists. Those three were each fixed in place;
+  this is the audit that finished the job. Row counts are arithmetic on the
+  window's own height now — which is set explicitly, so it is true the moment
+  it is read — and **the measuring version has been deleted rather than left
+  available**. A trap four separate bugs walked into does not want a
+  convenient spelling.
+
+### Changed
+- **The Sell, Auctions, Crafting and History tables wear the Buy table's
+  chrome**: the faint zebra banding, the hairline rule between rows, and the
+  selection tint where rows can be picked. Previously the Buy table had the
+  only copy, which is exactly why every other tab read as a different addon.
+
+  The banding is keyed to a row's **position**, never to the entry it is
+  showing, so scrolling slides data past fixed stripes instead of making them
+  crawl along with it.
+
+  History gets no selection tint and no tick column: a ledger line is a
+  record, and there is nothing to select one *for*.
+
+### Internal
+- **One function, five tables.** `ui.AddRowChrome` builds all three textures
+  in the one order that works — stripe, then hairline, then tint. They share
+  the BACKGROUND layer, where creation order *is* draw order, so any other
+  order is a silent visual bug: nothing errors, every row still draws, and a
+  selected row wears a hairline scar or reads as striped-and-selected. That
+  order is now asserted directly, by running the real function against a row
+  that records what it was asked to make.
+- The suite also checks there is exactly **one** copy of each chrome colour in
+  the file, because four tabs each growing their own is the shape that
+  produced the Saved-vs-Builder drift in 1.19.3.
+- **`tests/lint/definitions.py` had been inert for its whole life.** It asked
+  whether a name appeared *anywhere in the file text*, so a rename passed as a
+  substring (`ui.TableRowsAt` is inside `ui.TableRowsAtNew`) and a deletion
+  passed whenever a comment happened to mention the name — which is precisely
+  how it waved through the `ui.RowsFor` removal above.
+
+  It compares definition *sets* now. It also **fails when it compared
+  nothing**: without a git repo every file is skipped as "new" and the run
+  exited 0 having checked nothing at all, which is indistinguishable from a
+  clean pass. It has a `--selftest` mode pinning both misses, run before it
+  every time — the same guard `lua50.py` has had all along.
+
+  This repo has met this failure before, in `sharedlayout.py`: a checker
+  fooled by its own documentation is worse than none.
+- Deliberate removals are expressible: `REMOVED_ON_PURPOSE` names them and
+  their reason, and an entry naming something still defined is reported as
+  stale, so the list cannot quietly become a blanket exemption.
+- Nine new sabotages across the row counts and the chrome; **73 caught in
+  all.** Two written for this pass were deleted rather than papered over — a
+  sabotage that cannot fail proves as little as a test that cannot.
+
+## [1.22.0]
+
+Five of the nine placeholder filter components are real filters now.
+`/reload`.
+
+### Added
+- **`min-level` and `max-level`** — bound the listing's own required level.
+  `sword/min-level/40/max-level/50` is a band, which is the thing the
+  server-side `level/40-50` cannot be: a query filter is part of the query and
+  cannot be OR'd or negated, so `min-level/40/or/rarity/epic` needs the
+  post-filter version.
+- **`rarity`** — **exactly** that quality, not "that or better".
+
+  The server-side `quality/N` is already the minimum — it *is* the form's
+  **Min Quality** dropdown — so a post-filter minimum would be a second way to
+  spell something that already had one. Exact is what you could not otherwise
+  say: `bracers/rarity/rare` is rares and none of the epics above them. Same
+  vocabulary as `quality`, so `rarity/rare` and `rarity/3` are the same
+  clause.
+- **`seller`** — case-insensitive substring of the seller's name, so
+  `linen/seller/Bob` finds Bobby and Bobson. Matched as plain text, never as a
+  pattern: a seller called `Mr.X` is a name, not a wildcard.
+- **`left`** — **at most** this much time remaining. `left/short` is what is
+  about to expire; `left/long` is everything except the freshly posted. Takes
+  a word or an index (`short`, `medium`, `long`, `very long`, or `1`–`4`), and
+  your client's own wording is accepted too.
+
+  A bound rather than an exact match because the question people actually have
+  is "what is ending soon" — and because a bound still composes:
+  `left/medium/not/left/short` is exactly medium.
+
+- **A filter that cannot ANSWER now says so.** The seller's name arrives a
+  moment after the page does, and some servers do not report time left at all.
+  Rows those filters cannot judge are dropped — a positive filter cannot
+  honestly keep what it cannot verify — but they are **counted and named** in
+  the status line: `3 skipped (no seller data yet — search again)`.
+
+  This is the same confession bare `stack` makes, for the same reason: an
+  unexplained empty page is indistinguishable from a broken filter, and that
+  is exactly how the `stack` fault got reported in the first place.
+
+All five now appear in normal colour in the Builder's **Component** dropdown
+rather than dimmed, and the Post Filter list draws each one's value in its own
+terms — a quality by name, a time left as "or less", a price as "per item".
+
+### Still pending
+`item`, `percent`, `vendor-profit` and `disenchant-profit` remain placeholders
+and stay dimmed. `percent` and `vendor-profit` need the price DB and are next;
+`item` needs the client's item cache; `disenchant-profit` needs a data source
+that does not exist on 1.12 and is not scheduled.
+
+### Internal
+- **One table decides what a component's value IS**, and four readers ask it:
+  the parser, the query writer, the Builder's Enter key and the Post Filter
+  list. Four hand-written copies of "min-level takes a number" is the shape
+  that produced the Saved-vs-Builder drift in 1.19.3.
+
+  It also fixed a latent fault: the Builder assumed every non-`tooltip`
+  component took **money**, which was true only while the price bounds were
+  the only ones wired up. A level typed into that box would have been read as
+  a price.
+- **A value that does not parse is not a clause.** `silk/min-level/soon`
+  leaves the words as name text instead of building a clause that can never
+  match — the rule `quality` and `level` already follow.
+- New `post_filter` suite (76 checks) driving every predicate through the real
+  `ParseTerm → CompileTerm → filter` path. Eleven sabotages, each confirmed to
+  fail it: both bounds inverted, `rarity` turned back into a minimum, the
+  seller needle treated as a pattern and as case-sensitive, unanswered rows
+  dropped silently and kept wrongly, a bad value accepted as a clause, the
+  emitter bypassing the value table, and a pending component that filters.
+- The suite's own row helper caught a Lua trap worth naming: `Row({ owner =
+  nil })` sets **no key at all**, so `pairs()` never sees it and the default
+  survived. Four assertions about unresolved owners were passing against a row
+  that had one. A sentinel is the only way to say "absent" through a table.
+
 ## [1.21.1]
 
 The **Usable items** check box never actually filtered anything. `/reload`.
@@ -1922,6 +3775,51 @@ that was there before moved behind one **Advanced** button. `/reload`.
 
 ---
 
+[1.49.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.49.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.48.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.47.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.47.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.46.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.46.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.46.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.45.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.45.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.45.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.44.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.43.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.42.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.41.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.41.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.41.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.40.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.39.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.39.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.38.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.37.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.36.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.35.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.34.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.33.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.32.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.31.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.30.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.30.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.29.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.28.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.28.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.27.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.26.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.25.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.49.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.49.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.21.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.20.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

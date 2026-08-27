@@ -48,6 +48,7 @@ tools we test with are more permissive than the client we ship to.
 | `modebits.py` | A Buy-tab widget no view shows or hides | Every widget exists; one just never appears, or never goes away |
 | `sharedlayout.py` | Two views placed into one space by two different functions | Both look right until one of them is edited |
 | `anchorchain.py` | Two widgets anchored below the same one | A fork in a vertical chain. The addon loads, every widget exists, nothing errors — the tab just draws on top of itself |
+| `palette.py` | A `C.<colour>` that is not in the palette | Valid Lua until the line runs. `ui/frame.lua` builds a window on load so no suite loads it — an invented colour compiles, lints, passes everything, and throws the first time a player opens that tab |
 
 That middle row is not hypothetical. v1.16.0 shipped an addon that would not
 load at all: thirteen new layout constants took `ui.BuildBuyTab` to 36
@@ -114,9 +115,14 @@ tests/
     upvalues.py       the 32-upvalue ceiling (hard rule 12a)
     scoping.py        no file-scope local read above its declaration
     definitions.py    every top-level definition still present vs a git ref
+                      (compares definition SETS -- it used to ask whether the
+                      name appeared in the text, which a comment satisfied;
+                      `--selftest` pins that)
     modebits.py       every Buy-tab widget accounted for by every view
     sharedlayout.py   views sharing a space are placed by ONE function
     anchorchain.py    no two widgets hang off the same anchor
+    palette.py        every C.<colour> the UI reads exists in the palette
+    version.py        the version agrees in all FIVE places it is written
     selftest.py       proves lua50.py fires, and does not over-fire
   units/
     util_test.lua           money, strings, tables, GetItemInfo normalisation
@@ -129,6 +135,27 @@ tests/
     geometry_test.lua       panel insets, row counts, tab and form layout
     window_point_test.lua   a restored window point you can still reach
     taborder_test.lua       Tab traversal: wrap, hidden boxes, dead ends
+    post_filter_test.lua    min-level/max-level/rarity/seller/left, and what
+                            a filter does when it cannot answer
+    rowchrome_test.lua      the shared zebra/hairline/selection chrome, and
+                            the creation order that makes it draw right
+    bags_test.lua           bag aggregation, and why "how much do I have" and
+                            "what can I post as one stack" are two numbers
+    sellslot_test.lua       moving an item into the sell slot without leaving
+                            it on the cursor -- the slot button SWAPS
+    clientdata_test.lua     GetItemInfo's tuple shapes, and the slot stand-in
+                            for a client whose tuple has no equipLoc at all
+    disenchant_test.lua     the rule: bands, yields, expected value
+    disenchant_learn_test.lua  what watching a player disenchant teaches, and
+                            what it refuses to conclude from one break
+    tooltip_test.lua        which lines appear, what multiplies by a stack,
+                            and when the addon says nothing rather than "?"
+    vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
+                            cheaper limited one), and the two measured deposit
+                            corrections
+    external_buttons_test.lua  the buttons Aegis puts on Blizzard's windows:
+                            the recorded anchor, and the pfUI nudge that moves
+                            each one once and in the right direction
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a
@@ -147,7 +174,20 @@ It pins the 1.12 API shapes that this addon has actually broken on, and
 call — name / minLevel / maxLevel must be strings, and `page` must be
 0-indexed — so any query the engine sends is checked simply by being sent.
 
-Two things about it are easy to get wrong and are commented in place:
+**The failure mode to watch for is a mock that is MORE capable than the
+client.** It does not merely fail to catch a bug — it certifies one. Four have
+got through that way: `GetItemInfo` resolving a bare numeric id (which 1.12
+does not), the owner auction list answering unpaged, `UnitFactionGroup`
+ignoring its argument so a neutral auctioneer could not exist, and
+`CursorHasItem` always saying no. Each made a real bug invisible for releases.
+When adding to this file, model what the client *refuses* as carefully as what
+it returns.
+
+One gap is still open and marked in place: **every registered item is
+answerable forever**, so there is no way to model an item the client knows of
+but has no cached data for — the state most of a fresh login is in.
+
+Two other things about it are easy to get wrong and are commented in place:
 
 - **`getglobal` reads `_G`**, not a private registry. Backing it with a side
   table made lookups of client constants (`AUCTION_TIME_LEFT1`) come back nil,

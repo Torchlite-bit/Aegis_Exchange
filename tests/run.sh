@@ -32,6 +32,11 @@ python3 tests/lint/selftest.py  >/dev/null || { echo "lint selftest FAILED"; \
 python3 tests/lint/lua50.py     || fail=1
 
 # ---------------------------------------------------------------------------
+step "Version, in all five places it is written"
+# A bump touches five files and only attention has ever held them together.
+python3 tests/lint/version.py || fail=1
+
+# ---------------------------------------------------------------------------
 step "Syntax"
 for f in core/*.lua ui/*.lua; do
     if ! luac5.1 -p "$f" 2>/tmp/aegis-luac-err; then
@@ -54,6 +59,11 @@ python3 tests/lint/scoping.py || fail=1
 
 # ---------------------------------------------------------------------------
 step "Top-level definitions still present"
+# Its own self-test first, for the same reason lua50.py has one: this lint
+# spent its whole life asking whether a NAME appeared anywhere in the file,
+# so a rename passed as a substring and a deletion passed when a comment
+# mentioned it. A lint that never fires is worse than none.
+python3 tests/lint/definitions.py --selftest || fail=1
 # Skipped when the tree is dirty against no useful ref, or outside a git repo.
 if git rev-parse --git-dir >/dev/null 2>&1; then
     python3 tests/lint/definitions.py HEAD >/dev/null || {
@@ -77,6 +87,12 @@ step "No two widgets hang off the same anchor"
 # below it. Everything still loads; the tab just draws on top of itself. This
 # is what 1.20.0 shipped in the settings panel.
 python3 tests/lint/anchorchain.py || fail=1
+
+step "Every colour the UI reads exists in the palette"
+python3 tests/lint/palette.py --selftest >/dev/null || { \
+    echo "palette selftest FAILED"; python3 tests/lint/palette.py --selftest; \
+    fail=1; }
+python3 tests/lint/palette.py || fail=1
 
 # ---------------------------------------------------------------------------
 step "Unit suites"
