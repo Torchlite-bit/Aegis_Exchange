@@ -7863,6 +7863,17 @@ function ui.BuildAuctionsTab()
     cancelAll:SetScript("OnClick", function() ui.ConfirmCancelAllUndercut() end)
     ui.aucCancelAllBtn = cancelAll
 
+    -- Clear the whole book. Carries its own COUNT, because the one thing you
+    -- want to know before pressing this is how much it is about to destroy --
+    -- and the count is not on screen otherwise once you are past page one.
+    local cancelEvery = ui.MakeButton(panel, "quiet",
+        "AegisExchangeAucCancelEveryButton")
+    cancelEvery:SetWidth(96); cancelEvery:SetHeight(20)
+    cancelEvery:SetPoint("RIGHT", cancelAll, "LEFT", -6, 0)
+    cancelEvery:SetText("Cancel all")
+    cancelEvery:SetScript("OnClick", function() ui.ConfirmCancelAll() end)
+    ui.aucCancelEveryBtn = cancelEvery
+
     -- PAGE NAVIGATION. The owner list is paged at 50 and Turtle's cap is 120,
     -- so a full book needs three pages -- and until now only the first existed.
     --
@@ -8111,6 +8122,19 @@ function ui.UpdateAuctionsList()
             ui.aucCancelAllBtn:Disable()
         end
     end
+
+    -- Cancel All carries the WHOLE book's count, not this page's. Past page
+    -- one the total is the one number you cannot see, and it is exactly the
+    -- number you want before pressing a button with no undo.
+    if ui.aucCancelEveryBtn then
+        if (owned or 0) > 0 then
+            ui.aucCancelEveryBtn:SetText("Cancel all " .. owned)
+            ui.aucCancelEveryBtn:Enable()
+        else
+            ui.aucCancelEveryBtn:SetText("Cancel all")
+            ui.aucCancelEveryBtn:Disable()
+        end
+    end
     if total == 0 then
         ui.aucStatus:SetText("No active auctions. Post some on the Sell tab.")
     elseif pages > 1 then
@@ -8268,6 +8292,101 @@ function ui.DoCancelAllUndercut()
     end
     ChatMsg("Aegis: cancelled " .. done .. " undercut auction(s).")
     ui.RefreshAuctions(true)
+end
+
+-- ---- cancel EVERY auction ------------------------------------------------
+
+-- ALWAYS confirms, even with the Aegis tab's "ask before cancelling" switched
+-- off. That switch exists so a player can clear a pile of undercuts one click
+-- at a time; this is a different act. Every deposit on every auction is gone
+-- and there is no undo, so the one guard it has does not get to be optional.
+StaticPopupDialogs["AEGIS_EXCHANGE_CANCELEVERY"] = {
+    text = "Cancel ALL %s?\n%s\nEvery item returns by mail and every deposit"
+        .. " is lost. This cannot be undone.",
+    button1 = "Cancel them all", button2 = "Keep",
+    OnAccept = function() ui.DoCancelAll() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmCancelAll()
+    local _, _, total = A.sell.OwnerPageInfo()
+    if (total or 0) < 1 then
+        ChatMsg("Aegis: you have no auctions up.")
+        return
+    end
+    local value, rows, i = 0, ui.aucAuctions or {}, 1
+    while i <= table.getn(rows) do
+        value = value + (rows[i].buyout or 0)
+        i = i + 1
+    end
+    local detail = "This page is worth " .. util.FormatMoney(value)
+        .. " at buyout."
+    StaticPopup_Show("AEGIS_EXCHANGE_CANCELEVERY",
+        total .. " of your auctions", detail)
+end
+
+-- THE LIST REFILLS; IT DOES NOT PAGE.
+--
+-- CancelAuction indexes into the page the CLIENT holds, so a walk across pages
+-- is the wrong shape twice over. Cancelling 50 auctions off page 0 pulls the
+-- next 50 UP into page 0 -- there is never a page 1 to move to, because the
+-- book shrinks under you. Cancelling the same page repeatedly is what empties
+-- it, which is why this is a loop over rounds rather than over pages.
+--
+-- Each round ends by asking for page 0 again; the reply arrives as
+-- AUCTION_OWNED_LIST_UPDATE and the handler calls back in here.
+function ui.DoCancelAll()
+    ui.cancelAllActive = true
+    ui.cancelAllRound  = 0
+    ui.cancelAllDone   = 0
+    ui.CancelAllRound()
+end
+
+function ui.CancelAllRound()
+    if not ui.cancelAllActive then return end
+    local rows = A.sell.CancelOrder(ui.aucAuctions or {})
+    local n = table.getn(rows)
+    ui.cancelAllRound = (ui.cancelAllRound or 0) + 1
+    local i = 1
+    while i <= n do
+        if A.sell.CancelOwnerAuction(rows[i].index) then
+            ui.cancelAllDone = (ui.cancelAllDone or 0) + 1
+        end
+        i = i + 1
+    end
+    if n > 0 then
+        -- Ask for page 0 back. The reply re-enters through
+        -- ui.ContinueCancelAll, which decides whether another round is due.
+        ui.RefreshAuctions(true, 0)
+    else
+        ui.FinishCancelAll()
+    end
+end
+
+-- Called from the AUCTION_OWNED_LIST_UPDATE handler while a Cancel All is
+-- running. Stops on an empty book, and stops on the round bound -- an auction
+-- the server refuses to cancel would otherwise be retried for ever, on a list
+-- that never shrinks and never errors.
+function ui.ContinueCancelAll()
+    if not ui.cancelAllActive then return end
+    local _, _, total = A.sell.OwnerPageInfo()
+    if A.sell.CancelAllNextRound(total or 0, ui.cancelAllRound or 0) then
+        ui.CancelAllRound()
+    else
+        ui.FinishCancelAll(total or 0)
+    end
+end
+
+function ui.FinishCancelAll(left)
+    if not ui.cancelAllActive then return end
+    ui.cancelAllActive = false
+    local msg = "Aegis: cancelled " .. (ui.cancelAllDone or 0) .. " auction(s)."
+    if (left or 0) > 0 then
+        msg = msg .. " " .. left .. " could not be cancelled \226\128\148"
+            .. " try again."
+    end
+    ChatMsg(msg)
+    ui.RefreshAuctions(true, 0)
 end
 
 function ui.DoCancelAuction()
@@ -11246,6 +11365,10 @@ A.RegisterEvent("AUCTION_HOUSE_SHOW", function()
 end)
 
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
+    -- A Cancel All in flight ends with the session. Leaving it armed would
+    -- have it resume against whatever the owner list holds NEXT time, which
+    -- may be a different character's book.
+    ui.cancelAllActive = nil
     if ui.frame then ui.frame:Hide() end
     -- Clear the Sell tab's per-item cache so next session gets fresh prices.
     A.sell.StopBatchScan()
@@ -11289,6 +11412,9 @@ end)
 A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
     ui.RefreshSell()
     if ui.aucBuilt then ui.RefreshAuctions(false) end
+    -- State-gated, per HARD RULE 16: this does nothing at all unless a Cancel
+    -- All is actually in flight, which is every other time the event fires.
+    ui.ContinueCancelAll()
 end)
 
 -- The mailbox updated (opened one, or took mail): log any AH sale mail so the

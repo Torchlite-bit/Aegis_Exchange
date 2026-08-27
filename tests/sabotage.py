@@ -2007,6 +2007,47 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- cancel all -------------------------------------------------------
+    # The cancel order flipped. Cancelling shifts every later index down, so an
+    # upward pass takes every other auction and reports success for all of
+    # them -- no error, and a plausible count.
+    ("cancel-order-walks-upward", "core/sell.lua",
+     "    table.sort(out, function(a, b) return (a.index or 0) > (b.index or 0) end)",
+     "    table.sort(out, function(a, b) return (a.index or 0) < (b.index or 0) end)",
+     "sellslot"),
+
+    # Sorting the CALLER's list instead of a copy. Every auction is still
+    # cancelled, so the batch looks fine -- but the table on screen silently
+    # reorders itself out of the player's chosen sort.
+    ("cancel-order-mutates-the-caller", "core/sell.lua",
+     """    local out, i = {}, 1
+    while i <= table.getn(rows or {}) do
+        out[i] = rows[i]
+        i = i + 1
+    end""",
+     "    local out = rows or {}",
+     "sellslot"),
+
+    # The round bound removed. An auction the server refuses to cancel is
+    # retried for ever, on a list that never shrinks and never errors.
+    ("cancel-all-never-stops", "core/sell.lua",
+     "    if not round or round >= sell.CANCEL_ALL_MAX_ROUNDS then return false end",
+     "",
+     "sellslot"),
+
+    # Stopping while auctions remain: a bound too small to clear a full book
+    # gives up partway and reports it as a server refusal.
+    ("cancel-all-bound-too-small", "core/sell.lua",
+     "sell.CANCEL_ALL_MAX_ROUNDS = 6",
+     "sell.CANCEL_ALL_MAX_ROUNDS = 2",
+     "sellslot"),
+
+    # Carrying on with an empty book -- the other half of the stop condition.
+    ("cancel-all-continues-on-empty", "core/sell.lua",
+     "    if not remaining or remaining <= 0 then return false end",
+     "",
+     "sellslot"),
+
     # ---- row clearance ----------------------------------------------------
     # The right pad back to where it shaved "% Mkt". Nothing errors; the last
     # column is drawn under the box border, which reads as a rendering fault.

@@ -336,4 +336,90 @@ H.check("StartPosting accepts bid == buyout",
         sell.StartPosting(2589, "Linen Cloth", 20, 1, 100, 100, 480, {}))
 if sell.StopPosting then sell.StopPosting() end
 
+-- ---------------------------------------------------------------------------
+H.section("cancelling a BATCH of auctions")
+-- ---------------------------------------------------------------------------
+
+-- THE MECHANIC. CancelAuction indexes into the page the CLIENT holds, and
+-- cancelling one shifts every later index down by one. A pass that walks
+-- upward cancels row 3, watches 4..n slide down into 3..n-1, and then cancels
+-- what used to be row 5 -- taking every other auction and reporting success
+-- for all of them. Nothing errors, and the count looks right.
+
+local function owned(n)
+    local rows = {}
+    for i = 1, n do
+        rows[i] = { name = "Auction " .. i, count = 1, buyout = i * 100 }
+    end
+    W.SetOwned(rows)
+    W.cancelled = {}
+    return A.sell.OwnerAuctions()
+end
+
+local rows = owned(6)
+local order = sell.CancelOrder(rows)
+H.eq("it returns the same number of rows", table.getn(order), 6)
+H.eq("highest owner index first", order[1].index, 6)
+H.eq("...then the next", order[2].index, 5)
+H.eq("...down to the lowest", order[6].index, 1)
+
+-- The caller's list keeps the order it was painted in -- that order is the
+-- player's sort, not ours.
+H.eq("the input is not reordered", rows[1].index, 1)
+
+H.eq("an empty list is an empty order", table.getn(sell.CancelOrder({})), 0)
+H.eq("nil is an empty order", table.getn(sell.CancelOrder(nil)), 0)
+
+-- THE PROOF, and the reason CancelOrder exists at all: run the batch in the
+-- order it hands back and EVERY auction is gone. Run it any other way and the
+-- list still has auctions in it.
+rows = owned(6)
+order = sell.CancelOrder(rows)
+local i = 1
+while i <= table.getn(order) do
+    sell.CancelOwnerAuction(order[i].index)
+    i = i + 1
+end
+H.eq("every auction was cancelled", table.getn(W.cancelled), 6)
+H.eq("...and none is left", table.getn(W.owned), 0)
+
+-- Named individually, so a pass that took the right COUNT of the wrong rows
+-- cannot slip through.
+local seen = {}
+for k = 1, table.getn(W.cancelled) do seen[W.cancelled[k].name] = true end
+for k = 1, 6 do
+    H.check("Auction " .. k .. " was one of them", seen["Auction " .. k] == true)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("...and when to stop cancelling")
+-- ---------------------------------------------------------------------------
+
+-- The loop's exit condition is "nothing left", so an auction the server
+-- refuses to cancel would be retried for ever -- a hang with no error, on a
+-- list that never shrinks. The bound is the only thing between that and a
+-- locked client.
+H.eq("nothing left, no further round",
+     sell.CancelAllNextRound(0, 1), false)
+H.eq("a negative remainder is not a reason to continue",
+     sell.CancelAllNextRound(-3, 1), false)
+H.eq("nil remainder stops rather than looping",
+     sell.CancelAllNextRound(nil, 1), false)
+H.check("auctions left and rounds to spare, so continue",
+        sell.CancelAllNextRound(70, 1))
+H.check("...and again", sell.CancelAllNextRound(20, 2))
+H.eq("but never past the bound",
+     sell.CancelAllNextRound(20, sell.CANCEL_ALL_MAX_ROUNDS), false)
+H.eq("...nor beyond it",
+     sell.CancelAllNextRound(20, sell.CANCEL_ALL_MAX_ROUNDS + 5), false)
+
+-- The bound has to clear a full book: Turtle caps at 120 and a page is 50, so
+-- three rounds empty it. A bound of two would stop with auctions still up and
+-- report it as a server refusal.
+H.check("the bound clears a full book",
+        sell.CANCEL_ALL_MAX_ROUNDS
+            >= math.ceil(sell.CAP / sell.OWNER_PAGE_SIZE),
+        "bound " .. sell.CANCEL_ALL_MAX_ROUNDS .. " cannot clear "
+            .. sell.CAP .. " at " .. sell.OWNER_PAGE_SIZE .. " a page")
+
 os.exit(H.report("sellslot"))

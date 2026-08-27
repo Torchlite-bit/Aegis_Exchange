@@ -374,6 +374,42 @@ function sell.OwnerAuctions()
     return rows
 end
 
+-- The order a batch of cancels must run in: HIGHEST owner index first.
+--
+-- Cancelling shifts every later index down by one, so a pass that walked
+-- upward would cancel row 3, watch rows 4..n slide down into 3..n-1, and then
+-- cancel what used to be row 5 -- skipping one auction for every one it took.
+-- Nothing errors and the count still looks plausible, which is why this is a
+-- function with a test rather than a `table.sort` written twice.
+--
+-- Returns a NEW array; the caller's list keeps whatever order it was painted
+-- in, because the on-screen order is the player's sort, not ours.
+function sell.CancelOrder(rows)
+    local out, i = {}, 1
+    while i <= table.getn(rows or {}) do
+        out[i] = rows[i]
+        i = i + 1
+    end
+    table.sort(out, function(a, b) return (a.index or 0) > (b.index or 0) end)
+    return out
+end
+
+-- How many times "cancel everything on this page" may run before we stop.
+--
+-- Turtle's cap is 120 and a page is 50, so three rounds clears a full book and
+-- the rest is slack. The bound exists because the loop's exit condition is
+-- "nothing left", and an auction the server refuses to cancel would otherwise
+-- be retried forever -- a hang with no error, on a list that never shrinks.
+sell.CANCEL_ALL_MAX_ROUNDS = 6
+
+-- Is another round due? Pure, so the stop condition can be tested without an
+-- auction house.
+function sell.CancelAllNextRound(remaining, round)
+    if not remaining or remaining <= 0 then return false end
+    if not round or round >= sell.CANCEL_ALL_MAX_ROUNDS then return false end
+    return true
+end
+
 -- Cancel the auction at owner index `i`. The refreshed list arrives via
 -- AUCTION_OWNED_LIST_UPDATE.
 function sell.CancelOwnerAuction(i)

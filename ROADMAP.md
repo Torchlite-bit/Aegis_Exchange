@@ -2390,6 +2390,51 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Cancel All — v1.51.0
+
+Asked for directly. The interesting part is not the button, it is that
+**the list refills rather than pages.**
+
+`CancelAuction` indexes into the page the CLIENT is holding. Cancelling 50
+auctions off page 0 pulls the next 50 UP into page 0 — so there is never a
+page 1 to walk to, and a loop that tried would run off the end of a book that
+shrank under it. Cancelling the same page repeatedly is what empties it, which
+makes this a loop over ROUNDS with a bound, not a walk over pages.
+
+The bound exists because the exit condition is "nothing left". An auction the
+server declines to cancel would otherwise be retried for ever on a list that
+never shrinks and never errors — a hang with no message. Six rounds clears
+Turtle's 120 cap at 50 a page with slack, and the suite asserts the bound
+against `sell.CAP / sell.OWNER_PAGE_SIZE` rather than against the literal 6.
+
+**The order within a round is the other half.** Cancelling shifts every later
+index down by one, so a pass that walked upward would cancel row 3, watch
+4..n slide into 3..n-1, and then cancel what used to be row 5 — taking every
+other auction and reporting success for all of them. That was already written
+correctly inline in `ui.DoCancelAllUndercut`; it is `sell.CancelOrder` now,
+where it can be tested, and **the mock had to learn the index shift before the
+test meant anything** — a client that marked a row cancelled in place would
+let the upward walk pass.
+
+**It always confirms**, and that is a deliberate exception to the
+`confirmCancel` setting. That switch was added so a player could clear a pile
+of undercuts one click at a time; this destroys every deposit in the book with
+no undo. The button also carries the total (`Cancel all 47`), because past
+page one that number is not on screen anywhere else and it is exactly what you
+want before pressing it.
+
+### Decisions taken for 2h, before any of it is built
+
+- **Clicking a reagent fires a real auction query.** Accurate over instant; the
+  previous result stays on screen while the next lands.
+- **The made-count resets manually only.** A crafting run spans several trips,
+  and a counter that cleared on `AUCTION_HOUSE_CLOSED` would clear in the
+  middle of the thing it is counting.
+- **The shopping-list engine goes.** `buy.AddList`, `RenameList`,
+  `DeleteList`, `AddItemToList` and `RemoveItemFromList` are not coming back as
+  the storage behind tracked recipes — delete them in the next housekeeping
+  pass rather than carry them a third year.
+
 ### Rows under the box border, again — v1.50.3
 
 Reported as "small clipping issues with the check box and the % market column"
