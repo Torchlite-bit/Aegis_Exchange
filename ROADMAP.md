@@ -2390,6 +2390,55 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The buttons on somebody else's window — v1.51.0
+
+Four buttons Aegis puts on frames it does not own: "Add to Aegis" on both
+profession windows, "Aegis: sell N marked" on the merchant, "Aegis UI" on the
+stock auction house. All four were `ui.MakeButton` plates, and **that was the
+mistake** — not the placement, which had already been fixed twice.
+
+A dark flat plate is correct on the Aegis window, where everything around it is
+also ours. On gold parchment it is the only dark flat rectangle in the frame and
+reads as something broken rather than something added. They are stock
+`UIPanelButtonTemplate` buttons now.
+
+**The pfUI half came free, and by the shorter route.** `skin.ApplyExternal` used
+to route these four through `SkinWidget`'s `aegisButton` branch, with a comment
+explaining that pfUI's `SkinButton` would double-border them — true, because a
+plate carries its own backdrop. A stock button carries none, and `SkinButton` is
+written for exactly that template; it is what pfUI's own addon-skinner does to
+every Blizzard button it meets. The special case existed only to serve the
+wrong widget choice.
+
+**Two of them still needed a nudge**, because pfUI does not move the windows
+underneath by the same amount in every direction. Anchoring to something that
+moves WITH the skin — the profession window's own Exit button, the merchant's
+own tabs — gets most of the way there and is why this was ever close; the
+remainder is a per-button offset in `skin.EXTERNAL_NUDGE`, applied only when
+pfUI is skinning. The numbers are eyeballed and are meant to stay that way:
+pfUI's border is a hairline where vanilla's is thick ornate art, and there is
+nothing to compute the difference from.
+
+**The mechanism is a recorded anchor, not a re-derived one.**
+`ui.SetExternalPoint` places the button and remembers point/frame/relPoint/x/y
+in one write, so `skin.NudgeExternal` can re-point from the record rather than
+working out the anchor a second time. A placement the skin cannot see is one
+the skin silently fails to adjust — and in game that is indistinguishable from
+the offset being wrong, which is the failure mode this whole area kept
+producing.
+
+**One sabotage escaped and changed the design.** `Nudge` started as a
+file-scope local, so `external-nudge-reapplies` — dropping the once-per-button
+guard — went unnoticed: no suite could reach it. That guard protects against
+the button walking a little further every time the merchant is opened, with the
+first open looking perfect, which is precisely the kind of fault that survives
+a visual check. It is `skin.NudgeExternal` now. **An unsabotaged guard is
+decoration, and "it is a local" is not a reason to leave one that way.**
+
+**What is still not testable, and is not pretended to be:** whether 10px up
+actually clears the Create row, and whether 4px right actually lands on the tab
+line. That needs a client and a person looking at it.
+
 ### Housekeeping — v1.50.1
 
 A full read of `core/`, `ui/`, `tests/` and the docs, looking for code that had

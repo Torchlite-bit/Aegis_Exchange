@@ -340,6 +340,65 @@ function skin.AdjustHeader()
     end
 end
 
+-- How far pfUI needs each external button moved from where the stock UI wants
+-- it, in (x, y). Zero means the stock placement is already right.
+--
+-- These exist because pfUI does not move the windows underneath by the same
+-- amount in every direction. The attach code anchors to something that moves
+-- WITH the skin -- the profession window's own Exit button, the merchant's own
+-- tabs -- which gets most of the way there, and this covers the remainder.
+--
+-- EYEBALLED, and meant to stay that way. There is nothing to compute them
+-- from: pfUI's border is a hairline where vanilla's is thick ornate art, and
+-- the difference is whatever pfUI's author chose. Tune by looking.
+skin.EXTERNAL_NUDGE = {
+    -- "Add to Aegis" sat flush against the panel's bottom-right inner border
+    -- in pfUI while clearing it comfortably on the stock frame.
+    AegisExchangeAddTradeSkillButton = { x = 0, y = 10 },
+    AegisExchangeAddCraftButton      = { x = 0, y = 10 },
+    -- "Aegis: sell N marked" rode slightly high and tight against the tabs.
+    AegisExchangeMerchantSellButton  = { x = 4, y = -4 },
+    -- The stock AH swap button lands right in both; named anyway so the table
+    -- lists every external button rather than only the ones that move.
+    AegisExchangeSwapButton          = { x = 0, y = 0 },
+}
+
+-- The nudged anchor for one button, as a pure function so the arithmetic is
+-- testable without pfUI, a client, or a frame. Returns x, y.
+--
+-- An unknown name nudges by nothing, which is the safe direction: a button
+-- this table has never heard of keeps exactly the placement the attach code
+-- gave it.
+function skin.NudgedPoint(name, x, y)
+    local n = skin.EXTERNAL_NUDGE[name]
+    if not n then return x or 0, y or 0 end
+    return (x or 0) + (n.x or 0), (y or 0) + (n.y or 0)
+end
+
+-- Re-point one external button for pfUI, from the anchor ui.SetExternalPoint
+-- recorded. Silent when there is no record (nothing to re-point from) or no
+-- nudge to make. Returns whether it moved anything.
+--
+-- ONCE PER BUTTON, and that guard is the whole reason this is public rather
+-- than a file-scope local. skin.ApplyExternal runs on every attach AND from
+-- skin.Apply, so a nudge that re-applied would walk the button a little
+-- further every time the merchant was opened -- and nothing about the first
+-- open would look wrong. A local could not be reached from a suite, so that
+-- guard could not be sabotaged, and an unsabotaged guard is decoration.
+function skin.NudgeExternal(b, name)
+    if not b or b.aegisNudged then return false end
+    local a = b.aegisAnchor
+    if not a or not a.rel then return false end
+    local x, y = skin.NudgedPoint(name, a.x, a.y)
+    b.aegisNudged = true
+    if x == a.x and y == a.y then return false end
+    pcall(function()
+        b:ClearAllPoints()
+        b:SetPoint(a.point, a.rel, a.relPoint, x, y)
+    end)
+    return true
+end
+
 -- Our buttons that live on OTHER frames (profession windows, the merchant, the
 -- stock auction house). They appear later than the window, so this runs both
 -- from Apply and whenever one of them is created.
@@ -354,15 +413,18 @@ function skin.ApplyExternal()
     local i = 1
     while i <= table.getn(names) do
         local b = getglobal(names[i])
-        if b and not b.aegisSkinned then
-            -- Through SkinWidget, NOT straight to pfUI's SkinButton. All four
-            -- of these are ui.MakeButton frames, so they belong in the
-            -- aegisButton branch with every other Aegis button: SkinButton
-            -- would give them a second border on top of the backdrop they
-            -- already draw, and its plate would bury their labels the same way
-            -- the settings panel's did. Fixing the label in one place and
-            -- leaving it broken in four others is not fixing it.
-            SkinWidget(b)
+        if b then
+            -- Straight through SkinWidget, which now lands them in the generic
+            -- Button branch -- pfUI's own SkinButton.
+            --
+            -- This USED to be the wrong path and is now the right one, because
+            -- these four stopped being ui.MakeButton plates. A plate carries
+            -- its own backdrop, so SkinButton gave it a second border and
+            -- buried the label; a stock UIPanelButtonTemplate is exactly what
+            -- SkinButton is written for, and is what pfUI's own addon-skinner
+            -- does to every Blizzard button it meets.
+            if not b.aegisSkinned then SkinWidget(b) end
+            skin.NudgeExternal(b, names[i])
         end
         i = i + 1
     end

@@ -2006,6 +2006,63 @@ end
      "        rec[meanKey] = old + (value - old) / n",
      "        rec[meanKey] = value",
      "vendorbuy"),
+
+    # ---- external buttons -------------------------------------------------
+    # The nudge inverted. Every button still moves, still by the right amount,
+    # and every one of them moves the WRONG WAY -- which on a live client is a
+    # button that got worse rather than one that vanished.
+    ("external-nudge-inverted", "ui/skin.lua",
+     "    return (x or 0) + (n.x or 0), (y or 0) + (n.y or 0)",
+     "    return (x or 0) - (n.x or 0), (y or 0) - (n.y or 0)",
+     "external.buttons"),
+
+    # Only one axis applied. The craft button (x = 0) looks perfect and the
+    # merchant one is half-fixed, which is the shape of bug that gets reported
+    # as "it is still not quite right" three releases running.
+    ("external-nudge-drops-x", "ui/skin.lua",
+     "    return (x or 0) + (n.x or 0), (y or 0) + (n.y or 0)",
+     "    return (x or 0), (y or 0) + (n.y or 0)",
+     "external.buttons"),
+
+    # An unknown button shoved to the origin instead of left alone. Nothing
+    # errors; a button nobody listed simply teleports.
+    ("external-unknown-button-reset", "ui/skin.lua",
+     "    if not n then return x or 0, y or 0 end",
+     "    if not n then return 0, 0 end",
+     "external.buttons"),
+
+    # The AH swap button given the merchant's offset. It is the entry that
+    # exists to say "do not move this", so a table that cannot express zero
+    # cannot say it.
+    ("external-swap-button-moved", "ui/skin.lua",
+     "    AegisExchangeSwapButton          = { x = 0, y = 0 },",
+     "    AegisExchangeSwapButton          = { x = 4, y = -4 },",
+     "external.buttons"),
+
+    # The placement recorded but the anchor frame dropped, so skin.lua has a
+    # record it cannot re-point from and the nudge silently never happens --
+    # indistinguishable, in game, from the offset being wrong.
+    ("external-anchor-record-loses-frame", "ui/frame.lua",
+     """    b.aegisAnchor = { point = point, rel = rel, relPoint = relPoint,
+                      x = x or 0, y = y or 0 }""",
+     """    b.aegisAnchor = { point = point, relPoint = relPoint,
+                      x = x or 0, y = y or 0 }""",
+     "external.buttons"),
+
+    # Nil offsets recorded as nil rather than zero, so the nudge arithmetic
+    # downstream meets a nil.
+    ("external-anchor-record-keeps-nil", "ui/frame.lua",
+     "                      x = x or 0, y = y or 0 }",
+     "                      x = x, y = y }",
+     "external.buttons"),
+
+    # The nudge re-applied on every ApplyExternal call. ApplyExternal runs on
+    # each attach and from skin.Apply, so the button walks a little further
+    # every time the merchant is opened.
+    ("external-nudge-reapplies", "ui/skin.lua",
+     "    if not b or b.aegisNudged then return false end",
+     "    if not b then return false end",
+     "external.buttons"),
 ]
 
 SUITES = {
@@ -2028,6 +2085,7 @@ SUITES = {
     "disenchant.learn": "tests/units/disenchant_learn_test.lua",
     "clientdata": "tests/units/clientdata_test.lua",
     "vendorbuy": "tests/units/vendorbuy_test.lua",
+    "external.buttons": "tests/units/external_buttons_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

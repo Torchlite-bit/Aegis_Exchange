@@ -153,6 +153,9 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    external_buttons_test.lua  the buttons Aegis puts on Blizzard's windows:
+                            the recorded anchor, and the pfUI nudge that moves
+                            each one once and in the right direction
 ```
 
 `sabotage.py` treats a **lint** as a suite too, not only a Lua unit file: a

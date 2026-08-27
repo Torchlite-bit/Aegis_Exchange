@@ -440,6 +440,47 @@ function ui.MakeButton(parent, kind, name)
     return b
 end
 
+-- A button that lives on a BLIZZARD window rather than on ours.
+--
+-- Deliberately a stock UIPanelButtonTemplate, NOT a ui.MakeButton plate. Our
+-- plate is right on the Aegis window, where everything around it is also ours;
+-- on the profession window, the merchant and the stock auction house it is the
+-- only dark flat rectangle on a sheet of gold and parchment, and it reads as
+-- something broken rather than as something added.
+--
+-- It also makes the pfUI case correct for free, and by the shorter route.
+-- pfUI's SkinButton is written for exactly this template -- strip the template
+-- textures, apply the pfUI plate -- which is what pfUI's own addon-skinner
+-- does to every Blizzard button it meets. Our plate had to opt OUT of that
+-- path (see the aegisButton branch in ui/skin.lua) precisely because it was
+-- not one, and then needed its own backdrop handling to look right. A stock
+-- button needs none of that.
+--
+-- The template supplies SetText / GetText / Enable / Disable natively, so no
+-- caller has to know which kind of button it was handed.
+--
+-- `anchorRec` is recorded rather than applied: pfUI does not move these three
+-- windows by the same amount in every direction, so two of them need an offset
+-- that would be wrong on the stock UI. skin.AdjustExternal re-points them from
+-- this record. See ui.SetExternalPoint.
+function ui.MakeExternalButton(parent, name, w, h)
+    local b = CreateFrame("Button", name, parent, "UIPanelButtonTemplate")
+    b:SetWidth(w)
+    b:SetHeight(h)
+    return b
+end
+
+-- Place an external button AND remember where, so the skin can nudge it later
+-- without re-deriving the anchor. One writer for both, because a placement the
+-- skin cannot see is one the skin will silently fail to adjust.
+function ui.SetExternalPoint(b, point, rel, relPoint, x, y)
+    if not b or not rel then return end
+    b.aegisAnchor = { point = point, rel = rel, relPoint = relPoint,
+                      x = x or 0, y = y or 0 }
+    b:ClearAllPoints()
+    b:SetPoint(point, rel, relPoint, x or 0, y or 0)
+end
+
 -- A recessed content well: the dark inset panel a list or a form sits in.
 -- The concept uses one for every content area (.well), and it is what stops an
 -- area with little in it from reading as a hole in the window rather than as
@@ -7569,8 +7610,7 @@ end
 -- button. Save-original-and-replace only: no secure hooks on 1.12.
 function ui.AttachCraftButton(frame, name, anchorNames)
     if not frame or getglobal(name) then return end
-    local b = ui.MakeButton(frame, "quiet", name)
-    b:SetWidth(96); b:SetHeight(20)
+    local b = ui.MakeExternalButton(frame, name, 96, 22)
     -- Anchor to the window's OWN Exit/Create button, not to the frame corner.
     -- Same principle as the pfUI header fix: anchor to something that moves
     -- with the skin. The stock profession window's BOTTOMRIGHT sits out under
@@ -7592,11 +7632,11 @@ function ui.AttachCraftButton(frame, name, anchorNames)
         -- art overhangs its logical bounds, so a flush right edge clipped the
         -- window frame in both UIs. The profit lines stack off this button, so
         -- they inset with it.
-        b:SetPoint("BOTTOMRIGHT", anchor, "TOPRIGHT", -10, 8)
+        ui.SetExternalPoint(b, "BOTTOMRIGHT", anchor, "TOPRIGHT", -10, 8)
     else
         -- Unknown window layout: fall back well inside the frame rather than
         -- on top of its border.
-        b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -40, 60)
+        ui.SetExternalPoint(b, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -40, 60)
     end
     b:SetText("Add to Aegis")
     b:SetScript("OnClick", function() ui.CraftCapture() end)
@@ -10134,8 +10174,8 @@ StaticPopupDialogs["AEGIS_EXCHANGE_VENDORSELL"] = {
 function ui.AttachMerchantButton()
     if not MerchantFrame then return end
     if not ui.merchantBtn then
-        local b = ui.MakeButton(MerchantFrame, "quiet", "AegisExchangeMerchantSellButton")
-        b:SetWidth(150); b:SetHeight(22)
+        local b = ui.MakeExternalButton(MerchantFrame,
+            "AegisExchangeMerchantSellButton", 150, 22)
         -- Sit in the tab row, to the right of Merchant / Buyback -- effectively
         -- a third tab position.
         --
@@ -10147,10 +10187,10 @@ function ui.AttachMerchantButton()
         local anchor = getglobal("MerchantFrameTab2")
             or getglobal("MerchantFrameTab1")
         if anchor then
-            b:SetPoint("LEFT", anchor, "RIGHT", 2, 0)
+            ui.SetExternalPoint(b, "LEFT", anchor, "RIGHT", 2, 0)
         else
             -- No tabs (shouldn't happen): fall back to under the frame.
-            b:SetPoint("TOP", MerchantFrame, "BOTTOM", 0, -6)
+            ui.SetExternalPoint(b, "TOP", MerchantFrame, "BOTTOM", 0, -6)
         end
         b:SetFrameStrata("HIGH")
         b:SetScript("OnClick", function() ui.ConfirmSellMarked() end)
@@ -10906,16 +10946,16 @@ function ui.HookAuctionFrame()
     -- the documented return path (README: "Aegis UI button (on the stock AH)").
     -- Everything else Aegis draws lives under UIParent.
     if not ui.blizSwapBtn then
-        local b = ui.MakeButton(AuctionFrame, "quiet", "AegisExchangeSwapButton")
-        b:SetWidth(70)
-        b:SetHeight(19)
+        local b = ui.MakeExternalButton(AuctionFrame,
+            "AegisExchangeSwapButton", 76, 22)
         local blizClose = getglobal("AuctionFrameCloseButton")
         if blizClose then
             -- Negative gap: sit clearly to the LEFT of the X (the old +4 tucked
             -- our right edge under the close button, crammed in pfUI).
-            b:SetPoint("RIGHT", blizClose, "LEFT", -6, 0)
+            ui.SetExternalPoint(b, "RIGHT", blizClose, "LEFT", -6, 0)
         else
-            b:SetPoint("TOPRIGHT", AuctionFrame, "TOPRIGHT", -60, -12)
+            ui.SetExternalPoint(b, "TOPRIGHT", AuctionFrame, "TOPRIGHT",
+                -60, -12)
         end
         b:SetText("Aegis UI")
         b:SetScript("OnClick", function()

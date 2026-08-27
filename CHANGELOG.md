@@ -12,6 +12,35 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.51.0]
+
+### Changed
+- **The buttons Aegis puts on Blizzard's windows now look like Blizzard's
+  buttons.** "Add to Aegis" on the two profession windows, "Aegis: sell N
+  marked" on the merchant, and "Aegis UI" on the stock auction house were all
+  drawn as Aegis plates — dark, flat, and right at home on the Aegis window,
+  but the only dark flat rectangle on a sheet of gold and parchment everywhere
+  else. They are stock `UIPanelButtonTemplate` buttons now.
+  - **And that hands the pfUI case to pfUI.** Its `SkinButton` is written for
+    exactly this template, which is what pfUI's own addon-skinner does to every
+    Blizzard button it meets. Our plate had to opt *out* of that path
+    precisely because it wasn't one, then needed its own backdrop handling to
+    look right; a stock button needs none of that.
+
+### Fixed
+- **"Add to Aegis" sat flush against the profession window's bottom-right
+  border under pfUI**, where it clears it comfortably on the stock frame. It
+  moves up 10px when pfUI is skinning, and not at all when it isn't. The
+  profit/loss lines anchor to the button, so they follow.
+- **"Aegis: sell N marked" rode high and tight against the merchant tabs under
+  pfUI.** It moves 4px right and 4px down when skinned.
+  - Both offsets are eyeballed against a real pfUI client and are meant to be:
+    pfUI's border is a hairline where vanilla's is thick ornate art, and there
+    is nothing to compute the difference from. They live in one table
+    (`skin.EXTERNAL_NUDGE`) so tuning them is a one-line change.
+
+---
+
 ## [1.50.1]
 
 Housekeeping only — no behaviour change, no new capability.
@@ -3754,6 +3783,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.49.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
