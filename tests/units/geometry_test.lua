@@ -929,12 +929,75 @@ end
 BUYL.gut_w    = field("BUYL", "gut_w")
 BUYL.gutter_w = field("BUYL", "gutter_w")
 BUY_COLS_END  = constant("BUY_COLS_END")
+ROWPAD = { l = field("ROWPAD", "l"), r = field("ROWPAD", "r") }
 do
     local fn, err = loadstring(extract("function ui.ColumnsFitAt("),
                                "ColumnsFitAt")
     if not fn then error("will not compile: " .. tostring(err)) end
     fn()
 end
+
+-- ---------------------------------------------------------------------------
+H.section("rows are held clear of the box border they sit inside")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. A backdrop edge is drawn CENTRED on the frame boundary, so
+-- a well's border reaches WELL_BLEED px INWARD from its own edge. Anything the
+-- rows draw inside that band is under the border: on the Buy tab that was the
+-- tick box on the left and the right-justified "% Mkt" on the right, and it
+-- looks like a rendering fault rather than a layout one.
+--
+-- The two sides are anchored differently, which is why the two pads are not
+-- equal and why this cannot be checked as "l == r":
+--
+--   left   the well is offset -WELL_BLEED from the scroll frame, so its
+--          border's inner edge lands ON the scroll frame's edge. Clearance is
+--          ROWPAD.l itself.
+--   right  the well is FLUSH with the scroll frame, so the border reaches
+--          WELL_BLEED past that edge into the rows. Clearance is
+--          ROWPAD.r - WELL_BLEED.
+-- GLOBAL, not local: constant() evaluates the source expression through
+-- loadstring, and WELL_EDGE is written as `WELL_BLEED * 2` -- so the name has
+-- to be reachable from that chunk. Reading the relationship out of the file is
+-- the point; restating `12` here would let the two drift.
+WELL_BLEED = constant("WELL_BLEED")
+
+H.eq("a well's border reaches half its edgeSize inward",
+     constant("WELL_EDGE"), WELL_BLEED * 2)
+
+-- "% Mkt" is right-justified and the Item column absorbs every surplus pixel,
+-- so the last column ALWAYS ends exactly on the row's right edge. Nothing sits
+-- between it and the border, which is why the right pad has to carry a full
+-- border width on its own.
+H.check("% Mkt clears the right border",
+        ROWPAD.r - WELL_BLEED >= WELL_BLEED,
+        "% Mkt clearance " .. (ROWPAD.r - WELL_BLEED)
+            .. ", need " .. WELL_BLEED)
+
+-- The LEFT is NOT symmetric, and that is deliberate. Six tables read ROWPAD
+-- and only the Buy tab puts a CONTROL against the left edge; the rest start
+-- with text, which 2px clears. So the clearance the tick box needs is bought
+-- in RCX_BUY rather than in ROWPAD, where it would cost every table 4px of
+-- row -- and the Sell bag column has none to give.
+--
+-- Assert the SUM, so either half may pay for it and neither may quietly stop.
+local TICK_X = ROWPAD.l + field("RCX_BUY", "check")
+H.check("the tick box clears the left border",
+        TICK_X >= WELL_BLEED,
+        "tick box " .. TICK_X .. "px in, border reaches " .. WELL_BLEED)
+
+-- ...and the columns after the tick box did NOT move to pay for it. The three
+-- leading columns shifted right together and `name` gave the width back, so a
+-- change that shoved the whole table sideways would show up here.
+H.eq("Lvl is where it was", field("RCX_BUY", "lvl"), 290)
+H.eq("...and the Item column gave back exactly what the shift took",
+     field("RCX_BUY", "name") + field("RCW_BUY", "name"), 280)
+
+-- The gaps inside the leading cluster are unchanged: box, then icon, then
+-- text, 6px apart. Shifting three columns by hand is exactly where one of
+-- them gets left behind.
+H.eq("tick box to icon", field("RCX_BUY", "icon") - (field("RCX_BUY", "check") + 14), 6)
+H.eq("icon to name", field("RCX_BUY", "name") - (field("RCX_BUY", "icon") + 16), 6)
 
 -- ---------------------------------------------------------------------------
 -- The Buy results table's columns
@@ -983,6 +1046,25 @@ H.check("the result columns fit at the size the window opens at",
 H.check("the 832 the window used to open at does NOT fit",
         not ui.ColumnsFitAt(832),
         "832 fits, so this pair of assertions proves nothing")
+
+-- AND it measures the ROW, not the scroll frame. Those differ by the two pads,
+-- and the pair above cannot tell them apart: 832 fails either way and the
+-- default passes either way, so a ColumnsFitAt that forgot the pads would sit
+-- here looking green while promising a fit at a width where "% Mkt" is under
+-- the border. That is the same mistake the pads exist to correct, made one
+-- level up.
+--
+-- The width below is the inverse of the function's own arithmetic: the one at
+-- which the columns exactly fill the SCROLL FRAME. The row is then short by
+-- exactly ROWPAD.l + ROWPAD.r, so the honest answer is no.
+local ROWLEFT = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
+local frameExactW = BUY_COLS_END + 22 + ROWLEFT + BUYL.gutter_w
+H.check("a width where the FRAME fits but the ROW does not is refused",
+        not ui.ColumnsFitAt(frameExactW),
+        frameExactW .. " accepted, so the pads are not being counted")
+H.check("...and the same width plus the pads is accepted",
+        ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r),
+        "the columns never fit, so the check above proves nothing")
 
 -- ---------------------------------------------------------------------------
 H.section("...and it can never be dragged or restored outside that range")

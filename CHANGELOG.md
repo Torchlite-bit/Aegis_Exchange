@@ -12,6 +12,37 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.50.3]
+
+### Fixed
+- **The Buy table's "% Mkt" column was drawn under the box border.** A backdrop
+  edge is drawn *centred* on the frame it belongs to, so the well's border
+  reaches 6px inward — and the rows were held only 2px clear of it. "% Mkt" is
+  right-justified and the Item column absorbs every surplus pixel, so the last
+  column always ends exactly on the row's right edge, with nothing between it
+  and the border. The rows are held a full border width clear now.
+- **The Buy table's tick box sat on the left border**, 4px from where the border
+  reaches. The tick box, icon and item name all shift 4px right and the Item
+  column gives the width back, so every column from *Lvl* onward is exactly
+  where it was. The left row pad is deliberately unchanged: six tables read it
+  and only this one puts a control against the edge, and raising it costs the
+  Sell tab's bag column width it does not have.
+- **The header separators between Buy columns leaned by 2px.** The top of each
+  1px line included the row pad and the bottom did not, so the line was drawn
+  between two different x — which reads as a rendering artefact rather than as
+  a mistake anyone made.
+- **`ui.ColumnsFitAt` measured the scroll frame instead of the row**, so it
+  promised the columns fit at widths where the last one is under the border.
+  That is the same mistake the row pads exist to correct, made one level up.
+
+### Internal
+- The border overhang is a named constant (`WELL_BLEED`) that both wells draw
+  from, so the border's thickness and the pads that clear it cannot drift apart
+  again. Six new sabotages, and four existing ones rewritten against the new
+  numbers rather than deleted.
+
+---
+
 ## [1.50.2]
 
 ### Changed
@@ -3783,6 +3814,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.50.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1362,8 +1362,8 @@ end
     # A centred column flush to the box edge is what "scrunched against the
     # boarder" looked like. The pad is the only thing holding it off.
     ("bag-qty-flush-to-border", "ui/frame.lua",
-     "    bag_qty_pad = 6,",
-     "    bag_qty_pad = 0,",
+     "    bag_qty_pad = 2,",
+     "    bag_qty_pad = -12,",
      "geometry"),
 
     # Widen the count column alone and the name silently draws underneath it.
@@ -1376,8 +1376,8 @@ end
     # designed and one that reads as assembled -- and every column is still
     # individually fine, so nothing else notices.
     ("buy-gutters-uneven", "ui/frame.lua",
-     "    check = 2, icon = 22, name = 44, lvl = 290, left = 330,",
-     "    check = 2, icon = 22, name = 44, lvl = 286, left = 330,",
+     "    check = 6, icon = 26, name = 48, lvl = 290, left = 330,",
+     "    check = 6, icon = 26, name = 48, lvl = 286, left = 330,",
      "geometry"),
 
     # BUY_COLS_END is written as a sum, so it goes stale the moment a column
@@ -1463,15 +1463,15 @@ end
     # value -- the rows simply poke through the box, and the last column gets
     # shaved by the border.
     ("rows-under-the-box-border", "ui/frame.lua",
-     "local ROWPAD = { l = 2, r = 8 }",
+     "local ROWPAD = { l = 2, r = 12 }",
      "local ROWPAD = { l = 0, r = 0 }",
      "geometry"),
 
     # An inset too small to clear the overhang: half a fix, which looks like
     # a whole one until someone measures it.
     ("row-inset-too-small-for-the-border", "ui/frame.lua",
+     "local ROWPAD = { l = 2, r = 12 }",
      "local ROWPAD = { l = 2, r = 8 }",
-     "local ROWPAD = { l = 2, r = 4 }",
      "geometry"),
     # ---- client-provided item data ---------------------------------------
     # The learned price winning over the client's own. Both answer, so the
@@ -2006,6 +2006,51 @@ end
      "        rec[meanKey] = old + (value - old) / n",
      "        rec[meanKey] = value",
      "vendorbuy"),
+
+    # ---- row clearance ----------------------------------------------------
+    # The right pad back to where it shaved "% Mkt". Nothing errors; the last
+    # column is drawn under the box border, which reads as a rendering fault.
+    ("rowpad-right-under-the-border", "ui/frame.lua",
+     "local ROWPAD = { l = 2, r = 12 }",
+     "local ROWPAD = { l = 2, r = 8 }",
+     "geometry"),
+
+    # The tick box back onto the left border.
+    ("rowpad-tick-box-on-the-border", "ui/frame.lua",
+     "    check = 6, icon = 26, name = 48, lvl = 290, left = 330,",
+     "    check = 2, icon = 26, name = 48, lvl = 290, left = 330,",
+     "geometry"),
+
+    # The leading columns shifted WITHOUT the Item column giving the width
+    # back, so every money column slides 4px right and the table stops lining
+    # up with its own headers.
+    ("rowpad-item-column-not-rebalanced", "ui/frame.lua",
+     "    name = 232, lvl = 30, left = 78,",
+     "    name = 236, lvl = 30, left = 78,",
+     "geometry"),
+
+    # One of the three leading columns left behind. The box and the icon
+    # overlap by 4px -- small enough to read as art rather than as layout.
+    ("rowpad-icon-left-behind", "ui/frame.lua",
+     "    check = 6, icon = 26, name = 48, lvl = 290, left = 330,",
+     "    check = 6, icon = 22, name = 48, lvl = 290, left = 330,",
+     "geometry"),
+
+    # The well's border thickness and the pad that clears it pulled apart.
+    # WELL_EDGE is what the backdrop actually draws; WELL_BLEED is what every
+    # inset is measured against, and half of one IS the other.
+    ("well-bleed-not-half-the-edge", "ui/frame.lua",
+     "local WELL_EDGE  = WELL_BLEED * 2",
+     "local WELL_EDGE  = WELL_BLEED * 3",
+     "geometry"),
+
+    # ColumnsFitAt back to measuring the SCROLL FRAME instead of the row, so it
+    # answers "they fit" for a width at which the last column is under the
+    # border -- the guarantee it exists to make, made against the wrong number.
+    ("columnsfit-measures-the-frame-not-the-row", "ui/frame.lua",
+     "    local rowW = (w - 22) - rowLeft - BUYL.gutter_w - ROWPAD.l - ROWPAD.r",
+     "    local rowW = (w - 22) - rowLeft - BUYL.gutter_w",
+     "geometry"),
 
     # ---- external buttons -------------------------------------------------
     # The nudge inverted. Every button still moves, still by the right amount,

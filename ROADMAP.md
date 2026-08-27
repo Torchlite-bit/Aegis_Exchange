@@ -2390,6 +2390,53 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Rows under the box border, again — v1.50.3
+
+Reported as "small clipping issues with the check box and the % market column"
+on the Buy tab. Both are one fault seen twice, and it is the same fault
+`ROWPAD` was introduced to fix — the pads were simply set below the number they
+had to clear.
+
+**The number is `edgeSize / 2`.** A backdrop edge is drawn CENTRED on the frame
+boundary, so a well's border reaches 6px INWARD. It is now `WELL_BLEED`, a named
+constant both wells draw their `edgeSize` from, because it had been spelled 6 in
+some places and absorbed into a pad in others — which is exactly how the pads
+came to sit below it.
+
+**The two sides are not symmetric, and the fix should not be either.** The well
+is offset -6 from the scroll frame on the left, so its border's inner edge lands
+ON the frame edge; on the right it is flush (any positive offset puts the box
+under the scrollbar), so the border reaches 6px into the rows. Left clearance is
+`ROWPAD.l`; right clearance is `ROWPAD.r - 6`. Both were about 2.
+
+**Raising both was the obvious fix and the geometry suite refused it.** The Sell
+tab's bag column is sized so its name column consumes exactly what is left, so
+8px off the row overflowed it — and shrinking the name column would have taken
+it under the 160px the suite requires for a name to be worth reading. That is a
+shared constant caught doing damage two tabs away from the change, by a suite,
+before a client. The whole reason `ROWPAD` is one table is also the reason it
+cannot be raised casually.
+
+So the clearance is bought where each problem actually is:
+
+- **Right** — `ROWPAD.r` 8 to 12, a full border width. The Sell tab pays nothing
+  for it, because `bag_qty_pad` (a private pad doing the same job on top of
+  `ROWPAD.r`) drops 6 to 2. The total is 14 either way; the clearance simply
+  moved into the shared number, and nothing on that tab moved on screen.
+- **Left** — `ROWPAD.l` unchanged. Six tables read it and only the Buy tab puts
+  a CONTROL against the left edge; the rest start with text, which 2px clears.
+  `RCX_BUY`'s three leading columns shift 4px right instead and `name` gives the
+  width back, so everything from `lvl` onward is untouched.
+
+**Two things fell out of looking.** The header separator ticks were anchored
+with `ROWPAD.l` at the top and without it at the bottom, so each 1px line leaned
+2px across the header. And `ui.ColumnsFitAt` measured the SCROLL FRAME rather
+than the row — promising a fit at widths where the last column is under the
+border, which is this same mistake made one level up. Its existing assertions
+could not catch that (832 fails either way, the default passes either way), so
+the suite now checks the one width that separates them: the one at which the
+columns exactly fill the frame and the row is short by both pads.
+
 ### The buttons on somebody else's window — v1.50.2
 
 Four buttons Aegis puts on frames it does not own: "Add to Aegis" on both

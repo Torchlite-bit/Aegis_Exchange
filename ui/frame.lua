@@ -481,6 +481,18 @@ function ui.SetExternalPoint(b, point, rel, relPoint, x, y)
     b:SetPoint(point, rel, relPoint, x or 0, y or 0)
 end
 
+-- How far a well's backdrop border reaches INWARD past the frame edge it is
+-- drawn on: half its edgeSize, because a backdrop edge is drawn CENTRED on
+-- that edge rather than outside it.
+--
+-- Named because it is the number every row inset in this file is really
+-- measured against. It was implicit before, spelled 6 in some places and
+-- absorbed into a pad in others, and the pads drifted below it -- which is
+-- what put the Buy tab's tick box on the left border and shaved its "% Mkt"
+-- against the right one. See ROWPAD.
+local WELL_BLEED = 6
+local WELL_EDGE  = WELL_BLEED * 2
+
 -- A recessed content well: the dark inset panel a list or a form sits in.
 -- The concept uses one for every content area (.well), and it is what stops an
 -- area with little in it from reading as a hole in the window rather than as
@@ -498,7 +510,7 @@ function ui.MakeWell(parent, around, inset)
     w:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
+        tile = true, tileSize = 16, edgeSize = WELL_EDGE,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
     w:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
@@ -2801,12 +2813,18 @@ ui.PctColorSell = PctColorSell
 -- air on the outside of both. A level is a two-digit label rather than a
 -- magnitude read digit by digit, so centring it costs nothing and stops the
 -- pinch.
+-- `check`, `icon` and `name` all sit 4px further right than they used to. The
+-- tick box was 4px from the well border's inner edge and read as sitting on
+-- it; ROWPAD.l could not be raised without costing every other table row width
+-- it does not have (see ROWPAD). The three move together and `name` gives the
+-- 4px back, so `lvl` and everything after it are where they always were and
+-- the 6px gaps between box, icon and text are unchanged.
 local RCX_BUY = {
-    check = 2, icon = 22, name = 44, lvl = 290, left = 330,
+    check = 6, icon = 26, name = 48, lvl = 290, left = 330,
     bid = 418, stack = 512, unit = 606, pct = 682,
 }
 local RCW_BUY = {
-    name = 236, lvl = 30, left = 78,
+    name = 232, lvl = 30, left = 78,
     bid = 84, stack = 84, unit = 66, pct = 44,
 }
 -- Where the rightmost column ends. Asked for rather than re-added by hand, so
@@ -2867,7 +2885,30 @@ local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 -- ONE table, read by every row builder and by both layout functions, because
 -- the rows' inset and the width the columns are allowed to use are the same
 -- measurement seen from two ends.
-local ROWPAD = { l = 2, r = 8 }
+--
+-- WHERE THE NUMBERS COME FROM. Every well draws edgeSize 12, so its border
+-- reaches 6px INWARD from the frame edge it is drawn on. The two sides are not
+-- anchored alike, which is why the two pads are not equal:
+--
+--   left   the well is offset -6 from the scroll frame, so its border's inner
+--          edge lands exactly ON the scroll frame's left edge. Clearance is
+--          therefore ROWPAD.l itself.
+--   right  the well is FLUSH with the scroll frame (any positive offset puts
+--          the box under the scrollbar), so the border reaches 6px past that
+--          edge into the rows. Clearance is ROWPAD.r minus 6.
+--
+-- The RIGHT had 2px of real clearance and that shaved the Buy tab's
+-- right-justified "% Mkt", which always ends exactly on the row's right edge
+-- because the Item column absorbs every surplus pixel. It is a full border
+-- width now.
+--
+-- The LEFT stays at 2, deliberately. Six tables read this and only one of them
+-- puts a CONTROL hard against the left edge; the other five start with text,
+-- which 2px already clears. Raising it costs every table 4px of row and the
+-- Sell tab's bag column has none to give -- its name column is sized to
+-- consume exactly what is left. The Buy tab's tick box is moved instead, in
+-- RCX_BUY, where the problem actually is.
+local ROWPAD = { l = 2, r = 12 }
 
 -- The chrome every results row wears: a zebra stripe, a hairline separator,
 -- and -- where rows can be picked -- a selection tint.
@@ -3939,7 +3980,11 @@ local SELLL = {
     -- point to line up, so centring them under a centred heading reads as a
     -- column where right-alignment just looked like it was hugging the wall.
     bag_qty_w   = 44,
-    bag_qty_pad = 6,
+    -- 2, not 6. This is a pad ON TOP OF ROWPAD.r, and it used to make up the
+    -- clearance ROWPAD.r was short of. ROWPAD.r carries the full border width
+    -- now, so the same total (14px) is spelled 12 + 2 instead of 8 + 6 -- the
+    -- clearance moved into the shared number, and nothing here moved on screen.
+    bag_qty_pad = 2,
     bag_qty_gap = 10,
 
     well_top   = SELL_TOP_H + 10,
@@ -4036,7 +4081,10 @@ end
 
 function ui.ColumnsFitAt(w)
     local rowLeft = BUYL.side_x + 176 + BUYL.gut_w + 6   -- SIDE_W is 176
-    local rowW = (w - 22) - rowLeft - BUYL.gutter_w
+    -- Minus ROWPAD: the columns get the ROW's width, not the scroll frame's.
+    -- This used to measure the frame and was optimistic by the two pads --
+    -- which is the same mistake the pads exist to correct, made one level up.
+    local rowW = (w - 22) - rowLeft - BUYL.gutter_w - ROWPAD.l - ROWPAD.r
     return BUY_COLS_END <= rowW
 end
 -- Post Filter clause rows in the Filter Builder.
@@ -4643,7 +4691,7 @@ function ui.BuildBuyTab()
     well:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 12,
+        tile = true, tileSize = 16, edgeSize = WELL_EDGE,
         insets = { left = 3, right = 3, top = 3, bottom = 3 },
     })
     well:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
@@ -4682,10 +4730,14 @@ function ui.BuildBuyTab()
     while ti <= table.getn(tickKeys) do
         local tk = panel:CreateTexture(nil, "ARTWORK")
         tk:SetWidth(1)
+        -- BOTH ends at the same x. They used to disagree by ROWPAD.l -- the
+        -- top included it and the bottom did not -- which leans a 1px line
+        -- across the header and reads as a rendering artefact rather than as
+        -- a mistake anyone made.
         tk:SetPoint("TOPLEFT", well, "TOPLEFT",
             6 + ROWPAD.l + RCX_BUY[tickKeys[ti]] - 8, -6)
         tk:SetPoint("BOTTOMLEFT", well, "TOPLEFT",
-            6 + RCX_BUY[tickKeys[ti]] - 8, -(BUYL.hdr_h))
+            6 + ROWPAD.l + RCX_BUY[tickKeys[ti]] - 8, -(BUYL.hdr_h))
         tk:SetTexture(0.35, 0.30, 0.18, 0.7)
         ui.buyHdrTicks[ti] = tk
         ti = ti + 1
