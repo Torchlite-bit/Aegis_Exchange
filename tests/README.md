@@ -153,6 +153,9 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    inventory_test.lua      how many you own and where: the bag/bank walkers,
+                            the dirty-flag cache, live bags beating the
+                            snapshot, and per-realm scoping
     session_buys_test.lua   "purchased N this session": units not auctions,
                             both purchase paths, and when the line may name an
                             item at all

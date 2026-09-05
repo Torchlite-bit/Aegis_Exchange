@@ -155,7 +155,30 @@ function time() return W.now end
 
 W.realm   = "TestRealm"
 W.player  = "Tester"
+W.class   = "MAGE"
 function GetRealmName() return W.realm end
+
+-- Returns localized name, ENGLISH TOKEN. The token is the one that matters:
+-- it is what RAID_CLASS_COLORS is keyed by, and the only thing worth storing
+-- about an offline character, because nothing on 1.12 can ask a character
+-- that is not logged in what class it is.
+function UnitClass(unit)
+    if unit ~= "player" then return nil end
+    return W.class, W.class
+end
+
+-- Real 1.12 global, keyed by the English token.
+RAID_CLASS_COLORS = {
+    WARRIOR = { r = .78, g = .61, b = .43 },
+    PALADIN = { r = .96, g = .55, b = .73 },
+    HUNTER  = { r = .67, g = .83, b = .45 },
+    ROGUE   = { r = 1,   g = .96, b = .41 },
+    PRIEST  = { r = 1,   g = 1,   b = 1   },
+    SHAMAN  = { r = .14, g = .35, b = 1   },
+    MAGE    = { r = .41, g = .80, b = .94 },
+    WARLOCK = { r = .58, g = .51, b = .79 },
+    DRUID   = { r = 1,   g = .49, b = .04 },
+}
 function UnitName(unit) if unit == "player" then return W.player end return nil end
 -- "npc" answers only at a FACTION auctioneer; at a neutral (goblin) one the
 -- client returns nil. The old version ignored its argument and always said
@@ -740,6 +763,9 @@ function W.Reset()
     W.itemInfoShape = "vanilla"
     W.itemInfoCalls = 0
     W.merchant      = {}
+    W.class         = "MAGE"
+    W.player        = "Tester"
+    W.realm         = "TestRealm"
     W.clientDepositRate = 0.05
     W.npcFaction    = "Alliance"
     C_Item          = nil

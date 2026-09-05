@@ -594,6 +594,12 @@ ui.HELP_VENDOR = "Learned by visiting a merchant with the item.\n\n"
     .. "With ClassicAPI installed, Aegis reads the price out of the client "
     .. "instead \226\128\148 every item, no merchant visit."
 
+ui.HELP_INVENTORY = "How many of the item you own, per character, split "
+    .. "across bags, bank, auctions and mail.\n\n"
+    .. "Only your BAGS can be read on demand. The bank, your auctions and "
+    .. "your mail answer only while you are standing at them, so those "
+    .. "numbers are from your last visit and the tooltip says so."
+
 ui.HELP_VENDOR_BUY = "What a merchant CHARGES, learned by opening one. "
     .. "Aegis reads the whole inventory, not just the item you hover.\n\n"
     .. "\"limited\" means that vendor's stock was finite, so the price is not "
@@ -1720,6 +1726,8 @@ function ui.BuildAegisSettings(panel, anchorAbove)
           help = ui.HELP_VENDOR },
         { key = "tipVendorBuy",  text = "What a vendor charges",
           help = ui.HELP_VENDOR_BUY },
+        { key = "tipInventory",  text = "How many I own, and where",
+          help = ui.HELP_INVENTORY },
         { key = "tipDisenchant", text = "Disenchant value (hold Shift for the"
                                         .. " breakdown)",
           help = ui.HELP_DISENCHANT },

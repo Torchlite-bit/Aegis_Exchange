@@ -12,6 +12,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.0]
+
+Second of four pieces of ROADMAP 2h.
+
+### Added
+- **"Inventory" on the tooltip — how many you own, and where.** A block at the
+  bottom of the tooltip, per character, split across bags, bank, auctions and
+  mail, with the account total on the right and each name in its **class
+  colour**.
+  - **This release covers the character you are on**, with bags and bank. Your
+    auctions, your mail, and your other characters follow in the next one.
+  - **Only your bags are live.** The bank answers only while you are standing
+    at it, so it is a snapshot taken when you open it — and the block says so
+    in one line rather than putting a date on every row. It only says it when
+    something in the block really is a memory; an item you hold only in your
+    bags carries no caveat.
+  - **Realm-scoped**, which is the opposite of vendor prices and deliberately
+    so. A vendor's price is a fact about the game; twenty Silk Cloth on a
+    character you cannot reach from here is not stock you have.
+  - Empty places are not printed, and a character holding none of the item is
+    left out entirely.
+  - Its own switch on the Aegis tab: **How many I own, and where**.
+
+### Internal
+- Bag counts are rebuilt only when the bags actually change. `BAG_UPDATE`
+  storms — the stock `MAIL_SHOW` handler calls `OpenBackpack()`, so a mailbox
+  with unseen attachments sets it off — and a bag walk inside that handler is
+  the shape that hard-froze another addon in the suite. The handler sets a
+  flag; the walk happens when something asks.
+
+---
+
 ## [1.52.0]
 
 First of four pieces of ROADMAP 2h. The others — the account-wide inventory
@@ -3904,6 +3936,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

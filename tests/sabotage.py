@@ -2007,6 +2007,93 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- inventory --------------------------------------------------------
+    # The bank walked as if it were bags. Every bank reads empty, which looks
+    # exactly like "you have none there" -- and sends the player to the bank
+    # for something they do have.
+    ("inventory-bank-walks-bags", "core/sell.lua",
+     "sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }",
+     "sell.BANK_CONTAINERS = { 0, 1, 2, 3, 4 }",
+     "inventory"),
+
+    # BANK_CONTAINER (-1) dropped. The bank BAGS are counted and the bank's own
+    # slots are not, so the number is plausible and short.
+    ("inventory-bank-misses-container-minus-one", "core/sell.lua",
+     "sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }",
+     "sell.BANK_CONTAINERS = { 5, 6, 7, 8, 9, 10 }",
+     "inventory"),
+
+    # Stacks counted as one item each.
+    ("inventory-counts-slots-not-items", "core/sell.lua",
+     "                out[id] = (out[id] or 0) + (count or 1)",
+     "                out[id] = (out[id] or 0) + 1",
+     "inventory"),
+
+    # The bag cache never invalidated: the count freezes at whatever it was the
+    # first time anything asked, and nothing about it looks wrong.
+    ("inventory-bag-cache-never-dirties", "core/sell.lua",
+     "    if force or sell.bagsDirty or not sell.bagCounts then",
+     "    if not sell.bagCounts then",
+     "inventory"),
+
+    # BAG_UPDATE doing the walk inline instead of setting a flag -- the HARD
+    # RULE 16 violation this design exists to avoid.
+    ("inventory-bag-update-walks-inline", "core/sell.lua",
+     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = true end)",
+     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = false end)",
+     "inventory"),
+
+    # The durable bag snapshot taking the CACHED answer, so what other
+    # characters see is whatever this one happened to have cached.
+    ("inventory-durable-snapshot-uses-cache", "core/sell.lua",
+     "    local counts = sell.BagCounts(true)",
+     "    local counts = sell.BagCounts()",
+     "inventory"),
+
+    # The class token lost to the Lua truncation trap that actually happened:
+    # `local _, c = UnitClass and UnitClass("player")` yields ONE value.
+    ("inventory-class-token-truncated", "core/sell.lua",
+     """    local _, token = UnitClass("player")
+    if token == "" then return nil end
+    return token""",
+     """    local _, token = UnitClass and UnitClass("player")
+    return token""",
+     "inventory"),
+
+    # The current character's row not seeded when nothing is stored for them.
+    # A fresh install has no record until a bank is opened, so the block never
+    # appears at all -- which is how this shipped the first time.
+    ("inventory-fresh-character-has-no-row", "core/db.lua",
+     "    if me and liveBags and (liveBags[itemId] or 0) > 0 and not inv[me] then",
+     "    if false then",
+     "inventory"),
+
+    # Live bags ignored in favour of the stored snapshot -- a stale number
+    # where an exact one was available.
+    ("inventory-ignores-live-bags", "core/db.lua",
+     "            if b == \"bags\" and who == me and liveBags then",
+     "            if false then",
+     "inventory"),
+
+    # Characters holding none of the item listed anyway, so every tooltip grows
+    # a row per alt saying zero.
+    ("inventory-lists-empty-characters", "core/db.lua",
+     "        if row.total > 0 then",
+     "        if true then",
+     "inventory"),
+
+    # Inventory pooled across realms: stock you cannot reach counted as stock
+    # you have.
+    ("inventory-not-realm-scoped", "core/db.lua",
+     """    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.inventory then bucket.inventory = {} end
+    return bucket.inventory""",
+     """    if not db.account.inventoryAll then db.account.inventoryAll = {} end
+    return db.account.inventoryAll""",
+     "inventory"),
+
     # ---- purchased this session -------------------------------------------
     # Counting AUCTIONS instead of units. The number stays plausible and is
     # wrong by the stack size on every row -- "purchased 2" after buying two
@@ -2275,6 +2362,7 @@ SUITES = {
     "vendorbuy": "tests/units/vendorbuy_test.lua",
     "scan.leak": "tests/units/scan_leak_test.lua",
     "session.buys": "tests/units/session_buys_test.lua",
+    "inventory": "tests/units/inventory_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"

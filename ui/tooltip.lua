@@ -75,6 +75,16 @@ function tooltip.Extend(gtt, itemId, count)
         vendorBuy, vendorBuyLimited = A.db.GetVendorBuy(itemId)
     end
 
+    -- How many of this you own, and where. Bags are read LIVE and handed in;
+    -- everything else is a snapshot of a place the client only answers for
+    -- while you are standing at it. See db.InventoryRows.
+    local invRows, invTotal
+    if Want("tipInventory") and A.db.InventoryRows then
+        invRows, invTotal = A.db.InventoryRows(itemId,
+            A.sell and A.sell.BagCounts and A.sell.BagCounts() or nil)
+        if invTotal and invTotal < 1 then invRows, invTotal = nil, nil end
+    end
+
     -- Resolved LAST, and only when the line is wanted. It is the one entry
     -- here that costs a GetItemInfo, and a tooltip that ends up showing no
     -- Aegis lines at all should not have paid for one.
@@ -112,7 +122,7 @@ function tooltip.Extend(gtt, itemId, count)
 
     if not market and not minBuy and not vendor and not vendorBuy
         and not disenchant and not disenchantRows and not deUnpriced
-        and not craftCost then
+        and not craftCost and not invRows then
         return
     end
 
@@ -255,6 +265,54 @@ function tooltip.Extend(gtt, itemId, count)
                 gtt:AddLine("    " .. deUnpriced
                     .. " material(s) never seen on the AH", 0.6, 0.6, 0.6)
             end
+        end
+    end
+
+    -- ---------------------------------------------------------------------
+    -- WHERE YOUR OWN ARE. Last, because it qualifies nothing above it: every
+    -- other line is about the item, this one is about you.
+    -- ---------------------------------------------------------------------
+    if invRows then
+        blank()
+        pair("Inventory", invTotal .. " total")
+        local anySnapshot = false
+        local i = 1
+        while i <= table.getn(invRows) do
+            local r = invRows[i]
+            if r.oldest then anySnapshot = true end
+            -- Names in CLASS COLOUR, the way a character's name is written
+            -- everywhere else in the game. The class comes from the token
+            -- stored with the snapshot, because nothing on 1.12 can ask what
+            -- class an offline character is; an unknown one falls back to the
+            -- plain colour rather than erroring.
+            local cr, cg, cb = 0.82, 0.76, 0.66
+            local cc = RAID_CLASS_COLORS and r.class and RAID_CLASS_COLORS[r.class]
+            if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+            -- The character you are ON reads at full strength; the rest are
+            -- held back, because their numbers are memories and yours is not.
+            if not r.you then cr, cg, cb = cr * 0.62, cg * 0.62, cb * 0.62 end
+            local parts = {}
+            local bi = 1
+            while bi <= table.getn(A.db.INVENTORY_BUCKETS) do
+                local b = A.db.INVENTORY_BUCKETS[bi]
+                if r[b] and r[b] > 0 then
+                    table.insert(parts, r[b] .. " " .. b)
+                end
+                bi = bi + 1
+            end
+            gtt:AddDoubleLine(
+                "    " .. r.name,
+                r.total .. "  |cff8a6f4e(" .. table.concat(parts, ", ") .. ")|r",
+                cr, cg, cb, 1, 1, 1)
+            i = i + 1
+        end
+        -- ONE line for all of them, not a date per row. An age on every
+        -- character doubles the width of the widest block on the tooltip, and
+        -- the true statement is the same for all of them. Same discipline as
+        -- "approx" on the deposit: label it, or do not show it.
+        if anySnapshot then
+            gtt:AddLine("    bags are live; bank, auctions and mail are as of"
+                .. " your last visit", 0.44, 0.40, 0.33)
         end
     end
 

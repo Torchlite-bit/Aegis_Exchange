@@ -2690,6 +2690,45 @@ The tally is **in memory only**, which is the definition of "this session":
 login to logout, never written to SavedVariables. A persisted one would answer
 "how many have I got so far" wrongly the next day.
 
+#### §2 The inventory block, this character — v1.53.0
+
+Bags live, bank on `BANKFRAME_OPENED`, and the whole tooltip section with its
+freshness line. Auctions, mail and other characters are §3.
+
+**Three bugs the suite caught before the client did**, all of them the kind
+that look like the feature simply not working:
+
+- **A fresh character had no row at all.** Nothing is stored until a bank is
+  opened, so the reader looped over an empty table and the player's own bags --
+  the one bucket that is exact and always available -- were invisible. That is
+  the common case on a fresh install, and it presents as "the block never
+  appears". `db.InventoryRows` now seeds the current character's row when live
+  bags have the item and nothing is stored.
+- **The class token was always nil.** `local _, class = UnitClass and
+  UnitClass("player")` yields ONE value: an `and` expression truncates a
+  multiple return to its first result. It is `sell.PlayerClass()` now, written
+  out, with the trap named in the comment -- there is no other way for the
+  tooltip to colour a name, and nothing on 1.12 can ask what class an offline
+  character is, so this is the only chance to record it.
+- **The durable bag snapshot took the cached answer**, so what other characters
+  would eventually read was whatever this one happened to have cached. Forced
+  now: one walk per bank visit is worth it for a number that may be read for
+  days.
+
+**HARD RULE 16, and this time the danger is bags rather than mail.**
+`BAG_UPDATE` storms -- the stock `MAIL_SHOW` handler calls `OpenBackpack()`, so
+a mailbox with unseen attachments sets it off, which is exactly how RallyPower
+stalled ~18s with no mailbox feature at all. The handler sets one boolean. The
+walk happens in `sell.BagCounts`, at most once per real change, driven by
+whoever asks for the answer -- the dirty-flag shape, with the tooltip as the
+flush rather than an OnUpdate.
+
+**One walker for both containers.** Bags are 0..4; the bank is `-1` plus 5..10.
+Two sabotages cover the two ways that goes wrong quietly: walking bags where
+the bank was meant (every bank reads empty, which looks exactly like "you have
+none there"), and dropping `-1` so the bank bags count and the bank's own slots
+do not.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
