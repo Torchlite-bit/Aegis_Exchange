@@ -1944,6 +1944,82 @@ function buy.BatchCost(rows)
 end
 
 -- Start a batch buyout of `rows`. Returns (true) or (false, reason).
+-- ---------------------------------------------------------------------------
+-- What you have bought this session
+-- ---------------------------------------------------------------------------
+
+-- Auction house purchases since login, by item.
+--
+-- IN MEMORY ONLY, and that IS the definition of "this session": it lives from
+-- login to logout and is never written to SavedVariables. The History ledger
+-- is the durable record of what was spent; this is the scratch number that
+-- answers "how many have I got so far" while you are still shopping, and a
+-- persisted one would answer that question wrongly the next day.
+--
+-- It deliberately does NOT reset when the auction house closes. Buying out a
+-- crafting run takes several trips to the auctioneer, and a counter that
+-- cleared on the way out would clear in the middle of the thing it counts --
+-- the same reasoning that made the crafting tally manual-only.
+--
+-- COUNTS UNITS, NOT AUCTIONS. Buying a stack of twenty Fine Thread is twenty
+-- thread. "How many have I bought" is a question about items, and answering it
+-- with a number of auctions is the kind of wrong that looks right.
+buy.session = {}   -- itemId -> { n = units, spent = copper, name = "..." }
+
+-- Book one purchase.
+--
+-- Called from the ENGINE, at the two places an auction is actually bought,
+-- rather than from the UI beside the ledger write. The engine holds every fact
+-- this needs -- the id, the stack size, the price -- and a purchase made
+-- through a path that forgot to book it would be counted by neither. It also
+-- means the tally is reachable from a suite, which ui/frame.lua is not.
+function buy.RecordPurchase(itemId, name, stack, copper)
+    if not itemId then return nil end
+    stack = stack or 1
+    if stack < 1 then stack = 1 end
+    local rec = buy.session[itemId]
+    if not rec then
+        rec = { n = 0, spent = 0, name = name }
+        buy.session[itemId] = rec
+    end
+    rec.n     = rec.n + stack
+    rec.spent = rec.spent + (copper or 0)
+    if name then rec.name = name end
+    return rec.n, rec.spent
+end
+
+-- Units and copper bought this session for one item. ALWAYS two numbers, so no
+-- caller has to branch on nil to render a zero.
+function buy.SessionBought(itemId)
+    local rec = itemId and buy.session[itemId]
+    if not rec then return 0, 0 end
+    return rec.n, rec.spent
+end
+
+function buy.ClearSession()
+    buy.session = {}
+end
+
+-- The one item a result set is about, or nil when it is about several.
+--
+-- The status line NAMES an item, so it may only do that when there is one to
+-- name. A search for "cloth" returns Linen, Wool and Silk; reporting one of
+-- their tallies beside all three would be a true number attached to the wrong
+-- thing, which is worse than no number.
+function buy.SoleItemId(rows)
+    local id = nil
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.itemId then
+            if id and r.itemId ~= id then return nil end
+            id = r.itemId
+        end
+        i = i + 1
+    end
+    return id
+end
+
 function buy.StartBatch(rows, onDone, onStep)
     if buy.batch.active then return false, "A buyout is already running." end
     if not rows or table.getn(rows) == 0 then
@@ -1962,7 +2038,12 @@ function buy.StartBatch(rows, onDone, onStep)
         if r.buyout and r.buyout > 0 and not r.mine then
             local fp = buy.Fingerprint(r)
             if not owed[fp] then
-                owed[fp] = { count = 0, price = r.buyout, name = r.name }
+                -- `stack` and `itemId` ride along for the session tally. Safe
+                -- to keep on the bucket rather than per row: the fingerprint
+                -- keys on name, stack size and price, so everything collapsed
+                -- into one bucket is the same item at the same stack size.
+                owed[fp] = { count = 0, price = r.buyout, name = r.name,
+                             itemId = r.itemId, stack = r.count or 1 }
                 table.insert(order, fp)
             end
             owed[fp].count = owed[fp].count + 1
@@ -2029,6 +2110,7 @@ function buy.BatchStep()
     st.timeout = buy.TIMEOUT
     buy.driver:Show()
     PlaceAuctionBid("list", index, info.price)
+    buy.RecordPurchase(info.itemId, info.name, info.stack, info.price)
     -- Reported per PURCHASE, with what was bought, so the caller can book each
     -- one as it happens. Booking the whole batch at the end would lose
     -- everything bought before an abort -- and an abort is the case where an
@@ -2053,6 +2135,7 @@ function buy.Buyout(row)
     st.timeout = buy.TIMEOUT
     buy.driver:Show()
     PlaceAuctionBid("list", row.index, row.buyout)
+    buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)
     return true
 end
 

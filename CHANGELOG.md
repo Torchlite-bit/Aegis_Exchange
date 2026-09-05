@@ -12,6 +12,29 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.0]
+
+First of four pieces of ROADMAP 2h. The others — the account-wide inventory
+block on the tooltip, and the Crafting tab rebuilt as three panels — follow.
+
+### Added
+- **"Purchased N this session" on the Buy tab.** When your results are about
+  one item and you have bought some of it this session, the status line says
+  so: `13 match(es) • unit low to high • purchased 12 Silk Cloth this session`.
+  - **It counts items, not auctions.** Buying a stack of twenty is twenty.
+  - **It only names an item when there is one to name.** A search for *cloth*
+    returns Linen, Wool and Silk; putting one of their tallies beside all three
+    would be a true number attached to the wrong thing.
+  - **It lives from login to logout** and is never saved. Buying out a crafting
+    run takes several trips to the auctioneer, so it deliberately does *not*
+    reset when the auction house closes — a counter that cleared on the way out
+    would clear in the middle of the thing it counts.
+  - It is booked at the two points an auction is actually bought, in the buy
+    engine rather than in the window, so a single buyout and a multi-buyout
+    batch cannot disagree about what happened.
+
+---
+
 ## [1.51.1]
 
 ### Fixed
@@ -3881,6 +3904,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

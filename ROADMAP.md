@@ -2647,7 +2647,50 @@ is not. `ui.ColumnsFitAt`, right beside them, IS extracted by
 up. Wiring them into the geometry suite is a better answer than deleting them,
 and belongs in its own change.
 
-### 2h — Session Purchase & Crafting Material Tracker
+### 2h — Session Purchase & Crafting Material Tracker — **BUILDING**
+
+Scoped in two passes with the project owner. The concept settled on **three
+separate pieces, not one system**, and the shape of each is decided:
+
+1. **Purchased this session** — Buy tab status line. **DONE, v1.52.0.**
+2. **The inventory block** — a tooltip section answering "how many do I own,
+   everywhere", per character, split across bags / bank / auctions / mail, with
+   names in class colour. Ships in two steps: this character, then the account.
+3. **The Crafting tab in three panels** — tracked recipes, search results for a
+   clicked reagent, and a made-counter, side by side, with a `[-] N [+]`
+   quantity stepper on each recipe that drives the material totals.
+
+**Settled, and not to be re-litigated:** clicking a reagent fires a REAL
+auction query (accurate over instant; the previous result stays on screen while
+the next lands); the made-count resets **manually only** (a crafting run spans
+several trips, and a counter clearing on `AUCTION_HOUSE_CLOSED` would clear
+mid-run); and the dormant shopping-list engine is **not** coming back as the
+storage behind tracked recipes -- delete it in the next housekeeping pass.
+
+#### §1 Purchased this session — v1.52.0
+
+Three decisions worth keeping:
+
+- **Units, not auctions.** A stack of twenty is twenty. Counting auctions gives
+  a number that stays plausible and is wrong by the stack size on every row,
+  which is why it is the first sabotage.
+- **Named only when there is one item to name.** `buy.SoleItemId` returns nil
+  for a mixed result set, so a search for "cloth" gets no line rather than one
+  item's tally sitting beside three items' rows. Rows whose id has not resolved
+  are skipped rather than treated as a second item -- a cold item cache is
+  normal and must not blank the line.
+- **Booked in the ENGINE, not beside the ledger write in the window.** The
+  engine holds every fact at the moment of purchase (id, stack, price), a path
+  that forgot to book would be missed by both, and `ui/frame.lua` cannot be
+  loaded by a suite. Two sabotages exist because the single-buyout and
+  multi-buyout paths share nothing but the tally: each can stop booking while
+  the other keeps working, and the suite covers both.
+
+The tally is **in memory only**, which is the definition of "this session":
+login to logout, never written to SavedVariables. A persisted one would answer
+"how many have I got so far" wrongly the next day.
+
+### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
 

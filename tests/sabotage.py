@@ -2007,6 +2007,42 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- purchased this session -------------------------------------------
+    # Counting AUCTIONS instead of units. The number stays plausible and is
+    # wrong by the stack size on every row -- "purchased 2" after buying two
+    # stacks of twenty.
+    ("session-counts-auctions-not-units", "core/buy.lua",
+     "    rec.n     = rec.n + stack",
+     "    rec.n     = rec.n + 1",
+     "session.buys"),
+
+    # The single-buyout path stops booking. The batch path still does, so the
+    # tally works right up until someone buys one thing at a time.
+    ("session-single-buyout-not-booked", "core/buy.lua",
+     "    buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)\n",
+     "",
+     "session.buys"),
+
+    # The batch path stops booking -- the other half.
+    ("session-batch-not-booked", "core/buy.lua",
+     "    buy.RecordPurchase(info.itemId, info.name, info.stack, info.price)\n",
+     "",
+     "session.buys"),
+
+    # The owed bucket loses the stack size, so every batch purchase books one
+    # item however big the stack was.
+    ("session-batch-loses-stack", "core/buy.lua",
+     "                             itemId = r.itemId, stack = r.count or 1 }",
+     "                             itemId = r.itemId }",
+     "session.buys"),
+
+    # SoleItemId answers for a mixed result set, so the line names one item
+    # and reports it beside three.
+    ("session-sole-item-ignores-mismatch", "core/buy.lua",
+     "            if id and r.itemId ~= id then return nil end",
+     "",
+     "session.buys"),
+
     # ---- the scan callback leak (the multi-second freeze) -----------------
     # The gate removed, which is the bug exactly as it shipped: every page
     # anyone looks at is handed to whichever scan callback was installed last,
@@ -2238,6 +2274,7 @@ SUITES = {
     "clientdata": "tests/units/clientdata_test.lua",
     "vendorbuy": "tests/units/vendorbuy_test.lua",
     "scan.leak": "tests/units/scan_leak_test.lua",
+    "session.buys": "tests/units/session_buys_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"

@@ -153,6 +153,9 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    session_buys_test.lua   "purchased N this session": units not auctions,
+                            both purchase paths, and when the line may name an
+                            item at all
     scan_leak_test.lua      the callback leak behind the multi-second freeze:
                             a finished scan stops collecting, a live one takes
                             only its own pages, and the price DB still fills

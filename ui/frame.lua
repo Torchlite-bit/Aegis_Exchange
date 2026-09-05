@@ -6938,6 +6938,16 @@ function ui.UpdateBuyList()
                         .. " skipped (stack size unknown)"
                 end
                 shown = shown .. blindNote
+                -- What you have bought this session, when these results are
+                -- about ONE item. Last, because it qualifies nothing above it
+                -- -- it is a fact about your bags, not about the search.
+                local soleId = A.buy.SoleItemId(all)
+                local boughtN = soleId and A.buy.SessionBought(soleId) or 0
+                if boughtN > 0 then
+                    local rec = A.buy.session[soleId]
+                    shown = shown .. " \226\128\162 purchased " .. boughtN
+                        .. " " .. (rec and rec.name or "") .. " this session"
+                end
                 ui.buyStatus:SetText(headline .. " \226\128\162 "
                     .. sortKey .. " " .. order .. shown)
             end
