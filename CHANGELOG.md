@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.51.1]
+
+### Fixed
+- **The multi-second freeze.** Reported as a hang a few seconds after opening
+  the auction house, worse the longer a session ran, gone after a `/reload` —
+  and separately as a hang when posting a first auction. Same cause.
+  - Aegis feeds its price database from **every** auction page anyone looks at,
+    so browsing fills it in as you play. That is deliberate. But the same call
+    also handed the page to whichever **scan** was collecting — and it sat above
+    the check for whether the scanner was expecting a page at all.
+  - A finished scan never released its collector either. So one Sell-tab price
+    lookup left a collector armed for the rest of the session, receiving every
+    page from every source — a Buy search, the stock auction house, a manual
+    browse — and appending matching rows to a table nothing ever emptied. One
+    report showed **910 rows cached for a single item in a category holding 60
+    auctions**.
+  - It compounded, which is why it got worse over a session: reading that item
+    from cache handed back the cached table **by reference**, so the stray
+    appends then rewrote the cache itself, and that survived for the full
+    hour-long cache lifetime.
+  - Sorting, copying and grouping that table is what took seconds — on the path
+    the Sell tab runs whenever it repaints, including right after a post.
+  - Three fixes, because two of them are each enough on their own and neither
+    covers the third: a scan's collector now only receives pages that scan
+    asked for; a run releases its collector when it ends or is stopped; and the
+    listings cache is copied on the way out as well as on the way in.
+  - **The passive price feed is untouched** — browsing still fills the
+    database. A fix that switched that off would have been the worse bug:
+    silent, and visible only as prices that never appear.
+- Removed the temporary `Aegis cache store:` line that was printing to chat on
+  every price lookup.
+
+---
+
 ## [1.51.0]
 
 ### Added
@@ -3847,6 +3881,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.51.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -153,6 +153,10 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    scan_leak_test.lua      the callback leak behind the multi-second freeze:
+                            a finished scan stops collecting, a live one takes
+                            only its own pages, and the price DB still fills
+                            from anything you browse
     external_buttons_test.lua  the buttons Aegis puts on Blizzard's windows:
                             the recorded anchor, and the pfUI nudge that moves
                             each one once and in the right direction
