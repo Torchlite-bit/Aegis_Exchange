@@ -132,9 +132,20 @@ end
 -- to collect every listing of one item), it is invoked for EACH auction on the
 -- page as onListing(itemId, name, count, buyout, minBid, owner) — including
 -- bid-only ones, so the listings table can show them too.
-local function RecordVisiblePage(numOnPage)
+-- `ours` SEPARATES THE TWO JOBS, and mixing them up is what froze clients.
+-- Feeding the price DB from any page anyone looks at is deliberate. Handing
+-- that page to a SCAN's callback is not: the callback belongs to one run
+-- collecting one item, and a page the run did not ask for is somebody else's
+-- page -- a Buy-tab search, the stock auction house, a manual browse.
+--
+-- Before this, every list update in the session was delivered to whichever
+-- onListing was installed last, for as long as the client stayed up. The Sell
+-- tab's collector went on appending rows for its item and nothing ever emptied
+-- it, so sorting and copying that table came to take seconds. See the note
+-- above sell.ScanItem.
+local function RecordVisiblePage(numOnPage, ours)
     local st = scan.state
-    local onListing = st.callbacks and st.callbacks.onListing
+    local onListing = ours and st.callbacks and st.callbacks.onListing
     local tally = st.tally
     for i = 1, numOnPage do
         local name, _, count, quality, _, _, minBid, _, buyoutPrice, _, _, owner =
@@ -304,9 +315,15 @@ local function Finish()
     end
     st.phase = "idle"
     scan.driver:Hide()
-    if st.callbacks and st.callbacks.onComplete then
-        st.callbacks.onComplete(stats)
-    end
+    -- Take the callbacks OFF the state before running onComplete, and leave
+    -- nothing armed behind. Belt and braces against the freeze above: a
+    -- callback that outlives its run is a landmine either way. Cleared first
+    -- rather than after, because onComplete may start the next scan -- the
+    -- batch bag scan does -- and clearing afterwards would wipe the NEW run's
+    -- callbacks instead of the finished one's.
+    local cb = st.callbacks
+    st.callbacks = nil
+    if cb and cb.onComplete then cb.onComplete(stats) end
 end
 
 -- Begin the current category (queries[queryIndex]) at page 0.
@@ -330,10 +347,12 @@ end
 function scan.OnListUpdate()
     local numOnPage, totalAuctions = GetNumAuctionItems("list")
 
-    -- Passive feed: every result page anyone looks at updates the DB.
-    RecordVisiblePage(numOnPage)
-
+    -- Passive feed: every result page anyone looks at updates the DB. The
+    -- second argument says whether this page is one WE asked for, and is read
+    -- BEFORE the gate below, because the gate advances the state machine.
     local st = scan.state
+    RecordVisiblePage(numOnPage, st.phase == "wait_results")
+
     if st.phase ~= "wait_results" then return end
 
     -- This is the page we asked for: accept it and advance.
@@ -447,6 +466,8 @@ function scan.Stop()
     st.phase = "idle"
     st.lastCompleted = -1
     st.page = 0
+    -- Same reason as Finish: an abandoned run must not go on collecting.
+    st.callbacks = nil
     scan.driver:Hide()
 end
 

@@ -2390,6 +2390,64 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The scan callback leak — v1.51.1
+
+A player reported a multi-second freeze; a second player traced it far enough
+to hand over a `/aex debug` log showing **910 rows cached for one item in a
+category holding 60 auctions**, and named the accumulation. Their proposed
+cause — `sell.listings` not cleared at scan start — was wrong; it IS cleared,
+one line above `A.scan.Start`. **The observation was right and the diagnosis
+was not**, which is the most useful kind of bug report and worth saying so.
+
+The real path has three links, and the first is a HARD RULE 16 violation
+hiding behind a gate that looked like it covered the file:
+
+```lua
+RecordVisiblePage(numOnPage)          -- ran on EVERY list update
+local st = scan.state
+if st.phase ~= "wait_results" then return end
+```
+
+`RecordVisiblePage` feeds the price DB from every page anyone looks at, which
+is deliberate and valuable. It also invoked the running scan's `onListing`,
+and it sat ABOVE the phase gate. Second link: `Finish()` set `phase = "idle"`
+but never cleared `st.callbacks`. So one Sell-tab price lookup left its
+collector armed for the rest of the session, receiving every page from every
+source and appending to a table nothing emptied.
+
+Third link is what made it compound rather than merely grow: `ScanItem`'s
+cache-hit path did `sell.listings = entry.listings`, aliasing the cached array,
+so the stray appends rewrote the cache — and that survived `CACHE_TTL`, an
+hour. **`ui/frame.lua` already documented this hazard in two places** and
+worked around it by rendering straight from the cache; the workaround was
+right, the alias it was avoiding was never removed.
+
+Sorting, copying and grouping that table is the seconds, on the path the Sell
+tab runs on every repaint — including the one after a post, which is why it
+also presented as "freezes when I post my first auction".
+
+**Three fixes, and the redundancy is the point.** A scan's collector only
+receives pages that scan asked for; a run releases its collector on Finish and
+on Stop; the cache is copied out as well as in. Two of those independently
+prevent the reported symptom — which is exactly why one sabotage
+(`scan-callback-not-scoped`) went unnoticed at first: with the callbacks
+cleared at Finish, removing the gate no longer leaked on a FINISHED scan.
+
+That escape found the case the suite was missing, and it is the case that
+matters most in the field: **a scan is live but not waiting for results for
+most of its life.** Between pages it sits in `wait_query` behind the throttle;
+it sits in `paused` for as long as a player has walked away from the
+auctioneer. Its callbacks are legitimately armed the whole time, so a page
+landing in those windows — browsing during a batch bag scan, the stock AH —
+is somebody else's page arriving at an armed collector. Nothing but the gate
+covers that.
+
+**And the fix had a way to go too far**, which is sabotaged too
+(`scan-passive-feed-gated-too`): gating the whole call rather than just the
+callback would stop the price DB filling in while you browse. That would be a
+worse bug than the freeze — silent, with no symptom but prices that never
+appear.
+
 ### Cancel All — v1.51.0
 
 Asked for directly. The interesting part is not the button, it is that

@@ -716,6 +716,36 @@ function sell.StopBatchScan()
     sell.batchCurrentItemId = nil
 end
 
+-- A shallow copy of a listings array, row tables included.
+--
+-- ONE WRITER, because the cache has to be copied on the way IN and on the way
+-- OUT and only one of those was ever done. `sell.listings` is a live table
+-- that a running scan appends to; handing out the cached array by reference
+-- meant an append landed in the cache, and the corruption then survived for
+-- CACHE_TTL -- an hour of a Sell tab quietly getting slower, which is exactly
+-- how this presented in the field ("worse the longer the session runs, fine
+-- after a /reload").
+--
+-- ui/frame.lua already worked around this in two places by rendering straight
+-- from the cache and never touching sell.listings. Those comments describe
+-- this bug; the fix belongs here, where the alias was created.
+function sell.CopyListings(rows)
+    local out, i = {}, 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        out[i] = {
+            count  = r.count,
+            buyout = r.buyout,
+            unit   = r.unit,
+            minBid = r.minBid,
+            owner  = r.owner,
+            isMine = r.isMine,
+        }
+        i = i + 1
+    end
+    return out
+end
+
 -- Lowest per-unit buyout among the last scan's listings. `excludeMine` skips
 -- your own auctions (so undercut targets other sellers). Returns nil if none.
 function sell.LowestListingUnit(excludeMine)
@@ -741,7 +771,9 @@ function sell.ScanItem(itemName, itemId, onProgress, onDone)
     -- Cache hit: return stored results without a new scan.
     local entry = sell.cache[itemId]
     if entry and time() - entry.when < sell.CACHE_TTL then
-        sell.listings   = entry.listings
+        -- A COPY. Aliasing the cached array here is what let a stray append
+        -- rewrite the cache itself -- see sell.CopyListings.
+        sell.listings   = sell.CopyListings(entry.listings)
         sell.scanItemId = itemId
         sell.scanName   = itemName
         sell.scanWhen   = entry.when
@@ -777,31 +809,12 @@ function sell.ScanItem(itemName, itemId, onProgress, onDone)
                 return au < bu
             end)
             sell.scanWhen = time()
-            -- Store a deep copy in the cache so later mutations to sell.listings
-            -- don't corrupt the cached data.
-            local copy = {}
-            local li = 1
-            while li <= table.getn(sell.listings) do
-                local r = sell.listings[li]
-                table.insert(copy, {
-                    count  = r.count,
-                    buyout = r.buyout,
-                    unit   = r.unit,
-                    minBid = r.minBid,
-                    owner  = r.owner,
-                    isMine = r.isMine,
-                })
-                li = li + 1
-            end
-            sell.cache[itemId] = { listings = copy, when = sell.scanWhen }
-            -- Temporary debug: log what's being cached so we can trace
-            -- the root cause of cache entries with 0 rows.
-            if DEFAULT_CHAT_FRAME then
-                DEFAULT_CHAT_FRAME:AddMessage(
-                    "|cff5fc8f8Aegis cache store:|r "
-                    .. tostring(itemName) .. " (id:" .. tostring(itemId)
-                    .. ") rows=" .. tostring(table.getn(copy)))
-            end
+            -- Store a copy so later mutations to sell.listings cannot reach
+            -- the cached data. The read side copies too; see sell.CopyListings.
+            sell.cache[itemId] = {
+                listings = sell.CopyListings(sell.listings),
+                when     = sell.scanWhen,
+            }
             if onDone then onDone(sell.listings) end
         end,
     })

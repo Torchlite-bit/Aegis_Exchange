@@ -2007,6 +2007,72 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- the scan callback leak (the multi-second freeze) -----------------
+    # The gate removed, which is the bug exactly as it shipped: every page
+    # anyone looks at is handed to whichever scan callback was installed last,
+    # for the rest of the session. Nothing errors -- the Sell tab just gets
+    # slower until it hangs.
+    ("scan-callback-not-scoped", "core/scan.lua",
+     "    local onListing = ours and st.callbacks and st.callbacks.onListing",
+     "    local onListing = st.callbacks and st.callbacks.onListing",
+     "scan.leak"),
+
+    # The phase read AFTER the gate has advanced the state machine, so a page
+    # we DID ask for is judged by the state it left behind rather than the one
+    # it arrived in.
+    ("scan-ours-read-too-late", "core/scan.lua",
+     "    RecordVisiblePage(numOnPage, st.phase == \"wait_results\")",
+     "    RecordVisiblePage(numOnPage, false)",
+     "scan.leak"),
+
+    # A finished run leaves its callbacks armed -- the second half of the leak,
+    # and on its own enough to bring it back.
+    ("scan-finish-keeps-callbacks", "core/scan.lua",
+     """    local cb = st.callbacks
+    st.callbacks = nil
+    if cb and cb.onComplete then cb.onComplete(stats) end""",
+     """    if st.callbacks and st.callbacks.onComplete then
+        st.callbacks.onComplete(stats)
+    end""",
+     "scan.leak"),
+
+    # An abandoned run keeps collecting.
+    ("scan-stop-keeps-callbacks", "core/scan.lua",
+     """    -- Same reason as Finish: an abandoned run must not go on collecting.
+    st.callbacks = nil
+""",
+     "",
+     "scan.leak"),
+
+    # The passive price feed switched off along with the callback. This is the
+    # fix going too far, and it is the WORSE bug: silent, and visible only as
+    # prices that never fill in while you browse.
+    ("scan-passive-feed-gated-too", "core/scan.lua",
+     "    RecordVisiblePage(numOnPage, st.phase == \"wait_results\")",
+     "    if st.phase == \"wait_results\" then RecordVisiblePage(numOnPage, true) end",
+     "scan.leak"),
+
+    # The cache handed out by reference again, so a stray append rewrites it
+    # and the corruption outlives the scan by an hour.
+    ("sell-cache-hit-aliases", "core/sell.lua",
+     "        sell.listings   = sell.CopyListings(entry.listings)",
+     "        sell.listings   = entry.listings",
+     "scan.leak"),
+
+    # The copy made shallow at the ROW level: the array is new, every row is
+    # shared, so editing one reaches into the cache.
+    ("sell-copy-shares-rows", "core/sell.lua",
+     """        out[i] = {
+            count  = r.count,
+            buyout = r.buyout,
+            unit   = r.unit,
+            minBid = r.minBid,
+            owner  = r.owner,
+            isMine = r.isMine,
+        }""",
+     "        out[i] = r",
+     "scan.leak"),
+
     # ---- cancel all -------------------------------------------------------
     # The cancel order flipped. Cancelling shifts every later index down, so an
     # upward pass takes every other auction and reports success for all of
@@ -2171,6 +2237,7 @@ SUITES = {
     "disenchant.learn": "tests/units/disenchant_learn_test.lua",
     "clientdata": "tests/units/clientdata_test.lua",
     "vendorbuy": "tests/units/vendorbuy_test.lua",
+    "scan.leak": "tests/units/scan_leak_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
