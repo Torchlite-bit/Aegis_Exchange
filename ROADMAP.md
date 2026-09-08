@@ -2935,6 +2935,42 @@ plausible, and makes a strip-fit check pass at every width there is. A reader
 that can be silently wrong is worse than one that throws, so it consumes
 continuation lines now and a sabotage removes the second line to prove it.
 
+#### §6 The Crafting tab on a real client — v1.52.7
+
+A screenshot did what 321 sabotages could not, which is the whole point of the
+line in CLAUDE.md about what the suite deliberately does not cover.
+
+**Three panels, three shapes.** Each one had been given the band its own
+contents wanted -- box tops at 34, 86 and 36, row heights of 20, 26 and 18 --
+and every one of those numbers was individually defensible. Together they read
+as three unrelated windows that happened to be adjacent. The fix is that both
+edges and the row height are now SHARED and asserted: one top, one bottom, one
+row height, and each panel still filling its box with ten rows at MIN_H.
+
+**The left column was upside down.** The profit estimate and its two buttons
+sat BELOW the recipe list, which forced that list to stop 144px short of the
+panel bottom while the two boxes beside it ran on to 30. Flipping them above
+lets the list reach the same bottom as the others; Cost and Sells share one
+line, and the NET moved to the panel's footer bar -- a conclusion belongs on
+the bottom bar, and that is where the concept draws it.
+
+**Two of the three lists had no row chrome.** The middle table's rows go
+through `BuildResultRow`, which calls `ui.AddRowChrome`; the outer two built
+their own rows and got no stripe, no hairline and no hover. That is why they
+read as loose text next to a table rather than as three tables.
+
+**The lesson is about which numbers are allowed to be local.** Every one of
+these was set by asking "what does THIS panel need", and the answer was right
+every time. What was missing is that a panel next to another panel does not get
+to answer that question alone -- so the shared quantities are now single
+constants the others read, and the suite asserts the sharing rather than the
+values.
+
+**And a seventh list turned up.** The per-list geometry checks covered six; the
+made-this-session list was never added when it was built, so it was the one
+list in the window whose row height and row count nothing checked. It is in
+`LISTS` now.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

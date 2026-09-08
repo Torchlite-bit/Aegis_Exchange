@@ -18,6 +18,42 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.7]
+
+The Crafting tab, on a real client. Three panels that each took the shape their
+own contents wanted read as three unrelated windows sitting next to each other,
+not as one tab.
+
+### Fixed
+- **All three panels now share one top edge and one bottom edge.** They started
+  at three different heights and the left one stopped less than halfway down
+  the tab.
+- **One row height across all three lists** (26, the middle table's — it has
+  per-row buttons and cannot shrink). They were 26 / 20 / 18, so nothing lined
+  up from a recipe on the left to what it was short of in the middle.
+- **The profit estimate and the two buttons moved ABOVE the recipe list.**
+  Below it, they forced that list to stop 144px short of the panel bottom and
+  left the numbers floating on bare panel. Cost and Sells now share one line
+  above the box; the **net moved to the panel's footer bar**, where a
+  conclusion belongs and where the concept puts it.
+- **The recipe list and the made-this-session list get the same row chrome as
+  every other table in the window** — the zebra stripe, the hairline and the
+  hover. Two of the three lists had none, which is what made them read as
+  loose text rather than as tables.
+- **The middle panel's heading is the same size and on the same line as the
+  other two.** It was `GameFontNormalLarge` on its own baseline, which made the
+  middle panel look like the page and the outer two like margin notes.
+- The search box, the Search button and the pager are all one height and start
+  on one line with the left panel's buttons.
+
+### Internal
+- Six new geometry sabotages, and the suite now asserts what a screenshot had
+  to catch: that the three boxes share a top and a bottom, that all three
+  panels use one row height, and that each still fills its box with ten rows at
+  the smallest allowed window.
+- The made-this-session list was the **seventh** list in the window and the
+  only one the per-list geometry checks did not cover. It does now.
+
 ## [1.52.6]
 
 The housekeeping pass 2h kept deferring things into. No behaviour change —
@@ -4124,6 +4160,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

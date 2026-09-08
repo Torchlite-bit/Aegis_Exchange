@@ -834,12 +834,21 @@ end
 local LISTS = {}
 do
     local _, h
-    _, h = pairConst("CSIDE_ROWS", "CSIDE_ROW_H")
+    -- The three Crafting panels share ONE row height, so it is one constant
+    -- the other two read -- not three numbers that can drift apart, which is
+    -- what 26 / 20 / 18 was.
+    CRAFT_ROW_H = constant("CRAFT_ROW_H")
+    local _, mx
+    _, mx = pairConst("CSIDE_ROWS", "CSIDE_ROWS_MAX")
     table.insert(LISTS, { name = "craft recipe tree", box = LISTBOX.craftSide,
-                          rowH = h, max = constant("CSIDE_ROWS_MAX") })
-    _, h = pairConst("CRAFT_ROWS", "CRAFT_ROW_H")
+                          rowH = constant("CSIDE_ROW_H"), max = mx })
+    _, mx = pairConst("CRAFT_ROWS", "CRAFT_ROWS_MAX")
     table.insert(LISTS, { name = "Crafting", box = LISTBOX.craft,
-                          rowH = h, max = constant("CRAFT_ROWS_MAX") })
+                          rowH = CRAFT_ROW_H, max = mx })
+    _, mx = pairConst("MADE_ROWS", "MADE_ROWS_MAX")
+    table.insert(LISTS, { name = "craft made-this-session",
+                          box = LISTBOX.craftMade,
+                          rowH = constant("MADE_ROW_H"), max = mx })
     _, h = pairConst("AUC_ROWS", "AUC_ROW_H")
     table.insert(LISTS, { name = "Auctions", box = LISTBOX.auc,
                           rowH = h, max = constant("AUC_ROWS_MAX") })
@@ -854,7 +863,7 @@ do
                           rowH = h, max = constant("LIST_ROWS_MAX") })
 end
 
-H.eq("every list is accounted for", table.getn(LISTS), 6)
+H.eq("every list is accounted for", table.getn(LISTS), 7)
 
 for _, L in ipairs(LISTS) do
     local function area(winH)
@@ -1226,59 +1235,62 @@ H.eq("the box edge is one bleed outside its list",
 H.eq("...and what is drawn outside it must clear two",
      ui.CraftBoxClear(100), 100 - WELL_BLEED * 2)
 
--- The heading above each box. The middle one's box reaches CRAFT_HDR_BAND
--- higher than the others' to enclose its column headers and the rule.
-local hdrBottom = CRAFTL.hdr_y + CRAFTL.hdr_h
-H.check("the LEFT panel's heading clears its box",
-        hdrBottom <= ui.CraftBoxClear(CRAFTL.side_top),
-        "heading reaches " .. hdrBottom .. ", border starts at "
-            .. ui.CraftBoxClear(CRAFTL.side_top))
-H.check("the RIGHT panel's heading clears its box",
-        hdrBottom <= ui.CraftBoxClear(CRAFTL.made_top),
-        "heading reaches " .. hdrBottom .. ", border starts at "
-            .. ui.CraftBoxClear(CRAFTL.made_top))
-H.check("the MIDDLE panel's heading clears its box",
-        hdrBottom <= ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND),
-        "heading reaches " .. hdrBottom .. ", border starts at "
-            .. ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND))
+-- ONE TOP AND ONE BOTTOM for all three boxes. Three panels starting at three
+-- heights read as three unrelated windows that happen to be adjacent, which is
+-- what the first pass looked like on a real client. The middle panel's LIST
+-- starts lower than the other two -- it has a column-header band and a rule
+-- inside its box -- but the BOX edge, which is the line you actually see, is
+-- the same for all three.
+local craftBoxTop = ui.CraftBoxEdge(CRAFTL.side_top)
+H.eq("the RIGHT panel's box starts on the same line as the left's",
+     ui.CraftBoxEdge(CRAFTL.made_top), craftBoxTop)
+H.eq("...and so does the MIDDLE panel's, once its header band is counted",
+     ui.CraftBoxEdge(CRAFTL.mid_top - CRAFT_HDR_BAND), craftBoxTop)
+H.eq("the RIGHT panel's box ends on the same line as the left's",
+     CRAFTL.made_bot, CRAFTL.side_bot)
+H.eq("...and so does the MIDDLE panel's", CRAFTL.mid_bot, CRAFTL.side_bot)
 
--- The middle panel's search strip and pager sit above its box too, and they
--- are TALLER than a heading -- so the heading check above cannot stand in for
--- them. The pager is the tallest of the three and therefore the binding one.
-H.check("the MIDDLE panel's search box clears its box",
-        CRAFTL.strip_y + CRAFTL.strip_h
-            <= ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND),
-        "the search box overlaps the table's own top border")
-H.check("...and so does the pager beside it",
-        CRAFTL.pager_y + CRAFTL.pager_h
-            <= ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND),
-        "the pager overlaps the table's own top border")
-H.check("the RIGHT panel's Reset button clears its box",
-        CRAFTL.reset_y + CRAFTL.reset_h
-            <= ui.CraftBoxClear(CRAFTL.made_top),
-        "Reset overlaps the made panel's top border")
+-- Everything drawn ABOVE the boxes has the same top border to clear, and the
+-- band is shared: the left panel's two buttons and the middle's search strip
+-- sit on ONE line, so a change to either has to keep clearing it. Each is
+-- listed by name because each is a separate SetPoint that can be moved alone.
+local craftAbove = {
+    { "the panel headings",            CRAFTL.hdr_y,   CRAFTL.hdr_h },
+    { "the Cost / Sells line",         CRAFTL.est_y,   CRAFTL.est_h },
+    { "the Price / Remove buttons",    CRAFTL.btn_y,   CRAFTL.btn_h },
+    { "the reagent search box",        CRAFTL.strip_y, CRAFTL.strip_h },
+    { "the pager",                     CRAFTL.pager_y, CRAFTL.pager_h },
+    { "the Reset button",              CRAFTL.reset_y, CRAFTL.reset_h },
+}
+for _, a in ipairs(craftAbove) do
+    H.check(a[1] .. " clears the boxes' top border",
+            a[2] + a[3] <= ui.CraftBoxClear(CRAFTL.side_top),
+            a[1] .. " reaches " .. (a[2] + a[3]) .. ", the border starts at "
+                .. ui.CraftBoxClear(CRAFTL.side_top))
+end
 
--- ...and the status line below each one.
-local footTop = CRAFTL.foot_y + CRAFTL.foot_h
-H.check("the LEFT panel's list stops clear of the profit block under it",
-        CRAFTL.est_y + CRAFTL.est_h <= ui.CraftBoxClear(CRAFTL.side_bot),
-        "the profit block reaches " .. (CRAFTL.est_y + CRAFTL.est_h)
-            .. ", the recipe box's border starts at "
-            .. ui.CraftBoxClear(CRAFTL.side_bot))
-H.check("the MIDDLE panel's status line clears its box",
-        footTop <= ui.CraftBoxClear(CRAFTL.mid_bot),
-        "status reaches " .. footTop .. ", border starts at "
-            .. ui.CraftBoxClear(CRAFTL.mid_bot))
-H.check("the RIGHT panel's footer clears its box",
-        footTop <= ui.CraftBoxClear(CRAFTL.made_bot),
-        "footer reaches " .. footTop .. ", border starts at "
-            .. ui.CraftBoxClear(CRAFTL.made_bot))
+-- ...and the footer bar below them, on one line for all three panels.
+H.check("the footer bar clears the boxes' bottom border",
+        CRAFTL.foot_y + CRAFTL.foot_h <= ui.CraftBoxClear(CRAFTL.side_bot),
+        "the footer reaches " .. (CRAFTL.foot_y + CRAFTL.foot_h)
+            .. ", the border starts at " .. ui.CraftBoxClear(CRAFTL.side_bot))
 
--- The middle table keeps the ten rows it had as a full-width pane. Three
--- panels is a layout change, not a smaller table -- and the row count is what
--- a player would actually notice going backwards.
+-- ONE ROW HEIGHT. Three lists side by side at three row heights read as three
+-- unrelated tables; nothing lines up across the tab.
+H.eq("the recipe rows are the middle table's height",
+     constant("CSIDE_ROW_H"), CRAFT_ROW_H)
+H.eq("...and so are the made-this-session rows",
+     constant("MADE_ROW_H"), CRAFT_ROW_H)
+
+-- ...and every panel still fills its box at the smallest allowed window. Ten
+-- rows is what the middle table had as a full-width pane; aligning the three
+-- panels is a layout change, not a smaller table.
 H.eq("the middle table still holds ten rows at the smallest window",
-     ui.ListRowsAt(MIN_H, LISTBOX.craft, 26, 34), 10)
+     ui.ListRowsAt(MIN_H, LISTBOX.craft, CRAFT_ROW_H, 34), 10)
+H.eq("...the recipe list holds ten too",
+     ui.ListRowsAt(MIN_H, LISTBOX.craftSide, CRAFT_ROW_H, 38), 10)
+H.eq("...and so does the made-this-session list",
+     ui.ListRowsAt(MIN_H, LISTBOX.craftMade, CRAFT_ROW_H, 34), 10)
 
 -- ---------------------------------------------------------------------------
 H.section("rows are held clear of the box border they sit inside")

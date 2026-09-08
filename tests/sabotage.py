@@ -2101,28 +2101,61 @@ end
      "    return ui.CraftBoxEdge(band)",
      "geometry"),
 
-    # The left panel's list run down over the profit block below it.
-    ("craft-side-list-eats-the-profit-block", "ui/frame.lua",
-     "    side_top = 34, side_bot = 144,",
-     "    side_top = 34, side_bot = 120,",
+    # The left panel's list pushed down so it no longer fills its box.
+    ("craft-side-list-loses-a-row", "ui/frame.lua",
+     "    side_top = 70, side_bot = 30,",
+     "    side_top = 80, side_bot = 30,",
      "geometry"),
 
-    # The middle table's box pulled up over its own column headers.
-    ("craft-mid-box-under-its-headers", "ui/frame.lua",
-     "    mid_top  = 86, mid_bot  = 38,",
-     "    mid_top  = 62, mid_bot  = 38,",
-     "geometry"),
-
-    # ...and pushed down, so the table loses a row at the smallest window.
+    # The middle table pushed down, so it loses a row at the smallest window.
     ("craft-mid-table-loses-a-row", "ui/frame.lua",
-     "    mid_top  = 86, mid_bot  = 38,",
-     "    mid_top  = 96, mid_bot  = 38,",
+     "    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "    mid_top  = 104, mid_bot  = 30,  -- side_top + CRAFT_HDR_BAND",
      "geometry"),
 
-    # The right panel's footer under its own bottom border.
-    ("craft-made-footer-under-the-border", "ui/frame.lua",
-     "    made_top = 36, made_bot = 38,",
-     "    made_top = 36, made_bot = 24,",
+    # The footer bar run up under the boxes' bottom border.
+    ("craft-footer-under-the-border", "ui/frame.lua",
+     "    foot_y = 4,  foot_h = 12,",
+     "    foot_y = 22, foot_h = 12,",
+     "geometry"),
+
+    # The three boxes back to three different tops -- the exact thing the
+    # aligned layout fixed, and the thing a screenshot showed before the
+    # suite could.
+    ("craft-boxes-not-aligned-at-the-top", "ui/frame.lua",
+     "    made_top = 70, made_bot = 30,",
+     "    made_top = 40, made_bot = 30,",
+     "geometry"),
+
+    # ...and to three different bottoms.
+    ("craft-boxes-not-aligned-at-the-bottom", "ui/frame.lua",
+     "    side_top = 70, side_bot = 30,",
+     "    side_top = 70, side_bot = 120,",
+     "geometry"),
+
+    # The middle box's own header band forgotten, so its box edge sits
+    # CRAFT_HDR_BAND below the other two instead of level with them.
+    ("craft-mid-box-not-level", "ui/frame.lua",
+     "    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "    mid_top  = 70, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "geometry"),
+
+    # One panel's rows back to their own height, so nothing lines up across
+    # the tab.
+    ("craft-side-rows-own-height", "ui/frame.lua",
+     "local CSIDE_ROW_H  = CRAFT_ROW_H",
+     "local CSIDE_ROW_H  = 20",
+     "geometry"),
+
+    ("craft-made-rows-own-height", "ui/frame.lua",
+     "local MADE_ROW_H   = CRAFT_ROW_H",
+     "local MADE_ROW_H   = 18",
+     "geometry"),
+
+    # The left panel's buttons run down through the top of its own box.
+    ("craft-buttons-through-the-box", "ui/frame.lua",
+     "    btn_y   = 38, btn_h   = 18,    -- Price recipe | Remove recipe",
+     "    btn_y   = 56, btn_h   = 18,    -- Price recipe | Remove recipe",
      "geometry"),
 
     # A name measured against the whole row, ignoring what the row ENDS with --

@@ -4165,25 +4165,45 @@ local CRAFTL = {
     -- The three panels' vertical bands: where each one's LIST starts and
     -- stops, measured from the top and bottom of the tab panel. LISTBOX reads
     -- them below; they live here so the geometry suite can check them against
-    -- the heading and footer lines above and below each box, which is what
-    -- three of them were failing.
-    side_top = 34, side_bot = 144,
-    mid_top  = 86, mid_bot  = 38,
-    made_top = 36, made_bot = 38,
+    -- the heading and footer lines above and below each box.
+    --
+    -- ONE TOP AND ONE BOTTOM FOR ALL THREE BOXES. The first pass gave each
+    -- panel the band its own contents wanted -- 34, 86 and 36 -- and three
+    -- boxes starting at three heights read as three unrelated windows that
+    -- happened to be next to each other, not as one tab. `mid_top` is the
+    -- outlier only because the middle box reaches CRAFT_HDR_BAND further down
+    -- INSIDE itself for its column headers and the rule under them; its BOX
+    -- edge lands on the same line as the other two, which is the thing you
+    -- actually see. The geometry suite asserts both.
+    side_top = 70, side_bot = 30,
+    made_top = 70, made_bot = 30,
+    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND
 
     -- The heading above each box and the status line below it: where the text
     -- sits, and how tall a small font line is. A heading has to clear TWICE
     -- WELL_BLEED above the list it labels -- see ui.CraftBoxClear.
-    hdr_y  = 8,  hdr_h  = 12,
-    foot_y = 12, foot_h = 12,
+    hdr_y  = 6,  hdr_h  = 12,
+    foot_y = 4,  foot_h = 12,
 
     -- ...and the other things drawn OUTSIDE a box, which have the same border
     -- to clear. Named for the same reason: the suite cannot check an offset
     -- that only exists as a literal at a SetPoint.
-    strip_y = 30, strip_h = 18,    -- the middle panel's reagent search box
-    pager_y = 28, pager_h = 20,    -- ...and the pager on the same line
-    reset_y = 6,  reset_h = 16,    -- the right panel's Reset button
-    est_y   = 116, est_h  = 12,    -- the profit block under the recipe list
+    --
+    -- These are ROWS ACROSS THE WHOLE TAB, not per-panel offsets: `est_y` is
+    -- the left panel's cost/sells line, and `btn_y` / `strip_y` / `pager_y`
+    -- are one band holding the left panel's two buttons and the middle's
+    -- search strip. Lining those up is what stops the header area reading as
+    -- three separate stacks.
+    est_y   = 22, est_h   = 12,    -- Cost / Sells, above the recipe list
+    btn_y   = 38, btn_h   = 18,    -- Price recipe | Remove recipe
+    -- The search box, the Search button and the pager are all 20 now and all
+    -- start on the same line as the left panel's two buttons, so the whole
+    -- band under the headings has ONE top and ONE bottom instead of four
+    -- heights within six pixels of each other.
+    strip_y = 36, strip_h = 20,    -- the middle panel's reagent search box
+    pager_y = 36, pager_h = 20,    -- ...and the pager on the same line
+    reset_y = 4,  reset_h = 16,    -- the right panel's Reset button
+    btn_gap = 6,                   -- between the two left-panel buttons
 }
 ui.CRAFTL = CRAFTL      -- read by the geometry suite
 
@@ -7375,15 +7395,23 @@ end
 --          Manual reset only; see craft.made for why.
 -- ---------------------------------------------------------------------------
 
-local CRAFT_ROWS,  CRAFT_ROW_H  = 9, 26
-local CRAFT_ROWS_MAX  = 34
--- The recipe rows carry a stepper now, so they are 20 rather than 18: a 16px
--- button in an 18px row leaves one pixel above and below it and reads as a
--- misprint.
-local CSIDE_ROWS,  CSIDE_ROW_H  = 10, 20
-local CSIDE_ROWS_MAX  = 38
-local MADE_ROWS,   MADE_ROW_H   = 10, 18
-local MADE_ROWS_MAX   = 34
+-- ONE ROW HEIGHT FOR ALL THREE PANELS.
+--
+-- They were 26 / 20 / 18 -- each the height its own contents wanted -- and
+-- three lists side by side at three row heights read as three unrelated
+-- tables that happen to be adjacent. Nothing lines up across the tab, and the
+-- eye has nothing to follow from a recipe on the left to what it is short of
+-- in the middle. The concept draws one row height across all three.
+--
+-- 26 is the middle table's, because that is the one with per-row buttons and
+-- the one that cannot shrink. It also gives the stepper room: a 16px button
+-- in an 18px row leaves one pixel above and below it and reads as a misprint.
+local CRAFT_ROW_H = 26
+local CRAFT_ROWS,  CRAFT_ROWS_MAX  = 9, 34
+local CSIDE_ROWS,  CSIDE_ROWS_MAX  = 9, 38
+local CSIDE_ROW_H  = CRAFT_ROW_H
+local MADE_ROWS,   MADE_ROWS_MAX   = 9, 34
+local MADE_ROW_H   = CRAFT_ROW_H
 
 -- The three panels' left edges and widths, from CRAFTL. Functions rather than
 -- constants for the two that depend on the window: the middle panel and the
@@ -7438,6 +7466,45 @@ function ui.BuildCraftTab()
     ui.craftShortFS:SetWidth(70)
     ui.craftShortFS:SetJustifyH("RIGHT")
 
+    -- ---- ABOVE the box: the profit estimate, then the two buttons --------
+    --
+    -- FLIPPED. These sat BELOW the recipe list, which forced that list to stop
+    -- 144px short of the panel bottom while the two boxes beside it ran on to
+    -- 30 -- the left panel ended halfway up the tab and the numbers under it
+    -- floated on bare panel. Above the box, the list reaches the same bottom
+    -- as the other two and the whole tab has one top edge and one bottom edge.
+    --
+    -- Cost and Sells share one line as two halves; the NET moved to the
+    -- footer, where a conclusion belongs and where the concept puts it.
+    local halfW = math.floor((CRAFTL.left_w - CRAFTL.btn_gap) / 2)
+
+    ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftCostFS:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
+        -CRAFTL.est_y)
+    ui.craftCostFS:SetWidth(halfW); ui.craftCostFS:SetJustifyH("LEFT")
+
+    ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftValueFS:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        CRAFTL.edge + CRAFTL.left_w - halfW, -CRAFTL.est_y)
+    ui.craftValueFS:SetWidth(halfW); ui.craftValueFS:SetJustifyH("RIGHT")
+
+    -- Side by side rather than stacked: two full-width buttons cost 40px of
+    -- the header band, and the band is what every box top is measured from.
+    local priceBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPriceButton")
+    priceBtn:SetWidth(halfW); priceBtn:SetHeight(CRAFTL.btn_h)
+    priceBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge, -CRAFTL.btn_y)
+    priceBtn:SetText("Price recipe")
+    priceBtn:SetScript("OnClick", function() ui.CraftPriceRecipe() end)
+    ui.craftPriceBtn = priceBtn
+
+    local delBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftDelButton")
+    delBtn:SetWidth(halfW); delBtn:SetHeight(CRAFTL.btn_h)
+    delBtn:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        CRAFTL.edge + CRAFTL.left_w - halfW, -CRAFTL.btn_y)
+    delBtn:SetText("Remove recipe")
+    delBtn:SetScript("OnClick", function() ui.CraftDeleteProject() end)
+    ui.craftDelBtn = delBtn
+
     local sideBox = CraftBox(panel)
     sideBox:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
         -ui.CraftBoxEdge(LISTBOX.craftSide.top))
@@ -7473,6 +7540,11 @@ ui.GrowCraftSideRows = function(n)
             else
                 row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1], "BOTTOMLEFT", 0, 0)
             end
+            -- The SAME chrome the middle table's rows get: zebra stripe,
+            -- hairline, hover. Three lists side by side with only one of them
+            -- striped is what made the outer two read as loose text rather
+            -- than as tables.
+            ui.AddRowChrome(row, i)
             local ex = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             ex:SetPoint("LEFT", row, "LEFT", 0, 0)
             ex:SetWidth(CRAFTL.ex_w)
@@ -7520,47 +7592,24 @@ ui.GrowCraftSideRows = function(n)
     end
     ui.GrowCraftSideRows(CSIDE_ROWS)
 
-    -- Profit estimate for the selected recipe (buy mats -> craft -> resell).
-    -- Below the box rather than inside it: it is about ONE recipe, and a list
-    -- of recipes with a per-recipe figure inside its own border reads as a
-    -- total of the list.
-    local estHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    estHdr:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge,
-        CRAFTL.est_y)
-    estHdr:SetText("Profit estimate")
-    estHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    -- The left panel's footer bar: the NET. Cost and Sells are the inputs and
+    -- sit above the box; this is what they add up to, and a conclusion belongs
+    -- on the bottom bar -- which is where the concept draws it.
+    ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        CRAFTL.edge + ROWPAD.l, CRAFTL.foot_y)
+    ui.craftNetFS:SetWidth(ui.CraftSideRowW())
+    ui.craftNetFS:SetJustifyH("LEFT")
 
-    ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftCostFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 100)
-    ui.craftCostFS:SetWidth(CRAFTL.left_w); ui.craftCostFS:SetJustifyH("LEFT")
-
-    ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftValueFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 84)
-    ui.craftValueFS:SetWidth(CRAFTL.left_w); ui.craftValueFS:SetJustifyH("LEFT")
-
-    ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 64)
-    ui.craftNetFS:SetWidth(CRAFTL.left_w); ui.craftNetFS:SetJustifyH("LEFT")
-
-    -- Fill the DB with a fresh price for the crafted item and every reagent.
-    local priceBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPriceButton")
-    priceBtn:SetWidth(CRAFTL.left_w); priceBtn:SetHeight(18)
-    priceBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 42)
-    priceBtn:SetText("Price recipe")
-    priceBtn:SetScript("OnClick", function() ui.CraftPriceRecipe() end)
-    ui.craftPriceBtn = priceBtn
-
-    -- Delete the selected recipe.
-    local delBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftDelButton")
-    delBtn:SetWidth(CRAFTL.left_w); delBtn:SetHeight(18)
-    delBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 20)
-    delBtn:SetText("Remove recipe")
-    delBtn:SetScript("OnClick", function() ui.CraftDeleteProject() end)
-    ui.craftDelBtn = delBtn
 
     -- ===== Middle: reagent search + result list =========================
-    ui.craftTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X + 6, -6)
+    -- The SAME font and the SAME line as "Tracked" and "Made this session".
+    -- It was GameFontNormalLarge on its own baseline, which made the middle
+    -- panel look like the page and the other two like margin notes -- the
+    -- concept gives all three panels one header row.
+    ui.craftTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X + ROWPAD.l,
+        -CRAFTL.hdr_y)
     ui.craftTitle:SetText("Crafting")
     ui.craftTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
@@ -7740,6 +7789,7 @@ ui.GrowCraftMadeRows = function(n)
             else
                 row:SetPoint("TOPLEFT", ui.craftMadeRows[i - 1], "BOTTOMLEFT", 0, 0)
             end
+            ui.AddRowChrome(row, i)
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             lbl:SetPoint("LEFT", row, "LEFT", 0, 0)
             lbl:SetJustifyH("LEFT")
@@ -8267,35 +8317,39 @@ end
 -- Paint the Cost / Sells-for / Net lines for the selected recipe.
 function ui.UpdateCraftSummary()
     if not ui.craftCostFS then return end
+    local DASH = "\226\128\148"
     local p = ui.craftSel and A.craft and A.craft.Projects()[ui.craftSel]
     if not p then
-        ui.craftCostFS:SetText("Reagents: \226\128\148")
-        ui.craftValueFS:SetText("Sells for: \226\128\148")
-        ui.craftNetFS:SetText("Net: \226\128\148")
+        ui.craftCostFS:SetText("Cost " .. DASH)
+        ui.craftValueFS:SetText("Sells " .. DASH)
+        ui.craftNetFS:SetText("Net " .. DASH)
         ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         return
     end
     local cost, complete = A.craft.CostOf(p)
     local value, known = A.craft.ValueOf(p)
 
+    -- "Cost", not "Reagents:". These two share ONE line as two halves of a
+    -- 182px panel now, so the label pays for itself in characters -- and a
+    -- label wide enough to push the money off the end is a label that has
+    -- stopped labelling anything.
     if cost > 0 and not complete then
-        ui.craftCostFS:SetText("Reagents: " .. util.FormatMoney(cost, true)
-            .. " +?")
+        ui.craftCostFS:SetText("Cost " .. util.FormatMoney(cost, true) .. "+")
     elseif complete then
-        ui.craftCostFS:SetText("Reagents: " .. util.FormatMoney(cost, true))
+        ui.craftCostFS:SetText("Cost " .. util.FormatMoney(cost, true))
     else
-        ui.craftCostFS:SetText("Reagents: |cff808080? \226\128\148 Price recipe|r")
+        ui.craftCostFS:SetText("Cost |cff808080?|r")
     end
 
     if known then
-        ui.craftValueFS:SetText("Sells for: " .. util.FormatMoney(value, true))
+        ui.craftValueFS:SetText("Sells " .. util.FormatMoney(value, true))
     else
-        ui.craftValueFS:SetText("Sells for: |cff808080?|r")
+        ui.craftValueFS:SetText("Sells |cff808080?|r")
     end
 
     local net, netKnown = A.craft.NetOf(p)
     if netKnown then
-        local word = net >= 0 and "Profit: " or "Loss: "
+        local word = net >= 0 and "Profit " or "Loss "
         ui.craftNetFS:SetText(word .. util.FormatMoney(math.abs(net), true))
         if net >= 0 then
             ui.craftNetFS:SetTextColor(0.30, 0.85, 0.30)
@@ -8303,7 +8357,7 @@ function ui.UpdateCraftSummary()
             ui.craftNetFS:SetTextColor(0.90, 0.30, 0.30)
         end
     else
-        ui.craftNetFS:SetText("Net: |cff808080need prices|r")
+        ui.craftNetFS:SetText("Net |cff808080need prices \226\128\148 Price recipe|r")
         ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     end
 end
