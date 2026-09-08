@@ -10,9 +10,15 @@ printed in the window title bar — quote it in bug reports.
 > list at startup, so `/reload` won't pick them up — you need to fully restart
 > the client. Everything else is `/reload`-safe.
 
+> **One push, one MINOR.** A body of work that lands in one merge takes a
+> single MINOR bump, and every change inside it — each phase, each fix found
+> along the way — is a PATCH under it. So the 2h overhaul is `1.52.0` through
+> `1.52.5`, not five MINORs. The MINOR moves again at the next body of work,
+> not at the next feature within this one.
+
 ---
 
-## [1.56.0]
+## [1.52.5]
 
 The second half of ROADMAP 2h §4 — the Crafting tab rebuilt as three panels
 side by side, with the quantity stepper on the recipes themselves.
@@ -64,7 +70,7 @@ side by side, with the quantity stepper on the recipes themselves.
 - The made-count and bag changes both repaint through **one once-per-frame
   flush** rather than inline in the handlers that feed them.
 
-## [1.55.0]
+## [1.52.4]
 
 The first half of ROADMAP 2h §4 — the numbers and the space the Crafting tab's
 three panels need. The panels themselves are the next release.
@@ -101,7 +107,7 @@ three panels need. The panels themselves are the next release.
 
 ---
 
-## [1.54.0]
+## [1.52.3]
 
 Third of four pieces of ROADMAP 2h. The Crafting tab is the last one.
 
@@ -135,7 +141,7 @@ Third of four pieces of ROADMAP 2h. The Crafting tab is the last one.
 
 ---
 
-## [1.53.1]
+## [1.52.2]
 
 ### Fixed
 - **`ui\tooltip.lua:489: Unknown link type` while hovering.** Aegis was not
@@ -163,7 +169,7 @@ Third of four pieces of ROADMAP 2h. The Crafting tab is the last one.
 
 ---
 
-## [1.53.0]
+## [1.52.1]
 
 Second of four pieces of ROADMAP 2h.
 
@@ -4087,11 +4093,11 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.56.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.55.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
-[1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

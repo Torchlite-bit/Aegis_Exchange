@@ -2390,7 +2390,7 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
-### Wearing another addon's error — v1.53.1
+### Wearing another addon's error — v1.52.2
 
 Reported as `ui\tooltip.lua:489: Unknown link type` while hovering. Line 489
 is the call into the CLIENT's own method, not our code, and Aegis was not the
@@ -2718,7 +2718,7 @@ The tally is **in memory only**, which is the definition of "this session":
 login to logout, never written to SavedVariables. A persisted one would answer
 "how many have I got so far" wrongly the next day.
 
-#### §2 The inventory block, this character — v1.53.0
+#### §2 The inventory block, this character — v1.52.1
 
 Bags live, bank on `BANKFRAME_OPENED`, and the whole tooltip section with its
 freshness line. Auctions, mail and other characters are §3.
@@ -2757,7 +2757,7 @@ the bank was meant (every bank reads empty, which looks exactly like "you have
 none there"), and dropping `-1` so the bank bags count and the bank's own slots
 do not.
 
-#### §3 The inventory block, the whole account — v1.54.0
+#### §3 The inventory block, the whole account — v1.52.3
 
 Auctions, mail and other characters. Two of the three needed a shape rather
 than a function.
@@ -2798,7 +2798,7 @@ character on the realm. The only ordering rule that matters is that YOU come
 first -- your row is the one you are acting on, the rest are context for it --
 then whoever holds the most, so a glance finds where the stock actually is.
 
-#### §4a The numbers and the space — v1.55.0
+#### §4a The numbers and the space — v1.52.4
 
 Split from the layout deliberately: the arithmetic and the geometry can be
 proven, the widgets cannot, and doing them in that order is what let the fit
@@ -2849,7 +2849,7 @@ Also collapsed: the Crafting tab's column positions existed twice, once at file
 scope and once inside the builder. Identical today, which is exactly how the
 Sell tab's headers and rows started.
 
-#### §4b The three panels — v1.56.0
+#### §4b The three panels — v1.52.5
 
 The widgets, on §4a's numbers. Tracked recipes left, reagent search middle,
 made-this-session right; the `[-] n [+]` stepper on the recipe rows, shift for
