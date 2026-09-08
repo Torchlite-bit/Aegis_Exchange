@@ -2348,6 +2348,162 @@ function craft.NetOf(project)
     return math.floor(value * (1 - craft.AH_CUT) - cost), true
 end
 
+-- ---------------------------------------------------------------------------
+-- How many to make, and what that costs in reagents
+-- ---------------------------------------------------------------------------
+
+-- Upper bound on the quantity stepper. Not a game limit -- a guard, so a stuck
+-- key or a bad saved value cannot ask for a reagent total that overflows the
+-- column it is drawn in.
+craft.WANT_MAX = 999
+
+-- How many of the finished item this project is set to make. Defaults to one,
+-- so a recipe captured before the stepper existed reads as "one of these".
+function craft.Want(project)
+    local n = project and project.want
+    if not n or n < 1 then return 1 end
+    if n > craft.WANT_MAX then return craft.WANT_MAX end
+    return n
+end
+
+-- Set it, clamped, and persist. Returns the value actually stored.
+function craft.SetWant(index, n)
+    local s = CStore()
+    local p = s and s.projects[index]
+    if not p then return nil end
+    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end
+    if n > craft.WANT_MAX then n = craft.WANT_MAX end
+    p.want = n
+    return n
+end
+
+-- Nudge it by `delta` and persist. The stepper's whole job.
+function craft.StepWant(index, delta)
+    local s = CStore()
+    local p = s and s.projects[index]
+    if not p then return nil end
+    return craft.SetWant(index, craft.Want(p) + (delta or 0))
+end
+
+-- CRAFTS needed to produce `wanted` finished items from a recipe that yields
+-- `made` per craft.
+--
+-- THE CEIL IS THE WHOLE FUNCTION. The stepper counts finished ITEMS, which is
+-- how anyone says it out loud, and for most recipes that is also the number of
+-- crafts. They diverge the moment a recipe makes more than one: wanting five of
+-- something made in twos is 2.5 crafts, and a truncated 2 shops you one item
+-- short EVERY time. The divide is not new -- craft.CostForItem already divides
+-- by `made` to get a per-unit cost, for exactly this reason.
+function craft.CraftsFor(wanted, made)
+    wanted = math.floor(tonumber(wanted) or 1)
+    made   = math.floor(tonumber(made) or 1)
+    if made < 1 then made = 1 end
+    if wanted < 1 then return 0 end
+    return math.ceil(wanted / made)
+end
+
+-- What `wanted` finished items need, reagent by reagent.
+--
+-- Returns rows, shortCount. Each row is
+--   { name, itemId, per, need, have, short }
+-- where `per` is the recipe's own figure, `need` is that times the crafts, and
+-- `short` is what you would still have to buy.
+--
+-- `haveOf` is a function itemId -> how many you own, injected rather than read
+-- here -- the same discipline as db.InventoryRows taking live bags. This file
+-- knows about recipes and prices; it has no business walking containers, and a
+-- caller that can answer exactly is the one that should.
+function craft.NeedFor(project, wanted, haveOf)
+    local rows, shortCount = {}, 0
+    if not project or not project.reagents then return rows, shortCount end
+    local crafts = craft.CraftsFor(wanted or craft.Want(project), project.made)
+    local i = 1
+    while i <= table.getn(project.reagents) do
+        local r = project.reagents[i]
+        local id = ResolveId(r.itemId, r.name)
+        local per = r.count or 1
+        local need = per * crafts
+        local have = 0
+        if haveOf and id then have = haveOf(id) or 0 end
+        local short = need - have
+        if short < 0 then short = 0 end
+        if short > 0 then shortCount = shortCount + 1 end
+        table.insert(rows, {
+            name = r.name, itemId = id, per = per,
+            need = need, have = have, short = short,
+        })
+        i = i + 1
+    end
+    return rows, shortCount
+end
+
+-- ---------------------------------------------------------------------------
+-- What you have actually made
+-- ---------------------------------------------------------------------------
+
+-- Crafted items since login, by item id.
+--
+-- IN MEMORY, and MANUAL RESET ONLY -- never on AUCTION_HOUSE_CLOSED. A crafting
+-- run spans several trips to the auctioneer, so a counter that cleared on the
+-- way out would clear in the middle of the thing it counts. Same reasoning as
+-- the Buy tab's session tally.
+craft.made = {}
+
+function craft.RecordMade(itemId, n)
+    if not itemId then return nil end
+    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end
+    craft.made[itemId] = (craft.made[itemId] or 0) + n
+    return craft.made[itemId]
+end
+
+function craft.MadeCount(itemId)
+    return (itemId and craft.made[itemId]) or 0
+end
+
+function craft.ClearMade()
+    craft.made = {}
+end
+
+-- The prefix the client puts in front of a created item, e.g. "You create: ".
+--
+-- Read from the client's own globals so it works in any locale, with the
+-- English literal only as a fallback off Turtle. LOOT_ITEM_CREATED_SELF is
+-- "You create: %s." -- everything before the %s is the prefix.
+function craft.CreatePrefix(fmt)
+    fmt = fmt or LOOT_ITEM_CREATED_SELF or "You create: %s."
+    -- PLAIN find, so the needle is the two literal characters "%" and "s".
+    -- Escaping it as "%%s" is right for a PATTERN and wrong here: with plain
+    -- matching it looks for two percent signs, never matches, and every locale
+    -- silently falls back to the English prefix.
+    local at = string.find(fmt, "%s", 1, true)
+    if not at or at < 2 then return "You create: " end
+    return string.sub(fmt, 1, at - 1)
+end
+
+-- Did this chat line say we made something? Returns itemId, count.
+--
+-- THE CREATE MESSAGE IS THE ONLY SIGNAL. 1.12 has no spell-success event to
+-- hang a craft counter on, but the client prints the line above to
+-- CHAT_MSG_LOOT every time you make something. It is an O(1) string test on an
+-- event that does not storm -- and it is the same discipline as the purchase
+-- counter: never infer from bags what the game will tell you directly.
+--
+-- The multiple form is "You create: %sx%d." (no space), so a trailing "x12"
+-- after the link is the count.
+function craft.ParseCreate(msg)
+    if type(msg) ~= "string" then return nil end
+    local head = craft.CreatePrefix()
+    if string.find(msg, head, 1, true) ~= 1 then return nil end
+    local id = util.ItemIdFromLink(msg)
+    if not id then return nil end
+    -- The count sits after the link's colour terminator ("...|h|rx12."), so
+    -- anchor on the END of the line rather than on any part of the link.
+    local _, _, n = string.find(msg, "x(%d+)[%.%s]*$")
+    return id, tonumber(n) or 1
+end
+
 -- Capture the recipe selected in the craft window (Enchanting).
 function craft.CaptureCraft()
     if not GetCraftSelectionIndex then return nil, "No profession open." end
@@ -2387,3 +2543,19 @@ function craft.Current()
     end
     return nil, "No profession open."
 end
+
+-- You made something. The client prints "You create: [Item]" to CHAT_MSG_LOOT
+-- on every craft, and that is the only signal 1.12 offers -- there is no
+-- spell-success event on this client.
+--
+-- REGISTERED AT THE END OF THE FILE, not beside the other handlers. `craft` is
+-- a file-scope local declared partway down; a closure written above that line
+-- captures the nil GLOBAL of the same name and fails only when it runs. This
+-- one did exactly that.
+--
+-- O(1): one prefix test, and an early return on the loot lines that are not
+-- creates, which is nearly all of them.
+A.RegisterEvent("CHAT_MSG_LOOT", function()
+    local id, n = craft.ParseCreate(arg1)
+    if id then craft.RecordMade(id, n) end
+end)

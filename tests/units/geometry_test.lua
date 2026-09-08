@@ -938,6 +938,90 @@ do
 end
 
 -- ---------------------------------------------------------------------------
+H.section("the Crafting tab's three panels fit side by side")
+-- ---------------------------------------------------------------------------
+
+-- WRITTEN BEFORE THE WIDGETS, deliberately. Three panels across a window whose
+-- minimum is 1000 is close enough to the edge that it should be proven rather
+-- than assumed -- and this repo already has the machinery, which has now
+-- caught a wrong measurement (ColumnsFitAt reading the frame instead of the
+-- row) and a change that broke a different tab (the Sell bag column).
+CRAFTL = {
+    left_w  = field("CRAFTL", "left_w"),
+    right_w = field("CRAFTL", "right_w"),
+    gap     = field("CRAFTL", "gap"),
+    edge    = field("CRAFTL", "edge"),
+}
+CRAFT_COLS_END = constant("CRAFT_COLS_END")
+PANEL_H_INSET = constant("PANEL_H_INSET")
+do
+    local fn = assert(loadstring(extract("function ui.PanelWidthAt("),
+                                 "PanelWidthAt"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftMidWidthAt("),
+                           "CraftMidWidthAt"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftPanelsFitAt("),
+                           "CraftPanelsFitAt"))
+    fn()
+end
+
+-- CRAFT_COLS_END is where a row really ends -- the Bid button's right edge,
+-- not the last text column's. A panel sized to the text would cut the buttons
+-- off, and the buttons are the point of that table.
+H.check("the row's end is past its last text column",
+        CRAFT_COLS_END > field("RCX", "pct") + field("RCW", "pct"),
+        CRAFT_COLS_END .. " vs "
+            .. (field("RCX", "pct") + field("RCW", "pct")))
+H.eq("...and is the Bid button's right edge",
+     CRAFT_COLS_END, field("RCX", "bid") + 44)
+
+H.check("all three panels fit at the smallest allowed window",
+        ui.CraftPanelsFitAt(MIN_W),
+        "middle panel gets " .. ui.CraftMidWidthAt(MIN_W)
+            .. "px, columns need " .. CRAFT_COLS_END)
+
+-- ...and the check can fail, so the one above is not passing for free. The
+-- Buy tab's full column set is what will NOT go in the middle panel, which is
+-- why the Crafting tab keeps its own narrower shape.
+H.check("the BUY column set would not fit there",
+        constant("BUY_COLS_END") > ui.CraftMidWidthAt(MIN_W),
+        "Buy needs " .. constant("BUY_COLS_END") .. ", middle panel has "
+            .. ui.CraftMidWidthAt(MIN_W))
+
+-- The middle panel takes every surplus pixel; the outer two are fixed. A
+-- recipe name and a made-count do not get more readable with more room.
+H.check("the middle panel grows with the window",
+        ui.CraftMidWidthAt(MIN_W + 200) - ui.CraftMidWidthAt(MIN_W) == 200,
+        "grew by " .. (ui.CraftMidWidthAt(MIN_W + 200)
+            - ui.CraftMidWidthAt(MIN_W)))
+
+-- EVERY TERM ACCOUNTED FOR. Three panels, two gutters and two margins have to
+-- add up to exactly the space there is -- no more, or they overlap; no less,
+-- and there is a strip of nothing down the tab. Checking only "does the middle
+-- one fit" cannot see a dropped gutter: losing one makes the middle WIDER, so
+-- the fit passes and the panels quietly overlap by eight pixels.
+H.eq("the three panels and their gutters account for the whole width",
+     CRAFTL.edge * 2 + CRAFTL.left_w + CRAFTL.gap
+        + ui.CraftMidWidthAt(MIN_W) + CRAFTL.gap + CRAFTL.right_w,
+     ui.PanelWidthAt(MIN_W))
+
+-- ...and the fit is measured against the ROW, not the panel. Those differ by
+-- the two row pads, and the check above cannot tell them apart: dropping the
+-- pad makes the test MORE permissive, so it still passes at every width that
+-- already worked. The width below is the one that separates them -- the panel
+-- fits the columns exactly, and the row inside it is short by both pads.
+local craftExactW = CRAFT_COLS_END + 442   -- inverse of ui.CraftMidWidthAt
+H.eq("...the inverse is right", ui.CraftMidWidthAt(craftExactW),
+     CRAFT_COLS_END)
+H.check("a width where the PANEL fits but the ROW does not is refused",
+        not ui.CraftPanelsFitAt(craftExactW),
+        craftExactW .. " accepted, so the row pad is not being counted")
+H.check("...and the same width plus the pads is accepted",
+        ui.CraftPanelsFitAt(craftExactW + ROWPAD.l + ROWPAD.r),
+        "the panels never fit, so the check above proves nothing")
+
+-- ---------------------------------------------------------------------------
 H.section("rows are held clear of the box border they sit inside")
 -- ---------------------------------------------------------------------------
 

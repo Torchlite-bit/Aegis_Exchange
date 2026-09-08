@@ -2798,6 +2798,57 @@ character on the realm. The only ordering rule that matters is that YOU come
 first -- your row is the one you are acting on, the rest are context for it --
 then whoever holds the most, so a glance finds where the stock actually is.
 
+#### §4a The numbers and the space — v1.55.0
+
+Split from the layout deliberately: the arithmetic and the geometry can be
+proven, the widgets cannot, and doing them in that order is what let the fit
+problem surface before anything was built on it.
+
+**The ceil is the whole of the quantity work.** The stepper counts finished
+ITEMS -- how anyone says it out loud -- and for most recipes that is also the
+number of crafts. They diverge the moment a recipe yields more than one:
+wanting five of something made in twos is 2.5 crafts, and a truncated 2 shops
+you one item short every time with every number on screen looking reasonable.
+`craft.CostForItem` already divided by `made` for the same reason; this is the
+other half of that idea.
+
+**The made-counter reads the create message**, because 1.12 has no
+spell-success event. `You create: [Item]` on CHAT_MSG_LOOT, including the
+`x12` form -- an O(1) prefix test on an event that does not storm, and the same
+discipline as the purchase counter: never infer from bags what the game states
+directly. Manual reset only, for the reason already settled: a crafting run
+spans several trips.
+
+**Two bugs found by writing the tests, both mine, both instructive:**
+
+- The `CHAT_MSG_LOOT` registration went in ABOVE `local craft = A.craft`, so
+  the closure captured the nil GLOBAL and the suite failed at load. `scoping.py`
+  catches this in one second -- **I simply had not run it since adding the
+  handler.** The lint was never the problem; the process was. It is registered
+  at the end of the file now, with the trap named.
+- `string.find(fmt, "%%s", 1, true)` -- the `%%` escape is right for a PATTERN
+  and wrong for a PLAIN match, where it looks for two literal percent signs and
+  never matches. Every non-English client would have silently fallen back to
+  the English prefix and counted nothing.
+
+**And the geometry assertion earned itself immediately.** Three panels at the
+window's 1000px minimum: the first pass tried 200/210 for the outer two and the
+suite refused it, 24px short, **before a single widget existed**. So the widths
+are derived from the constraint rather than chosen -- trim the outer panels, not
+the table, because a recipe name and a made-count lose less to a narrow column
+than a seven-column table with two buttons in it.
+
+Two of the four geometry sabotages escaped the first pass, and for the same
+reason as the `ColumnsFitAt` one before them: **both mutations make the check
+more permissive**, so every width that already passed still passed. Dropping the
+row pad and dropping a gutter both need an assertion that can separate them --
+an exact accounting of every term, and the one width where the panel fits the
+columns and the row inside it does not.
+
+Also collapsed: the Crafting tab's column positions existed twice, once at file
+scope and once inside the builder. Identical today, which is exactly how the
+Sell tab's headers and rows started.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

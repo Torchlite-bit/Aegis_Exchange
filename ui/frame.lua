@@ -2875,6 +2875,12 @@ end
 local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
               buy = 436, bid = 490 }
 local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
+-- Where a Crafting row actually ends: the Bid button's right edge, not the
+-- last text column's. Asked for rather than re-added by hand, the same as
+-- BUY_COLS_END and SELL_COLS_END -- a column edit must not silently push the
+-- table under the scrollbar, and here it would push a whole PANEL out of the
+-- three that have to fit side by side.
+local CRAFT_COLS_END = 490 + 44
 
 -- Build a listing result row (name/ct/unit/stack/pct + Buy/Bid) into `store`.
 -- Buttons act on row.entry, so the same rows serve Buy and Crafting.
@@ -4019,6 +4025,59 @@ local SELLL = {
 -- A table rather than twelve file-scope locals: thirteen constants as
 -- thirteen locals cost thirteen upvalues (HARD RULE 12a), and ui.BuildSellTab
 -- is already a large function.
+-- ---------------------------------------------------------------------------
+-- The Crafting tab's three panels
+-- ---------------------------------------------------------------------------
+
+-- Recipes on the left, results in the middle, progress on the right -- side by
+-- side, nothing stacked.
+--
+-- THE WIDTH IS THE DESIGN PROBLEM, and it is why these numbers exist before
+-- any widget does. The Buy tab's full column set ends at BUY_COLS_END (726)
+-- and will not fit in a middle panel at the window's minimum, so the middle
+-- keeps the Crafting tab's own narrower five-column shape and takes every
+-- surplus pixel as the window grows. The outer two are fixed: a recipe name
+-- and a made-count do not get more readable with more room, and a results
+-- table does.
+--
+-- Asserted by the geometry suite at MIN_W rather than assumed -- the same
+-- machinery ui.ColumnsFitAt uses, which has now caught a wrong measurement
+-- and a change that broke a different tab.
+-- THESE WIDTHS ARE DERIVED, NOT CHOSEN. The middle panel gets whatever the
+-- other two leave, and it has a floor: CRAFT_COLS_END plus the row pad. At
+-- MIN_W the panel area is 960, so the outer two plus the gutters may not
+-- exceed 960 - (534 + 14) = 412. The first pass tried 200/210 and the geometry
+-- suite refused it 24px short -- before a single widget existed, which is the
+-- whole reason that assertion was written first.
+--
+-- So: trim the outer panels, not the table. A recipe name and a made-count
+-- lose less to a narrower column than a seven-column table with two buttons in
+-- it does.
+local CRAFTL = {
+    left_w  = 186,   -- tracked recipes and their reagents
+    right_w = 180,   -- made this session
+    gap     = 8,     -- between panels
+    edge    = 10,    -- panel margin at each side of the tab
+}
+ui.CRAFTL = CRAFTL      -- read by the geometry suite
+
+-- Width the MIDDLE panel gets at a given window width: whatever the other two
+-- and the gutters do not take.
+function ui.CraftMidWidthAt(w)
+    return ui.PanelWidthAt(w or 0)
+        - (CRAFTL.edge * 2) - CRAFTL.left_w - CRAFTL.right_w
+        - (CRAFTL.gap * 2)
+end
+
+-- Do the middle panel's columns fit at this window width?
+--
+-- Measured against the ROW, not the panel: the rows are held clear of the
+-- box border by ROWPAD, and forgetting that is the same mistake ui.ColumnsFitAt
+-- was making one level up until v1.50.3.
+function ui.CraftPanelsFitAt(w)
+    return CRAFT_COLS_END <= (ui.CraftMidWidthAt(w) - ROWPAD.l - ROWPAD.r)
+end
+
 local LISTBOX = {
     craftSide = { top = 28,  bot = 132 },
     craft     = { top = 94,  bot = 10 },
@@ -7293,9 +7352,10 @@ ui.GrowCraftSideRows = function(n)
     ui.craftSortKey = "unit"
     ui.craftSortDir = "asc"
     local rowLeft = RX + 4
-    local CX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
-                 buy = 436, bid = 490 }
-    local CW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
+    -- RCX/RCW, not a second copy of them. The row builder already lays cells
+    -- out from those, and two sets of numbers for one table is exactly how the
+    -- Sell tab's headers and rows came to disagree.
+    local CX, CW = RCX, RCW
 
     -- Every column sorts (see ui.MakeSortHeaders); headers stay unskinned.
     ui.craftHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, CX, CW,

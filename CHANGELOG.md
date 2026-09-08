@@ -12,6 +12,43 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.55.0]
+
+The first half of ROADMAP 2h §4 — the numbers and the space the Crafting tab's
+three panels need. The panels themselves are the next release.
+
+### Added
+- **A quantity on every tracked recipe**, remembered across sessions, and the
+  reagent totals that follow from it. Set a recipe to five and every reagent
+  says what five costs.
+  - **The quantity counts finished items, not crafts.** They are the same for
+    most recipes and stop being the same the moment one yields more than one:
+    wanting five of something made in twos is *three* crafts, not two, and
+    rounding down shops you one item short every time with every number on
+    screen looking reasonable.
+  - Reagent rows carry what you already own, so the shortfall is what you
+    actually have to buy. Reagents Aegis cannot identify are still listed —
+    dropping them would silently shorten the shopping list by exactly the
+    things you have never bought before.
+- **A "made this session" tally.** 1.12 has no spell-success event, so this
+  reads the `You create: [Item]` line the client prints on every craft —
+  including the `x12` form. Ordinary loot is not counted as a craft.
+  - **Manual reset only.** A crafting run spans several trips to the
+    auctioneer, so it deliberately does not clear when the auction house
+    closes — that would clear it mid-run.
+
+### Internal
+- The Crafting tab's column positions existed **twice**, once at file scope and
+  once inside the builder. That is how the Sell tab's headers and rows came to
+  disagree, so they are one table now, and where a row really ends
+  (`CRAFT_COLS_END` — the Bid button's edge, not the last text column's) is
+  asked for rather than re-added by hand.
+- The three panels' widths are **derived from the fit, not chosen**. The first
+  pass tried 200/210 and the geometry suite refused it 24px short — before a
+  single widget existed, which is why that assertion was written first.
+
+---
+
 ## [1.54.0]
 
 Third of four pieces of ROADMAP 2h. The Crafting tab is the last one.
@@ -3998,6 +4035,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.55.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

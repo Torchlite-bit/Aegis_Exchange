@@ -2007,6 +2007,118 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- the Crafting tab's three panels ----------------------------------
+    # The outer panels back to the widths the first pass tried. The middle one
+    # is then 24px short of its own columns and the table draws under the panel
+    # beside it -- which is what the assertion caught before any widget existed.
+    ("craft-panels-do-not-fit", "ui/frame.lua",
+     "    left_w  = 186,   -- tracked recipes and their reagents",
+     "    left_w  = 210,   -- tracked recipes and their reagents",
+     "geometry"),
+
+    # The middle panel measured against the PANEL rather than the ROW, so it
+    # promises a fit at a width where the last column is under the border --
+    # the same mistake ColumnsFitAt was making until v1.50.3.
+    ("craft-fit-ignores-the-row-pad", "ui/frame.lua",
+     "    return CRAFT_COLS_END <= (ui.CraftMidWidthAt(w) - ROWPAD.l - ROWPAD.r)",
+     "    return CRAFT_COLS_END <= ui.CraftMidWidthAt(w)",
+     "geometry"),
+
+    # CRAFT_COLS_END measured to the last TEXT column, so the panel is sized
+    # without the Buy and Bid buttons and cuts them off.
+    ("craft-cols-end-misses-the-buttons", "ui/frame.lua",
+     "local CRAFT_COLS_END = 490 + 44",
+     "local CRAFT_COLS_END = 390 + 40",
+     "geometry"),
+
+    # Only one gutter counted, so the panels overlap by the width of the other.
+    ("craft-mid-width-misses-a-gutter", "ui/frame.lua",
+     "        - (CRAFTL.gap * 2)",
+     "        - CRAFTL.gap",
+     "geometry"),
+
+    # ---- crafting: how many to make ---------------------------------------
+    # THE CEIL. Wanting five of something made in twos is 2.5 crafts; a
+    # truncated 2 shops you one item short every time, with every number on
+    # screen looking entirely reasonable.
+    ("craft-crafts-truncates", "core/buy.lua",
+     "    return math.ceil(wanted / made)",
+     "    return math.floor(wanted / made)",
+     "craft.plan"),
+
+    # The yield ignored, so a recipe making two costs twice the reagents it
+    # should -- and the shopping list is double all the way down.
+    ("craft-ignores-the-yield", "core/buy.lua",
+     "    return math.ceil(wanted / made)",
+     "    return wanted",
+     "craft.plan"),
+
+    # Reagent totals multiplied by the ITEMS wanted rather than the CRAFTS.
+    # Identical for every one-yield recipe, which is most of them.
+    ("craft-need-uses-wanted-not-crafts", "core/buy.lua",
+     "        local need = per * crafts",
+     "        local need = per * (wanted or 1)",
+     "craft.plan"),
+
+    # A surplus recorded as a negative shortfall, which then subtracts from the
+    # rest of the shopping list.
+    ("craft-surplus-goes-negative", "core/buy.lua",
+     "        if short < 0 then short = 0 end",
+     "",
+     "craft.plan"),
+
+    # The quantity unclamped at the bottom: zero or negative wanted.
+    ("craft-want-not-clamped-low", "core/buy.lua",
+     """    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end""",
+     "    n = math.floor(tonumber(n) or 1)",
+     "craft.plan"),
+
+    # ...and at the top.
+    ("craft-want-not-capped", "core/buy.lua",
+     "    if n > craft.WANT_MAX then n = craft.WANT_MAX end\n    p.want = n",
+     "    p.want = n",
+     "craft.plan"),
+
+    # An unresolvable reagent dropped from the list, which silently shortens
+    # the shopping list by exactly the things you have never bought before.
+    ("craft-drops-unknown-reagents", "core/buy.lua",
+     """        table.insert(rows, {
+            name = r.name, itemId = id, per = per,""",
+     """        if id then table.insert(rows, {
+            name = r.name, itemId = id, per = per,""",
+     "craft.plan"),
+
+    # Ordinary loot counted as a craft. This runs on every item anyone in the
+    # party picks up, so the made-count climbs while you stand still.
+    ("craft-counts-loot-as-made", "core/buy.lua",
+     "    if string.find(msg, head, 1, true) ~= 1 then return nil end",
+     "",
+     "craft.plan"),
+
+    # The multiple form losing its count: "You create: [Item]x12" books one.
+    ("craft-multiple-create-counts-one", "core/buy.lua",
+     '    local _, _, n = string.find(msg, "x(%d+)[%.%s]*$")',
+     "    local n = nil",
+     "craft.plan"),
+
+    # The locale prefix escaped as a PATTERN while matching PLAIN, so every
+    # locale silently falls back to English and non-English clients count
+    # nothing at all.
+    ("craft-prefix-escaped-as-pattern", "core/buy.lua",
+     '    local at = string.find(fmt, "%s", 1, true)',
+     '    local at = string.find(fmt, "%%s", 1, true)',
+     "craft.plan"),
+
+    # The made-count cleared when the auction house closes -- mid-run, since a
+    # crafting run spans several trips.
+    ("craft-made-resets-at-the-ah", "core/buy.lua",
+     "-- Walking away from the auctioneer ends any in-flight browse.\n"
+     "A.RegisterEvent(\"AUCTION_HOUSE_CLOSED\", function()\n",
+     "A.RegisterEvent(\"AUCTION_HOUSE_CLOSED\", function()\n"
+     "    A.craft.ClearMade()\n",
+     "craft.plan"),
+
     # ---- the tooltip hook --------------------------------------------------
     # The guard removed, which is the bug as reported: the client refuses a
     # link and the error carries OUR file name for a link we never touched.
@@ -2462,6 +2574,7 @@ SUITES = {
     "session.buys": "tests/units/session_buys_test.lua",
     "inventory": "tests/units/inventory_test.lua",
     "tooltip.hook": "tests/units/tooltip_hook_test.lua",
+    "craft.plan": "tests/units/craft_plan_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"

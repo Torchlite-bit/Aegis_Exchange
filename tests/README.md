@@ -153,6 +153,9 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    craft_plan_test.lua     "make five of these": the ceil from items wanted
+                            to crafts, the reagent totals that follow, and the
+                            create message the made-counter reads
     tooltip_hook_test.lua   the save-and-replace hooks themselves: that they
                             install, that return values survive, and that a
                             link the CLIENT refuses does not become our error
