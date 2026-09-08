@@ -11573,6 +11573,16 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         ChatMsg("  settings: tooltip=" .. tostring(A.db.Setting("tooltip"))
             .. " tipDisenchant=" .. tostring(A.db.Setting("tipDisenchant"))
             .. " tipVendor=" .. tostring(A.db.Setting("tipVendor")))
+        -- Times the CLIENT refused an argument inside one of our tooltip
+        -- hooks. Non-zero means some link in the session is one 1.12 cannot
+        -- render -- ours or another addon's -- and the hook swallowed the
+        -- error rather than printing our file name against it.
+        if A.tooltip then
+            local lf = A.tooltip.lastFailure
+            ChatMsg("  tooltip refusals=" .. tostring(A.tooltip.failures or 0)
+                .. (lf and ("  last=" .. tostring(lf.method) .. ": "
+                    .. tostring(lf.err)) or ""))
+        end
         ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
             .. "  cached items=" .. tostring(A.db.HarvestCount and A.db.HarvestCount()))
         local itemId = A.de and A.de.ParseReportArgs and A.de.ParseReportArgs(diagArgs)

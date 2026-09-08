@@ -486,13 +486,49 @@ local function HookMethod(name, source)
         -- it. We deliberately do NOT clear current afterward — the next Set*
         -- call overwrites it — so a slightly-late money callback still finds
         -- the right item.
-        local r1, r2 = tooltip.orig[name](self, a1, a2)
+        --
+        -- THE ORIGINAL CAN REFUSE ITS ARGUMENT, and when it does the error
+        -- lands on THIS line -- carrying our file name for something we did
+        -- not do.
+        --
+        -- 1.12's SetHyperlink throws "Unknown link type" for anything it
+        -- cannot render: a spell, an enchant, a quest, a profession link, a
+        -- malformed or nil one. ANY addon in the session can hand it one, and
+        -- the stock UI does it too. Without our hook that error is attributed
+        -- to whoever called it. With our hook there is a Lua frame of ours in
+        -- between, so what the player sees is
+        --
+        --   Interface\AddOns\Aegis_Exchange\ui\tooltip.lua:NNN: Unknown link type
+        --
+        -- for a link Aegis never touched, on an addon they will now blame.
+        -- The misattribution is OUR bug even though the link is not.
+        --
+        -- pcall takes the function and its arguments directly rather than a
+        -- closure: this runs on every hover, and a closure per hover is
+        -- garbage there is no reason to make.
+        --
+        -- NOT swallowed. Failures are counted and the last one kept, and
+        -- `/aex diag` prints both -- a hook that hides a real fault is worse
+        -- than one that misattributes it. Our own lines are skipped on a
+        -- failure, because the tooltip is then in a state we did not build and
+        -- cannot reason about.
+        local ok, r1, r2 = pcall(tooltip.orig[name], self, a1, a2)
+        if not ok then
+            tooltip.failures = (tooltip.failures or 0) + 1
+            tooltip.lastFailure = { method = name, err = r1 }
+            return
+        end
         if id then
             tooltip.Extend(self, id, count)
         end
         return r1, r2
     end
 end
+
+-- Times the client refused an argument inside one of our hooks, and the last
+-- one it refused. Read by /aex diag. See HookMethod for why they exist.
+tooltip.failures = 0
+tooltip.lastFailure = nil
 
 function tooltip.Install()
     if tooltip.hooked then return end

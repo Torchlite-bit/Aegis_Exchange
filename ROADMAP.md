@@ -2390,6 +2390,34 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Wearing another addon's error — v1.53.1
+
+Reported as `ui\tooltip.lua:489: Unknown link type` while hovering. Line 489
+is the call into the CLIENT's own method, not our code, and Aegis was not the
+caller: both of our own `SetHyperlink` sites are already `pcall`-guarded.
+
+1.12's `SetHyperlink` throws that for anything it cannot render -- a spell, an
+enchant, a profession link, a malformed or nil one. Any addon in the session
+can hand it one. **Without our hook the error is attributed to whoever called
+it; with our hook there is a Lua frame of ours in between, so the player sees
+our file name against a link we never touched.** That misattribution is our
+bug even though the link is not, and it is a general hazard of the
+save-and-replace pattern rather than anything specific to this method.
+
+The original call is guarded now, our lines are skipped on a refusal (a
+tooltip that failed to build is not one to append prices to), and the refusal
+is COUNTED rather than swallowed -- `/aex diag` prints the tally and the last
+message, so a link storm still reads as a storm. A hook that hides a real
+fault is worse than one that misattributes it.
+
+**How it got out: the mock had no GameTooltip at all.** `tooltip.Install()`
+returned early on its own `if not GameTooltip then return end` guard, so every
+hook in the file was untested -- the fifth time a gap in the simulated client
+certified something, after bare numeric ids, the owner list, `UnitFactionGroup`
+and `CursorHasItem`. The mock now models the REFUSAL as well as the call
+(`W.tooltipThrows`), because a tooltip that accepts everything cannot show that
+a wrapper mishandles a rejection.
+
 ### The scan callback leak — v1.51.1
 
 A player reported a multi-second freeze; a second player traced it far enough

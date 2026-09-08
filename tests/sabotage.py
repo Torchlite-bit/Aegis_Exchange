@@ -2007,6 +2007,43 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- the tooltip hook --------------------------------------------------
+    # The guard removed, which is the bug as reported: the client refuses a
+    # link and the error carries OUR file name for a link we never touched.
+    ("tooltip-hook-rethrows-client-refusal", "ui/tooltip.lua",
+     """        local ok, r1, r2 = pcall(tooltip.orig[name], self, a1, a2)
+        if not ok then
+            tooltip.failures = (tooltip.failures or 0) + 1
+            tooltip.lastFailure = { method = name, err = r1 }
+            return
+        end""",
+     "        local r1, r2 = tooltip.orig[name](self, a1, a2)",
+     "tooltip.hook"),
+
+    # Guarded but silent: the refusal never reaches /aex diag, so a link storm
+    # is invisible and a real fault of ours hides behind the same guard.
+    ("tooltip-hook-swallows-silently", "ui/tooltip.lua",
+     "            tooltip.failures = (tooltip.failures or 0) + 1",
+     "            tooltip.failures = 0",
+     "tooltip.hook"),
+
+    # Our lines appended to a tooltip that failed to build -- price lines on
+    # whatever happened to be on screen from the last hover.
+    ("tooltip-hook-extends-after-failure", "ui/tooltip.lua",
+     """            tooltip.lastFailure = { method = name, err = r1 }
+            return
+        end""",
+     """            tooltip.lastFailure = { method = name, err = r1 }
+        end""",
+     "tooltip.hook"),
+
+    # The client's return values eaten. SetBagItem hands back hasCooldown and
+    # repairCost on 1.12 and the stock UI reads them.
+    ("tooltip-hook-eats-return-values", "ui/tooltip.lua",
+     "        return r1, r2\n    end\nend",
+     "        return\n    end\nend",
+     "tooltip.hook"),
+
     # ---- inventory --------------------------------------------------------
     # The bank walked as if it were bags. Every bank reads empty, which looks
     # exactly like "you have none there" -- and sends the player to the bank
@@ -2363,6 +2400,7 @@ SUITES = {
     "scan.leak": "tests/units/scan_leak_test.lua",
     "session.buys": "tests/units/session_buys_test.lua",
     "inventory": "tests/units/inventory_test.lua",
+    "tooltip.hook": "tests/units/tooltip_hook_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"

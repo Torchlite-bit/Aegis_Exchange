@@ -153,6 +153,9 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    tooltip_hook_test.lua   the save-and-replace hooks themselves: that they
+                            install, that return values survive, and that a
+                            link the CLIENT refuses does not become our error
     inventory_test.lua      how many you own and where: the bag/bank walkers,
                             the dirty-flag cache, live bags beating the
                             snapshot, and per-realm scoping

@@ -12,6 +12,34 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.1]
+
+### Fixed
+- **`ui\tooltip.lua:489: Unknown link type` while hovering.** Aegis was not
+  the cause and was carrying the blame.
+  - 1.12's `SetHyperlink` throws that for any link it cannot render — a spell,
+    an enchant, a profession link, a malformed or nil one. Any addon in the
+    session can hand it one, and so can the stock UI. Without our hook the
+    error is attributed to whoever called it; **with** our hook there is a Lua
+    frame of ours in between, so the red line named `ui/tooltip.lua` for a link
+    Aegis never touched. The misattribution was our bug even though the link
+    was not.
+  - The call into the client's own method is guarded now, and our price lines
+    are skipped when it refuses — appending them to a tooltip that failed to
+    build is how one item's numbers end up under another item's name.
+  - **Not swallowed silently.** Refusals are counted and the last one kept, and
+    `/aex diag` prints both, so a link storm still shows up as a link storm.
+
+### Internal
+- The simulated client had **no `GameTooltip` at all**, so `tooltip.Install()`
+  returned early on its own guard and every hook in the file was untested —
+  which is how this shipped. It has one now, including the ability to refuse an
+  argument the way the real client does, plus a suite covering the hook layer:
+  that the hooks install, that return values survive, and that a refusal is
+  contained.
+
+---
+
 ## [1.53.0]
 
 Second of four pieces of ROADMAP 2h.
@@ -3936,6 +3964,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -502,6 +502,70 @@ function GetAuctionSellItemInfo()
 end
 
 -- ---------------------------------------------------------------------------
+-- GameTooltip
+-- ---------------------------------------------------------------------------
+
+-- The real frame, near enough for the HOOK layer to be exercised.
+--
+-- There was none at all until v1.53.1, so tooltip.Install() returned early on
+-- its `if not GameTooltip then return end` guard and every hook in the file
+-- was untested -- which is how a hook that turned another addon's error into
+-- an error carrying OUR file name shipped without anything noticing.
+--
+-- W.tooltipThrows[method] = "message" makes that method refuse, the way 1.12's
+-- SetHyperlink refuses a link it cannot render ("Unknown link type"). Modelling
+-- the REFUSAL is the point: a tooltip that accepts everything cannot show that
+-- a wrapper mishandles a rejection.
+W.tooltipCalls  = {}    -- every Set* that reached the ORIGINAL, in order
+W.tooltipThrows = {}    -- method name -> error message it should throw
+
+local function gttCall(name, a1, a2)
+    table.insert(W.tooltipCalls, { method = name, a1 = a1, a2 = a2 })
+    local err = W.tooltipThrows[name]
+    if err then error(err, 0) end
+end
+
+GameTooltip = {
+    lines = {},
+    shown = 0,
+}
+function GameTooltip:SetOwner(owner, anchor) self.owner = owner end
+function GameTooltip:Show() self.shown = self.shown + 1 end
+function GameTooltip:Hide() end
+function GameTooltip:SetText(t) self.text = t end
+function GameTooltip:AddLine(text, r, g, b)
+    table.insert(self.lines, { left = text, r = r, g = g, b = b })
+end
+function GameTooltip:AddDoubleLine(l, r) table.insert(self.lines, { left = l, right = r }) end
+function GameTooltip:NumLines() return table.getn(self.lines) end
+
+-- The methods ui/tooltip.lua hooks. SetBagItem returns two values on 1.12
+-- (hasCooldown, repairCost) and the wrapper has to pass both up, so it does
+-- here too.
+function GameTooltip:SetBagItem(bag, slot) gttCall("SetBagItem", bag, slot); return nil, 0 end
+function GameTooltip:SetInventoryItem(u, s) gttCall("SetInventoryItem", u, s) end
+function GameTooltip:SetAuctionItem(l, i) gttCall("SetAuctionItem", l, i) end
+function GameTooltip:SetAuctionSellItem() gttCall("SetAuctionSellItem") end
+function GameTooltip:SetHyperlink(link) gttCall("SetHyperlink", link) end
+function GameTooltip:SetMerchantItem(i) gttCall("SetMerchantItem", i) end
+function GameTooltip:SetInboxItem(i) gttCall("SetInboxItem", i) end
+function GameTooltip:SetLootItem(i) gttCall("SetLootItem", i) end
+function GameTooltip:SetQuestItem(t, i) gttCall("SetQuestItem", t, i) end
+function GameTooltip:SetQuestLogItem(t, i) gttCall("SetQuestLogItem", t, i) end
+function GameTooltip:SetTradeSkillItem(i, r) gttCall("SetTradeSkillItem", i, r) end
+function GameTooltip:SetCraftItem(i, r) gttCall("SetCraftItem", i, r) end
+function GameTooltip:SetCraftSpell(i) gttCall("SetCraftSpell", i) end
+
+-- Wipe the tooltip back to an unhooked frame, so a suite that installs the
+-- hooks does not leak them into the next one.
+function W.ResetTooltip()
+    W.tooltipCalls  = {}
+    W.tooltipThrows = {}
+    GameTooltip.lines = {}
+    GameTooltip.shown = 0
+end
+
+-- ---------------------------------------------------------------------------
 -- Merchants
 -- ---------------------------------------------------------------------------
 
@@ -763,6 +827,8 @@ function W.Reset()
     W.itemInfoShape = "vanilla"
     W.itemInfoCalls = 0
     W.merchant      = {}
+    W.tooltipCalls  = {}
+    W.tooltipThrows = {}
     W.class         = "MAGE"
     W.player        = "Tester"
     W.realm         = "TestRealm"
