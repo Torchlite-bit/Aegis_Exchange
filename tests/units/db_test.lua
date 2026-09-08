@@ -321,4 +321,46 @@ local kept = db.ItemFacts(456)
 H.check("facts written by the current reader survive a reload", kept ~= nil)
 H.eq("...intact", kept and kept.r, 40)
 
+-- ---------------------------------------------------------------------------
+H.section("the item-fact sweep yields, and is paced")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. The sweep ran 500 ids every 0.5s -- a thousand GetItemInfo
+-- calls a second, from login to id 120000, every session. On 1.12 a miss does
+-- not just return nil, it puts an item query on the wire, and a thousand a
+-- second is invisible to Task Manager because the cost is in the client's
+-- item-cache and network path rather than in Lua. It was reported as freezes
+-- and stalls "with no abnormal spikes".
+H.check("the per-step budget is a pace, not a burst",
+        db.HARVEST_BUDGET <= 100,
+        "the sweep examines " .. db.HARVEST_BUDGET .. " ids per step")
+
+-- IT YIELDS TO THE AUCTION HOUSE. A background sweep firing item queries while
+-- a scan is paging is HARD RULE 10's flood by another door -- and it lands
+-- exactly when the player is watching, because they opened the auction house
+-- to do something.
+db.harvestAt = 1
+db.StartHarvest()
+H.check("the sweep runs when nothing else needs the client",
+        db.HarvestRunning(), "it never started")
+
+W.FireEvent(A.frame, "AUCTION_HOUSE_SHOW")
+H.check("...and stops the moment the auction house opens",
+        not db.HarvestRunning(),
+        "the sweep keeps firing item queries while a scan pages")
+
+W.FireEvent(A.frame, "AUCTION_HOUSE_CLOSED")
+H.check("...and picks up again when it closes", db.HarvestRunning(),
+        "the sweep never resumes, so the facts are never gathered")
+
+-- A FINISHED sweep must not be restarted by closing the auction house --
+-- db.harvestAt is nil when it has reached the top of the range, and
+-- db.StartHarvest returns false rather than showing the frame again.
+db.StopHarvest()
+db.harvestAt = nil
+H.check("a finished sweep is not restarted", not db.StartHarvest(),
+        "closing the auction house restarts a sweep that is already done")
+H.check("...and stays stopped", not db.HarvestRunning(), "it came back")
+db.harvestAt = 1
+
 os.exit(H.report("db"))

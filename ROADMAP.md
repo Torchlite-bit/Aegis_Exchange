@@ -3051,6 +3051,60 @@ Also: with the panels proportional there is no longer a window width that makes
 the middle panel exactly n wide, so the four assertions that isolated the fit's
 three terms by constructing such a width had to become an identity instead.
 
+#### §9 Anchors, clamps, and the sweep — v1.52.12, v1.52.13
+
+**Two clipping reports in a row, and the second one named the cause.** "% Mkt
+clips in Blizzlike, fixed in Advanced" is not a wrong number -- a wrong number
+is wrong in both modes. It is a CHAIN of offsets from the row's left, ending in
+a surplus recomputed per mode from a `left` that differs between them, and the
+last column is where any error in that chain shows because it is the one with a
+border beside it. The answer is not a better number, it is an ANCHOR: the last
+column and its header hang off the row's right edge now.
+
+The Crafting tab's outer rows were the same finding wearing different clothes.
+They were given a WIDTH -- a number captured at build time -- so a relayout had
+to walk both pools re-setting every one, and any row built while that number
+was stale drew past its box. They are two-anchored now, which is what
+BuildResultRow always did for the middle table: **the one table that never
+clipped was the one that was never sized.**
+
+**SetMaxResize does not hold on this client.** A window dragged to ~1467 was
+reported, 67px past MAX_W. That is not cosmetic: every width-derived layout in
+the addon is written and asserted for MIN_W..MAX_W, so outside that range none
+of the guarantees the geometry suite proves apply -- which is a plausible
+account of "resizing extra large caused a crash". The grip clamps what the drag
+produced now, through ui.ClampWindowSize, the same arithmetic the restore path
+uses.
+
+#### The sweep, and a comment that was asserting rather than reporting
+
+**db.HarvestStep ran 500 GetItemInfo calls every half second -- a thousand a
+second -- from login to item id 120000, every session.** Nothing paused it: not
+a scan, not the auction house being open.
+
+The comment inside it read *"nil here means the client has never seen this
+item, which is the common case and costs nothing"*. That is the whole bug in
+one sentence, and it is the SAME SHAPE as believing 1.12 routes shift-clicks
+through ChatEdit_InsertLink: a claim about this client, written confidently,
+never checked against it. On 1.12 a cache miss does not simply return nil -- it
+puts an item query on the wire.
+
+It matches the report exactly, including the part that looked like it ruled a
+memory problem out: **"no abnormal spikes in RAM, CPU or GPU"**. There would not
+be. The cost is in the client's item-cache and network path, which no external
+tool is sampling.
+
+50 per second now, and it stops dead while the auction house is open. A
+background sweep firing item queries into the client a scan is paging through
+is HARD RULE 10's flood arriving by another door -- and it lands exactly when
+the player is watching, because they opened the auction house to do something.
+
+`db.StopHarvest` had existed with no callers since it was written. The
+housekeeping pass flagged it as unreachable and kept it on the grounds that it
+was the only implementation of its idea. **It was, and this is the caller it
+was waiting for** -- which is the argument for that pass's restraint, made in
+retrospect.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

@@ -995,7 +995,7 @@ BUY_ADV_W    = constant("BUY_ADV_W")
 CAT_TOP_LEVEL_N = constant("CAT_TOP_LEVEL_N")
 -- BUYL is assembled field by field in this suite rather than loaded whole;
 -- these are the three the category column and the table budget read.
-BUYL.col_tail  = field("BUYL", "col_tail")
+BUY_COL_TAIL = constant("BUY_COL_TAIL")
 BUYL.side_top  = field("BUYL", "side_top")
 BUYL.side_bot  = field("BUYL", "side_bot")
 BUYL.table_bot = field("BUYL", "table_bot")
@@ -1374,6 +1374,37 @@ H.check("the footer bar clears the boxes' bottom border",
         "the footer reaches " .. (CRAFTL.foot_y + CRAFTL.foot_h)
             .. ", the border starts at " .. ui.CraftBoxClear(CRAFTL.side_bot))
 
+-- THE OUTER ROWS ARE ANCHORED, NEVER SIZED.
+--
+-- A width is a number captured when the row is built; two anchors are a
+-- relationship the client maintains. The rows were given a width and a
+-- relayout had to walk both pools re-setting every one -- so any row built
+-- while that number was stale, or any pool the relayout did not reach, drew
+-- past its own box. That is what the [+] button clipping and the made-panel
+-- text clipping both were.
+--
+-- Stated as an absence, because the bug IS the presence: no SetWidth on a
+-- Crafting row anywhere in the file.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    H.check("no recipe row is given a width",
+            not string.find(src, "row:SetWidth(ui.CraftSideRowW", 1, true),
+            "a row sized by a number can hold a stale one")
+    H.check("no made-this-session row is given a width",
+            not string.find(src, "row:SetWidth(ui.CraftMadeRowW", 1, true),
+            "a row sized by a number can hold a stale one")
+    H.check("...the recipe rows are anchored to both edges instead",
+            string.find(src, 'row:SetPoint("TOPRIGHT", sideScroll, "TOPRIGHT"',
+                        1, true) ~= nil,
+            "the first recipe row has no right anchor")
+    H.check("...and so are the made-this-session rows",
+            string.find(src, 'row:SetPoint("TOPRIGHT", madeScroll, "TOPRIGHT"',
+                        1, true) ~= nil,
+            "the first made row has no right anchor")
+end
+
 -- ONE ROW HEIGHT. Three lists side by side at three row heights read as three
 -- unrelated tables; nothing lines up across the tab.
 H.eq("the recipe rows are the middle table's height",
@@ -1526,7 +1557,7 @@ H.check("...and the same width plus the pads is STILL refused",
 -- reads as touching it. Counted by the fit check as well as by the layout, or
 -- it would apply at every width EXCEPT the minimum, where it is worst.
 H.check("...and only the pads PLUS the tail is accepted",
-        ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r + BUYL.col_tail),
+        ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r + BUY_COL_TAIL),
         "the columns never fit, so the check above proves nothing")
 
 -- ---------------------------------------------------------------------------

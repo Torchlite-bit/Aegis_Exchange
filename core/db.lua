@@ -1167,7 +1167,21 @@ db.HARVEST_MAX_ID = 120000
 
 -- Ids examined per step. Paced on ids EXAMINED, not ids recorded -- aux paces
 -- on recorded, which means a cold cache walks its whole range in one frame.
-db.HARVEST_BUDGET = 500
+--
+-- WAS 500 EVERY 0.5s -- a thousand GetItemInfo calls a second, from login to
+-- id 120000, for about two minutes, every session, whatever else was going on.
+--
+-- The comment inside db.HarvestStep said a nil return "is the common case and
+-- costs nothing". THAT WAS ASSERTED, NOT MEASURED, and it is the same shape of
+-- mistake as believing 1.12 routes shift-clicks through ChatEdit_InsertLink:
+-- on this client GetItemInfo for an item the cache has never seen does not
+-- simply return nil, it puts an item query on the wire. A thousand a second is
+-- not free, and it is invisible to Task Manager because the cost is in the
+-- client's item-cache and network path rather than in Lua.
+--
+-- 50 per second instead. The sweep takes longer to finish and nothing else
+-- changes: it is the least urgent thing in the addon and it says so.
+db.HARVEST_BUDGET = 50
 
 -- What we keep, and nothing else: three fields that answer the disenchant
 -- question. Names, textures and stack sizes have their own tables already.
@@ -1208,7 +1222,8 @@ function db.HarvestStep(fromId, budget)
         if not db.ItemFacts(id) then
             -- The bare id, not a link: GetItemInfo takes either, and an id
             -- cannot be mis-formatted. nil here means "the client has never
-            -- seen this item", which is the common case and costs nothing.
+            -- seen this item" -- the common case, and NOT free: see the note
+            -- on db.HARVEST_BUDGET for why this is paced the way it is.
             local info = A.util.ItemInfo(id)
             if info and type(info.quality) == "number" then
                 db.SetItemFacts(id, info.quality, info.minLevel, info.equipLoc)
@@ -1243,7 +1258,7 @@ local harvester = CreateFrame("Frame", "AegisExchangeHarvester")
 harvester:Hide()
 db.harvestAt = 1
 
-local HARVEST_DELAY = 0.5
+local HARVEST_DELAY = 1.0
 
 harvester:SetScript("OnUpdate", function()
     harvester.accum = (harvester.accum or 0) + arg1
@@ -1273,6 +1288,20 @@ end
 function db.StopHarvest()
     harvester:Hide()
 end
+
+-- The sweep YIELDS to the auction house, and this is the whole point of it
+-- being pausable.
+--
+-- HARD RULE 10 is about not flooding the client's auction path; a background
+-- sweep firing item queries into the same client while a scan is paging is the
+-- same flood by another door -- and it lands exactly when the player is
+-- watching, because they opened the auction house to do something.
+--
+-- db.StopHarvest existed and NOTHING CALLED IT. The housekeeping pass flagged
+-- it as unreachable and kept it on the grounds that it was the only
+-- implementation of its idea. It was: this is the caller it was waiting for.
+A.RegisterEvent("AUCTION_HOUSE_SHOW", function() db.StopHarvest() end)
+A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() db.StartHarvest() end)
 
 function db.HarvestRunning()
     return harvester:IsShown() and true or false

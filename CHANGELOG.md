@@ -18,6 +18,48 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.13]
+
+### Fixed
+- **The item-fact sweep no longer floods the client.** It ran **500
+  `GetItemInfo` calls every half second — a thousand a second** — from login
+  until it reached item id 120000, every session, whatever else was happening.
+  On 1.12 a cache miss does not merely return nil; it puts an item query on
+  the wire. This is the most likely cause of the freezes and stalls reported
+  with *"no abnormal spikes in RAM, CPU or GPU"* — the cost is in the client's
+  item-cache and network path, not in Lua, so nothing outside the game can see
+  it.
+  - **50 per second now**, and it **stops entirely while the auction house is
+    open**, resuming when you close it. A background sweep firing item queries
+    while a scan is paging is the same flood HARD RULE 10 exists to prevent,
+    arriving by another door — and it landed exactly when you were watching.
+  - The trade-off is stated plainly: the sweep takes longer to finish. It is
+    the least urgent thing in the addon and it is the only thing that got
+    slower.
+  - `db.StopHarvest` had existed with **no callers** since it was written; the
+    last housekeeping pass flagged it and kept it. This is the caller it was
+    waiting for.
+
+## [1.52.12]
+
+### Fixed
+- **"% Mkt" no longer clips on the Blizzlike Buy tab.** The tail added in
+  1.52.10 was applied to a chain of offsets measured from the row's *left*,
+  ending in a surplus recomputed per mode — right in Advanced and wrong in
+  Blizzlike, which is exactly what was reported. The last column and its header
+  are **anchored to the row's right edge** now. An anchor cannot drift.
+- **The Crafting tab's outer rows no longer clip.** They were given a *width*,
+  which a relayout had to walk both pools re-setting — so any row built while
+  that number was stale drew past its own box. They are **anchored to both
+  edges of their scroll frame**, the way the middle table's rows always were,
+  and that table is the one that never clipped.
+- **Resizing past the maximum no longer breaks the layout.** `SetMaxResize` is
+  asked for and does not hold on this client — a window dragged to ~1467 was
+  reported, 67px past `MAX_W`. Every width-derived layout in the addon is
+  written and asserted for `MIN_W..MAX_W`; outside that range none of those
+  guarantees apply. The resize grip now clamps what the drag produced, through
+  the same arithmetic the restore path uses.
+
 ## [1.52.11]
 
 ### Changed
@@ -4232,6 +4274,8 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

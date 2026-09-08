@@ -154,4 +154,79 @@ H.check("BOTTOMLEFT can be pushed off the left",
 H.check("TOPRIGHT can be pushed off the right",
         not ok("TOPRIGHT", "TOPRIGHT", WINW, -100), "")
 
+-- ---------------------------------------------------------------------------
+H.section("a dragged window is pulled back inside its own range")
+-- ---------------------------------------------------------------------------
+
+-- SetMinResize / SetMaxResize are asked for and DO NOT HOLD on this client: a
+-- window dragged to ~1467 was reported, 67px past MAX_W. That matters because
+-- every width-derived layout in the addon -- the whole Crafting tab -- is
+-- written and asserted for MIN_W..MAX_W. Outside it, none of the guarantees
+-- the geometry suite proves apply.
+local src
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    src = f:read("*a")
+    f:close()
+end
+
+-- The CALL, not the definition. Searching for "ui.ApplyClampedSize()" plainly
+-- matches "function ui.ApplyClampedSize()" as well, so deleting the call left
+-- this green -- the checker satisfied by the thing it was checking for the
+-- existence of. The leading indent is what distinguishes a call site here.
+H.check("the resize grip clamps what the drag produced",
+        string.find(src, "\n        ui.ApplyClampedSize()", 1, true) ~= nil,
+        "a drag past MAX_W is laid out and saved as-is")
+
+-- ...and it clamps BEFORE saving and before laying anything out against it.
+local atClamp = string.find(src, "\n        ui.ApplyClampedSize()", 1, true)
+H.check("...before the size is saved",
+        atClamp < string.find(src, "ui.SaveWindowSize()", atClamp, true),
+        "an out-of-range size is written to SavedVariables")
+H.check("...and before the layout is run against it",
+        atClamp < string.find(src, "ui.LayoutAll()", atClamp, true),
+        "the layout runs at a width its own assertions do not cover")
+
+-- ...and the clamp actually RESIZES. A grip handler that calls a function
+-- which measures the window and then does nothing with the answer is the same
+-- bug with an extra step.
+-- ui.ApplyClampedSize reads the four bounds and ui.ClampWindowSize.
+MIN_W, MIN_H = 1000, 492
+MAX_W, MAX_H = 1400, 900
+do
+    local fn = assert(loadstring(extract("function ui.ClampWindowSize("),
+                                 "ClampWindowSize"))
+    fn()
+    fn = assert(loadstring(extract("function ui.ApplyClampedSize("),
+                           "ApplyClampedSize"))
+    fn()
+end
+
+local function StubWindow(w, h)
+    local f = { w = w, h = h }
+    f.GetWidth  = function(self) return self.w end
+    f.GetHeight = function(self) return self.h end
+    f.SetWidth  = function(self, v) self.w = v end
+    f.SetHeight = function(self, v) self.h = v end
+    return f
+end
+
+ui.frame = StubWindow(MAX_W + 300, MAX_H + 300)
+ui.ApplyClampedSize()
+H.eq("a window dragged past the maximum is pulled back", ui.frame.w, MAX_W)
+H.eq("...in both directions", ui.frame.h, MAX_H)
+
+ui.frame = StubWindow(MIN_W - 200, MIN_H - 200)
+ui.ApplyClampedSize()
+H.eq("...and one dragged below the minimum is pushed out", ui.frame.w, MIN_W)
+H.eq("...in both directions too", ui.frame.h, MIN_H)
+
+-- A window already in range is left ALONE. Setting the size unconditionally
+-- would fight anything else that has a say in it.
+ui.frame = StubWindow(1200, 700)
+ui.ApplyClampedSize()
+H.eq("a window inside the range is untouched", ui.frame.w, 1200)
+H.eq("...in both directions", ui.frame.h, 700)
+ui.frame = nil
+
 os.exit(H.report("window.point"))

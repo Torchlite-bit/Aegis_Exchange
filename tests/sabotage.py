@@ -2007,6 +2007,57 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # A drag past MAX_W laid out and saved as-is. SetMaxResize does not hold
+    # on this client, so the grip is the only thing standing between a 1467px
+    # window and every width-derived layout running outside its asserted range.
+    ("window-grip-does-not-clamp", "ui/frame.lua",
+     "        ui.ApplyClampedSize()",
+     "",
+     "window.point"),
+
+    # ...and the clamp present but toothless.
+    ("window-clamp-does-not-apply", "ui/frame.lua",
+     "    if cw ~= w then f:SetWidth(cw) end",
+     "",
+     "window.point"),
+
+    # The outer rows back to a captured WIDTH instead of two anchors, which is
+    # what let them keep a stale number and draw past their own box.
+    ("craft-side-rows-sized-not-anchored", "ui/frame.lua",
+     """                row:SetPoint("TOPRIGHT", sideScroll, "TOPRIGHT",
+                    -CRAFTL.row_r, 0)""",
+     "                row:SetWidth(ui.CraftSideRowW(ui.WindowW()))",
+     "geometry"),
+
+    # ---- the item-fact sweep -----------------------------------------------
+    # The sweep back to a burst: 500 GetItemInfo calls every step. On 1.12 a
+    # cache miss puts an item query on the wire, so this is a thousand a second
+    # from login -- the reported freezes with nothing visible in Task Manager.
+    ("harvest-budget-is-a-burst", "core/db.lua",
+     "db.HARVEST_BUDGET = 50",
+     "db.HARVEST_BUDGET = 500",
+     "db"),
+
+    # ...and the sweep no longer yielding to the auction house, so it floods
+    # the same client a scan is paging through.
+    ("harvest-does-not-yield-to-the-ah", "core/db.lua",
+     'A.RegisterEvent("AUCTION_HOUSE_SHOW", function() db.StopHarvest() end)',
+     "",
+     "db"),
+
+    # ...or never coming back, so the facts are never gathered at all.
+    ("harvest-never-resumes", "core/db.lua",
+     'A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() db.StartHarvest() end)',
+     "",
+     "db"),
+
+    # A finished sweep restarted every time the auction house closes, which
+    # walks the whole 120000-id range again for nothing.
+    ("harvest-restarts-when-finished", "core/db.lua",
+     "    if not db.harvestAt then return false end",
+     "",
+     "db"),
+
     # ---- shift-click an item into a search box -----------------------------
     # The name read as the whole link, so the search box fills with
     # "|cff1eff00|Hitem:2589..." and every search returns nothing.
@@ -2209,14 +2260,14 @@ end
     # The last column back on the row's right edge, 6px from the box border,
     # which is the border's own half-width and reads as touching it.
     ("buy-last-column-has-no-tail", "ui/frame.lua",
-     "    col_tail    = 8,",
-     "    col_tail    = 0,",
+     "local BUY_COL_TAIL = 8",
+     "local BUY_COL_TAIL = 0",
      "geometry"),
 
     # ...and the tail applied by the LAYOUT but not counted by the fit check,
     # so it holds at every width except the minimum -- where it is worst.
     ("buy-tail-not-counted-by-the-fit", "ui/frame.lua",
-     "    return BUY_COLS_END + BUYL.col_tail <= rowW",
+     "    return BUY_COLS_END + BUY_COL_TAIL <= rowW",
      "    return BUY_COLS_END <= rowW",
      "geometry"),
 

@@ -917,6 +917,20 @@ function ui.ClampWindowSize(w, h)
     return w, h
 end
 
+-- Pull the window back inside MIN..MAX if something put it outside.
+--
+-- Separate from ui.ClampWindowSize so the arithmetic stays testable without a
+-- frame, and so the ONE place that resizes the window after a drag is named.
+function ui.ApplyClampedSize()
+    local f = ui.frame
+    if not f or not f.GetWidth then return end
+    local w, h = f:GetWidth(), f:GetHeight()
+    local cw, ch = ui.ClampWindowSize(w, h)
+    if cw ~= w then f:SetWidth(cw) end
+    if ch ~= h then f:SetHeight(ch) end
+    return cw, ch
+end
+
 function ui.RestoreWindowSize()
     if not ui.frame or not A.db or not A.db.char then return end
     -- Scale first, and unconditionally: it is stored independently of the size,
@@ -1308,6 +1322,19 @@ function ui.BuildWindow()
     grip:SetScript("OnMouseUp", function()
         f.aegisSizing = false
         f:StopMovingOrSizing()
+        -- CLAMP WHAT THE DRAG PRODUCED, before anything is laid out against
+        -- it or saved.
+        --
+        -- SetMinResize / SetMaxResize are asked for above and DO NOT HOLD on
+        -- this client -- a window dragged to ~1467 was reported, well past
+        -- MAX_W. Everything on the Crafting tab is derived from the window
+        -- width, and every one of those derivations was written and asserted
+        -- for MIN_W..MAX_W; run them 70px outside that and the guarantees the
+        -- geometry suite proves simply do not apply.
+        --
+        -- ui.ClampWindowSize is the same arithmetic the restore path uses, so
+        -- the two ways a window gets its size cannot disagree.
+        ui.ApplyClampedSize()
         ui.SaveWindowSize()
         ui.Refresh()
         ui.LayoutAll()           -- everything that depends on the new WIDTH
@@ -2922,6 +2949,18 @@ local RCW_BUY = {
 -- a column edit cannot silently push the table under the scrollbar.
 local BUY_COLS_END = 682 + 44
 
+-- How far the LAST column's right edge is held inside the row's.
+--
+-- It was zero: BUY_NAME_EXTRA gave the Item column every surplus pixel, so
+-- "% Mkt" ended exactly ON the row's right edge -- 6px from the box's border,
+-- which is the border's own half-width and reads as touching it. Every other
+-- column has air around it and that one had none.
+--
+-- Declared HERE, next to BUY_COLS_END, rather than in BUYL: ui.LayoutBuyRow
+-- reads it and is defined 700 lines above BUYL, so a BUYL field would have
+-- been a nil GLOBAL at runtime. tests/lint/scoping.py caught exactly that.
+local BUY_COL_TAIL = 8
+
 -- Extra width the ITEM column has been given, over its RCW_BUY.name default.
 --
 -- Advanced hides the category tree, so the results table there starts at the
@@ -2944,7 +2983,7 @@ end
 function ui.LayoutBuyRow(row)
     if not row or not row.pct then return end     -- Crafting row: five columns
     row.name:SetWidth(RCW_BUY.name + BUY_NAME_EXTRA)
-    local keys = { "lvl", "left", "bid", "stack", "unit", "pct" }
+    local keys = { "lvl", "left", "bid", "stack", "unit" }
     local i = 1
     while i <= table.getn(keys) do
         local cell = row[keys[i]]
@@ -2954,6 +2993,21 @@ function ui.LayoutBuyRow(row)
         end
         i = i + 1
     end
+    -- THE LAST COLUMN IS ANCHORED TO THE ROW'S RIGHT EDGE, not computed from
+    -- the left.
+    --
+    -- Everything before it is a chain of offsets off the row's left, ending in
+    -- BUY_NAME_EXTRA -- a surplus recomputed per mode, per width, from a
+    -- `left` that differs between Blizzlike and Advanced. Get any term of that
+    -- chain wrong and the LAST column is where it shows, because it is the one
+    -- with a border immediately beside it. It was reported clipping in
+    -- Blizzlike and correct in Advanced, which is the signature of a chain
+    -- that is right in one mode and not the other.
+    --
+    -- An anchor cannot drift. The same reasoning as ui.buyQueryBox hanging off
+    -- the Search button rather than off a constant measured to clear it.
+    row.pct:ClearAllPoints()
+    row.pct:SetPoint("RIGHT", row, "RIGHT", -BUY_COL_TAIL, 0)
 end
 local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
               buy = 436, bid = 484 }
@@ -3627,17 +3681,6 @@ local BUYL = {
     -- column instead of drawn across the percentages.
     gutter_w    = 26,
 
-    -- How far the LAST column's right edge is held inside the row's.
-    --
-    -- It was zero: BUY_NAME_EXTRA gave the Item column every surplus pixel, so
-    -- "% Mkt" ended exactly ON the row's right edge -- 6px from the box's
-    -- border, which is the border's own half-width and reads as touching it.
-    -- Every other column has air around it and that one had none.
-    --
-    -- Counted by ui.ColumnsFitAt as well, or it would only apply at widths
-    -- with surplus to give back -- which is every width EXCEPT the minimum,
-    -- where the clipping is worst.
-    col_tail    = 8,
 }
 
 -- ADVANCED-mode layout, in ONE table for the same upvalue reason as BUYL --
@@ -3828,7 +3871,7 @@ function ui.LayoutBuyTable()
     -- right-hand side that got bigger the more room you gave it.
     local rowW = ui.PanelWidthAt(ui.WindowW()) - left - BUYL.gutter_w
         - ROWPAD.l - ROWPAD.r
-    BUY_NAME_EXTRA = rowW - BUY_COLS_END - BUYL.col_tail
+    BUY_NAME_EXTRA = rowW - BUY_COLS_END - BUY_COL_TAIL
     if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
 
     -- The table's TOP also moves with the mode.
@@ -3858,8 +3901,16 @@ function ui.LayoutBuyTable()
 
     for key, b in pairs(ui.buyHeaders or {}) do
         b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", panel, "TOPLEFT",
-            left + ROWPAD.l + ColX(key), -hdrTop)
+        if key == "pct" then
+            -- ...and its HEADER with it, off the same edge. A header placed
+            -- from the left while its column is placed from the right is two
+            -- answers to one question.
+            b:SetPoint("TOPRIGHT", panel, "TOPRIGHT",
+                -(BUYL.gutter_w + ROWPAD.r + BUY_COL_TAIL), -hdrTop)
+        else
+            b:SetPoint("TOPLEFT", panel, "TOPLEFT",
+                left + ROWPAD.l + ColX(key), -hdrTop)
+        end
     end
     local tk = { "lvl", "left", "bid", "stack", "unit", "pct" }
     local ti = 1
@@ -4484,7 +4535,7 @@ function ui.ColumnsFitAt(w)
     -- This used to measure the frame and was optimistic by the two pads --
     -- which is the same mistake the pads exist to correct, made one level up.
     local rowW = (w - 22) - rowLeft - BUYL.gutter_w - ROWPAD.l - ROWPAD.r
-    return BUY_COLS_END + BUYL.col_tail <= rowW
+    return BUY_COLS_END + BUY_COL_TAIL <= rowW
 end
 -- Post Filter clause rows in the Filter Builder.
 local FB_POST_ROWS = 9
@@ -7671,11 +7722,22 @@ ui.GrowCraftSideRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(CSIDE_ROW_H)
-            row:SetWidth(ui.CraftSideRowW(ui.WindowW()))
+            -- ANCHORED ON BOTH SIDES, never SetWidth.
+            --
+            -- A width is a number captured at build time; two anchors are a
+            -- relationship the client maintains. The rows were given a width
+            -- and a relayout had to go round and re-set every one of them when
+            -- the window moved -- and any row built while that was stale, or
+            -- any pool the relayout did not reach, kept the old number and
+            -- drew past its own box. This is what BuildResultRow does for the
+            -- middle table, which is the one table that never clipped.
             if i == 1 then
                 row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", CRAFTL.row_l, 0)
+                row:SetPoint("TOPRIGHT", sideScroll, "TOPRIGHT",
+                    -CRAFTL.row_r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1], "BOTTOMLEFT", 0, 0)
+                row:SetPoint("TOPRIGHT", ui.craftSideRows[i - 1], "BOTTOMRIGHT", 0, 0)
             end
             -- The SAME chrome the middle table's rows get: zebra stripe,
             -- hairline, hover. Three lists side by side with only one of them
@@ -7924,11 +7986,13 @@ ui.GrowCraftMadeRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(MADE_ROW_H)
-            row:SetWidth(ui.CraftMadeRowW(ui.WindowW()))
             if i == 1 then
                 row:SetPoint("TOPLEFT", madeScroll, "TOPLEFT", CRAFTL.row_l, 0)
+                row:SetPoint("TOPRIGHT", madeScroll, "TOPRIGHT",
+                    -CRAFTL.row_r, 0)
             else
                 row:SetPoint("TOPLEFT", ui.craftMadeRows[i - 1], "BOTTOMLEFT", 0, 0)
+                row:SetPoint("TOPRIGHT", ui.craftMadeRows[i - 1], "BOTTOMRIGHT", 0, 0)
             end
             ui.AddRowChrome(row, i)
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -8024,13 +8088,9 @@ function ui.LayoutCraftPanels()
     if ui.craftDelBtn   then ui.craftDelBtn:SetWidth(halfW)   end
     if ui.craftSideBox    then ui.craftSideBox:SetWidth(leftW)    end
     if ui.craftSideScroll then ui.craftSideScroll:SetWidth(leftW) end
-    local sideRowW = ui.CraftSideRowW(w)
-    local i = 1
-    while i <= table.getn(ui.craftSideRows or {}) do
-        ui.craftSideRows[i]:SetWidth(sideRowW)
-        i = i + 1
-    end
-    if ui.craftNetFS then ui.craftNetFS:SetWidth(sideRowW) end
+    -- The ROWS need nothing here: they are anchored to both edges of their
+    -- scroll frame, so they follow it. Only things sized by a number do.
+    if ui.craftNetFS then ui.craftNetFS:SetWidth(ui.CraftSideRowW(w)) end
 
     -- ---- middle panel ---------------------------------------------------
     place(ui.craftTitle, "TOPLEFT", panel, "TOPLEFT",
@@ -8067,13 +8127,9 @@ function ui.LayoutCraftPanels()
     if ui.craftMadeHdr then ui.craftMadeHdr:SetWidth(rightW - 46 - CRAFTL.row_l) end
     if ui.craftMadeBox    then ui.craftMadeBox:SetWidth(rightW)    end
     if ui.craftMadeScroll then ui.craftMadeScroll:SetWidth(rightW) end
-    local madeRowW = ui.CraftMadeRowW(w)
-    local mi = 1
-    while mi <= table.getn(ui.craftMadeRows or {}) do
-        ui.craftMadeRows[mi]:SetWidth(madeRowW)
-        mi = mi + 1
+    if ui.craftMadeFootFS then
+        ui.craftMadeFootFS:SetWidth(ui.CraftMadeRowW(w))
     end
-    if ui.craftMadeFootFS then ui.craftMadeFootFS:SetWidth(madeRowW) end
 end
 
 -- ---- recipe-tree model + paint -----------------------------------------
