@@ -995,6 +995,7 @@ BUY_ADV_W    = constant("BUY_ADV_W")
 CAT_TOP_LEVEL_N = constant("CAT_TOP_LEVEL_N")
 -- BUYL is assembled field by field in this suite rather than loaded whole;
 -- these are the three the category column and the table budget read.
+BUYL.col_tail  = field("BUYL", "col_tail")
 BUYL.side_top  = field("BUYL", "side_top")
 BUYL.side_bot  = field("BUYL", "side_bot")
 BUYL.table_bot = field("BUYL", "table_bot")
@@ -1061,6 +1062,14 @@ do
     local fn = assert(loadstring(extract("function ui.PanelWidthAt("),
                                  "PanelWidthAt"))
     fn()
+    -- CraftWidthsAt is the one the other three go through: the outer panels
+    -- are a SHARE of the width now, so nothing about this tab is a constant.
+    fn = assert(loadstring(extract("function ui.CraftMidFloor("),
+                           "CraftMidFloor"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftWidthsAt("),
+                           "CraftWidthsAt"))
+    fn()
     fn = assert(loadstring(extract("function ui.CraftMidWidthAt("),
                            "CraftMidWidthAt"))
     fn()
@@ -1080,7 +1089,7 @@ H.check("the row's end is past its last text column",
         CRAFT_COLS_END .. " vs "
             .. (field("RCX", "pct") + field("RCW", "pct")))
 H.eq("...and is the Bid button's right edge",
-     CRAFT_COLS_END, field("RCX", "bid") + 44)
+     CRAFT_COLS_END, field("RCX", "bid") + 38)
 
 H.check("all three panels fit at the smallest allowed window",
         ui.CraftPanelsFitAt(MIN_W),
@@ -1095,54 +1104,114 @@ H.check("the BUY column set would not fit there",
         "Buy needs " .. constant("BUY_COLS_END") .. ", middle panel has "
             .. ui.CraftMidWidthAt(MIN_W))
 
--- The middle panel takes every surplus pixel; the outer two are fixed. A
--- recipe name and a made-count do not get more readable with more room.
-H.check("the middle panel grows with the window",
-        ui.CraftMidWidthAt(MIN_W + 200) - ui.CraftMidWidthAt(MIN_W) == 200,
-        "grew by " .. (ui.CraftMidWidthAt(MIN_W + 200)
-            - ui.CraftMidWidthAt(MIN_W)))
+-- THE PROPORTIONS HOLD AT EVERY WIDTH. The outer panels were FIXED and the
+-- middle took every surplus pixel, on the argument that a recipe name and a
+-- made-count do not get more readable with more room. On a real client they
+-- plainly do: drag the window wide and the middle table grew to twice the tab
+-- while the columns either side stayed at the width they need at the MINIMUM.
+local function craftShare(w)
+    local l, m, r = ui.CraftWidthsAt(w)
+    local total = l + m + r
+    return l / total, m / total, r / total
+end
+
+for _, w in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
+    local l, m, r = craftShare(w)
+    H.check("at " .. w .. " the left panel keeps its share",
+            math.abs(l - CRAFTL.left_frac) < 0.02,
+            "left is " .. string.format("%.3f", l) .. ", wanted "
+                .. CRAFTL.left_frac)
+    H.check("...and the right panel keeps its share",
+            math.abs(r - CRAFTL.right_frac) < 0.02,
+            "right is " .. string.format("%.3f", r) .. ", wanted "
+                .. CRAFTL.right_frac)
+    H.check("...and all three are positive",
+            l > 0 and m > 0 and r > 0, "a panel came out at zero or less")
+end
+
+-- ALL THREE GROW. The old assertion was that the middle grew by the WHOLE of
+-- any extra width; the point of this change is that it does not.
+do
+    local l0, m0, r0 = ui.CraftWidthsAt(MIN_W)
+    local l1, m1, r1 = ui.CraftWidthsAt(MIN_W + 200)
+    H.check("the left panel grows with the window", l1 > l0,
+            "it stayed at " .. l0)
+    H.check("the right panel grows with the window", r1 > r0,
+            "it stayed at " .. r0)
+    H.check("the middle panel grows with the window", m1 > m0,
+            "it stayed at " .. m0)
+    H.check("...and the middle still takes the largest part of the extra",
+            (m1 - m0) > (l1 - l0) and (m1 - m0) > (r1 - r0),
+            "the middle got " .. (m1 - m0) .. " of 200")
+end
+
+-- A MIDDLE ROW IS ITS PANEL LESS THREE TERMS, stated as an identity. The
+-- earlier form built a window width for each term and walked up from "refused"
+-- to "accepted"; with the panels proportional there is no longer a window
+-- width that makes the middle panel exactly n wide, so the terms are pinned
+-- directly. Drop the lane or either pad and this stops being equal.
+for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
+    H.eq("a middle row at " .. w .. " is its panel less the lane and both pads",
+         ui.CraftRowWidthAt(w),
+         ui.CraftMidWidthAt(w) - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r)
+end
+
+-- THE MIDDLE TABLE'S FLOOR OUTRANKS THE SHARES. The shares are what the tab
+-- should look like; the floor is what it has to be for the table to work at
+-- all. Checked at the minimum window AND below it, because the window can be
+-- restored to a saved size and a clamp that only holds at MIN_W is not a
+-- clamp.
+for _, w in ipairs({ MIN_W, 900, 800 }) do
+    local l, m, r = ui.CraftWidthsAt(w)
+    H.check("the middle panel keeps its floor at " .. w,
+            m >= ui.CraftMidFloor(),
+            "middle is " .. m .. ", floor is " .. ui.CraftMidFloor())
+    -- ...and the outer two survive being scaled back. Giving the budget to one
+    -- of them alone drives the other NEGATIVE at a width this narrow -- which
+    -- is a panel anchored inside-out, not a narrow panel.
+    H.check("...and both outer panels are still positive at " .. w,
+            l > 0 and r > 0,
+            "left " .. l .. ", right " .. r
+                .. " -- one panel absorbed the whole budget")
+end
+
+H.check("all three panels fit at the smallest allowed window (again, via the shares)",
+        ui.CraftPanelsFitAt(MIN_W),
+        "middle panel gets " .. ui.CraftMidWidthAt(MIN_W)
+            .. "px, columns need " .. CRAFT_COLS_END)
 
 -- EVERY TERM ACCOUNTED FOR. Three panels, two gutters and two margins have to
 -- add up to exactly the space there is -- no more, or they overlap; no less,
 -- and there is a strip of nothing down the tab. Checking only "does the middle
 -- one fit" cannot see a dropped gutter: losing one makes the middle WIDER, so
--- the fit passes and the panels quietly overlap by eight pixels.
-H.eq("the three panels and their gutters account for the whole width",
-     CRAFTL.edge * 2 + CRAFTL.left_w + CRAFTL.gap
-        + ui.CraftMidWidthAt(MIN_W) + CRAFTL.gap + CRAFTL.right_w,
-     ui.PanelWidthAt(MIN_W))
+-- the fit passes and the panels quietly overlap.
+for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
+    local l, m, r = ui.CraftWidthsAt(w)
+    H.eq("the panels and gutters account for the whole width at " .. w,
+         CRAFTL.edge * 2 + l + CRAFTL.gap + m + CRAFTL.gap + r,
+         ui.PanelWidthAt(w))
+end
 
 -- ...and the fit is measured against the ROW, not the panel. THREE terms
 -- separate the two -- the scrollbar lane and the two row pads -- and the check
 -- above cannot tell any of them apart: dropping one makes the test MORE
 -- permissive, so it still passes at every width that already worked.
 --
--- So each term gets a width that isolates it. `craftPanelW(n)` is the window
--- width at which the middle PANEL is exactly n wide, and the four checks below
--- walk up from "the panel is exactly the columns" to "the panel is the columns
--- plus every term", asserting refused, refused, refused, accepted. Drop the
--- lane and the third one passes; drop the pads and the second one does.
-local craftInverse = PANEL_H_INSET + CRAFTL.edge * 2
-    + CRAFTL.left_w + CRAFTL.right_w + CRAFTL.gap * 2
-local craftPanelW = function(n) return n + craftInverse end
-
-H.eq("...the inverse is right", ui.CraftMidWidthAt(craftPanelW(CRAFT_COLS_END)),
-     CRAFT_COLS_END)
-H.check("a panel sized to the columns exactly is refused",
-        not ui.CraftPanelsFitAt(craftPanelW(CRAFT_COLS_END)),
-        "accepted, so neither the pads nor the bar lane are counted")
-H.check("...the columns plus the ROW PADS is still refused",
-        not ui.CraftPanelsFitAt(
-            craftPanelW(CRAFT_COLS_END + ROWPAD.l + ROWPAD.r)),
-        "accepted, so the scrollbar lane is not being counted")
-H.check("...the columns plus the BAR LANE is still refused",
-        not ui.CraftPanelsFitAt(
-            craftPanelW(CRAFT_COLS_END + CRAFTL.bar_lane)),
-        "accepted, so the row pads are not being counted")
-H.check("...and the columns plus all three terms is accepted",
-        ui.CraftPanelsFitAt(craftPanelW(
-            CRAFT_COLS_END + CRAFTL.bar_lane + ROWPAD.l + ROWPAD.r)),
-        "the panels never fit, so the checks above prove nothing")
+-- The middle panel's floor is built from exactly those terms, so asserting the
+-- floor's composition is what pins them: drop the lane or the pads from
+-- ui.CraftRowWidthAt and a panel sized to the floor no longer fits its row.
+H.eq("the middle panel's floor is its columns, its pads, its lane and a cushion",
+     ui.CraftMidFloor(),
+     CRAFT_COLS_END + ROWPAD.l + ROWPAD.r + CRAFTL.bar_lane
+        + field("CRAFTL", "mid_cushion"))
+H.check("a middle panel at exactly its floor fits its row",
+        ui.CraftMidFloor() - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r
+            >= CRAFT_COLS_END,
+        "the floor does not actually clear the columns")
+H.check("...and one a cushion narrower does not",
+        (ui.CraftMidFloor() - field("CRAFTL", "mid_cushion") - 1)
+            - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r < CRAFT_COLS_END,
+        "the floor has slack it is not accounting for")
 
 -- THE LANE IS SELLL'S NUMBERS, not new ones: it is the same bar on the same
 -- client, and the Sell tab's bag list is the one other place in this window
@@ -1168,26 +1237,57 @@ do
                            "CraftLabelW"))
     fn()
 end
--- The outer panels pay the two row pads and NOT the scrollbar lane: their bar
--- is hidden and the wheel scrolls them. Paying it would cost a seventh of a
--- panel whose entire problem is width.
-H.eq("a recipe row is the left panel less its two pads",
-     ui.CraftSideRowW(), CRAFTL.left_w - ROWPAD.l - ROWPAD.r)
-H.eq("a made row is the right panel less its two pads",
-     ui.CraftMadeRowW(), CRAFTL.right_w - ROWPAD.l - ROWPAD.r)
-H.check("neither pays the scrollbar lane",
-        ui.CraftSideRowW() > CRAFTL.left_w - CRAFTL.bar_lane,
-        "the outer panels are being charged for a bar they do not draw")
+-- The outer panels pay their own row pads and NOT the scrollbar lane: their
+-- bar is hidden and the wheel scrolls them. Paying it would cost a seventh of
+-- a panel whose entire problem is width.
+-- Both bleeds, read here because this is the first section that needs them:
+-- how far a BOX border reaches inward, and how far a BUTTON's plate is drawn
+-- outward past the button.
+WELL_BLEED = constant("WELL_BLEED")
+BTN_EDGE   = constant("BTN_EDGE")
+CRAFTL.row_l = field("CRAFTL", "row_l")
+CRAFTL.row_r = field("CRAFTL", "row_r")
+for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
+    local l, _, r = ui.CraftWidthsAt(w)
+    H.eq("a recipe row at " .. w .. " is the left panel less its two pads",
+         ui.CraftSideRowW(w), l - CRAFTL.row_l - CRAFTL.row_r)
+    H.eq("a made row at " .. w .. " is the right panel less its two pads",
+         ui.CraftMadeRowW(w), r - CRAFTL.row_l - CRAFTL.row_r)
+end
+
+-- THOSE PADS ARE NOT ROWPAD, and that is the whole finding. ROWPAD.l is 2 --
+-- INSIDE the 6px a backdrop border reaches inward -- so a recipe name and a
+-- made-count started underneath their own box's left border. The middle table
+-- gets away with 2 because its first column is an icon with slack around it.
+H.check("the outer rows clear the border on the LEFT",
+        CRAFTL.row_l >= WELL_BLEED,
+        "rows start " .. CRAFTL.row_l .. "px in, the border reaches "
+            .. WELL_BLEED)
+-- ...and the right side needs MORE than the border, because the [+] button's
+-- backdrop draws outside the button itself.
+H.check("...and the [+] button's plate clears it on the RIGHT",
+        CRAFTL.row_r >= WELL_BLEED + BTN_EDGE,
+        "rows end " .. CRAFTL.row_r .. "px in, the border plus the button's "
+            .. "own edge needs " .. (WELL_BLEED + BTN_EDGE))
+do
+    local l = ui.CraftWidthsAt(MIN_W)
+    H.check("neither pays the scrollbar lane",
+            ui.CraftSideRowW(MIN_W) > l - CRAFTL.bar_lane,
+            "the outer panels are being charged for a bar they do not draw")
+end
 
 -- Every name on those rows has to leave room for what the row ends with, and
 -- the four cases differ: a recipe row ends with the stepper, a reagent row
 -- with a have/need count, and a reagent's name starts further in. Getting one
 -- wrong does not throw -- it wraps a name onto the row below it.
-local recipeName  = ui.CraftLabelW(ui.CraftSideRowW(), CRAFTL.ex_w + 2,
+-- Measured at the SMALLEST window, which is where they are tightest -- the
+-- panels grow with it now, so anything that fits here fits everywhere.
+local recipeName  = ui.CraftLabelW(ui.CraftSideRowW(MIN_W), CRAFTL.ex_w + 2,
                                    CRAFTL.step_w + 4)
-local reagentName = ui.CraftLabelW(ui.CraftSideRowW(), CRAFTL.ex_w + 2,
+local reagentName = ui.CraftLabelW(ui.CraftSideRowW(MIN_W), CRAFTL.ex_w + 2,
                                    CRAFTL.count_w + 4)
-local madeName    = ui.CraftLabelW(ui.CraftMadeRowW(), 0, CRAFTL.count_w + 4)
+local madeName    = ui.CraftLabelW(ui.CraftMadeRowW(MIN_W), 0,
+                                   CRAFTL.count_w + 4)
 
 H.check("a recipe name has room left over", recipeName > 0,
         "recipe names get " .. recipeName .. "px")
@@ -1228,7 +1328,6 @@ do
     fn()
 end
 CRAFT_HDR_BAND = constant("CRAFT_HDR_BAND")
-WELL_BLEED = constant("WELL_BLEED")
 
 H.eq("the box edge is one bleed outside its list",
      ui.CraftBoxEdge(100), 100 - WELL_BLEED)
@@ -1417,8 +1516,17 @@ local frameExactW = BUY_COLS_END + 22 + ROWLEFT + BUYL.gutter_w
 H.check("a width where the FRAME fits but the ROW does not is refused",
         not ui.ColumnsFitAt(frameExactW),
         frameExactW .. " accepted, so the pads are not being counted")
-H.check("...and the same width plus the pads is accepted",
-        ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r),
+H.check("...and the same width plus the pads is STILL refused",
+        not ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r),
+        "accepted, so the last column's tail is not being counted")
+
+-- THE TAIL is the third term, and it is the one this table was missing. Every
+-- surplus pixel went to the Item column, so "% Mkt" ended exactly ON the row's
+-- right edge -- 6px from the border, which is the border's own half-width and
+-- reads as touching it. Counted by the fit check as well as by the layout, or
+-- it would apply at every width EXCEPT the minimum, where it is worst.
+H.check("...and only the pads PLUS the tail is accepted",
+        ui.ColumnsFitAt(frameExactW + ROWPAD.l + ROWPAD.r + BUYL.col_tail),
         "the columns never fit, so the check above proves nothing")
 
 -- ---------------------------------------------------------------------------

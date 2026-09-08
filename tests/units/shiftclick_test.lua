@@ -41,13 +41,19 @@ local function extract(path, signature)
 end
 
 ui = {}
-do
-    local fn, err = loadstring(extract("ui/frame.lua",
-                                       "function ui.LinkTargetFor("),
-                               "LinkTargetFor")
-    if not fn then error("will not compile: " .. tostring(err)) end
+for _, sig in ipairs({
+    "function ui.LinkTargetFor(",
+    "function ui.ShiftClickIsOurs(",
+}) do
+    local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
     fn()
 end
+
+-- The two client globals the predicate reads.
+IsShiftKeyDown = function() return SHIFT end
+ChatFrameEditBox = { shown = false }
+ChatFrameEditBox.IsShown = function(self) return self.shown end
 
 -- A stand-in edit box: it only has to say whether it is on screen and take a
 -- name. That is the whole surface ui.LinkTargetFor touches.
@@ -100,6 +106,48 @@ H.isNil("...and an empty list too", ui.LinkTargetFor(nil, {}))
 H.isNil("...and a nil list", ui.LinkTargetFor(nil, nil))
 
 -- ---------------------------------------------------------------------------
+H.section("which click is ours")
+-- ---------------------------------------------------------------------------
+
+-- READ OFF THE CLIENT'S OWN 1.12 SOURCE, not guessed. ContainerFrame.lua takes
+-- its shift branch on button == "LeftButton", IsShiftKeyDown() and
+-- not ignoreModifiers -- and inside it inserts to chat only when
+-- ChatFrameEditBox is shown, otherwise opening the stack-split dialog. We slot
+-- in exactly where that split dialog would go.
+SHIFT = true
+ChatFrameEditBox.shown = false
+
+H.check("shift + LEFT click is ours", ui.ShiftClickIsOurs("LeftButton", nil),
+        "the gesture the whole feature is named after was refused")
+
+-- BLIZZARD'S DEFAULT IS SHIFT+LEFT. The first build hooked a function 1.12
+-- does not have, so shift+left opened the stack-split dialog instead -- and
+-- the right button must stay what it has always been.
+H.check("shift + RIGHT click is NOT ours",
+        not ui.ShiftClickIsOurs("RightButton", nil),
+        "right-click was taken; on 1.12 that is the merchant sell path")
+
+H.check("an unmodified left click is not ours",
+        not (function() SHIFT = false
+             local r = ui.ShiftClickIsOurs("LeftButton", nil)
+             SHIFT = true; return r end)(),
+        "picking an item up would stop working")
+
+-- `ignoreModifiers` is the client re-entering its own handler to run the
+-- unmodified path. Taking that would make one click do two things.
+H.check("the client's own re-entry is not ours",
+        not ui.ShiftClickIsOurs("LeftButton", 1),
+        "the handler would fire twice for one click")
+
+-- CHAT WINS. Composing a message and shift-clicking means "put it in the
+-- message", everywhere else in the game.
+ChatFrameEditBox.shown = true
+H.check("...not while a chat message is being composed",
+        not ui.ShiftClickIsOurs("LeftButton", nil),
+        "a link would be stolen from a message the player is typing")
+ChatFrameEditBox.shown = false
+
+-- ---------------------------------------------------------------------------
 H.section("the hook is a saved original, not a secure hook")
 -- ---------------------------------------------------------------------------
 
@@ -113,28 +161,28 @@ H.section("the hook is a saved original, not a secure hook")
 -- fooled by its own documentation that definitions.py was written about. What
 -- IS this suite's job is that the saved original is kept and called.
 local src = Source("ui/frame.lua")
-H.check("the original ChatEdit_InsertLink is saved",
-        string.find(src, "ui.origInsertLink = ChatEdit_InsertLink", 1, true) ~= nil,
-        "the client's function is not kept")
-H.check("...and called when we decline the link",
-        string.find(src, "return ui.origInsertLink(text)", 1, true) ~= nil,
-        "declining the link drops it instead of passing it on")
-
--- CHAT WINS over our boxes. Shift-clicking while typing a message means "put
--- it in the message" everywhere else in the game; taking it would be a
--- surprise, not a feature.
-H.check("the chat edit box is checked first",
+-- CONTAINERFRAMEITEMBUTTON_ONCLICK is the function 1.12 actually calls.
+-- The first build hooked ChatEdit_InsertLink, which stock 1.12 does not have
+-- -- so nothing fired and shift+left opened the stack-split dialog. Naming the
+-- right function here is what stops that being re-decided from memory.
+H.check("the container click handler is the one hooked",
         string.find(src,
-            "if ChatFrameEditBox and ChatFrameEditBox:IsVisible() then return false end",
+            "ui.origContainerClick = ContainerFrameItemButton_OnClick",
             1, true) ~= nil,
-        "a link would be stolen from a message the player is typing")
+        "the function 1.12 calls on a bag click is not hooked")
+H.check("...and its original is called whenever we decline",
+        string.find(src,
+            "return ui.origContainerClick(button, ignoreModifiers)",
+            1, true) ~= nil,
+        "picking up, splitting and Ctrl-dressing would stop working")
 
--- The replacement runs on EVERY shift-click in the game, including with our
--- window shut, so an error in it would break linking into chat for the whole
--- session.
+-- The replacement is on the click path for EVERY bag slot in the game,
+-- including with our window shut, so an error in it would break picking items
+-- up for the whole session.
 H.check("our half runs under pcall",
-        string.find(src, "local ok, took = pcall(ui.InsertItemLink, text)",
-                    1, true) ~= nil,
-        "an error in our code would break chat linking for the session")
+        string.find(src,
+            "local ok, took = pcall(ui.TakeContainerShiftClick, button, ignoreModifiers)",
+            1, true) ~= nil,
+        "an error in our code would break bag clicks for the session")
 
 os.exit(H.report("shiftclick"))

@@ -18,6 +18,52 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.11]
+
+### Changed
+- **The three Crafting panels keep their proportions when you resize.** They
+  were fixed and the middle took every surplus pixel, on the argument that a
+  recipe name and a made-count do not get more readable with more room. On a
+  real window they plainly do — drag it wide and the table grew to twice the
+  tab while the columns either side stayed at the width they need at the
+  *minimum*. It is **20 / 62 / 18** at every size now.
+  - The middle table still has a floor, and that floor outranks the shares: if
+    the proportions would leave its columns without room, both outer panels are
+    scaled back **together** — never one alone, which is what makes a window
+    look lopsided as it narrows.
+
+## [1.52.10]
+
+### Fixed
+- **"% Mkt" no longer runs into the table's right border on the Buy tab.** Every
+  surplus pixel went to the Item column, so the last column ended *exactly* on
+  the row's right edge — 6px from the border, which is the border's own
+  half-width and reads as touching it. It now keeps a tail, counted by the fit
+  check as well as the layout so it holds at the smallest window too.
+- **The Crafting tab's outer panels no longer clip their own rows.** They used
+  `ROWPAD`, whose left pad of 2 is *inside* the 6px a border reaches inward —
+  so recipe names and made-counts started underneath their own box edge, and
+  the `[+]` button's plate ran into the right one. Those panels have their own
+  pads now, and the right one allows for the fact that a button's backdrop is
+  drawn outside the button.
+- **The Buy and Bid buttons on a Crafting row are smaller** (44×16 and 38×16).
+  At 50×17 in a 26px row they were the widest thing on the line, for a
+  three-letter label.
+
+## [1.52.9]
+
+### Fixed
+- **Shift-click now works on shift + LEFT click, the way the stock UI does.**
+  The first attempt hooked `ChatEdit_InsertLink`, on the reasoning that the
+  client routes every shift-click through it. **That is not true on 1.12** —
+  `ContainerFrame.lua` inserts into the chat box directly, so the hook never
+  fired for a bag item and shift+left opened the stack-split dialog instead.
+  It hooks `ContainerFrameItemButton_OnClick` now, with the conditions read off
+  the client's own source.
+  - Picking up, splitting, Ctrl-dressing and every right-click path are
+    untouched — we take the click only where the split dialog would have
+    opened, and hand it straight back otherwise.
+
 ## [1.52.8]
 
 ### Added
@@ -4186,6 +4232,9 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

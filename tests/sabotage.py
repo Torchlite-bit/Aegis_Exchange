@@ -2046,15 +2046,36 @@ end
 
     # The link stolen from a message the player is typing.
     ("link-steals-from-chat", "ui/frame.lua",
-     "    if ChatFrameEditBox and ChatFrameEditBox:IsVisible() then return false end",
+     "    if ChatFrameEditBox and ChatFrameEditBox:IsShown() then return false end",
      "",
      "shiftclick"),
 
-    # We decline the link and then drop it instead of passing it on, so
-    # shift-clicking into chat stops working while Aegis is loaded.
+    # BLIZZARD'S DEFAULT IS SHIFT+LEFT. Taking the right button instead is the
+    # bug this feature shipped with once already -- and on 1.12 right-click on
+    # a bag slot is the sell-to-merchant path.
+    ("link-takes-the-right-button", "ui/frame.lua",
+     '    if button ~= "LeftButton" then return false end',
+     '    if button ~= "RightButton" then return false end',
+     "shiftclick"),
+
+    # ...and taking EVERY left click, so picking an item up stops working.
+    ("link-takes-unmodified-clicks", "ui/frame.lua",
+     "    if not IsShiftKeyDown or not IsShiftKeyDown() then return false end",
+     "",
+     "shiftclick"),
+
+    # The client re-enters its own handler with ignoreModifiers to run the
+    # unmodified path; taking that makes one click do two things.
+    ("link-ignores-the-reentry-flag", "ui/frame.lua",
+     "    if ignoreModifiers then return false end",
+     "",
+     "shiftclick"),
+
+    # We decline the click and then swallow it instead of passing it on, so
+    # picking up, splitting and Ctrl-dressing all stop working.
     ("link-declined-is-dropped", "ui/frame.lua",
-     "        return ui.origInsertLink(text)",
-     "        return false",
+     "        return ui.origContainerClick(button, ignoreModifiers)",
+     "        return",
      "shiftclick"),
 
     # ---- the three guarantees that used to assert nothing -------------------
@@ -2103,12 +2124,61 @@ end
      "geometry"),
 
     # ---- the Crafting tab's three panels ----------------------------------
-    # The outer panels back to the widths the first pass tried. The middle one
-    # is then 24px short of its own columns and the table draws under the panel
-    # beside it -- which is what the assertion caught before any widget existed.
+    # The outer panels given a share big enough to starve the middle table.
+    # Before v1.52.10 this was a fixed width; the guarantee is the same.
     ("craft-panels-do-not-fit", "ui/frame.lua",
-     "    left_w  = 182,   -- tracked recipes and their reagents",
-     "    left_w  = 210,   -- tracked recipes and their reagents",
+     "    left_frac  = 0.20,   -- tracked recipes and their reagents",
+     "    left_frac  = 0.40,   -- tracked recipes and their reagents",
+     "geometry"),
+
+    # THE ORDER OF THE TWO CLAMPS. Applying the outer panels' minimums AFTER
+    # the budget lets them push straight past it -- at a 900px window they hold
+    # 182 and 152 and leave the middle table 86px short of its own columns.
+    # The floor outranks the minimums; this swaps them back.
+    ("craft-minimums-outrank-the-floor", "ui/frame.lua",
+     """    if left  < CRAFTL.left_min  then left  = CRAFTL.left_min  end
+    if right < CRAFTL.right_min then right = CRAFTL.right_min end
+
+    -- The most the outer two may take between them. Scaled TOGETHER, never one
+    -- alone -- shaving one is what makes a window look lopsided as it narrows.
+    local budget = avail - ui.CraftMidFloor()
+    if left + right > budget then
+        local total = left + right
+        left  = math.floor(budget * left / total)
+        right = budget - left
+    end""",
+     """    local budget = avail - ui.CraftMidFloor()
+    if left + right > budget then
+        local total = left + right
+        left  = math.floor(budget * left / total)
+        right = budget - left
+    end
+    if left  < CRAFTL.left_min  then left  = CRAFTL.left_min  end
+    if right < CRAFTL.right_min then right = CRAFTL.right_min end""",
+     "geometry"),
+
+    # Only ONE of the two scaled back, so the tab goes lopsided as it narrows.
+    ("craft-scales-one-panel-alone", "ui/frame.lua",
+     """        local total = left + right
+        left  = math.floor(budget * left / total)
+        right = budget - left""",
+     "        right = budget - left",
+     "geometry"),
+
+    # The outer panels back to FIXED, which is what this release changed: the
+    # middle takes every surplus pixel and the columns either side stay at the
+    # width they need at the minimum however wide the window gets.
+    ("craft-outer-panels-do-not-grow", "ui/frame.lua",
+     "    local left  = math.floor(avail * CRAFTL.left_frac)",
+     "    local left  = CRAFTL.left_min",
+     "geometry"),
+
+    # The middle panel's floor forgetting the scrollbar lane, so the shares are
+    # allowed to squeeze the table until its bar is over the right panel.
+    ("craft-floor-forgets-the-lane", "ui/frame.lua",
+     """    return CRAFT_COLS_END + ROWPAD.l + ROWPAD.r + CRAFTL.bar_lane
+        + CRAFTL.mid_cushion""",
+     "    return CRAFT_COLS_END + ROWPAD.l + ROWPAD.r + CRAFTL.mid_cushion",
      "geometry"),
 
     # The middle panel measured against the PANEL rather than the ROW, so it
@@ -2136,11 +2206,46 @@ end
      "    bar_lane = 16,   -- the MIDDLE table's scrollbar, inside its own panel",
      "geometry"),
 
+    # The last column back on the row's right edge, 6px from the box border,
+    # which is the border's own half-width and reads as touching it.
+    ("buy-last-column-has-no-tail", "ui/frame.lua",
+     "    col_tail    = 8,",
+     "    col_tail    = 0,",
+     "geometry"),
+
+    # ...and the tail applied by the LAYOUT but not counted by the fit check,
+    # so it holds at every width except the minimum -- where it is worst.
+    ("buy-tail-not-counted-by-the-fit", "ui/frame.lua",
+     "    return BUY_COLS_END + BUYL.col_tail <= rowW",
+     "    return BUY_COLS_END <= rowW",
+     "geometry"),
+
+    # The outer panels' rows back to ROWPAD, whose left pad of 2 is INSIDE the
+    # 6px a border reaches inward -- names drawn under their own box edge.
+    ("craft-outer-rows-under-the-border", "ui/frame.lua",
+     "    row_l   = 8,  row_r   = 16,",
+     "    row_l   = 2,  row_r   = 12,",
+     "geometry"),
+
+    # ...and the right pad trimmed to the border alone, forgetting that the
+    # [+] button's plate is drawn outside the button.
+    ("craft-plus-button-plate-clipped", "ui/frame.lua",
+     "    row_l   = 8,  row_r   = 16,",
+     "    row_l   = 8,  row_r   = 6,",
+     "geometry"),
+
+    # The Bid button's width and the row's end disagreeing, which is how a
+    # column edit silently pushes a table under the scrollbar.
+    ("craft-cols-end-stale-button-width", "ui/frame.lua",
+     "local CRAFT_COLS_END = 484 + 38",
+     "local CRAFT_COLS_END = 484 + 50",
+     "geometry"),
+
     # The OUTER panels charged for a scrollbar lane they do not draw, so every
     # recipe name loses a quarter of its column to nothing.
     ("craft-side-row-pays-for-a-hidden-bar", "ui/frame.lua",
-     "    return CRAFTL.left_w - ROWPAD.l - ROWPAD.r",
-     "    return CRAFTL.left_w - ROWPAD.l - ROWPAD.r - CRAFTL.bar_lane",
+     "    return left - CRAFTL.row_l - CRAFTL.row_r",
+     "    return left - CRAFTL.row_l - CRAFTL.row_r - CRAFTL.bar_lane",
      "geometry"),
 
     # The box edge measured at ONE bleed instead of two, so every heading on
@@ -2225,14 +2330,14 @@ end
     # CRAFT_COLS_END measured to the last TEXT column, so the panel is sized
     # without the Buy and Bid buttons and cuts them off.
     ("craft-cols-end-misses-the-buttons", "ui/frame.lua",
-     "local CRAFT_COLS_END = 490 + 44",
+     "local CRAFT_COLS_END = 484 + 38",
      "local CRAFT_COLS_END = 390 + 40",
      "geometry"),
 
     # Only one gutter counted, so the panels overlap by the width of the other.
     ("craft-mid-width-misses-a-gutter", "ui/frame.lua",
-     "        - (CRAFTL.gap * 2)",
-     "        - CRAFTL.gap",
+     "        - (CRAFTL.edge * 2) - (CRAFTL.gap * 2)",
+     "        - (CRAFTL.edge * 2) - CRAFTL.gap",
      "geometry"),
 
     # ---- crafting: how many to make ---------------------------------------

@@ -3000,6 +3000,57 @@ passed on the comment NEXT TO ui.HookAuctionFrame explaining why we do not use
 one -- the checker fooled by its own documentation that `definitions.py` was
 written about. `lua50.py` already bans it properly; the duplicate came out.
 
+#### §8 Second pass on a real client — v1.52.9 through v1.52.11
+
+Five things off a screenshot and a play session, and one of them was a wrong
+belief about the client rather than a wrong number.
+
+**Shift-click was hooked on a function 1.12 does not have.** The reasoning --
+"the client routes every shift-click through ChatEdit_InsertLink" -- is true of
+a LATER client. 1.12's ContainerFrame.lua does it inline:
+
+    elseif ( IsShiftKeyDown() and not ignoreModifiers ) then
+        if ( ChatFrameEditBox:IsShown() ) then
+            ChatFrameEditBox:Insert(GetContainerItemLink(...));
+        else
+            ... OpenStackSplitFrame ...
+
+so the hook never fired and shift+left opened the stack-split dialog. The fix
+was five minutes; FINDING it was reading the client's own source, which was
+sitting in the scratchpad the whole time. **When a guess about this client can
+be checked against its source, check it** -- the reference addons in CLAUDE.md
+are there for the same reason.
+
+**"% Mkt" ended exactly ON the row's right edge.** Every surplus pixel went to
+the Item column, so the last column had no tail at all -- 6px from the border,
+which is the border's own half-width. Every other column has air; that one had
+none, and the fit check had to learn the term too or it would have held at
+every width except the minimum, where it is worst.
+
+**The outer panels used ROWPAD, and ROWPAD.l is 2.** A backdrop border reaches
+6px INWARD, so a recipe name started underneath its own box edge and the [+]
+button's plate -- drawn 5px outside the button -- ran into the right one. Those
+panels have their own pads now, and the right one is wider than the left
+BECAUSE of that button plate. `BTN_EDGE` is named for the same reason
+`WELL_BLEED` is.
+
+**And the fixed outer panels were wrong.** They were fixed on the argument that
+a recipe name and a made-count do not get more readable with more room -- which
+is true up to a point and false past it. Drag the window wide and the middle
+table grew to twice the tab while the columns either side stayed at the width
+they need at the MINIMUM. They are shares now, 20 / 62 / 18, with the middle
+table's floor outranking them.
+
+**The order of the two clamps is the whole rule there**, and the suite caught
+me getting it wrong. Applying the outer panels' minimums AFTER the budget let
+them push straight past it: at a 900px window they held 182 and 152 and left
+the middle table 86px short of its own columns. Minimums first, floor last --
+cramped names cost readability, a table under a border costs the buttons.
+
+Also: with the panels proportional there is no longer a window width that makes
+the middle panel exactly n wide, so the four assertions that isolated the fit's
+three terms by constructing such a width had to become an identity instead.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

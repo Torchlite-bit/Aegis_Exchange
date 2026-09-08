@@ -354,6 +354,14 @@ end
 --     ui.MakeButton(parent, "quiet", name)
 -- -- the returned frame answers SetText/GetText/Enable/Disable/IsEnabled the
 -- same way, so existing call sites keep working after the constructor swap.
+-- How far a button's PLATE is drawn outside the button's own rect.
+--
+-- Same idea as WELL_BLEED, and for the same reason: a backdrop edge is drawn
+-- CENTRED on the frame boundary, so an edgeSize of 10 hangs 5px outward. That
+-- is what a row has to leave beside a plated button, and it is why the
+-- Crafting panels' right row pad is wider than their left.
+local BTN_EDGE = 5
+
 function ui.MakeButton(parent, kind, name)
     local b = CreateFrame("Button", name, parent)
     b.aegisButton = true
@@ -362,7 +370,7 @@ function ui.MakeButton(parent, kind, name)
     b:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 10,
+        tile = true, tileSize = 16, edgeSize = BTN_EDGE * 2,
         insets = { left = 2, right = 2, top = 2, bottom = 2 },
     })
 
@@ -2948,14 +2956,14 @@ function ui.LayoutBuyRow(row)
     end
 end
 local RCX = { name = 2, ct = 178, unit = 210, stack = 296, pct = 390,
-              buy = 436, bid = 490 }
+              buy = 436, bid = 484 }
 local RCW = { name = 172, ct = 26, unit = 82, stack = 90, pct = 40 }
 -- Where a Crafting row actually ends: the Bid button's right edge, not the
 -- last text column's. Asked for rather than re-added by hand, the same as
 -- BUY_COLS_END and SELL_COLS_END -- a column edit must not silently push the
 -- table under the scrollbar, and here it would push a whole PANEL out of the
 -- three that have to fit side by side.
-local CRAFT_COLS_END = 490 + 44
+local CRAFT_COLS_END = 484 + 38
 
 -- Build a listing result row (name/ct/unit/stack/pct + Buy/Bid) into `store`.
 -- Buttons act on row.entry, so the same rows serve Buy and Crafting.
@@ -3152,8 +3160,11 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         -- Buy is the primary plate and Bid the quiet one, exactly as the
         -- concept has them: on a row of listings the buyout is the action,
         -- and a bid is the hedge.
+        -- Sized to the row, not to the label. At 50x17 in a 26px row these
+        -- were the widest thing on the line and left the two of them nearly
+        -- touching; the labels are three letters.
         local buyBtn = ui.MakeButton(row, "primary")
-        buyBtn:SetWidth(50); buyBtn:SetHeight(17)
+        buyBtn:SetWidth(44); buyBtn:SetHeight(16)
         buyBtn:SetPoint("LEFT", row, "LEFT", RCX.buy, 0)
         buyBtn:SetText("Buy")
         buyBtn:SetScript("OnClick", function()
@@ -3161,7 +3172,7 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         end)
         row.buyBtn = buyBtn
         local bidBtn = ui.MakeButton(row, "quiet")
-        bidBtn:SetWidth(44); bidBtn:SetHeight(17)
+        bidBtn:SetWidth(38); bidBtn:SetHeight(16)
         bidBtn:SetPoint("LEFT", row, "LEFT", RCX.bid, 0)
         bidBtn:SetText("Bid")
         bidBtn:SetScript("OnClick", function()
@@ -3615,6 +3626,18 @@ local BUYL = {
     -- OUTWARD from the scroll frame's right edge; this keeps it off the last
     -- column instead of drawn across the percentages.
     gutter_w    = 26,
+
+    -- How far the LAST column's right edge is held inside the row's.
+    --
+    -- It was zero: BUY_NAME_EXTRA gave the Item column every surplus pixel, so
+    -- "% Mkt" ended exactly ON the row's right edge -- 6px from the box's
+    -- border, which is the border's own half-width and reads as touching it.
+    -- Every other column has air around it and that one had none.
+    --
+    -- Counted by ui.ColumnsFitAt as well, or it would only apply at widths
+    -- with surplus to give back -- which is every width EXCEPT the minimum,
+    -- where the clipping is worst.
+    col_tail    = 8,
 }
 
 -- ADVANCED-mode layout, in ONE table for the same upvalue reason as BUYL --
@@ -3786,6 +3809,7 @@ function ui.LayoutAll()
     if ui.LayoutViewTabs     then ui.LayoutViewTabs()     end
     if ui.LayoutAdvColumns   then ui.LayoutAdvColumns()   end
     if ui.LayoutBuilderForm  then ui.LayoutBuilderForm()  end
+    if ui.LayoutCraftPanels  then ui.LayoutCraftPanels()  end
 end
 
 function ui.LayoutBuyTable()
@@ -3804,7 +3828,7 @@ function ui.LayoutBuyTable()
     -- right-hand side that got bigger the more room you gave it.
     local rowW = ui.PanelWidthAt(ui.WindowW()) - left - BUYL.gutter_w
         - ROWPAD.l - ROWPAD.r
-    BUY_NAME_EXTRA = rowW - BUY_COLS_END
+    BUY_NAME_EXTRA = rowW - BUY_COLS_END - BUYL.col_tail
     if BUY_NAME_EXTRA < 0 then BUY_NAME_EXTRA = 0 end
 
     -- The table's TOP also moves with the mode.
@@ -4147,8 +4171,23 @@ local SELLL = {
 -- out of 182 is a sixth of a panel whose whole problem is width, and those
 -- lists are a handful of recipes, not fifty listings.
 local CRAFTL = {
-    left_w  = 182,   -- tracked recipes and their reagents
-    right_w = 152,   -- made this session
+    -- THE OUTER PANELS ARE A SHARE OF THE WIDTH, not fixed.
+    --
+    -- They were fixed and the middle took every surplus pixel, on the argument
+    -- that a recipe name and a made-count do not get more readable with more
+    -- room. On a real client at a real size they plainly do: drag the window
+    -- wide and the middle table grew to twice the tab while the two columns
+    -- either side stayed at the width they need at the MINIMUM, so most of
+    -- what you gained went to a table that already fitted.
+    --
+    -- `left_min` / `right_min` are what those panels need to be legible, and
+    -- they are what the shares fall back to when the window is too narrow to
+    -- honour them -- see ui.CraftWidthsAt, which never lets either share
+    -- starve the middle table below its own floor.
+    left_frac  = 0.20,   -- tracked recipes and their reagents
+    right_frac = 0.18,   -- made this session -- narrower, it holds two cells
+    left_min   = 182,
+    right_min  = 152,
     gap     = 10,    -- between panels
     edge    = 10,    -- panel margin at each side of the tab
     -- WELL_BLEED + SELLL.bar_x + SELLL.bar_w, asserted by the geometry suite.
@@ -4194,6 +4233,22 @@ local CRAFTL = {
     -- are one band holding the left panel's two buttons and the middle's
     -- search strip. Lining those up is what stops the header area reading as
     -- three separate stacks.
+    -- How far the OUTER panels' rows are held inside their box.
+    --
+    -- NOT ROWPAD. That is 2 on the left, which is INSIDE the 6px a border
+    -- reaches inward -- so a recipe name and a made-count started under the
+    -- box's own left border, and the [+] button's backdrop (which draws ~5px
+    -- outside the button) ran into the right one. The middle table gets away
+    -- with ROWPAD because its first column is an icon with slack around it
+    -- and its last is a text cell, not a plated button.
+    --
+    -- The right side is wider than the left because of that button edge.
+    row_l   = 8,  row_r   = 16,
+
+    -- Slack over the middle table's absolute minimum, so the one width where
+    -- the floor binds is not also the width where it fits exactly.
+    mid_cushion = 6,
+
     est_y   = 22, est_h   = 12,    -- Cost / Sells, above the recipe list
     btn_y   = 38, btn_h   = 18,    -- Price recipe | Remove recipe
     -- The search box, the Search button and the pager are all 20 now and all
@@ -4207,12 +4262,60 @@ local CRAFTL = {
 }
 ui.CRAFTL = CRAFTL      -- read by the geometry suite
 
--- Width the MIDDLE panel gets at a given window width: whatever the other two
--- and the gutters do not take.
+-- The three panels' widths at a given WINDOW width. Returns left, middle,
+-- right.
+--
+-- THE PROPORTIONS HOLD, and the middle table's floor holds harder. The outer
+-- two take their share of the space inside the margins and gutters; if those
+-- shares would leave the middle table too narrow for its own columns, BOTH are
+-- scaled back together -- never one alone, which is what makes a window look
+-- lopsided as it narrows -- and only then floored at their minimums.
+--
+-- At the smallest allowed window the shares are exactly what the floor allows
+-- and not a pixel more; drag it wider and it is 20 / 62 / 18 all the way up.
+function ui.CraftWidthsAt(w)
+    local avail = ui.PanelWidthAt(w or 0)
+        - (CRAFTL.edge * 2) - (CRAFTL.gap * 2)
+    local left  = math.floor(avail * CRAFTL.left_frac)
+    local right = math.floor(avail * CRAFTL.right_frac)
+
+    -- The minimums FIRST, then the middle table's floor -- and that order is
+    -- the whole rule. Applying the minimums last let them push straight past
+    -- the budget: at a 900px window they held 182 and 152 and left the middle
+    -- panel 86px short of its own columns, which is the table running under
+    -- the panel beside it.
+    --
+    -- THE FLOOR OUTRANKS THE MINIMUMS. The shares are what the tab should look
+    -- like and the minimums are what the outer panels would like; the floor is
+    -- what the middle table has to have for its columns to be on screen at
+    -- all. Cramped names lose you readability, a table under a border loses
+    -- you the buttons.
+    if left  < CRAFTL.left_min  then left  = CRAFTL.left_min  end
+    if right < CRAFTL.right_min then right = CRAFTL.right_min end
+
+    -- The most the outer two may take between them. Scaled TOGETHER, never one
+    -- alone -- shaving one is what makes a window look lopsided as it narrows.
+    local budget = avail - ui.CraftMidFloor()
+    if left + right > budget then
+        local total = left + right
+        left  = math.floor(budget * left / total)
+        right = budget - left
+    end
+    return left, avail - left - right, right
+end
+
+-- The narrowest the middle panel may ever be: its columns, the two row pads
+-- that hold a row clear of the box border, the scrollbar lane -- and a small
+-- cushion so the fit is not exact at the one width where it binds.
+function ui.CraftMidFloor()
+    return CRAFT_COLS_END + ROWPAD.l + ROWPAD.r + CRAFTL.bar_lane
+        + CRAFTL.mid_cushion
+end
+
+-- Width the MIDDLE panel gets at a given window width.
 function ui.CraftMidWidthAt(w)
-    return ui.PanelWidthAt(w or 0)
-        - (CRAFTL.edge * 2) - CRAFTL.left_w - CRAFTL.right_w
-        - (CRAFTL.gap * 2)
+    local _, mid = ui.CraftWidthsAt(w)
+    return mid
 end
 
 -- ...and what a ROW in it gets: the panel, less the scrollbar lane, less the
@@ -4240,12 +4343,33 @@ end
 -- They pay no scrollbar lane -- their bar is hidden and the wheel scrolls them
 -- -- so a row is the panel less the two pads that hold it clear of the box
 -- border it sits inside.
-function ui.CraftSideRowW()
-    return CRAFTL.left_w - ROWPAD.l - ROWPAD.r
+function ui.CraftSideRowW(w)
+    local left = ui.CraftWidthsAt(w or MIN_W)
+    return left - CRAFTL.row_l - CRAFTL.row_r
 end
 
-function ui.CraftMadeRowW()
-    return CRAFTL.right_w - ROWPAD.l - ROWPAD.r
+function ui.CraftMadeRowW(w)
+    local _, _, right = ui.CraftWidthsAt(w or MIN_W)
+    return right - CRAFTL.row_l - CRAFTL.row_r
+end
+
+-- Where the middle panel STARTS, and how far its right edge sits inside the
+-- tab panel's. Both move with the window now that the outer two are shares.
+function ui.CraftMidX(w)
+    local left = ui.CraftWidthsAt(w or MIN_W)
+    return CRAFTL.edge + left + CRAFTL.gap
+end
+
+function ui.CraftMidR(w)
+    local _, _, right = ui.CraftWidthsAt(w or MIN_W)
+    return CRAFTL.edge + right + CRAFTL.gap
+end
+
+-- Half the left panel, less the gutter between the two things that sit in it:
+-- the Cost / Sells pair, and the Price recipe / Remove recipe buttons.
+function ui.CraftHalfW(w)
+    local left = ui.CraftWidthsAt(w or MIN_W)
+    return math.floor((left - CRAFTL.btn_gap) / 2)
 end
 
 -- Where a Crafting panel's BOX edge is drawn, given the list band inside it,
@@ -4360,7 +4484,7 @@ function ui.ColumnsFitAt(w)
     -- This used to measure the frame and was optimistic by the two pads --
     -- which is the same mistake the pads exist to correct, made one level up.
     local rowW = (w - 22) - rowLeft - BUYL.gutter_w - ROWPAD.l - ROWPAD.r
-    return BUY_COLS_END <= rowW
+    return BUY_COLS_END + BUYL.col_tail <= rowW
 end
 -- Post Filter clause rows in the Filter Builder.
 local FB_POST_ROWS = 9
@@ -7418,13 +7542,14 @@ local CSIDE_ROW_H  = CRAFT_ROW_H
 local MADE_ROWS,   MADE_ROWS_MAX   = 9, 34
 local MADE_ROW_H   = CRAFT_ROW_H
 
--- The three panels' left edges and widths, from CRAFTL. Functions rather than
--- constants for the two that depend on the window: the middle panel and the
--- right one both move when it is dragged, and a number captured at build time
--- is exactly the staleness ui.PanelWidthAt exists to stop.
-local CRAFT_MID_X = CRAFTL.edge + CRAFTL.left_w + CRAFTL.gap
--- ...and how far the middle panel's right edge sits inside the panel's.
-local CRAFT_MID_R = CRAFTL.edge + CRAFTL.right_w + CRAFTL.gap
+-- Where the middle panel STARTS, and how far its right edge sits inside the
+-- tab panel's.
+--
+-- FUNCTIONS OF THE WINDOW WIDTH, not constants. They were constants because
+-- the outer panels were fixed; now that those take a share of the width, a
+-- number captured at build time is exactly the staleness ui.PanelWidthAt
+-- exists to stop -- and it would have pinned the whole tab to its opening
+-- size while the window grew around it.
 -- How far the middle box reaches ABOVE its first row: enough for the column
 -- headers and the rule under them. The Buy and Sell tables draw the same band.
 -- ...measured from where ui.CraftBoxEdge would put a PLAIN list's box: the
@@ -7455,10 +7580,17 @@ function ui.BuildCraftTab()
     if not panel or ui.craftBuilt then return end
     ui.craftBuilt = true
     ui.craftExpanded = {}
+    -- Built at the CURRENT width; ui.LayoutCraftPanels re-places every one of
+    -- these when the window is dragged. Read once here rather than per widget
+    -- so a builder cannot end up with two different answers.
+    local leftW, _, rightW = ui.CraftWidthsAt(ui.WindowW())
+    local midX, midR = ui.CraftMidX(ui.WindowW()), ui.CraftMidR(ui.WindowW())
 
     -- ===== Left: tracked recipes ========================================
     local sideHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge, -CRAFTL.hdr_y)
+    ui.craftSideHdr = sideHdr
+    sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
+        -CRAFTL.hdr_y)
     sideHdr:SetText("Tracked")
     sideHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
@@ -7467,7 +7599,7 @@ function ui.BuildCraftTab()
     -- worth having without expanding anything.
     ui.craftShortFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftShortFS:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        CRAFTL.edge + CRAFTL.left_w - 70, -CRAFTL.hdr_y)
+        CRAFTL.edge + leftW - CRAFTL.row_r - 70, -CRAFTL.hdr_y)
     ui.craftShortFS:SetWidth(70)
     ui.craftShortFS:SetJustifyH("RIGHT")
 
@@ -7481,7 +7613,7 @@ function ui.BuildCraftTab()
     --
     -- Cost and Sells share one line as two halves; the NET moved to the
     -- footer, where a conclusion belongs and where the concept puts it.
-    local halfW = math.floor((CRAFTL.left_w - CRAFTL.btn_gap) / 2)
+    local halfW = ui.CraftHalfW(ui.WindowW())
 
     ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftCostFS:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
@@ -7490,7 +7622,7 @@ function ui.BuildCraftTab()
 
     ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftValueFS:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        CRAFTL.edge + CRAFTL.left_w - halfW, -CRAFTL.est_y)
+        CRAFTL.edge + leftW - halfW, -CRAFTL.est_y)
     ui.craftValueFS:SetWidth(halfW); ui.craftValueFS:SetJustifyH("RIGHT")
 
     -- Side by side rather than stacked: two full-width buttons cost 40px of
@@ -7505,7 +7637,7 @@ function ui.BuildCraftTab()
     local delBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftDelButton")
     delBtn:SetWidth(halfW); delBtn:SetHeight(CRAFTL.btn_h)
     delBtn:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        CRAFTL.edge + CRAFTL.left_w - halfW, -CRAFTL.btn_y)
+        CRAFTL.edge + leftW - halfW, -CRAFTL.btn_y)
     delBtn:SetText("Remove recipe")
     delBtn:SetScript("OnClick", function() ui.CraftDeleteProject() end)
     ui.craftDelBtn = delBtn
@@ -7515,7 +7647,7 @@ function ui.BuildCraftTab()
         -ui.CraftBoxEdge(LISTBOX.craftSide.top))
     sideBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge,
         ui.CraftBoxEdge(LISTBOX.craftSide.bot))
-    sideBox:SetWidth(CRAFTL.left_w)
+    sideBox:SetWidth(leftW)
     ui.craftSideBox = sideBox
 
     local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftSideScroll",
@@ -7524,7 +7656,7 @@ function ui.BuildCraftTab()
         -LISTBOX.craftSide.top)
     sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge,
         LISTBOX.craftSide.bot)
-    sideScroll:SetWidth(CRAFTL.left_w)
+    sideScroll:SetWidth(leftW)
     sideScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CSIDE_ROW_H, ui.UpdateCraftTree)
     end)
@@ -7539,9 +7671,9 @@ ui.GrowCraftSideRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(CSIDE_ROW_H)
-            row:SetWidth(ui.CraftSideRowW())
+            row:SetWidth(ui.CraftSideRowW(ui.WindowW()))
             if i == 1 then
-                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", CRAFTL.row_l, 0)
             else
                 row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1], "BOTTOMLEFT", 0, 0)
             end
@@ -7602,8 +7734,8 @@ ui.GrowCraftSideRows = function(n)
     -- on the bottom bar -- which is where the concept draws it.
     ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        CRAFTL.edge + ROWPAD.l, CRAFTL.foot_y)
-    ui.craftNetFS:SetWidth(ui.CraftSideRowW())
+        CRAFTL.edge + CRAFTL.row_l, CRAFTL.foot_y)
+    ui.craftNetFS:SetWidth(ui.CraftSideRowW(ui.WindowW()))
     ui.craftNetFS:SetJustifyH("LEFT")
 
 
@@ -7613,7 +7745,7 @@ ui.GrowCraftSideRows = function(n)
     -- panel look like the page and the other two like margin notes -- the
     -- concept gives all three panels one header row.
     ui.craftTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X + ROWPAD.l,
+    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", midX + ROWPAD.l,
         -CRAFTL.hdr_y)
     ui.craftTitle:SetText("Crafting")
     ui.craftTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -7621,7 +7753,7 @@ ui.GrowCraftSideRows = function(n)
     local box = CreateFrame("EditBox", "AegisExchangeCraftSearchBox", panel,
         "InputBoxTemplate")
     box:SetWidth(180); box:SetHeight(CRAFTL.strip_h)
-    box:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X + 6, -CRAFTL.strip_y)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", midX + 6, -CRAFTL.strip_y)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoCraftSearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
@@ -7638,11 +7770,12 @@ ui.GrowCraftSideRows = function(n)
     searchBtn:SetScript("OnClick", function() ui.DoCraftSearch() end)
 
     -- Pager (mirrors the Buy tab). Anchored to the MIDDLE panel's right edge,
-    -- which is CRAFT_MID_R inside the tab's -- there is a panel over there now.
+    -- which is midR inside the tab's -- there is a panel over there now.
     local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftNextButton")
     nextBtn:SetWidth(24); nextBtn:SetHeight(CRAFTL.pager_h)
-    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -CRAFT_MID_R,
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -midR,
         -CRAFTL.pager_y)
+    ui.craftNextBtn = nextBtn
     nextBtn:SetText(">")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
@@ -7661,9 +7794,9 @@ ui.GrowCraftSideRows = function(n)
     -- The middle box reaches UP past its scroll frame to enclose the column
     -- headers and the rule under them, exactly as the Buy and Sell tables do:
     -- ONE box around the headings AND the rows.
-    midBox:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X,
+    midBox:SetPoint("TOPLEFT", panel, "TOPLEFT", midX,
         -ui.CraftBoxEdge(LISTBOX.craft.top - CRAFT_HDR_BAND))
-    midBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -CRAFT_MID_R,
+    midBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -midR,
         ui.CraftBoxEdge(LISTBOX.craft.bot))
     ui.craftMidBox = midBox
 
@@ -7677,7 +7810,7 @@ ui.GrowCraftSideRows = function(n)
     local CX, CW = RCX, RCW
 
     -- Every column sorts (see ui.MakeSortHeaders); headers stay unskinned.
-    ui.craftHeaders = ui.MakeSortHeaders(panel, CRAFT_MID_X + ROWPAD.l,
+    ui.craftHeaders = ui.MakeSortHeaders(panel, midX + ROWPAD.l,
         -(LISTBOX.craft.top - CRAFT_HDR_BAND), CX, CW,
         function(key) ui.SetCraftSort(key) end)
 
@@ -7692,10 +7825,10 @@ ui.GrowCraftSideRows = function(n)
     -- is on the far side of it here is the right panel's border.
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeCraftScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X,
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", midX,
         -LISTBOX.craft.top)
     scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -(CRAFT_MID_R + CRAFTL.bar_lane), LISTBOX.craft.bot)
+        -(midR + CRAFTL.bar_lane), LISTBOX.craft.bot)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CRAFT_ROW_H, ui.UpdateCraftList)
     end)
@@ -7731,7 +7864,7 @@ ui.GrowCraftRows = function(n)
     -- is in the table, and the concept puts them on the table's bottom bar.
     ui.craftStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftStatus:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        CRAFT_MID_X + ROWPAD.l, CRAFTL.foot_y)
+        midX + ROWPAD.l, CRAFTL.foot_y)
     ui.craftStatus:SetJustifyH("LEFT")
     ui.craftStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.craftStatus:SetText("Click a reagent on the left to shop for it.")
@@ -7740,7 +7873,7 @@ ui.GrowCraftRows = function(n)
     -- same bar. The whole reason the middle panel is showing this item.
     ui.craftNeedFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftNeedFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -(CRAFT_MID_R + CRAFTL.bar_lane + ROWPAD.r), CRAFTL.foot_y)
+        -(midR + CRAFTL.bar_lane + ROWPAD.r), CRAFTL.foot_y)
     ui.craftNeedFS:SetJustifyH("RIGHT")
 
     -- ===== Right: made this session =====================================
@@ -7748,9 +7881,10 @@ ui.GrowCraftRows = function(n)
     -- the right panel is a fixed width pinned to that edge, so it is the one
     -- thing on the tab whose x does not move when the window is dragged.
     local madeHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.craftMadeHdr = madeHdr
     madeHdr:SetPoint("TOPRIGHT", panel, "TOPRIGHT",
         -(CRAFTL.edge + 46), -CRAFTL.hdr_y)
-    madeHdr:SetWidth(CRAFTL.right_w - 46)
+    madeHdr:SetWidth(rightW - 46 - CRAFTL.row_l)
     madeHdr:SetJustifyH("LEFT")
     madeHdr:SetText("Made this session")
     madeHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
@@ -7768,7 +7902,7 @@ ui.GrowCraftRows = function(n)
         -ui.CraftBoxEdge(LISTBOX.craftMade.top))
     madeBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -CRAFTL.edge,
         ui.CraftBoxEdge(LISTBOX.craftMade.bot))
-    madeBox:SetWidth(CRAFTL.right_w)
+    madeBox:SetWidth(rightW)
     ui.craftMadeBox = madeBox
 
     local madeScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftMadeScroll",
@@ -7777,7 +7911,7 @@ ui.GrowCraftRows = function(n)
         -LISTBOX.craftMade.top)
     madeScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -CRAFTL.edge,
         LISTBOX.craftMade.bot)
-    madeScroll:SetWidth(CRAFTL.right_w)
+    madeScroll:SetWidth(rightW)
     madeScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(MADE_ROW_H, ui.UpdateCraftMade)
     end)
@@ -7790,9 +7924,9 @@ ui.GrowCraftMadeRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(MADE_ROW_H)
-            row:SetWidth(ui.CraftMadeRowW())
+            row:SetWidth(ui.CraftMadeRowW(ui.WindowW()))
             if i == 1 then
-                row:SetPoint("TOPLEFT", madeScroll, "TOPLEFT", ROWPAD.l, 0)
+                row:SetPoint("TOPLEFT", madeScroll, "TOPLEFT", CRAFTL.row_l, 0)
             else
                 row:SetPoint("TOPLEFT", ui.craftMadeRows[i - 1], "BOTTOMLEFT", 0, 0)
             end
@@ -7818,8 +7952,8 @@ ui.GrowCraftMadeRows = function(n)
 
     ui.craftMadeFootFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftMadeFootFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
-        -(CRAFTL.edge + ROWPAD.r), CRAFTL.foot_y)
-    ui.craftMadeFootFS:SetWidth(CRAFTL.right_w - ROWPAD.l - ROWPAD.r)
+        -(CRAFTL.edge + CRAFTL.row_r), CRAFTL.foot_y)
+    ui.craftMadeFootFS:SetWidth(ui.CraftMadeRowW(ui.WindowW()))
     ui.craftMadeFootFS:SetJustifyH("RIGHT")
     ui.craftMadeFootFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
@@ -7843,7 +7977,103 @@ ui.GrowCraftMadeRows = function(n)
         end
     end
 
+    ui.LayoutCraftPanels()
     ui.RefreshCraftTree()
+end
+
+-- Re-place everything on the Crafting tab whose x depends on the window width.
+--
+-- THE WHOLE TAB IS IN HERE, and that is deliberate. The outer panels are a
+-- share of the width now, so every anchor measured from the left edge, the
+-- right edge, or the middle panel's origin moves when the window is dragged --
+-- and one widget left behind is a heading floating over the wrong panel.
+--
+-- Called from the builder (so a tab built at any size is correct immediately)
+-- and from ui.LayoutAll (so it follows the resize grip). Two callers, one
+-- list -- the reason ui.LayoutAll exists at all.
+function ui.LayoutCraftPanels()
+    local panel = ui.panels and ui.panels["Crafting"]
+    if not panel or not ui.craftBuilt then return end
+    local w = ui.WindowW()
+    local leftW, _, rightW = ui.CraftWidthsAt(w)
+    local midX, midR = ui.CraftMidX(w), ui.CraftMidR(w)
+    local halfW = ui.CraftHalfW(w)
+
+    local function place(f, point, rel, relPoint, x, y)
+        if not f then return end
+        f:ClearAllPoints()
+        f:SetPoint(point, rel, relPoint, x, y)
+    end
+
+    -- ---- left panel -----------------------------------------------------
+    place(ui.craftSideHdr, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge + CRAFTL.row_l, -CRAFTL.hdr_y)
+    place(ui.craftShortFS, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge + leftW - CRAFTL.row_r - 70, -CRAFTL.hdr_y)
+    place(ui.craftCostFS, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge, -CRAFTL.est_y)
+    place(ui.craftValueFS, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge + leftW - halfW, -CRAFTL.est_y)
+    if ui.craftCostFS  then ui.craftCostFS:SetWidth(halfW)  end
+    if ui.craftValueFS then ui.craftValueFS:SetWidth(halfW) end
+    place(ui.craftPriceBtn, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge, -CRAFTL.btn_y)
+    place(ui.craftDelBtn, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge + leftW - halfW, -CRAFTL.btn_y)
+    if ui.craftPriceBtn then ui.craftPriceBtn:SetWidth(halfW) end
+    if ui.craftDelBtn   then ui.craftDelBtn:SetWidth(halfW)   end
+    if ui.craftSideBox    then ui.craftSideBox:SetWidth(leftW)    end
+    if ui.craftSideScroll then ui.craftSideScroll:SetWidth(leftW) end
+    local sideRowW = ui.CraftSideRowW(w)
+    local i = 1
+    while i <= table.getn(ui.craftSideRows or {}) do
+        ui.craftSideRows[i]:SetWidth(sideRowW)
+        i = i + 1
+    end
+    if ui.craftNetFS then ui.craftNetFS:SetWidth(sideRowW) end
+
+    -- ---- middle panel ---------------------------------------------------
+    place(ui.craftTitle, "TOPLEFT", panel, "TOPLEFT",
+          midX + ROWPAD.l, -CRAFTL.hdr_y)
+    place(ui.craftBox, "TOPLEFT", panel, "TOPLEFT", midX + 6, -CRAFTL.strip_y)
+    place(ui.craftNextBtn, "TOPRIGHT", panel, "TOPRIGHT",
+          -midR, -CRAFTL.pager_y)
+    if ui.craftMidBox then
+        ui.craftMidBox:ClearAllPoints()
+        ui.craftMidBox:SetPoint("TOPLEFT", panel, "TOPLEFT", midX,
+            -ui.CraftBoxEdge(LISTBOX.craft.top - CRAFT_HDR_BAND))
+        ui.craftMidBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -midR,
+            ui.CraftBoxEdge(LISTBOX.craft.bot))
+    end
+    for key, b in pairs(ui.craftHeaders or {}) do
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", panel, "TOPLEFT",
+            midX + ROWPAD.l + (RCX[key] or 0),
+            -(LISTBOX.craft.top - CRAFT_HDR_BAND))
+    end
+    if ui.craftScroll then
+        ui.craftScroll:ClearAllPoints()
+        ui.craftScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", midX,
+            -LISTBOX.craft.top)
+        ui.craftScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+            -(midR + CRAFTL.bar_lane), LISTBOX.craft.bot)
+    end
+    place(ui.craftStatus, "BOTTOMLEFT", panel, "BOTTOMLEFT",
+          midX + ROWPAD.l, CRAFTL.foot_y)
+    place(ui.craftNeedFS, "BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+          -(midR + CRAFTL.bar_lane + ROWPAD.r), CRAFTL.foot_y)
+
+    -- ---- right panel ----------------------------------------------------
+    if ui.craftMadeHdr then ui.craftMadeHdr:SetWidth(rightW - 46 - CRAFTL.row_l) end
+    if ui.craftMadeBox    then ui.craftMadeBox:SetWidth(rightW)    end
+    if ui.craftMadeScroll then ui.craftMadeScroll:SetWidth(rightW) end
+    local madeRowW = ui.CraftMadeRowW(w)
+    local mi = 1
+    while mi <= table.getn(ui.craftMadeRows or {}) do
+        ui.craftMadeRows[mi]:SetWidth(madeRowW)
+        mi = mi + 1
+    end
+    if ui.craftMadeFootFS then ui.craftMadeFootFS:SetWidth(madeRowW) end
 end
 
 -- ---- recipe-tree model + paint -----------------------------------------
@@ -12513,13 +12743,29 @@ function ui.LinkTargetFor(focus, targets)
     return nil
 end
 
+-- Does this click belong to us? Shift + LEFT on a bag item, with no chat
+-- message being composed.
+--
+-- THE CONDITIONS ARE THE CLIENT'S OWN, read off the 1.12 ContainerFrame
+-- source rather than guessed. Its handler takes the branch on
+-- `button == "LeftButton"`, `IsShiftKeyDown()` and `not ignoreModifiers`, and
+-- within that branch it inserts into chat ONLY when ChatFrameEditBox is shown
+-- -- otherwise it opens the stack-split dialog. We slot in exactly where that
+-- split dialog would go, so every other thing a click on a bag item does is
+-- untouched.
+--
+-- CHAT WINS, and that is not a courtesy: shift-clicking while composing a
+-- message means "put it in the message" everywhere else in the game.
+function ui.ShiftClickIsOurs(button, ignoreModifiers)
+    if button ~= "LeftButton" then return false end
+    if ignoreModifiers then return false end
+    if not IsShiftKeyDown or not IsShiftKeyDown() then return false end
+    if ChatFrameEditBox and ChatFrameEditBox:IsShown() then return false end
+    return true
+end
+
 -- Take a link if we want it. Returns true when it was consumed.
 function ui.InsertItemLink(link)
-    -- CHAT WINS. If the player is typing a message, a shift-clicked item
-    -- belongs in that message -- that is what the gesture means everywhere
-    -- else in the game, and taking it would be a surprise, not a feature.
-    if ChatFrameEditBox and ChatFrameEditBox:IsVisible() then return false end
-
     local name = util.ItemNameFromLink(link)
     if not name then
         -- A bare itemstring carries no name. Ask the client, which is cheap
@@ -12571,21 +12817,68 @@ function ui.RegisterLinkTarget(box)
     return box
 end
 
--- The hook itself. ChatEdit_InsertLink is what the client calls for EVERY
--- shift-click on an item -- bags, the character sheet, a loot window, a
--- merchant, another player's link in chat -- so hooking it once covers all of
--- them instead of hooking each frame's OnClick.
+-- The link a shift-click means, off the button the client left in `this`.
+--
+-- Defensive about every step: `this` is a global the client owns, and this
+-- runs on every click on a bag slot in the game.
+function ui.ContainerLinkFor(btn)
+    if not btn or not btn.GetID or not btn.GetParent then return nil end
+    local bag = btn:GetParent()
+    if not bag or not bag.GetID then return nil end
+    if not GetContainerItemLink then return nil end
+    return GetContainerItemLink(bag:GetID(), btn:GetID())
+end
+
+function ui.TakeContainerShiftClick(button, ignoreModifiers)
+    if not ui.ShiftClickIsOurs(button, ignoreModifiers) then return false end
+    local link = ui.ContainerLinkFor(this)
+    if not link then return false end
+    if ui.InsertItemLink(link) then return true end
+    return false
+end
+
+-- THE HOOK, and it took a look at the client's own source to get right.
+--
+-- The first attempt hooked ChatEdit_InsertLink, on the reasoning that the
+-- client routes every shift-click through it. THAT IS NOT TRUE ON 1.12.
+-- ContainerFrame.lua inserts into ChatFrameEditBox DIRECTLY:
+--
+--     elseif ( IsShiftKeyDown() and not ignoreModifiers ) then
+--         if ( ChatFrameEditBox:IsShown() ) then
+--             ChatFrameEditBox:Insert(GetContainerItemLink(...));
+--         else
+--             ... OpenStackSplitFrame ...
+--
+-- so the hook never fired for a bag item and shift+left-click opened the
+-- stack-split dialog instead. ChatEdit_InsertLink is a LATER client's idea.
 --
 -- SAVED ORIGINAL + REPLACEMENT, never a secure hook (HARD RULE 7). Ours gets
--- first refusal and falls through whenever it does not want the link, so chat,
--- the Blizzard auction house and anything else that consumes this keep working
+-- first refusal and falls through whenever it does not want the click, so
+-- picking up, splitting, Ctrl-dressing and every right-click path behave
 -- exactly as they did.
+if type(ContainerFrameItemButton_OnClick) == "function" then
+    ui.origContainerClick = ContainerFrameItemButton_OnClick
+    ContainerFrameItemButton_OnClick = function(button, ignoreModifiers)
+        -- pcall: this is on the click path for every bag slot in the game,
+        -- including with our window shut. An error here would break picking
+        -- items up for the whole session.
+        local ok, took = pcall(ui.TakeContainerShiftClick, button, ignoreModifiers)
+        if ok and took then return end
+        return ui.origContainerClick(button, ignoreModifiers)
+    end
+end
+
+-- ...and ChatEdit_InsertLink as well WHERE IT EXISTS. It is absent from stock
+-- 1.12, so on a bare client this installs nothing -- but a bag replacement
+-- (pfUI's, for one) does not go through ContainerFrameItemButton_OnClick at
+-- all, and the ones that reimplement the gesture reach for this. Guarded, so
+-- it costs nothing when there is nothing to hook.
 if type(ChatEdit_InsertLink) == "function" then
     ui.origInsertLink = ChatEdit_InsertLink
     ChatEdit_InsertLink = function(text)
-        -- pcall: this runs on a client function every shift-click in the game
-        -- makes, including with our window shut. An error here would break
-        -- linking into chat for the whole session.
+        if ChatFrameEditBox and ChatFrameEditBox:IsShown() then
+            return ui.origInsertLink(text)
+        end
         local ok, took = pcall(ui.InsertItemLink, text)
         if ok and took then return true end
         return ui.origInsertLink(text)
