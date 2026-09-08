@@ -8090,6 +8090,11 @@ end
 -- Move `delta` pages and ask the server for that one. The reply lands as
 -- AUCTION_OWNED_LIST_UPDATE, which repaints.
 function ui.AucStepPage(delta)
+    -- The player wants a specific page, so the background sweep stops asking
+    -- for its own. Their click is a real intent; ours is bookkeeping, and two
+    -- things driving GetOwnerAuctionItems would fight over the one page the
+    -- client holds. The sweep restarts on the next visit.
+    A.sell.CancelOwnerSweep()
     local page, pages = A.sell.OwnerPageInfo()
     local want = page + delta
     if want < 0 then want = 0 end

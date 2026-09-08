@@ -502,6 +502,33 @@ function GetAuctionSellItemInfo()
 end
 
 -- ---------------------------------------------------------------------------
+-- Mailbox
+-- ---------------------------------------------------------------------------
+
+-- 1.12 has NO GetInboxItemLink -- an attachment can be NAMED and not
+-- identified, which is why anything counting mail has to resolve through the
+-- scan-fed name map and quietly misses what that map has never seen. Modelling
+-- that gap matters: a mock that handed back a link would make the addon look
+-- like it could do something the client cannot.
+W.inbox = {}          -- array of { name, count, subject, money, daysLeft }
+function W.SetInbox(rows) W.inbox = rows or {} end
+
+function GetInboxNumItems() return table.getn(W.inbox) end
+
+function GetInboxItem(index)
+    local m = W.inbox[index]
+    if not m or not m.name then return nil end
+    return m.name, "icon", m.count or 1, m.quality or 1, 1
+end
+
+function GetInboxHeaderInfo(index)
+    local m = W.inbox[index]
+    if not m then return nil end
+    return "icon", 0, m.sender or "Someone", m.subject or "",
+           m.money or 0, 0, m.daysLeft or 30
+end
+
+-- ---------------------------------------------------------------------------
 -- GameTooltip
 -- ---------------------------------------------------------------------------
 
@@ -560,6 +587,7 @@ function GameTooltip:SetCraftSpell(i) gttCall("SetCraftSpell", i) end
 -- hooks does not leak them into the next one.
 function W.ResetTooltip()
     W.tooltipCalls  = {}
+    W.inbox         = {}
     W.tooltipThrows = {}
     GameTooltip.lines = {}
     GameTooltip.shown = 0
@@ -828,6 +856,7 @@ function W.Reset()
     W.itemInfoCalls = 0
     W.merchant      = {}
     W.tooltipCalls  = {}
+    W.inbox         = {}
     W.tooltipThrows = {}
     W.class         = "MAGE"
     W.player        = "Tester"

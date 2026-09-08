@@ -2757,6 +2757,47 @@ the bank was meant (every bank reads empty, which looks exactly like "you have
 none there"), and dropping `-1` so the bank bags count and the bank's own slots
 do not.
 
+#### §3 The inventory block, the whole account — v1.54.0
+
+Auctions, mail and other characters. Two of the three needed a shape rather
+than a function.
+
+**Auctions are a SWEEP, because the client holds one page.** The same
+constraint the Auctions tab lives with: fifty at a time, so a book bigger than
+that cannot be counted from whatever page happens to be loaded. It walks the
+pages on `AUCTION_HOUSE_SHOW`, driven by `AUCTION_OWNED_LIST_UPDATE`, bounded
+by `OWNER_SWEEP_MAX_PAGES` because the exit condition is "we reached the last
+page" and a total that never shrinks would walk for ever.
+
+**And it yields.** Two things driving `GetOwnerAuctionItems` would fight over
+the one page the client holds, so pressing Next on the Auctions tab cancels the
+sweep -- the player's click is a real intent, ours is bookkeeping. It restarts
+on the next visit. Closing the auction house cancels it too, rather than
+leaving it armed for a different character's book.
+
+An empty book is RECORDED, not skipped. Cancelling your last auction has to
+clear the count, or the old number sits on the tooltip until you post again --
+which is the failure mode of every cache that only ever writes on success.
+
+**Mail is the dirty-flag shape, and this is the case HARD RULE 16 was written
+for.** `MAIL_INBOX_UPDATE` is *the* storm event, and reading an attachment is a
+per-item call. The handler sets a boolean and shows a driver frame; the driver
+does the work once and hides itself in the same frame. It cannot wait for a
+hover the way bags do -- the mailbox only answers while you are standing at it,
+and by the time anyone hovers an item they have walked away.
+
+**The honest limit:** 1.12 has no `GetInboxItemLink`. An attachment can be
+NAMED and not identified, so mail counts resolve through the scan-fed name map
+and quietly miss anything that map has never seen. The mock models that gap
+deliberately -- handing back a link would make the addon look capable of
+something the client is not.
+
+**Alts needed almost nothing**, which is the payoff of §2's shape: one snapshot
+per character while it is logged in, and the reader already iterated every
+character on the realm. The only ordering rule that matters is that YOU come
+first -- your row is the one you are acting on, the rest are context for it --
+then whoever holds the most, so a glance finds where the stock actually is.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

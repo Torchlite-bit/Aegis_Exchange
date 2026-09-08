@@ -196,4 +196,199 @@ db.realmKey = db.RealmKey()
 H.check("...and going back finds it again",
         table.getn(db.InventoryRows(4306, nil)) > 0)
 
+-- ---------------------------------------------------------------------------
+H.section("what is at auction -- a sweep, because the client holds one page")
+-- ---------------------------------------------------------------------------
+
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db, sell = A.db, A.sell
+W.AddItem(4306, { name = "Silk Cloth", quality = 1 })
+W.AddItem(2589, { name = "Linen Cloth", quality = 1 })
+SILK = W.items[4306].link
+local LINEN2 = W.items[2589].link
+
+local function owned(n, link, name, count)
+    local rows = {}
+    for i = 1, n do
+        rows[i] = { name = name, count = count or 1, buyout = 100,
+                    minBid = 50, quality = 1, level = 1, link = link }
+    end
+    return rows
+end
+
+-- More than one page, which is the case the sweep exists for: the client
+-- holds fifty at a time and a book bigger than that cannot be counted from
+-- whatever page happens to be loaded.
+local book = owned(50, SILK, "Silk Cloth", 2)
+local more = owned(20, LINEN2, "Linen Cloth", 3)
+local all = {}
+for i = 1, 50 do all[i] = book[i] end
+for i = 1, 20 do all[50 + i] = more[i] end
+W.SetOwned(all)
+
+W.FireEvent(A.frame, "AUCTION_HOUSE_SHOW")
+H.check("a sweep started", sell.ownerSweep ~= nil)
+-- Each request answers with AUCTION_OWNED_LIST_UPDATE; drive it the way the
+-- client does until the sweep is done.
+local guard = 0
+while sell.ownerSweep and guard < 10 do
+    W.FireEvent(A.frame, "AUCTION_OWNED_LIST_UPDATE")
+    guard = guard + 1
+end
+H.isNil("the sweep finished", sell.ownerSweep)
+
+local arows = db.InventoryRows(4306, nil)
+H.eq("stacks at auction are counted, not auctions", arows[1].ah, 100)
+local lrows2 = db.InventoryRows(2589, nil)
+H.eq("...across every page", lrows2[1].ah, 60)
+
+-- Cancelling your last auction has to be RECORDED, or the old count sits on
+-- the tooltip until you post again.
+W.SetOwned({})
+W.FireEvent(A.frame, "AUCTION_HOUSE_SHOW")
+guard = 0
+while sell.ownerSweep and guard < 10 do
+    W.FireEvent(A.frame, "AUCTION_OWNED_LIST_UPDATE"); guard = guard + 1
+end
+H.eq("an empty book clears the count",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+
+-- ---------------------------------------------------------------------------
+H.section("...and the sweep yields to the player")
+-- ---------------------------------------------------------------------------
+
+-- Two things driving GetOwnerAuctionItems would fight over the one page the
+-- client holds. The player's click wins; ours is bookkeeping.
+W.SetOwned(all)
+W.FireEvent(A.frame, "AUCTION_HOUSE_SHOW")
+H.check("a sweep is running", sell.ownerSweep ~= nil)
+sell.CancelOwnerSweep()
+H.isNil("cancelling stops it", sell.ownerSweep)
+H.eq("...and a stray page update does nothing", sell.OwnerSweepStep(), false)
+
+-- Walking away stops it too, rather than leaving it armed for next time.
+W.FireEvent(A.frame, "AUCTION_HOUSE_SHOW")
+H.check("a sweep is running again", sell.ownerSweep ~= nil)
+W.FireEvent(A.frame, "AUCTION_HOUSE_CLOSED")
+H.isNil("closing the auction house cancels it", sell.ownerSweep)
+
+-- ---------------------------------------------------------------------------
+H.section("what is in the post")
+-- ---------------------------------------------------------------------------
+
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db, sell = A.db, A.sell
+W.AddItem(4306, { name = "Silk Cloth", quality = 1 })
+
+-- 1.12 has no GetInboxItemLink, so mail resolves BY NAME through the map the
+-- scanner fills. An item that map has never seen cannot be identified at all.
+db.RecordAuction(4306, 500, "Silk Cloth")
+W.SetInbox({
+    { name = "Silk Cloth", count = 12 },
+    { name = "Silk Cloth", count = 8 },
+    { name = "Something Never Scanned", count = 5 },
+})
+
+-- HARD RULE 16: the handler may only set a flag. MAIL_INBOX_UPDATE is the
+-- storm event -- dozens of fires in a few frames while attachments resolve --
+-- and the read is per attachment.
+W.FireEvent(A.frame, "MAIL_INBOX_UPDATE")
+H.eq("the handler only marks it dirty", sell.mailDirty, true)
+H.eq("...and records nothing yet",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+
+-- The driver does the work, once.
+W.Tick(sell.invDriver, 0.1)
+H.eq("the flush clears the flag", sell.mailDirty, false)
+local mrows = db.InventoryRows(4306, nil)
+H.eq("mail is counted, stacks summed", mrows[1].mail, 20)
+
+-- A storm of fires is still one flush.
+W.FireEvent(A.frame, "MAIL_INBOX_UPDATE")
+W.FireEvent(A.frame, "MAIL_INBOX_UPDATE")
+W.FireEvent(A.frame, "MAIL_INBOX_UPDATE")
+H.eq("still just a flag", sell.mailDirty, true)
+W.Tick(sell.invDriver, 0.1)
+H.eq("one flush clears it", sell.mailDirty, false)
+H.eq("...and the driver stops running itself",
+     sell.invDriver.shown, false)
+
+-- An item the name map has never seen is skipped rather than guessed at.
+local counts = sell.MailCounts()
+local seen = 0
+for _ in pairs(counts) do seen = seen + 1 end
+H.eq("only the item we can identify is counted", seen, 1)
+
+-- ---------------------------------------------------------------------------
+H.section("the whole account, not just the character you are on")
+-- ---------------------------------------------------------------------------
+
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db, sell = A.db, A.sell
+W.AddItem(4306, { name = "Silk Cloth", quality = 1 })
+SILK = W.items[4306].link
+
+-- Play three characters in turn, each leaving a snapshot behind. Nothing on
+-- 1.12 can read another character's inventory, so this -- one write per
+-- character while it is logged in -- is the only route there is.
+local function playAs(name, class, bags, bank)
+    W.player, W.class = name, class
+    W.SetBags(bags)
+    sell.bagsDirty = true
+    if bank then
+        local merged = {}
+        for k, v in pairs(bags) do merged[k] = v end
+        for k, v in pairs(bank) do merged[k] = v end
+        W.SetBags(merged)
+        sell.bagsDirty = true
+        W.FireEvent(A.frame, "BANKFRAME_OPENED")
+    else
+        sell.SnapshotBags()
+    end
+end
+
+playAs("Torchlight", "MAGE",
+       { [0] = { { link = SILK, count = 3 } } },
+       { [-1] = { { link = SILK, count = 5 } } })
+playAs("Subtilizer", "ROGUE",
+       { [0] = { { link = SILK, count = 10 } } },
+       { [-1] = { { link = SILK, count = 9 } } })
+playAs("Torchlite", "DRUID",
+       { [0] = { { link = SILK, count = 1 } } }, nil)
+
+-- Back on the first one, hovering the item.
+W.player, W.class = "Torchlight", "MAGE"
+W.SetBags({ [0] = { { link = SILK, count = 3 } },
+            [-1] = { { link = SILK, count = 5 } } })
+sell.bagsDirty = true
+
+local accRows, accTotal = db.InventoryRows(4306, sell.BagCounts())
+H.eq("all three characters appear", table.getn(accRows), 3)
+H.eq("...and the total spans them", accTotal, 3 + 5 + 10 + 9 + 1)
+
+-- YOU come first. Your row is the one you are acting on; the rest are context.
+H.eq("the character you are on leads", accRows[1].name, "Torchlight")
+H.eq("...and is marked as you", accRows[1].you, true)
+H.eq("...the rest are not", accRows[2].you, false)
+
+-- ...then the biggest holdings, so a glance finds where the stock actually is.
+H.eq("then the largest holding", accRows[2].name, "Subtilizer")
+H.eq("...then the smallest", accRows[3].name, "Torchlite")
+
+-- The class token is what lets the tooltip colour a name, and it can only be
+-- captured while that character is logged in.
+H.eq("each character kept its class", accRows[1].class, "MAGE")
+H.eq("...", accRows[2].class, "ROGUE")
+H.eq("...", accRows[3].class, "DRUID")
+
+-- An alt's numbers are memories, so they carry an age; yours are live bags
+-- plus a bank snapshot.
+H.check("an alt's row is aged", accRows[2].oldest ~= nil)
+
 os.exit(H.report("inventory"))

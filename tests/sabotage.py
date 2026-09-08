@@ -2131,6 +2131,67 @@ end
     return db.account.inventoryAll""",
      "inventory"),
 
+    # ---- auctions and mail ------------------------------------------------
+    # The sweep reads only the page the client happens to hold, so a book
+    # bigger than fifty is silently short -- and it is short by exactly the
+    # auctions you forgot about, which is what the column is for.
+    ("inventory-ah-reads-one-page", "core/sell.lua",
+     "    if sw.page < sw.pages then",
+     "    if false then",
+     "inventory"),
+
+    # Auctions counted rather than items: fifty stacks of two reads as fifty.
+    ("inventory-ah-counts-auctions", "core/sell.lua",
+     "            sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + (r.count or 1)",
+     "            sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + 1",
+     "inventory"),
+
+    # An empty book not recorded, so cancelling your last auction leaves the
+    # old count on the tooltip until you post again.
+    ("inventory-ah-empty-book-not-recorded", "core/sell.lua",
+     "        sell.FinishOwnerSweep({})\n        return nil",
+     "        return nil",
+     "inventory"),
+
+    # The sweep does not yield, so it fights the player for the one page the
+    # client holds every time they press Next.
+    ("inventory-sweep-ignores-the-player", "core/sell.lua",
+     "function sell.CancelOwnerSweep()\n    sell.ownerSweep = nil\nend",
+     "function sell.CancelOwnerSweep()\nend",
+     "inventory"),
+
+    # The mail read done INSIDE the storm handler -- the HARD RULE 16
+    # violation this whole shape exists to avoid.
+    ("inventory-mail-reads-in-the-handler", "core/sell.lua",
+     """    A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+        sell.mailDirty = true
+        sell.invDriver:Show()
+    end)""",
+     """    A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+        sell.SnapshotMail()
+    end)""",
+     "inventory"),
+
+    # Mail stacks counted as one letter each.
+    ("inventory-mail-counts-letters", "core/sell.lua",
+     "        if id then out[id] = (out[id] or 0) + (count or 1) end",
+     "        if id then out[id] = (out[id] or 0) + 1 end",
+     "inventory"),
+
+    # The driver never stops, so an OnUpdate runs for the rest of the session
+    # doing nothing.
+    ("inventory-driver-never-stops", "core/sell.lua",
+     "    if not sell.mailDirty then sell.invDriver:Hide() end",
+     "",
+     "inventory"),
+
+    # Rows no longer ordered with YOU first, so the row you are acting on is
+    # wherever the alphabet put it.
+    ("inventory-you-not-first", "core/db.lua",
+     "        if a.you ~= b.you then return a.you end",
+     "",
+     "inventory"),
+
     # ---- purchased this session -------------------------------------------
     # Counting AUCTIONS instead of units. The number stays plausible and is
     # wrong by the stack size on every row -- "purchased 2" after buying two

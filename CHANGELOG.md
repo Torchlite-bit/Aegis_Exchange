@@ -12,6 +12,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.0]
+
+Third of four pieces of ROADMAP 2h. The Crafting tab is the last one.
+
+### Added
+- **The Inventory block now covers your whole account.** Every character on the
+  realm that holds the item, each in their **class colour**, the one you are on
+  at full strength and the rest held back:
+
+  ```
+  Inventory                                    66 total
+      Torchlight     25  (3 bags, 5 bank, 17 ah)
+      Subtilizer     39  (10 bags, 9 bank, 10 ah, 10 mail)
+      Torchlite       2  (1 bags, 1 bank)
+      bags are live; bank, auctions and mail are as of your last visit
+  ```
+  - **Your auctions are counted across every page.** The client only holds
+    fifty at a time, so this walks the pages when the auction house opens — and
+    **yields the moment you press Next** on the Auctions tab, because your click
+    is a real intent and the bookkeeping is not. It restarts on your next visit.
+  - **Your mailbox is counted too**, behind a dirty flag flushed once per frame.
+    `MAIL_INBOX_UPDATE` is *the* storm event and reading an attachment is a
+    per-item call — doing it in the handler is what hard-froze another addon.
+    - 1.12 has **no** `GetInboxItemLink`, so an attachment can be named but not
+      identified. Mail counts resolve through the name map the scanner fills,
+      which means they cover what you trade in and quietly miss the rest. That
+      is the honest limit of the API, not a bug.
+  - You appear first, then whoever holds the most — a glance finds where the
+    stock actually is.
+  - Cancelling your last auction clears the count rather than leaving the old
+    number up until you post again.
+
+---
+
 ## [1.53.1]
 
 ### Fixed
@@ -3964,6 +3998,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
