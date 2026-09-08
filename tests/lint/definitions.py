@@ -68,6 +68,19 @@ REMOVED_ON_PURPOSE = {
                     "this plain-text box had no callers left",
     "ui.CountChecked": "v1.50.1 -- UpdateSelCount counts ui.CollectQueries, "
                        "which is the number the button actually shows",
+    # v1.52.6. The shopping-list ENGINE, unreachable since the Advanced
+    # redesign removed the sidebar that was its only caller. It was kept on
+    # the reasoning that re-homing the feature would cost a UI rather than a
+    # rewrite -- and then the Crafting tab's tracked recipes turned out to BE
+    # that feature's shape and were built on `crafting` instead. The saved
+    # data (account.shopping.lists) is deliberately NOT deleted.
+    "buy.Lists":  "v1.52.6 -- the shopping-list engine; tracked recipes are "
+                  "the same idea built on `crafting`",
+    "buy.AddList":            "v1.52.6 -- with buy.Lists",
+    "buy.RenameList":         "v1.52.6 -- with buy.Lists",
+    "buy.DeleteList":         "v1.52.6 -- with buy.Lists",
+    "buy.AddItemToList":      "v1.52.6 -- with buy.Lists",
+    "buy.RemoveItemFromList": "v1.52.6 -- with buy.Lists",
 }
 
 

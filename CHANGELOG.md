@@ -18,6 +18,37 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.6]
+
+The housekeeping pass 2h kept deferring things into. No behaviour change —
+one deletion the owner had already settled, and three layout guarantees that
+were written down and never enforced.
+
+### Removed
+- **The shopping-list engine** — `buy.Lists`, `AddList`, `RenameList`,
+  `DeleteList`, `AddItemToList`, `RemoveItemFromList`. Unreachable since the
+  Advanced redesign removed the sidebar that was their only caller, and kept on
+  the reasoning that re-homing the feature would cost a UI rather than a
+  rewrite. The Crafting tab's tracked recipes turned out to *be* that feature's
+  shape and were built on `crafting` instead, so nothing was coming back.
+  - **The saved data is NOT deleted.** A player who used the sidebar before the
+    redesign still has their lists in SavedVariables; dropping the field would
+    erase them on the next save, which is the one thing MAJOR is reserved for.
+    An unread table costs nothing.
+
+### Internal
+- **Three guarantees that asserted nothing are now asserted.**
+  `ui.StripFitsAt`, `ui.AllCategoriesFitAt` and `ui.TableSlack` each compute
+  whether a layout promise holds at a given window size, and each was written
+  so the arithmetic "lives here, where it can be checked" — and then nothing
+  checked it. `ui.AllCategoriesFitAt` said *"Asserted true at MIN_H"* in its
+  own comment, which was not true of anything. Six new sabotages.
+- **The suite's constant reader was silently wrong on a wrapped expression.**
+  `BUY_STRIP_W` is a sum written over two lines; stopping at the first returned
+  300 instead of 538 — a number that compiles, looks plausible, and makes a fit
+  check pass at every width. It reads the continuation now, and there is a
+  sabotage that removes the second line.
+
 ## [1.52.5]
 
 The second half of ROADMAP 2h §4 — the Crafting tab rebuilt as three panels
@@ -4093,6 +4124,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

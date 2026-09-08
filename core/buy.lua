@@ -68,11 +68,6 @@ local function Store()
     return A.db and A.db.account and A.db.account.shopping
 end
 
-function buy.Lists()
-    local s = Store()
-    return s and s.lists or {}
-end
-
 function buy.Recent()
     local s = Store()
     return s and s.recent or {}
@@ -171,57 +166,20 @@ function buy.MoveFavorite(index, dir)
     return to
 end
 
-function buy.AddList(name)
-    local s = Store()
-    if not s or not name or name == "" then return nil end
-    local list = { name = name, items = {} }
-    table.insert(s.lists, list)
-    return list
-end
-
-function buy.RenameList(index, name)
-    local s = Store()
-    if not s or not name or name == "" then return end
-    local list = s.lists[index]
-    if list then list.name = name end
-end
-
-function buy.DeleteList(index)
-    local s = Store()
-    if s and s.lists[index] then table.remove(s.lists, index) end
-end
-
--- Add an item name to a list (no duplicates). Returns true if newly added.
-function buy.AddItemToList(index, itemName)
-    local s = Store()
-    if not s or not itemName or itemName == "" then return false end
-    local list = s.lists[index]
-    if not list then return false end
-    local i = 1
-    while i <= table.getn(list.items) do
-        if string.lower(list.items[i]) == string.lower(itemName) then
-            return false
-        end
-        i = i + 1
-    end
-    table.insert(list.items, itemName)
-    return true
-end
-
-function buy.RemoveItemFromList(index, itemName)
-    local s = Store()
-    if not s then return end
-    local list = s.lists[index]
-    if not list then return end
-    local i = 1
-    while i <= table.getn(list.items) do
-        if list.items[i] == itemName then
-            table.remove(list.items, i)
-        else
-            i = i + 1
-        end
-    end
-end
+-- SHOPPING LISTS: the engine is GONE, the saved data is NOT.
+--
+-- buy.Lists / AddList / RenameList / DeleteList / AddItemToList /
+-- RemoveItemFromList lived here after the Advanced redesign removed the
+-- sidebar that was their only caller. They were kept on the reasoning that
+-- re-homing the feature would then cost a UI rather than a rewrite -- but the
+-- Crafting tab's tracked recipes ARE that feature's shape, and they were built
+-- on `crafting`, not on these. Nothing is coming back to them.
+--
+-- `account.shopping.lists` in core/db.lua STAYS. A player who used the sidebar
+-- before the redesign still has their lists in SavedVariables, and dropping
+-- the field would delete them on the next save -- which is a migration a
+-- player cannot upgrade into, i.e. the one thing MAJOR is reserved for. An
+-- unread table costs nothing; deleted data cannot be got back.
 
 -- ---------------------------------------------------------------------------
 -- Query language (ROADMAP Phase 2a)

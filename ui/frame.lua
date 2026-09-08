@@ -6954,17 +6954,12 @@ end
 
 -- ---- (shopping lists removed) -------------------------------------------
 --
--- The Shopping Lists sidebar and its list-management popups are gone: the
--- concept has no left column in Advanced, and every entry point into these
--- functions went with the sidebar. The ENGINE side (buy.Lists / AddList /
--- AddItemToList and friends in core/buy.lua) is deliberately left in place --
--- the saved data is untouched, so nothing a user built is lost, and re-homing
--- the feature later costs a UI, not a rewrite.
---
--- It is NOT tested, and this comment claimed it was for several releases. No
--- suite touches those five functions, so they are unreachable AND unchecked:
--- whatever re-homes the feature has to test them on the way through rather
--- than assume the coverage is already there.
+-- The Shopping Lists sidebar and its list-management popups went with the
+-- Advanced redesign, which has no left column. The ENGINE behind them is gone
+-- too now -- the Crafting tab's tracked recipes are the same idea (a named
+-- list of items and counts) and were built on `crafting`, so nothing was ever
+-- coming back to those functions. See the note in core/buy.lua for what was
+-- deliberately NOT deleted: the saved data.
 
 -- ---- search + results --------------------------------------------------
 

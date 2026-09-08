@@ -2007,6 +2007,51 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- the three guarantees that used to assert nothing -------------------
+    # Every one of these passed silently before v1.52.6, because nothing
+    # extracted the function that was written to catch them.
+
+    # The control strip widened past the window. Fixed widths on both sides of
+    # an empty middle, so the left cluster reaches the right-hand buttons.
+    ("strip-name-box-too-wide", "ui/frame.lua",
+     "local BUY_NAME_W   = 200",
+     "local BUY_NAME_W   = 560",
+     "geometry"),
+
+    # ...and the gap between the two clusters given away entirely.
+    ("strip-has-no-middle", "ui/frame.lua",
+     "    local MIN_GAP = 24        -- the mockup's empty middle, at its narrowest",
+     "    local MIN_GAP = -400      -- the mockup's empty middle, at its narrowest",
+     "geometry"),
+
+    # The strip's width read off its FIRST LINE ONLY -- 300 instead of 538.
+    # This is the shape that made the check worth writing: it compiles, it is
+    # a plausible number, and a fit test against a strip 238px too narrow
+    # passes at every width. The suite reads the continuation now.
+    ("strip-width-loses-its-second-line", "ui/frame.lua",
+     """                    + 16 + BUY_QUAL_W + 10 + 20 + 2 + 74""",
+     """local BUY_STRIP_UNUSED = 16 + BUY_QUAL_W + 10 + 20 + 2 + 74""",
+     "geometry"),
+
+    # A category list that cannot show its own eleven categories at the
+    # smallest allowed window -- a hidden minimum nobody wrote down.
+    ("categories-do-not-fit", "ui/frame.lua",
+     "    side_bot    = 40,   -- the tree runs nearly to the action bar",
+     "    side_bot    = 120,  -- the tree runs nearly to the action bar",
+     "geometry"),
+
+    # ...and the plated row height raised without checking what holds them.
+    ("category-rows-too-tall", "ui/frame.lua",
+     "local SIDE_ROWS, SIDE_ROW_H = 13, 22   -- SIDE_ROW_H is the PLATED height",
+     "local SIDE_ROWS, SIDE_ROW_H = 13, 30   -- SIDE_ROW_H is the PLATED height",
+     "geometry"),
+
+    # The Buy table run down over the pager and rule beneath it.
+    ("buy-table-overruns-its-pager", "ui/frame.lua",
+     "    table_bot   = 82,",
+     "    table_bot   = 60,",
+     "geometry"),
+
     # ---- the Crafting tab's three panels ----------------------------------
     # The outer panels back to the widths the first pass tried. The middle one
     # is then 24px short of its own columns and the table draws under the panel

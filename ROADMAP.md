@@ -2687,6 +2687,8 @@ separate pieces, not one system**, and the shape of each is decided:
 3. **The Crafting tab in three panels** — tracked recipes, search results for a
    clicked reagent, and a made-counter, side by side, with a `[-] N [+]`
    quantity stepper on each recipe that drives the material totals.
+4. **The housekeeping pass** the first three deferred things into. **DONE,
+   v1.52.6.**
 
 **Settled, and not to be re-litigated:** clicking a reagent fires a REAL
 auction query (accurate over instant; the previous result stays on screen while
@@ -2898,6 +2900,40 @@ Also hoisted: `ui.HideScrollBar` was a closure inside `ui.BuildBuyTab`, called
 from the Crafting tab. It worked only because the Buy tab is built one line
 earlier -- reorder those two calls and it is a nil call inside a builder, i.e.
 a tab that does not open.
+
+#### §5 The housekeeping pass — v1.52.6
+
+The two things this overhaul kept deferring, done now that the feature they
+were waiting on exists.
+
+**The shopping-list engine is gone**, and the argument for keeping it is what
+settled it. It was kept because "re-homing the feature later costs a UI, not a
+rewrite" -- and then §4 built exactly that feature, a named list of items and
+counts, on `crafting` rather than on these functions. The reason to keep them
+was disproved by the thing that would have used them.
+
+**The saved data stays.** `account.shopping.lists` is untouched: a player who
+used the sidebar before the redesign still has their lists in SavedVariables,
+and dropping the field erases them on the next save. That is a migration a
+player cannot upgrade into, which is the one thing MAJOR is reserved for -- and
+an unread table costs nothing, while deleted data cannot be got back.
+
+**And the three assertions that asserted nothing are wired up.** This was the
+most interesting item on the housekeeping list and it deserves its own note:
+they are not dead code. Dead code does nothing. `ui.StripFitsAt`,
+`ui.AllCategoriesFitAt` and `ui.TableSlack` each compute whether a layout
+promise holds, each was written precisely so the arithmetic "lives here, where
+it can be checked", and none of them was checked -- so each reads as an
+enforced guarantee to the next person to move a number near it.
+`ui.AllCategoriesFitAt` states *"Asserted true at MIN_H"* in its own comment.
+It was not true of anything.
+
+**The suite's own reader was the last find, and the worst-shaped one.**
+`BUY_STRIP_W` is a sum written over two lines, and `constant()` stopped at the
+first: 300 instead of 538. Not an error -- a number that compiles, looks
+plausible, and makes a strip-fit check pass at every width there is. A reader
+that can be silently wrong is worse than one that throws, so it consumes
+continuation lines now and a sabotage removes the second line to prove it.
 
 ### 2h — original scope
 

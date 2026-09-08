@@ -22,21 +22,42 @@ local H = require("harness")
 local SRC = "ui/frame.lua"
 
 -- Pull a `local NAME = <expr>` line out of the source and evaluate it.
+-- Strip a trailing `-- comment`; these are all arithmetic on numbers.
+local function uncomment(expr)
+    local cut = string.find(expr, "%-%-")
+    if cut then expr = string.sub(expr, 1, cut - 1) end
+    return expr
+end
+
 local function constant(name)
     local f = assert(io.open(SRC, "r"), "run this from the repo root")
-    local value
+    local value, expr = nil, nil
     for line in f:lines() do
-        local _, _, expr = string.find(line, "^local " .. name .. "%s*=%s*(.+)$")
         if expr then
-            -- Strip a trailing comment; these are all arithmetic on numbers.
-            local cut = string.find(expr, "%-%-")
-            if cut then expr = string.sub(expr, 1, cut - 1) end
-            local fn = loadstring("return " .. expr)
-            if fn then value = fn() end
-            break
+            -- A CONTINUATION LINE, and reading one is not optional.
+            --
+            -- BUY_STRIP_W is written over two lines with the second starting
+            -- `+ 16 + ...`. Stopping at the first line does not FAIL -- it
+            -- returns a number that compiles and is simply wrong (300 instead
+            -- of 538), and a fit check against a strip 238px narrower than the
+            -- real one passes at every width. A reader that can be silently
+            -- wrong is worse than one that errors.
+            --
+            -- A wrapped arithmetic expression continues with an operator; a
+            -- new statement does not.
+            local _, _, head = string.find(line, "^%s*([%+%-%*/%%%)%.])")
+            if not head then break end
+            expr = expr .. " " .. uncomment(line)
+        else
+            local _, _, e = string.find(line, "^local " .. name .. "%s*=%s*(.+)$")
+            if e then expr = uncomment(e) end
         end
     end
     f:close()
+    if expr then
+        local fn = loadstring("return " .. expr)
+        if fn then value = fn() end
+    end
     if value == nil then error("did not find: local " .. name) end
     return value
 end
@@ -939,6 +960,81 @@ do
     if not fn then error("will not compile: " .. tostring(err)) end
     fn()
 end
+
+-- ---------------------------------------------------------------------------
+H.section("the guarantees that were written down but never checked")
+-- ---------------------------------------------------------------------------
+
+-- THREE FUNCTIONS THAT ASSERT NOTHING. Each computes whether a layout
+-- guarantee holds at a given size, and each was written precisely so the
+-- arithmetic "lives here, where it can be checked" -- and then nothing checked
+-- it. ui.ColumnsFitAt, sitting right beside them, has been extracted by this
+-- suite since v1.23.0; these three were never wired up.
+--
+-- That is worse than dead code. Dead code does nothing; a guarantee that reads
+-- as enforced and is not will be trusted by the next person to move a number
+-- near it. ui.AllCategoriesFitAt even says "Asserted true at MIN_H" in its own
+-- comment, which was not true of anything.
+-- BUY_STRIP_W is a SUM of these, so they have to exist first -- and when they
+-- did not, the reader said so loudly instead of returning a number.
+BUY_NAME_W   = constant("BUY_NAME_W")
+BUY_LVL_W    = constant("BUY_LVL_W")
+BUY_QUAL_W   = constant("BUY_QUAL_W")
+BUY_STRIP_W  = constant("BUY_STRIP_W")
+BUY_SEARCH_W = constant("BUY_SEARCH_W")
+BUY_ADV_W    = constant("BUY_ADV_W")
+CAT_TOP_LEVEL_N = constant("CAT_TOP_LEVEL_N")
+-- BUYL is assembled field by field in this suite rather than loaded whole;
+-- these are the three the category column and the table budget read.
+BUYL.side_top  = field("BUYL", "side_top")
+BUYL.side_bot  = field("BUYL", "side_bot")
+BUYL.table_bot = field("BUYL", "table_bot")
+SIDE_ROWS, SIDE_ROW_H = pairConst("SIDE_ROWS", "SIDE_ROW_H")
+for _, sig in ipairs({
+    "function ui.StripFitsAt(",
+    "function ui.CatAreaAt(",
+    "function ui.AllCategoriesFitAt(",
+    "function ui.TableSlack(",
+}) do
+    local fn, err = loadstring(extract(sig), sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- The two-line constant, read whole. 200 + 14 + 32 + 7 + 8 + 7 + 32 is 300 and
+-- compiles fine, which is what a reader that stops at the first line returns.
+H.eq("the control strip's width is read across BOTH its lines",
+     BUY_STRIP_W, 538)
+
+-- The strip: fixed widths on both sides of an empty middle, so nothing in the
+-- anchoring stops the left cluster reaching the right-hand buttons. The
+-- guarantee is that the window is never narrow enough for that.
+H.check("the control strip fits at the smallest allowed window",
+        ui.StripFitsAt(MIN_W),
+        "the strip needs " .. (10 + BUY_STRIP_W + 24 + BUY_SEARCH_W + 14
+            + BUY_ADV_W + 12) .. " and has " .. (MIN_W - 22))
+H.check("...and the check can fail, so that is not passing for free",
+        not ui.StripFitsAt(600),
+        "a 600px window accepted the strip, so nothing is being measured")
+
+-- Eleven top-level categories ("All Categories" plus ten classes), at the
+-- plated row height. A category list that cannot show its own categories at
+-- the smallest allowed window has a hidden minimum nobody wrote down.
+H.check("every top-level category is visible at the smallest allowed window",
+        ui.AllCategoriesFitAt(MIN_H),
+        CAT_TOP_LEVEL_N .. " rows of " .. SIDE_ROW_H .. " need "
+            .. (CAT_TOP_LEVEL_N * SIDE_ROW_H) .. ", the column has "
+            .. ui.CatAreaAt(MIN_H))
+H.check("...and the check can fail",
+        not ui.AllCategoriesFitAt(300),
+        "a 300px window fits eleven plated rows, so nothing is being measured")
+
+-- What sits between the Buy table's bottom edge and the action bar: an 8px
+-- gap, the 20px pager, another 10, and the rule at 38. Negative slack means
+-- the table is drawn over the pager.
+H.check("the Buy table leaves room for the pager and rule beneath it",
+        ui.TableSlack() >= 0,
+        "the table overruns what is under it by " .. -ui.TableSlack() .. "px")
 
 -- ---------------------------------------------------------------------------
 H.section("the Crafting tab's three panels fit side by side")
