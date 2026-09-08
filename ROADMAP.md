@@ -2849,6 +2849,56 @@ Also collapsed: the Crafting tab's column positions existed twice, once at file
 scope and once inside the builder. Identical today, which is exactly how the
 Sell tab's headers and rows started.
 
+#### §4b The three panels — v1.56.0
+
+The widgets, on §4a's numbers. Tracked recipes left, reagent search middle,
+made-this-session right; the `[-] n [+]` stepper on the recipe rows, shift for
+five at a time.
+
+**§4a's derivation was missing a term, and building it is what found it.**
+The widths were derived against the columns and the row pads and nothing else
+-- but a table does not get its panel's width, it gets the width less a lane
+for the scrollbar. Worse, the assumption underneath it was wrong in the other
+direction too: FauxScrollFrameTemplate anchors the bar *2px INSIDE* the scroll
+frame's right edge, on top of the last column, which is why the Sell tab's bag
+list re-anchors it outward instead of leaving it where the template puts it.
+So the lane is SELLL's own measured numbers -- `WELL_BLEED + bar_x + bar_w` --
+and the outer panels shrank to pay for it.
+
+This is the honest limit of writing the geometry first: it proved everything
+the numbers knew about, and the term it did not know about was the one that
+had to come from the widget. The answer is not to write the numbers later, it
+is to write the missing term back into the same suite -- which now separates
+all three (columns, pads, lane) with a width that isolates each.
+
+**The outer panels pay no lane.** Their bar is hidden and the wheel scrolls
+them, exactly as the Buy tab's category tree already does. 30px out of 182 is
+a sixth of a panel whose entire problem is width, and those lists are a handful
+of recipes, not fifty listings.
+
+**Three headings drawn through their own border**, all three the same mistake:
+a backdrop edge is drawn CENTRED on the frame boundary, so a heading above a
+box has to clear TWICE `WELL_BLEED`, not once. Nothing throws -- the text is
+simply crossed out -- so every heading, status line, pager and button that sits
+outside one of these boxes is now a named offset the suite checks against
+`ui.CraftBoxClear`.
+
+**No ellipsis on this client.** `SetWidth` on a FontString makes it WRAP, and
+these rows are not their scroll frame's scroll child, so nothing clips the
+second line -- it draws over the row below. Every other table in this file got
+away with it because its name column is wide; at ~95px it is not hypothetical.
+`ui.FitString` measures and cuts, with the measure injected so it is arithmetic
+a suite can run.
+
+**One flush, two inputs.** The made-count comes off CHAT_MSG_LOOT and the
+have/need counts off BAG_UPDATE; both set a flag and one OnUpdate repaints at
+most once a frame, and the bag half only when the tab is actually on screen.
+
+Also hoisted: `ui.HideScrollBar` was a closure inside `ui.BuildBuyTab`, called
+from the Crafting tab. It worked only because the Buy tab is built one line
+earlier -- reorder those two calls and it is a nil call inside a builder, i.e.
+a tab that does not open.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

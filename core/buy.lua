@@ -2557,5 +2557,12 @@ end
 -- creates, which is nearly all of them.
 A.RegisterEvent("CHAT_MSG_LOOT", function()
     local id, n = craft.ParseCreate(arg1)
-    if id then craft.RecordMade(id, n) end
+    if id then
+        craft.RecordMade(id, n)
+        -- The UI hangs a FLAG-SETTER here, never a repaint. This handler is on
+        -- a chat event that prints a line per item, so a big loot lands
+        -- several of them in a few frames -- HARD RULE 16, and the same shape
+        -- as sell.mailDirty.
+        if craft.onMade then craft.onMade(id, n) end
+    end
 end)

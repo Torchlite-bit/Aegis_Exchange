@@ -2012,7 +2012,7 @@ end
     # is then 24px short of its own columns and the table draws under the panel
     # beside it -- which is what the assertion caught before any widget existed.
     ("craft-panels-do-not-fit", "ui/frame.lua",
-     "    left_w  = 186,   -- tracked recipes and their reagents",
+     "    left_w  = 182,   -- tracked recipes and their reagents",
      "    left_w  = 210,   -- tracked recipes and their reagents",
      "geometry"),
 
@@ -2020,8 +2020,78 @@ end
     # promises a fit at a width where the last column is under the border --
     # the same mistake ColumnsFitAt was making until v1.50.3.
     ("craft-fit-ignores-the-row-pad", "ui/frame.lua",
-     "    return CRAFT_COLS_END <= (ui.CraftMidWidthAt(w) - ROWPAD.l - ROWPAD.r)",
-     "    return CRAFT_COLS_END <= ui.CraftMidWidthAt(w)",
+     "    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r",
+     "    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane",
+     "geometry"),
+
+    # ...and the other term of the same subtraction: no lane for the scrollbar,
+    # so the bar draws through the RIGHT panel's border. Both directions,
+    # because either one alone makes the check more permissive and a check that
+    # only knows "does it fit" cannot tell which term went missing.
+    ("craft-fit-ignores-the-scrollbar", "ui/frame.lua",
+     "    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r",
+     "    return ui.CraftMidWidthAt(w) - ROWPAD.l - ROWPAD.r",
+     "geometry"),
+
+    # The lane trimmed to the bar's own width, forgetting that the bar is
+    # pushed OUT past the rows and that the box's border needs a bleed after
+    # it -- so the bar draws through the middle table's own right border.
+    ("craft-bar-lane-too-narrow", "ui/frame.lua",
+     "    bar_lane = 30,   -- the MIDDLE table's scrollbar, inside its own panel",
+     "    bar_lane = 16,   -- the MIDDLE table's scrollbar, inside its own panel",
+     "geometry"),
+
+    # The OUTER panels charged for a scrollbar lane they do not draw, so every
+    # recipe name loses a quarter of its column to nothing.
+    ("craft-side-row-pays-for-a-hidden-bar", "ui/frame.lua",
+     "    return CRAFTL.left_w - ROWPAD.l - ROWPAD.r",
+     "    return CRAFTL.left_w - ROWPAD.l - ROWPAD.r - CRAFTL.bar_lane",
+     "geometry"),
+
+    # The box edge measured at ONE bleed instead of two, so every heading on
+    # the tab has its own top border drawn through it. Nothing throws; the
+    # text is simply crossed out.
+    ("craft-box-clear-counts-one-bleed", "ui/frame.lua",
+     "    return ui.CraftBoxEdge(band) - WELL_BLEED",
+     "    return ui.CraftBoxEdge(band)",
+     "geometry"),
+
+    # The left panel's list run down over the profit block below it.
+    ("craft-side-list-eats-the-profit-block", "ui/frame.lua",
+     "    side_top = 34, side_bot = 144,",
+     "    side_top = 34, side_bot = 120,",
+     "geometry"),
+
+    # The middle table's box pulled up over its own column headers.
+    ("craft-mid-box-under-its-headers", "ui/frame.lua",
+     "    mid_top  = 86, mid_bot  = 38,",
+     "    mid_top  = 62, mid_bot  = 38,",
+     "geometry"),
+
+    # ...and pushed down, so the table loses a row at the smallest window.
+    ("craft-mid-table-loses-a-row", "ui/frame.lua",
+     "    mid_top  = 86, mid_bot  = 38,",
+     "    mid_top  = 96, mid_bot  = 38,",
+     "geometry"),
+
+    # The right panel's footer under its own bottom border.
+    ("craft-made-footer-under-the-border", "ui/frame.lua",
+     "    made_top = 36, made_bot = 38,",
+     "    made_top = 36, made_bot = 24,",
+     "geometry"),
+
+    # A name measured against the whole row, ignoring what the row ENDS with --
+    # so a recipe name runs under its own stepper, or wraps onto the row below.
+    ("craft-label-ignores-the-tail", "ui/frame.lua",
+     "    local w = (rowW or 0) - (indent or 0) - (tail or 0)",
+     "    local w = (rowW or 0) - (indent or 0)",
+     "geometry"),
+
+    # ...and the floor removed, so a tail wider than the row hands ui.FitString
+    # a zero and every name on that panel becomes an ellipsis.
+    ("craft-label-has-no-floor", "ui/frame.lua",
+     "    if w < 1 then w = 1 end\n    return w",
+     "    return w",
      "geometry"),
 
     # CRAFT_COLS_END measured to the last TEXT column, so the panel is sized
@@ -2087,6 +2157,58 @@ end
             name = r.name, itemId = id, per = per,""",
      """        if id then table.insert(rows, {
             name = r.name, itemId = id, per = per,""",
+     "craft.plan"),
+
+    # ---- crafting: the three panels' own arithmetic ------------------------
+    # What you own read as the ACCOUNT total rather than what is in your hands.
+    # Every bucket added makes the answer bigger, which reads as "you need
+    # less" and never as an error -- so each one gets its own sabotage.
+    ("craft-owned-counts-the-auction-house", "ui/frame.lua",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) end",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) + (r.ah or 0) end",
+     "craft.plan"),
+
+    ("craft-owned-counts-the-mailbox", "ui/frame.lua",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) end",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) + (r.mail or 0) end",
+     "craft.plan"),
+
+    # ...and the `you` test dropped, so an alt's bank answers for yours. The
+    # rows are sorted with you first, so this is right until it is not.
+    ("craft-owned-takes-the-first-row", "ui/frame.lua",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) end",
+     "        return (r.bags or 0) + (r.bank or 0)",
+     "craft.plan"),
+
+    # Overshooting a target counted as negative work left, which drags the
+    # footer's to-go total DOWN every time you overshoot one recipe -- a total
+    # that gets more wrong the more you craft.
+    ("craft-made-goes-negative", "ui/frame.lua",
+     "        local left = want - n\n        if left < 0 then left = 0 end",
+     "        local left = want - n",
+     "craft.plan"),
+
+    # The two footer totals swapped for the same sum, so "made" and "to go"
+    # both count the same thing.
+    ("craft-made-totals-the-wrong-number", "ui/frame.lua",
+     "        made = made + n\n        toGo = toGo + left",
+     "        made = made + n\n        toGo = toGo + n",
+     "craft.plan"),
+
+    # A name cut without room for the ellipsis it then has appended, so the
+    # "fits" answer is three dots too wide and the column overruns anyway.
+    ("craft-fit-forgets-the-ellipsis", "ui/frame.lua",
+     """        local cut = string.sub(s, 1, n) .. dots
+        if measure(cut) <= maxW then return cut end""",
+     """        local cut = string.sub(s, 1, n)
+        if measure(cut) <= maxW then return cut .. dots end""",
+     "craft.plan"),
+
+    # The UI never told that something was made, so the right panel sits at
+    # 0 / 5 through a whole crafting run.
+    ("craft-made-does-not-notify", "core/buy.lua",
+     "        if craft.onMade then craft.onMade(id, n) end",
+     "",
      "craft.plan"),
 
     # Ordinary loot counted as a craft. This runs on every item anyone in the

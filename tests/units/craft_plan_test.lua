@@ -162,10 +162,175 @@ H.eq("closing the auction house does NOT reset it", craft.MadeCount(4241), 5)
 craft.ClearMade()
 H.eq("only asking does", craft.MadeCount(4241), 0)
 
+-- ...and the UI is TOLD, or the made panel sits at 0 / 5 through a whole
+-- crafting run with nothing to repaint it. A flag-setter, never a repaint --
+-- this is a chat event that prints a line per item.
+local told = {}
+craft.onMade = function(id, n) table.insert(told, { id = id, n = n }) end
+W.FireEvent(A.frame, "CHAT_MSG_LOOT", "You create: " .. LINK .. "x3.")
+H.eq("the UI is told about a craft", table.getn(told), 1)
+H.eq("...which item", told[1].id, 4241)
+H.eq("...and how many", told[1].n, 3)
+W.FireEvent(A.frame, "CHAT_MSG_LOOT", "You receive loot: " .. LINK .. ".")
+H.eq("ordinary loot tells it nothing", table.getn(told), 1)
+craft.onMade = nil
+
 -- The prefix comes from the client's own global, so it works in any locale.
 H.eq("the prefix is read from the client",
      craft.CreatePrefix("Vous cr\195\169ez : %s."), "Vous cr\195\169ez : ")
 H.eq("...with an English fallback when there is none",
      craft.CreatePrefix("nonsense with no placeholder"), "You create: ")
+
+-- ---------------------------------------------------------------------------
+H.section("the UI side: what you own, and what you have made")
+-- ---------------------------------------------------------------------------
+
+-- The three panels' arithmetic lives in ui/frame.lua, which no suite loads --
+-- it wants a real client to mean anything. So the functions are EXTRACTED
+-- from the source at run time and run here. Extracted, not copied: a duplicate
+-- would drift, and this is the drift that shows as a wrong shopping list.
+local function Source(path)
+    local f = assert(io.open(path, "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    return src
+end
+
+local function extract(path, signature)
+    local body, grabbing = {}, false
+    for line in string.gfind(Source(path), "([^\n]*)\n") do
+        if not grabbing then
+            if string.find(line, signature, 1, true) == 1 then
+                grabbing = true
+                table.insert(body, line)
+            end
+        else
+            table.insert(body, line)
+            if line == "end" then break end
+        end
+    end
+    if not grabbing then error("did not find: " .. signature) end
+    return table.concat(body, "\n")
+end
+
+ui = {}
+for _, sig in ipairs({
+    "function ui.OwnedFromRows(",
+    "function ui.MadeSummary(",
+    "function ui.FitString(",
+}) do
+    local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- ---- what you own -------------------------------------------------------
+
+-- YOUR bags and YOUR bank. NOT the account total the tooltip shows: cloth in
+-- an alt's bank is cloth you own, and the tooltip says where it is -- but
+-- "you still need to buy 7" has to mean seven, and an alt three zones away
+-- cannot hand you thread.
+local INV = {
+    { name = "Torchlight", you = true,  bags = 3, bank = 5, ah = 17, mail = 2,
+      total = 27 },
+    { name = "Alt",        you = false, bags = 40, bank = 60, ah = 0, mail = 0,
+      total = 100 },
+}
+H.eq("your bags and your bank", ui.OwnedFromRows(INV), 8)
+H.eq("nobody's row is nothing", ui.OwnedFromRows({}), 0)
+H.eq("a nil list is nothing", ui.OwnedFromRows(nil), 0)
+H.eq("a list with no row of yours is nothing",
+     ui.OwnedFromRows({ INV[2] }), 0)
+
+-- Each excluded bucket gets its own check, because dropping the exclusion is
+-- a change that makes the answer BIGGER -- which reads as "you need less" and
+-- never as an error.
+H.eq("what is posted at the auction house does not count",
+     ui.OwnedFromRows({ { you = true, bags = 1, bank = 0, ah = 99, mail = 0 } }),
+     1)
+H.eq("...nor does what is sitting in the mail",
+     ui.OwnedFromRows({ { you = true, bags = 1, bank = 0, ah = 0, mail = 99 } }),
+     1)
+H.eq("...and the alt's 100 are not yours",
+     ui.OwnedFromRows(INV), 8)
+
+-- ---- made this session --------------------------------------------------
+
+local PROJECTS = {
+    { name = "Green Woolen Bag", itemId = 4241 },
+    { name = "Red Linen Bag",    itemId = 4238 },
+    { name = "Woolen Boots",     itemId = 4310 },
+}
+local MADE = { [4241] = 1, [4238] = 1, [4310] = 0 }
+local WANT = { [4241] = 5, [4238] = 1, [4310] = 5 }
+local madeOf = function(id) return MADE[id] or 0 end
+local wantOf = function(p) return WANT[p.itemId] or 1 end
+
+local mrows, totalMade, toGo = ui.MadeSummary(PROJECTS, madeOf, wantOf)
+H.eq("a row per project", table.getn(mrows), 3)
+H.eq("...carrying the made count", mrows[1].made, 1)
+H.eq("...and the target", mrows[1].want, 5)
+H.eq("...and what is left", mrows[1].left, 4)
+H.check("one short of its target is not done", not mrows[1].done, "marked done")
+H.check("one of one IS done", mrows[2].done, "not marked done")
+H.eq("the index comes back so a click can select it", mrows[3].index, 3)
+
+H.eq("the total made is the sum", totalMade, 2)
+H.eq("...and the total left is the sum of what is left", toGo, 9)
+
+-- OVERSHOOTING FLOORS AT ZERO. Making six of something you asked five of is
+-- done, not minus-one to go -- and a negative would drag the footer's total
+-- DOWN every time you overshot one recipe, which is a total that gets more
+-- wrong the more you craft.
+MADE[4241] = 7
+local orows, oMade, oToGo = ui.MadeSummary(PROJECTS, madeOf, wantOf)
+H.eq("seven of a wanted five is zero left", orows[1].left, 0)
+H.check("...and it is done", orows[1].done, "not marked done")
+H.eq("the made total still counts all seven", oMade, 8)
+H.eq("...and the to-go total is only the OTHER recipe's five", oToGo, 5)
+MADE[4241] = 1
+
+-- A project with no item id has nothing to count against.
+local nrows = ui.MadeSummary({ { name = "Enchant Bracers" } }, madeOf, wantOf)
+H.eq("a recipe with no item id has made none", nrows[1].made, 0)
+H.eq("an empty project list is no rows",
+     table.getn(ui.MadeSummary({}, madeOf, wantOf)), 0)
+H.eq("...and a nil one too",
+     table.getn(ui.MadeSummary(nil, madeOf, wantOf)), 0)
+
+-- ---- cutting a name to a narrow column ----------------------------------
+
+-- The 1.12 client has no ellipsis: SetWidth on a FontString makes it WRAP,
+-- and a wrapped second line in a 20px row draws over the row below it. The
+-- outer panels are ~100px wide, so this is not hypothetical.
+--
+-- `measure` is injected, which is what makes this arithmetic: six pixels a
+-- character here, a real FontString in the client.
+local six = function(t) return string.len(t) * 6 end
+
+H.eq("a name that fits is untouched",
+     ui.FitString("Fine Thread", 120, six), "Fine Thread")
+H.eq("a name exactly the width is untouched",
+     ui.FitString("Fine Thread", 66, six), "Fine Thread")
+
+-- 17 characters at 6px is 102; at 60px the answer is the longest prefix whose
+-- length PLUS THE THREE DOTS still fits, i.e. 10 characters -> 7 of the name.
+H.eq("a long one is cut with an ellipsis",
+     ui.FitString("Green Woolen Bag", 60, six), "Green W...")
+H.check("...and the result really does fit",
+        six(ui.FitString("Green Woolen Bag", 60, six)) <= 60,
+        "the cut string is still too wide")
+
+-- The degenerate ends. A column too narrow for even the ellipsis gets the
+-- ellipsis rather than a loop that never terminates or a nil.
+H.eq("a hopeless width still returns something",
+     ui.FitString("Green Woolen Bag", 4, six), "...")
+H.eq("no measure means no cutting",
+     ui.FitString("Green Woolen Bag", 10, nil), "Green Woolen Bag")
+H.eq("no width means no cutting",
+     ui.FitString("Green Woolen Bag", nil, six), "Green Woolen Bag")
+H.eq("a zero width means no cutting",
+     ui.FitString("Green Woolen Bag", 0, six), "Green Woolen Bag")
+H.eq("nil text is empty text", ui.FitString(nil, 60, six), "")
 
 os.exit(H.report("craft.plan"))

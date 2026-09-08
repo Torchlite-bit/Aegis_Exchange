@@ -518,6 +518,81 @@ function ui.MakeWell(parent, around, inset)
     return w
 end
 
+-- Longest prefix of `s` that fits `maxW` pixels, ellipsised when it had to cut.
+--
+-- THE 1.12 CLIENT HAS NO ELLIPSIS. SetWidth on a FontString makes it WRAP, and
+-- a wrapped second line in an 18px row draws straight over the row beneath it
+-- -- nothing clips it, because these rows are not their scroll frame's scroll
+-- child. Every table in this file has got away with SetWidth because its name
+-- column is wide; the Crafting tab's outer panels are ~100px, where most
+-- recipe names do not fit and the wrap is not hypothetical.
+--
+-- `measure` is INJECTED rather than read off a widget, which is what makes
+-- this arithmetic rather than a frame: the suite hands it a font where every
+-- character is a fixed width and checks where the cut lands, and ui.FitText
+-- below hands it the real FontString.
+--
+-- Cuts one character at a time from the end and re-measures. Bounded by the
+-- string's length, and only ever run on rows that are VISIBLE.
+function ui.FitString(s, maxW, measure)
+    s = s or ""
+    if not measure or not maxW or maxW <= 0 then return s end
+    if measure(s) <= maxW then return s end
+    local dots = "..."
+    local n = string.len(s)
+    while n > 0 do
+        n = n - 1
+        local cut = string.sub(s, 1, n) .. dots
+        if measure(cut) <= maxW then return cut end
+    end
+    return dots
+end
+
+-- Put `s` on `fs`, cut to `maxW` if it does not fit.
+--
+-- The FontString measures ITSELF -- GetStringWidth reports what the client
+-- would actually draw, in the font that string is really in, which no table of
+-- character widths here could get right for every locale.
+function ui.FitText(fs, s, maxW)
+    if not fs then return end
+    s = s or ""
+    fs:SetText(s)
+    if not maxW or maxW <= 0 or not fs.GetStringWidth then return end
+    if fs:GetStringWidth() <= maxW then return end
+    fs:SetText(ui.FitString(s, maxW, function(t)
+        fs:SetText(t)
+        return fs:GetStringWidth()
+    end))
+end
+
+-- Take the scrollbar off a FauxScrollFrame and let the WHEEL do the scrolling.
+--
+-- FauxScrollFrameTemplate hangs its bar OUTWARD from the scroll frame's right
+-- edge, so a list with something drawn beside it either pays a ~26px lane for
+-- the bar or does without one. Three lists in this window do without: the Buy
+-- tab's category tree, and the Crafting tab's two outer panels, all of which
+-- are narrow columns where a lane would cost a seventh of the panel.
+--
+-- Scrolling still works. FauxScrollFrameTemplate's OnMouseWheel drives the
+-- bar's VALUE, and a hidden frame still holds and reports one.
+--
+-- TOP LEVEL, not a closure inside ui.BuildBuyTab. It was defined there and
+-- called from the Crafting tab, which worked only because the Buy tab happens
+-- to be built one line earlier; a reordering of those two calls would have
+-- been a nil-call in a builder, i.e. a tab that does not open.
+function ui.HideScrollBar(sf)
+    if not sf or not sf.GetName then return end
+    local nm = sf:GetName()
+    if not nm then return end
+    local bar = getglobal(nm .. "ScrollBar")
+    if bar then
+        bar:Hide()
+        -- FauxScrollFrame_Update re-Shows the bar whenever the content
+        -- overflows, so neutralise Show rather than relying on one Hide.
+        bar.Show = function() end
+    end
+end
+
 -- Give an InputBoxTemplate edit box the mockup's flat field instead of
 -- vanilla's art.
 --
@@ -4044,20 +4119,71 @@ local SELLL = {
 -- machinery ui.ColumnsFitAt uses, which has now caught a wrong measurement
 -- and a change that broke a different tab.
 -- THESE WIDTHS ARE DERIVED, NOT CHOSEN. The middle panel gets whatever the
--- other two leave, and it has a floor: CRAFT_COLS_END plus the row pad. At
--- MIN_W the panel area is 960, so the outer two plus the gutters may not
--- exceed 960 - (534 + 14) = 412. The first pass tried 200/210 and the geometry
--- suite refused it 24px short -- before a single widget existed, which is the
--- whole reason that assertion was written first.
+-- other two leave, and it has a floor: CRAFT_COLS_END, plus the row pad, plus
+-- the scrollbar lane. At MIN_W the panel area is 960, so the outer two plus
+-- the gutters may not exceed 960 - (534 + 14 + 30) = 382. The first pass tried
+-- 200/210 and the geometry suite refused it -- before a single widget existed,
+-- which is the whole reason that assertion was written first.
 --
 -- So: trim the outer panels, not the table. A recipe name and a made-count
 -- lose less to a narrower column than a seven-column table with two buttons in
 -- it does.
+--
+-- ...AND THE SCROLLBAR IS A TERM. Building the widgets found what writing the
+-- numbers first could not: a table does not get its panel's width, it gets the
+-- width less a lane for the bar.
+--
+-- WHERE THE BAR ACTUALLY IS. FauxScrollFrameTemplate anchors it 2px INSIDE the
+-- scroll frame's right edge -- ON the last column, not past it -- which is why
+-- the Sell tab's bag list re-anchors it outward by SELLL.bar_x rather than
+-- leaving it where the template puts it. The middle panel does the same, so
+-- its lane has to hold everything that ends up in it: the bar pushed out by
+-- bar_x, the bar's own bar_w, and then WELL_BLEED before the box's border can
+-- start. That is 6 + 8 + 16 = 30, and it is SELLL's numbers rather than new
+-- ones because it is the same bar on the same client.
+--
+-- The OUTER two panels do not pay it. Their bar is hidden and the WHEEL
+-- scrolls them, exactly as the Buy tab's category tree already does -- 30px
+-- out of 182 is a sixth of a panel whose whole problem is width, and those
+-- lists are a handful of recipes, not fifty listings.
 local CRAFTL = {
-    left_w  = 186,   -- tracked recipes and their reagents
-    right_w = 180,   -- made this session
-    gap     = 8,     -- between panels
+    left_w  = 182,   -- tracked recipes and their reagents
+    right_w = 152,   -- made this session
+    gap     = 10,    -- between panels
     edge    = 10,    -- panel margin at each side of the tab
+    -- WELL_BLEED + SELLL.bar_x + SELLL.bar_w, asserted by the geometry suite.
+    bar_lane = 30,   -- the MIDDLE table's scrollbar, inside its own panel
+
+    -- The outer panels' own columns, measured from the row rather than
+    -- restated at each widget. `ex` is the expander column, `step` the
+    -- [-] n [+] cluster on a recipe row, `count` the have/need and made/want
+    -- figures the reagent and made rows end with.
+    ex_w    = 12,
+    step_w  = 54,
+    count_w = 44,
+
+    -- The three panels' vertical bands: where each one's LIST starts and
+    -- stops, measured from the top and bottom of the tab panel. LISTBOX reads
+    -- them below; they live here so the geometry suite can check them against
+    -- the heading and footer lines above and below each box, which is what
+    -- three of them were failing.
+    side_top = 34, side_bot = 144,
+    mid_top  = 86, mid_bot  = 38,
+    made_top = 36, made_bot = 38,
+
+    -- The heading above each box and the status line below it: where the text
+    -- sits, and how tall a small font line is. A heading has to clear TWICE
+    -- WELL_BLEED above the list it labels -- see ui.CraftBoxClear.
+    hdr_y  = 8,  hdr_h  = 12,
+    foot_y = 12, foot_h = 12,
+
+    -- ...and the other things drawn OUTSIDE a box, which have the same border
+    -- to clear. Named for the same reason: the suite cannot check an offset
+    -- that only exists as a literal at a SetPoint.
+    strip_y = 30, strip_h = 18,    -- the middle panel's reagent search box
+    pager_y = 28, pager_h = 20,    -- ...and the pager on the same line
+    reset_y = 6,  reset_h = 16,    -- the right panel's Reset button
+    est_y   = 116, est_h  = 12,    -- the profit block under the recipe list
 }
 ui.CRAFTL = CRAFTL      -- read by the geometry suite
 
@@ -4069,18 +4195,80 @@ function ui.CraftMidWidthAt(w)
         - (CRAFTL.gap * 2)
 end
 
+-- ...and what a ROW in it gets: the panel, less the scrollbar lane, less the
+-- two row pads that hold a row clear of the box border it sits inside.
+--
+-- THREE TERMS, and a fit check that drops any one of them is more permissive
+-- than the layout -- which is to say it passes while the table runs under
+-- something. The geometry suite separates them by asserting a width for each.
+function ui.CraftRowWidthAt(w)
+    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r
+end
+
 -- Do the middle panel's columns fit at this window width?
 --
 -- Measured against the ROW, not the panel: the rows are held clear of the
 -- box border by ROWPAD, and forgetting that is the same mistake ui.ColumnsFitAt
 -- was making one level up until v1.50.3.
 function ui.CraftPanelsFitAt(w)
-    return CRAFT_COLS_END <= (ui.CraftMidWidthAt(w) - ROWPAD.l - ROWPAD.r)
+    return CRAFT_COLS_END <= ui.CraftRowWidthAt(w)
+end
+
+-- What a ROW gets in each of the two OUTER panels. Fixed, because those two
+-- panels are: only the middle one takes the surplus when the window grows.
+--
+-- They pay no scrollbar lane -- their bar is hidden and the wheel scrolls them
+-- -- so a row is the panel less the two pads that hold it clear of the box
+-- border it sits inside.
+function ui.CraftSideRowW()
+    return CRAFTL.left_w - ROWPAD.l - ROWPAD.r
+end
+
+function ui.CraftMadeRowW()
+    return CRAFTL.right_w - ROWPAD.l - ROWPAD.r
+end
+
+-- Where a Crafting panel's BOX edge is drawn, given the list band inside it,
+-- and how much room that leaves for whatever is drawn outside the box.
+--
+-- TWICE THE BLEED, not once. A box is drawn WELL_BLEED outside the list it
+-- holds, and its backdrop border then straddles that edge by another
+-- WELL_BLEED -- so a heading above a box or a status line below one has to
+-- clear 12px, not 6. All three panels got this wrong on the first pass and
+-- drew their heading through their own top border, which is why it is a
+-- function the suite can check rather than six offsets written out.
+function ui.CraftBoxEdge(band)
+    return (band or 0) - WELL_BLEED
+end
+
+function ui.CraftBoxClear(band)
+    return ui.CraftBoxEdge(band) - WELL_BLEED
+end
+
+-- How much room a NAME has on one of those rows: the row, less whatever is
+-- indented in front of it and whatever the row ends with.
+--
+-- A FUNCTION, not four subtractions written out at four call sites, because
+-- the four differ -- a recipe row ends with a stepper and a reagent row with a
+-- count, and a reagent's name starts further in than a recipe's. Getting one
+-- of them wrong does not throw; it wraps a name onto the row below.
+--
+-- Never returns less than 1: ui.FitString measures against this, and a zero
+-- would make it cut every name to an ellipsis.
+function ui.CraftLabelW(rowW, indent, tail)
+    local w = (rowW or 0) - (indent or 0) - (tail or 0)
+    if w < 1 then w = 1 end
+    return w
 end
 
 local LISTBOX = {
-    craftSide = { top = 28,  bot = 132 },
-    craft     = { top = 94,  bot = 10 },
+    -- The three Crafting panels READ their bands from CRAFTL rather than
+    -- restating them: the geometry suite checks those six numbers against the
+    -- heading and status lines that sit outside each box, and a second copy
+    -- here is a copy that can disagree with what was checked.
+    craftSide = { top = CRAFTL.side_top, bot = CRAFTL.side_bot },
+    craftMade = { top = CRAFTL.made_top, bot = CRAFTL.made_bot },
+    craft     = { top = CRAFTL.mid_top,  bot = CRAFTL.mid_bot },
     auc       = { top = 70,  bot = 10 },
     hist      = { top = 100, bot = 10 },
     -- Identical to sellList on purpose: both boxes start under the same
@@ -4344,28 +4532,12 @@ function ui.BuildBuyTab()
     catScroll:Hide()
     ui.buyCatScroll = catScroll
 
-    -- HIDE THE SCROLLBAR. FauxScrollFrameTemplate hangs it OUTWARD from the
-    -- scroll frame's right edge, which here is 186 -- and the results box
-    -- starts at 194. The two occupied the same eight pixels, so the arrows
-    -- and thumb drew across the table's left border. Its down-arrow also
-    -- floated far below the list, because this frame runs to the panel bottom
-    -- while the categories usually end much higher.
-    --
-    -- Widening the gutter would fix the overlap but open the tight gap the
-    -- mockup deliberately has, and the mockup shows no scrollbar at all. The
-    -- WHEEL still scrolls: FauxScrollFrameTemplate's OnMouseWheel drives the
-    -- scroll bar's value, and a hidden frame still holds and reports a value.
-    ui.HideScrollBar = function(sf)
-        local nm = sf:GetName()
-        if not nm then return end
-        local bar = getglobal(nm .. "ScrollBar")
-        if bar then
-            bar:Hide()
-            -- FauxScrollFrame_Update re-Shows the bar whenever the content
-            -- overflows, so neutralise Show rather than relying on one Hide.
-            bar.Show = function() end
-        end
-    end
+    -- HIDE THE SCROLLBAR. The bar hangs OUTWARD from the scroll frame's right
+    -- edge, which here is 186 -- and the results box starts at 194. The two
+    -- occupied the same eight pixels, so the arrows and thumb drew across the
+    -- table's left border. Its down-arrow also floated far below the list,
+    -- because this frame runs to the panel bottom while the categories usually
+    -- end much higher. See ui.HideScrollBar.
     ui.HideScrollBar(catScroll)
 
     -- The mockup draws NO box around the category list -- just the BROWSE
@@ -4680,7 +4852,7 @@ function ui.BuildBuyTab()
     ui.buyPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyPrevButton")
-    prevBtn:SetWidth(24); prevBtn:SetHeight(20)
+    prevBtn:SetWidth(24); prevBtn:SetHeight(CRAFTL.pager_h)
     prevBtn:SetPoint("RIGHT", ui.buyPageText, "LEFT", -6, 0)
     prevBtn:SetText("\226\151\128")
     prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
@@ -7193,16 +7365,62 @@ end
 -- Crafting tab: recipes captured from a profession window, their reagents, and
 -- a Buy-style price/buy pane for whichever reagent you click.
 --
--- Left  = recipe tree (project -> its reagents, expandable).
--- Right = the same searchable result list as the Buy tab (shared row helpers),
---         populated when you click a reagent.
+-- THREE PANELS SIDE BY SIDE, not two -- and side by side is the point. Stacking
+-- them would have been easier and is what the tab did before: the recipe tree
+-- on the left, everything else in one column on the right.
+--
+--   Left   Tracked recipes and their reagents. Each recipe carries a [-] n [+]
+--          stepper, and every number downstream of it follows: the reagent
+--          totals here, the shortfall the middle panel reports, and the target
+--          on the right.
+--   Middle The same searchable result table the Buy tab uses (shared row
+--          helpers), filled by clicking a reagent on the left. It is the only
+--          one of the three that grows with the window -- see CRAFTL.
+--   Right  What you have MADE this session, against what you asked for.
+--          Manual reset only; see craft.made for why.
 -- ---------------------------------------------------------------------------
 
 local CRAFT_ROWS,  CRAFT_ROW_H  = 9, 26
 local CRAFT_ROWS_MAX  = 34
-local CSIDE_ROWS,  CSIDE_ROW_H  = 10, 18
+-- The recipe rows carry a stepper now, so they are 20 rather than 18: a 16px
+-- button in an 18px row leaves one pixel above and below it and reads as a
+-- misprint.
+local CSIDE_ROWS,  CSIDE_ROW_H  = 10, 20
 local CSIDE_ROWS_MAX  = 38
-local CSIDE_W = 172   -- recipe-tree width (reagent lines carry a count)
+local MADE_ROWS,   MADE_ROW_H   = 10, 18
+local MADE_ROWS_MAX   = 34
+
+-- The three panels' left edges and widths, from CRAFTL. Functions rather than
+-- constants for the two that depend on the window: the middle panel and the
+-- right one both move when it is dragged, and a number captured at build time
+-- is exactly the staleness ui.PanelWidthAt exists to stop.
+local CRAFT_MID_X = CRAFTL.edge + CRAFTL.left_w + CRAFTL.gap
+-- ...and how far the middle panel's right edge sits inside the panel's.
+local CRAFT_MID_R = CRAFTL.edge + CRAFTL.right_w + CRAFTL.gap
+-- How far the middle box reaches ABOVE its first row: enough for the column
+-- headers and the rule under them. The Buy and Sell tables draw the same band.
+-- ...measured from where ui.CraftBoxEdge would put a PLAIN list's box: the
+-- headings sit WELL_BLEED inside the box top, are hdr_h tall, and the rule
+-- goes under them, which is the same 24 the Buy and Sell tables use between
+-- their well_top and their rows_top less the bleed.
+local CRAFT_HDR_BAND = 24
+
+-- A box for one panel: fixed width on the left, fixed width on the right, or
+-- two-corner anchored in the middle. ui.MakeWell wraps a frame it is handed;
+-- these are positioned from the tab panel instead, so they take their anchors
+-- rather than their contents' size.
+local function CraftBox(panel)
+    local b = CreateFrame("Frame", nil, panel)
+    b:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    b:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    b:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    return b
+end
 
 function ui.BuildCraftTab()
     local panel = ui.panels["Crafting"]
@@ -7210,18 +7428,36 @@ function ui.BuildCraftTab()
     ui.craftBuilt = true
     ui.craftExpanded = {}
 
-    -- ===== Left: recipe tree ============================================
+    -- ===== Left: tracked recipes ========================================
     local sideHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -10)
-    sideHdr:SetText("Recipes")
+    sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge, -CRAFTL.hdr_y)
+    sideHdr:SetText("Tracked")
     sideHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    -- How many reagents you are short of, across every tracked recipe. The
+    -- one number that says whether there is shopping left to do, and it is
+    -- worth having without expanding anything.
+    ui.craftShortFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftShortFS:SetPoint("TOPLEFT", panel, "TOPLEFT",
+        CRAFTL.edge + CRAFTL.left_w - 70, -CRAFTL.hdr_y)
+    ui.craftShortFS:SetWidth(70)
+    ui.craftShortFS:SetJustifyH("RIGHT")
+
+    local sideBox = CraftBox(panel)
+    sideBox:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
+        -ui.CraftBoxEdge(LISTBOX.craftSide.top))
+    sideBox:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge,
+        ui.CraftBoxEdge(LISTBOX.craftSide.bot))
+    sideBox:SetWidth(CRAFTL.left_w)
+    ui.craftSideBox = sideBox
 
     local sideScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftSideScroll",
         panel, "FauxScrollFrameTemplate")
-    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -LISTBOX.craftSide.top)
-    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10,
+    sideScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
+        -LISTBOX.craftSide.top)
+    sideScroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge,
         LISTBOX.craftSide.bot)
-    sideScroll:SetWidth(CSIDE_W)
+    sideScroll:SetWidth(CRAFTL.left_w)
     sideScroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CSIDE_ROW_H, ui.UpdateCraftTree)
     end)
@@ -7236,27 +7472,51 @@ ui.GrowCraftSideRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(CSIDE_ROW_H)
-            row:SetWidth(CSIDE_W)
+            row:SetWidth(ui.CraftSideRowW())
             if i == 1 then
-                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", 0, 0)
+                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", ROWPAD.l, 0)
             else
                 row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1], "BOTTOMLEFT", 0, 0)
             end
             local ex = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            ex:SetPoint("LEFT", row, "LEFT", 2, 0)
-            ex:SetWidth(12)
+            ex:SetPoint("LEFT", row, "LEFT", 0, 0)
+            ex:SetWidth(CRAFTL.ex_w)
             ex:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
             row.ex = ex
+            -- NO SetWidth on the label. A width makes a FontString wrap, and a
+            -- wrapped second line in a 20px row draws over the row below it.
+            -- ui.FitText cuts it to the space instead -- see ui.FitString.
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            lbl:SetPoint("LEFT", row, "LEFT", 14, 0)
-            lbl:SetWidth(CSIDE_W - 40)
+            lbl:SetPoint("LEFT", row, "LEFT", CRAFTL.ex_w + 2, 0)
             lbl:SetJustifyH("LEFT")
             row.label = lbl
-            local ct = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-            ct:SetPoint("RIGHT", row, "RIGHT", -2, 0)
-            ct:SetWidth(24)
+            -- What a REAGENT row ends with: have / need.
+            local ct = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            ct:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            ct:SetWidth(CRAFTL.count_w)
             ct:SetJustifyH("RIGHT")
             row.ct = ct
+            -- ...and what a RECIPE row ends with: [-] n [+].
+            local step = CreateFrame("Frame", nil, row)
+            step:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            step:SetWidth(CRAFTL.step_w); step:SetHeight(CSIDE_ROW_H)
+            local minus = ui.MakeButton(step, "quiet")
+            minus:SetWidth(16); minus:SetHeight(16)
+            minus:SetPoint("LEFT", step, "LEFT", 0, 0)
+            minus:SetText("-")
+            local qty = step:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            qty:SetPoint("CENTER", step, "CENTER", 0, 0)
+            qty:SetWidth(CRAFTL.step_w - 34)
+            qty:SetJustifyH("CENTER")
+            qty:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            local plus = ui.MakeButton(step, "quiet")
+            plus:SetWidth(16); plus:SetHeight(16)
+            plus:SetPoint("RIGHT", step, "RIGHT", 0, 0)
+            plus:SetText("+")
+            minus:SetScript("OnClick", function() ui.StepCraftRow(row, -1) end)
+            plus:SetScript("OnClick", function() ui.StepCraftRow(row, 1) end)
+            step:Hide()
+            row.step, row.qty = step, qty
             row:SetScript("OnClick", function() ui.OnCraftTreeClick(row.entry) end)
             row:Hide()
             ui.craftSideRows[i] = row
@@ -7266,51 +7526,53 @@ ui.GrowCraftSideRows = function(n)
     ui.GrowCraftSideRows(CSIDE_ROWS)
 
     -- Profit estimate for the selected recipe (buy mats -> craft -> resell).
+    -- Below the box rather than inside it: it is about ONE recipe, and a list
+    -- of recipes with a per-recipe figure inside its own border reads as a
+    -- total of the list.
     local estHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    estHdr:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 116)
+    estHdr:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge,
+        CRAFTL.est_y)
     estHdr:SetText("Profit estimate")
     estHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftCostFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 100)
-    ui.craftCostFS:SetWidth(CSIDE_W); ui.craftCostFS:SetJustifyH("LEFT")
+    ui.craftCostFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 100)
+    ui.craftCostFS:SetWidth(CRAFTL.left_w); ui.craftCostFS:SetJustifyH("LEFT")
 
     ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftValueFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 84)
-    ui.craftValueFS:SetWidth(CSIDE_W); ui.craftValueFS:SetJustifyH("LEFT")
+    ui.craftValueFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 84)
+    ui.craftValueFS:SetWidth(CRAFTL.left_w); ui.craftValueFS:SetJustifyH("LEFT")
 
     ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 64)
-    ui.craftNetFS:SetWidth(CSIDE_W); ui.craftNetFS:SetJustifyH("LEFT")
+    ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 64)
+    ui.craftNetFS:SetWidth(CRAFTL.left_w); ui.craftNetFS:SetJustifyH("LEFT")
 
     -- Fill the DB with a fresh price for the crafted item and every reagent.
     local priceBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPriceButton")
-    priceBtn:SetWidth(CSIDE_W); priceBtn:SetHeight(18)
-    priceBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 42)
+    priceBtn:SetWidth(CRAFTL.left_w); priceBtn:SetHeight(18)
+    priceBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 42)
     priceBtn:SetText("Price recipe")
     priceBtn:SetScript("OnClick", function() ui.CraftPriceRecipe() end)
     ui.craftPriceBtn = priceBtn
 
     -- Delete the selected recipe.
     local delBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftDelButton")
-    delBtn:SetWidth(CSIDE_W); delBtn:SetHeight(18)
-    delBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 20)
+    delBtn:SetWidth(CRAFTL.left_w); delBtn:SetHeight(18)
+    delBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", CRAFTL.edge, 20)
     delBtn:SetText("Remove recipe")
     delBtn:SetScript("OnClick", function() ui.CraftDeleteProject() end)
     ui.craftDelBtn = delBtn
 
-    -- ===== Right: reagent title + result list ============================
-    local RX = CSIDE_W + 24
-
+    -- ===== Middle: reagent search + result list =========================
     ui.craftTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -10)
+    ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X + 6, -6)
     ui.craftTitle:SetText("Crafting")
     ui.craftTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     local box = CreateFrame("EditBox", "AegisExchangeCraftSearchBox", panel,
         "InputBoxTemplate")
-    box:SetWidth(180); box:SetHeight(18)
-    box:SetPoint("TOPLEFT", panel, "TOPLEFT", RX + 6, -34)
+    box:SetWidth(180); box:SetHeight(CRAFTL.strip_h)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X + 6, -CRAFTL.strip_y)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoCraftSearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
@@ -7324,10 +7586,12 @@ ui.GrowCraftSideRows = function(n)
     searchBtn:SetText("Search")
     searchBtn:SetScript("OnClick", function() ui.DoCraftSearch() end)
 
-    -- Pager (mirrors the Buy tab).
+    -- Pager (mirrors the Buy tab). Anchored to the MIDDLE panel's right edge,
+    -- which is CRAFT_MID_R inside the tab's -- there is a panel over there now.
     local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftNextButton")
-    nextBtn:SetWidth(24); nextBtn:SetHeight(20)
-    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -34)
+    nextBtn:SetWidth(24); nextBtn:SetHeight(CRAFTL.pager_h)
+    nextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -CRAFT_MID_R,
+        -CRAFTL.pager_y)
     nextBtn:SetText(">")
     nextBtn:SetScript("OnClick", function() if A.buy then A.buy.NextPage() end end)
 
@@ -7337,38 +7601,67 @@ ui.GrowCraftSideRows = function(n)
     ui.craftPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftPrevButton")
-    prevBtn:SetWidth(24); prevBtn:SetHeight(20)
+    prevBtn:SetWidth(24); prevBtn:SetHeight(CRAFTL.pager_h)
     prevBtn:SetPoint("RIGHT", ui.craftPageText, "LEFT", -6, 0)
     prevBtn:SetText("<")
     prevBtn:SetScript("OnClick", function() if A.buy then A.buy.PrevPage() end end)
 
-    ui.craftStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftStatus:SetPoint("TOPLEFT", box, "BOTTOMLEFT", 0, -8)
-    ui.craftStatus:SetJustifyH("LEFT")
-    ui.craftStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-    ui.craftStatus:SetText("Click a reagent on the left to shop for it.")
+    local midBox = CraftBox(panel)
+    -- The middle box reaches UP past its scroll frame to enclose the column
+    -- headers and the rule under them, exactly as the Buy and Sell tables do:
+    -- ONE box around the headings AND the rows.
+    midBox:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X,
+        -ui.CraftBoxEdge(LISTBOX.craft.top - CRAFT_HDR_BAND))
+    midBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -CRAFT_MID_R,
+        ui.CraftBoxEdge(LISTBOX.craft.bot))
+    ui.craftMidBox = midBox
 
-    -- Sortable column headers (same layout / behaviour as the Buy tab).
+    -- Sortable column headers (same layout / behaviour as the Buy tab), inside
+    -- the box and above the rule.
     ui.craftSortKey = "unit"
     ui.craftSortDir = "asc"
-    local rowLeft = RX + 4
     -- RCX/RCW, not a second copy of them. The row builder already lays cells
     -- out from those, and two sets of numbers for one table is exactly how the
     -- Sell tab's headers and rows came to disagree.
     local CX, CW = RCX, RCW
 
     -- Every column sorts (see ui.MakeSortHeaders); headers stay unskinned.
-    ui.craftHeaders = ui.MakeSortHeaders(panel, rowLeft, -76, CX, CW,
+    ui.craftHeaders = ui.MakeSortHeaders(panel, CRAFT_MID_X + ROWPAD.l,
+        -(LISTBOX.craft.top - CRAFT_HDR_BAND), CX, CW,
         function(key) ui.SetCraftSort(key) end)
 
+    local rule = panel:CreateTexture(nil, "ARTWORK")
+    rule:SetPoint("TOPLEFT", midBox, "TOPLEFT", 6, -CRAFT_HDR_BAND)
+    rule:SetPoint("TOPRIGHT", midBox, "TOPRIGHT", -6, -CRAFT_HDR_BAND)
+    rule:SetHeight(1)
+    rule:SetTexture(0.45, 0.38, 0.22, 0.85)
+
+    -- The scroll frame stops CRAFTL.bar_lane short of the box's right edge:
+    -- FauxScrollFrameTemplate hangs its bar OUTWARD from that line, and what
+    -- is on the far side of it here is the right panel's border.
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeCraftScroll",
         panel, "FauxScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.craft.top)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.craft.bot)
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFT_MID_X,
+        -LISTBOX.craft.top)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -(CRAFT_MID_R + CRAFTL.bar_lane), LISTBOX.craft.bot)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(CRAFT_ROW_H, ui.UpdateCraftList)
     end)
     ui.craftScroll = scroll
+
+    -- Move the bar out of the rows. FauxScrollFrameTemplate anchors it 2px
+    -- INSIDE the scroll frame's right edge, which is on top of the last
+    -- column; SELLL.bar_x pushes it into the lane CRAFTL.bar_lane reserves.
+    -- Re-anchored rather than re-templated, exactly as the Sell tab's bag
+    -- list does it -- the template is Blizzard's and every other
+    -- FauxScrollFrame in the window inherits it.
+    local craftBar = getglobal("AegisExchangeCraftScrollScrollBar")
+    if craftBar then
+        craftBar:ClearAllPoints()
+        craftBar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", SELLL.bar_x, -16)
+        craftBar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", SELLL.bar_x, 16)
+    end
 
     ui.craftRows = {}
 ui.GrowCraftRows = function(n)
@@ -7383,28 +7676,208 @@ ui.GrowCraftRows = function(n)
     end
     ui.GrowCraftRows(CRAFT_ROWS)
 
+    -- Status under the box, not above it: the count and the sort describe what
+    -- is in the table, and the concept puts them on the table's bottom bar.
+    ui.craftStatus = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftStatus:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+        CRAFT_MID_X + ROWPAD.l, CRAFTL.foot_y)
+    ui.craftStatus:SetJustifyH("LEFT")
+    ui.craftStatus:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.craftStatus:SetText("Click a reagent on the left to shop for it.")
+
+    -- ...and how many of THIS reagent you would still have to buy, on the
+    -- same bar. The whole reason the middle panel is showing this item.
+    ui.craftNeedFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftNeedFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -(CRAFT_MID_R + CRAFTL.bar_lane + ROWPAD.r), CRAFTL.foot_y)
+    ui.craftNeedFS:SetJustifyH("RIGHT")
+
+    -- ===== Right: made this session =====================================
+    -- Anchored from the panel's RIGHT, like everything else in this column:
+    -- the right panel is a fixed width pinned to that edge, so it is the one
+    -- thing on the tab whose x does not move when the window is dragged.
+    local madeHdr = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    madeHdr:SetPoint("TOPRIGHT", panel, "TOPRIGHT",
+        -(CRAFTL.edge + 46), -CRAFTL.hdr_y)
+    madeHdr:SetWidth(CRAFTL.right_w - 46)
+    madeHdr:SetJustifyH("LEFT")
+    madeHdr:SetText("Made this session")
+    madeHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local resetBtn = ui.MakeButton(panel, "quiet", "AegisExchangeCraftResetButton")
+    resetBtn:SetWidth(44); resetBtn:SetHeight(CRAFTL.reset_h)
+    resetBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -CRAFTL.edge,
+        -CRAFTL.reset_y)
+    resetBtn:SetText("Reset")
+    resetBtn:SetScript("OnClick", function() ui.ResetCraftMade() end)
+    ui.craftResetBtn = resetBtn
+
+    local madeBox = CraftBox(panel)
+    madeBox:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -CRAFTL.edge,
+        -ui.CraftBoxEdge(LISTBOX.craftMade.top))
+    madeBox:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -CRAFTL.edge,
+        ui.CraftBoxEdge(LISTBOX.craftMade.bot))
+    madeBox:SetWidth(CRAFTL.right_w)
+    ui.craftMadeBox = madeBox
+
+    local madeScroll = CreateFrame("ScrollFrame", "AegisExchangeCraftMadeScroll",
+        panel, "FauxScrollFrameTemplate")
+    madeScroll:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -CRAFTL.edge,
+        -LISTBOX.craftMade.top)
+    madeScroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -CRAFTL.edge,
+        LISTBOX.craftMade.bot)
+    madeScroll:SetWidth(CRAFTL.right_w)
+    madeScroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(MADE_ROW_H, ui.UpdateCraftMade)
+    end)
+    ui.craftMadeScroll = madeScroll
+
+    ui.craftMadeRows = {}
+ui.GrowCraftMadeRows = function(n)
+        if n > MADE_ROWS_MAX then n = MADE_ROWS_MAX end
+        local i = table.getn(ui.craftMadeRows) + 1
+        while i <= n do
+            local row = CreateFrame("Button", nil, panel)
+            row:SetHeight(MADE_ROW_H)
+            row:SetWidth(ui.CraftMadeRowW())
+            if i == 1 then
+                row:SetPoint("TOPLEFT", madeScroll, "TOPLEFT", ROWPAD.l, 0)
+            else
+                row:SetPoint("TOPLEFT", ui.craftMadeRows[i - 1], "BOTTOMLEFT", 0, 0)
+            end
+            local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            lbl:SetPoint("LEFT", row, "LEFT", 0, 0)
+            lbl:SetJustifyH("LEFT")
+            row.label = lbl
+            local ct = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            ct:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            ct:SetWidth(CRAFTL.count_w)
+            ct:SetJustifyH("RIGHT")
+            row.ct = ct
+            row:SetScript("OnClick", function()
+                if row.index then ui.SelectCraftProject(row.index) end
+            end)
+            row:Hide()
+            ui.craftMadeRows[i] = row
+            i = i + 1
+        end
+    end
+    ui.GrowCraftMadeRows(MADE_ROWS)
+
+    ui.craftMadeFootFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftMadeFootFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+        -(CRAFTL.edge + ROWPAD.r), CRAFTL.foot_y)
+    ui.craftMadeFootFS:SetWidth(CRAFTL.right_w - ROWPAD.l - ROWPAD.r)
+    ui.craftMadeFootFS:SetJustifyH("RIGHT")
+    ui.craftMadeFootFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- HIDE THE OUTER PANELS' SCROLLBARS. The bar hangs OUTWARD from its scroll
+    -- frame's right edge, which for these two is another panel's border (left)
+    -- and the window's own (right). Paying it a 26px lane would cost a seventh
+    -- of a panel whose entire problem is width. The WHEEL still scrolls --
+    -- FauxScrollFrameTemplate's OnMouseWheel drives the bar's value and a
+    -- hidden frame still holds one. Same treatment, same reason, as the Buy
+    -- tab's category tree.
+    ui.HideScrollBar(sideScroll)
+    ui.HideScrollBar(madeScroll)
+
+    -- Repaint the made panel once per frame at most, never inline in the chat
+    -- handler that feeds it -- HARD RULE 16. A big loot prints several lines
+    -- in a few frames and each one would otherwise repaint a list.
+    if A.craft then
+        A.craft.onMade = function()
+            ui.craftMadeDirty = true
+            if ui.craftMadeDriver then ui.craftMadeDriver:Show() end
+        end
+    end
+
     ui.RefreshCraftTree()
 end
 
 -- ---- recipe-tree model + paint -----------------------------------------
 
+-- What YOU can put in a craft right now, out of one db.InventoryRows answer.
+--
+-- YOUR BAGS AND YOUR BANK, and nothing else. NOT the account-wide total the
+-- tooltip shows: cloth in an alt's bank is cloth you own, and the tooltip is
+-- right there to say where it is -- but "you still need to buy 7" has to mean
+-- seven, and an alt three zones away cannot hand you thread. The AH and mail
+-- buckets are out for the same reason: an item posted for sale is not a
+-- reagent until somebody fails to buy it.
+function ui.OwnedFromRows(rows)
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.you then return (r.bags or 0) + (r.bank or 0) end
+        i = i + 1
+    end
+    return 0
+end
+
+-- ...for one item id. `live` is the exact bag count read a moment ago; the
+-- bank half is whatever the last visit stored.
+function ui.CraftHaveOf(itemId, live)
+    if not itemId or not A.db or not A.db.InventoryRows then return 0 end
+    return ui.OwnedFromRows(A.db.InventoryRows(itemId, live))
+end
+
+-- Rows for the made-this-session panel, plus the two totals under it.
+--
+-- `madeOf` and `wantOf` are INJECTED for the same reason craft.NeedFor takes
+-- haveOf: this is two numbers per project and a subtraction, and the caller
+-- that can answer them exactly is the one that should. Which makes it
+-- arithmetic a suite can run without a frame.
+--
+-- `left` floors at zero. Making six of something you asked five of is done,
+-- not minus-one to go, and a negative would make the footer's total drift
+-- down every time you overshot one recipe.
+function ui.MadeSummary(projects, madeOf, wantOf)
+    local rows, made, toGo = {}, 0, 0
+    local i = 1
+    while i <= table.getn(projects or {}) do
+        local p = projects[i]
+        local want = (wantOf and wantOf(p)) or 1
+        local n = (madeOf and p.itemId and madeOf(p.itemId)) or 0
+        local left = want - n
+        if left < 0 then left = 0 end
+        made = made + n
+        toGo = toGo + left
+        table.insert(rows, { index = i, name = p.name, itemId = p.itemId,
+                             made = n, want = want, left = left,
+                             done = n >= want })
+        i = i + 1
+    end
+    return rows, made, toGo
+end
+
 function ui.FlattenCraft()
-    local flat = {}
+    local flat, shortTotal = {}, 0
     local projects = A.craft and A.craft.Projects() or {}
+    -- ONE bag walk for the whole repaint, not one per reagent. BagCounts is
+    -- itself dirty-flagged, so this is usually a table read.
+    local live = A.sell and A.sell.BagCounts and A.sell.BagCounts() or nil
+    local haveOf = function(id) return ui.CraftHaveOf(id, live) end
     local pi = 1
     while pi <= table.getn(projects) do
         local p = projects[pi]
-        table.insert(flat, { kind = "project", index = pi, name = p.name })
+        local want = A.craft.Want(p)
+        -- Costed for EVERY project, expanded or not: the "N short" line in the
+        -- header is the one number that says whether there is shopping left,
+        -- and it would be wrong if it only counted what happened to be open.
+        local need, nshort = A.craft.NeedFor(p, want, haveOf)
+        shortTotal = shortTotal + nshort
+        table.insert(flat, { kind = "project", index = pi, name = p.name,
+                             want = want, short = nshort })
         if ui.craftExpanded[pi] then
-            local reagents = p.reagents or {}
             local ri = 1
-            while ri <= table.getn(reagents) do
-                local r = reagents[ri]
+            while ri <= table.getn(need) do
+                local r = need[ri]
                 table.insert(flat, { kind = "reagent", projIndex = pi,
-                    name = r.name, count = r.count, itemId = r.itemId })
+                    name = r.name, itemId = r.itemId, per = r.per,
+                    need = r.need, have = r.have, shortBy = r.short })
                 ri = ri + 1
             end
-            if table.getn(reagents) == 0 then
+            if table.getn(need) == 0 then
                 table.insert(flat, { kind = "note", text = "(no reagents)" })
             end
         end
@@ -7417,12 +7890,14 @@ function ui.FlattenCraft()
             text = "then click 'Add to Aegis'." })
     end
     ui.craftFlat = flat
+    ui.craftShort = shortTotal
 end
 
 function ui.RefreshCraftTree()
     if not ui.craftSideScroll then return end
     ui.FlattenCraft()
     ui.UpdateCraftTree()
+    ui.UpdateCraftMade()
 end
 
 function ui.UpdateCraftTree()
@@ -7435,6 +7910,7 @@ function ui.UpdateCraftTree()
     FauxScrollFrame_Update(ui.craftSideScroll, table.getn(flat),
         vis, CSIDE_ROW_H)
     local offset = FauxScrollFrame_GetOffset(ui.craftSideScroll)
+    local rowW = ui.CraftSideRowW()
     local i = 1
     while i <= table.getn(ui.craftSideRows) do
         local row = ui.craftSideRows[i]
@@ -7443,23 +7919,34 @@ function ui.UpdateCraftTree()
             row.entry = e
             row.ex:SetText("")
             row.ct:SetText("")
+            row.step:Hide()
             if e.kind == "project" then
                 row.ex:SetText(ui.craftExpanded[e.index] and "-" or "+")
-                local mark = (ui.craftSel == e.index) and "> " or ""
-                row.label:SetText(mark .. e.name)
+                ui.FitText(row.label, e.name,
+                    ui.CraftLabelW(rowW, CRAFTL.ex_w + 2, CRAFTL.step_w + 4))
                 if ui.craftSel == e.index then
                     row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
                 else
                     row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
                 end
+                row.qty:SetText("" .. e.want)
+                row.step:Show()
             elseif e.kind == "reagent" then
-                row.label:SetText("  " .. e.name)
+                ui.FitText(row.label, "  " .. e.name,
+                    ui.CraftLabelW(rowW, CRAFTL.ex_w + 2, CRAFTL.count_w + 4))
                 row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-                if e.count and e.count > 1 then
-                    row.ct:SetText("x" .. e.count)
+                -- HAVE / NEED, not the recipe's own "x4". The recipe figure is
+                -- per craft and never changes; this is what the quantity on
+                -- the row above actually asks for, against what you hold.
+                row.ct:SetText(e.have .. "/" .. e.need)
+                if e.shortBy > 0 then
+                    row.ct:SetTextColor(0.90, 0.30, 0.30)
+                else
+                    row.ct:SetTextColor(0.30, 0.85, 0.30)
                 end
             else
-                row.label:SetText("  " .. (e.text or ""))
+                ui.FitText(row.label, "  " .. (e.text or ""),
+                    ui.CraftLabelW(rowW, CRAFTL.ex_w + 2, 4))
                 row.label:SetTextColor(0.5, 0.5, 0.5)
             end
             row:Show()
@@ -7469,7 +7956,135 @@ function ui.UpdateCraftTree()
         end
         i = i + 1
     end
+    ui.UpdateCraftShort()
 end
+
+-- The header's shopping-left line.
+function ui.UpdateCraftShort()
+    if not ui.craftShortFS then return end
+    local n = ui.craftShort or 0
+    if n > 0 then
+        ui.craftShortFS:SetText(n .. " short")
+        ui.craftShortFS:SetTextColor(0.90, 0.30, 0.30)
+    else
+        ui.craftShortFS:SetText("")
+    end
+end
+
+-- ---- the quantity stepper ----------------------------------------------
+
+-- Nudge the quantity on a recipe row. Shift takes five at a time -- asking for
+-- twenty of something is otherwise twenty clicks.
+function ui.StepCraftRow(row, delta)
+    local e = row and row.entry
+    if not e or e.kind ~= "project" or not A.craft then return end
+    if IsShiftKeyDown and IsShiftKeyDown() then delta = delta * 5 end
+    A.craft.StepWant(e.index, delta)
+    ui.craftSel = e.index
+    ui.RefreshCraftTree()
+    ui.UpdateCraftSummary()
+    ui.UpdateCraftNeed()
+end
+
+-- ---- made this session --------------------------------------------------
+
+function ui.SelectCraftProject(index)
+    ui.craftSel = index
+    ui.craftExpanded[index] = true
+    ui.RefreshCraftTree()
+    ui.UpdateCraftSummary()
+end
+
+function ui.ResetCraftMade()
+    if not A.craft then return end
+    A.craft.ClearMade()
+    ui.UpdateCraftMade()
+end
+
+function ui.UpdateCraftMade()
+    if not ui.craftMadeScroll then return end
+    ui.craftMadeDirty = false
+    local projects = A.craft and A.craft.Projects() or {}
+    local rows, made, toGo = ui.MadeSummary(projects,
+        function(id) return A.craft.MadeCount(id) end,
+        function(p) return A.craft.Want(p) end)
+
+    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.craftMade,
+        MADE_ROW_H, MADE_ROWS_MAX)
+    ui.GrowCraftMadeRows(vis)
+    ui.SkinNewRows(ui.craftMadeRows)
+    FauxScrollFrame_Update(ui.craftMadeScroll, table.getn(rows),
+        vis, MADE_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.craftMadeScroll)
+    local rowW = ui.CraftMadeRowW()
+    local i = 1
+    while i <= table.getn(ui.craftMadeRows) do
+        local row = ui.craftMadeRows[i]
+        local r = (i <= vis) and rows[i + offset] or nil
+        if r then
+            row.index = r.index
+            ui.FitText(row.label, r.name,
+                ui.CraftLabelW(rowW, 0, CRAFTL.count_w + 4))
+            if ui.craftSel == r.index then
+                row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            else
+                row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+            row.ct:SetText(r.made .. " / " .. r.want)
+            if r.done then
+                row.ct:SetTextColor(0.30, 0.85, 0.30)
+            else
+                row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            end
+            row:Show()
+        else
+            row.index = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+
+    if ui.craftMadeFootFS then
+        if table.getn(rows) == 0 then
+            ui.craftMadeFootFS:SetText("")
+        else
+            ui.craftMadeFootFS:SetText(made .. " made \226\128\162 "
+                .. toGo .. " to go")
+        end
+    end
+end
+
+-- ONE once-per-frame flush for both of the Crafting tab's stormable inputs.
+--
+-- CHAT_MSG_LOOT prints a line per item, so a big loot lands several in a few
+-- frames; BAG_UPDATE fires per container and storms outright while the client
+-- resolves an unseen item. HARD RULE 16: each handler sets a flag, and this
+-- does the repaint at most once a frame, then idles.
+--
+-- The bag flag is what keeps "3/10" honest. Buy ten thread in the middle panel
+-- and the reagent line beside it has to stop saying you are seven short --
+-- there is nothing else that would repaint it.
+ui.craftMadeDriver = CreateFrame("Frame", "AegisExchangeCraftMade")
+ui.craftMadeDriver:Hide()
+ui.craftMadeDriver:SetScript("OnUpdate", function()
+    if ui.craftMadeDirty then ui.UpdateCraftMade() end
+    if ui.craftBagsDirty then
+        ui.craftBagsDirty = false
+        -- Only when the tab is ON SCREEN. Off it, the next RefreshCraft picks
+        -- the new counts up anyway, and a rescan nobody can see is the exact
+        -- cost rule 16 is about.
+        local panel = ui.panels and ui.panels["Crafting"]
+        if panel and panel:IsVisible() then ui.RefreshCraftTree() end
+    end
+    ui.craftMadeDriver:Hide()
+end)
+
+-- O(1): a flag and a Show, nothing else. The work is in the driver above.
+A.RegisterEvent("BAG_UPDATE", function()
+    if not ui.craftBuilt then return end
+    ui.craftBagsDirty = true
+    ui.craftMadeDriver:Show()
+end)
 
 function ui.OnCraftTreeClick(e)
     if not e then return end
@@ -7480,10 +8095,46 @@ function ui.OnCraftTreeClick(e)
         ui.UpdateCraftSummary()
     elseif e.kind == "reagent" then
         ui.craftSel = e.projIndex
+        -- What the middle panel is shopping for, remembered so its bottom bar
+        -- can say how many more you need after the results land.
+        ui.craftShopping = { name = e.name, need = e.need, have = e.have,
+                             shortBy = e.shortBy }
         ui.craftBox:SetText(e.name)
+        -- A REAL AUCTION QUERY, not a filter over what is already on screen.
+        -- The middle panel is a shopping pane: it has to be able to show a
+        -- reagent nothing has searched for yet.
         ui.DoCraftSearch()
         ui.RefreshCraftTree()
         ui.UpdateCraftSummary()
+    end
+    ui.UpdateCraftNeed()
+end
+
+-- The middle panel's "need N more".
+function ui.UpdateCraftNeed()
+    if not ui.craftNeedFS then return end
+    local s = ui.craftShopping
+    if not s then ui.craftNeedFS:SetText("") return end
+    -- Re-read the shortfall rather than trusting what was stored when the
+    -- reagent was clicked: the stepper moves it, and so does buying some.
+    local short = s.shortBy or 0
+    if ui.craftFlat then
+        local i = 1
+        while i <= table.getn(ui.craftFlat) do
+            local e = ui.craftFlat[i]
+            if e.kind == "reagent" and e.name == s.name then
+                short = e.shortBy
+                break
+            end
+            i = i + 1
+        end
+    end
+    if short > 0 then
+        ui.craftNeedFS:SetText("need " .. short .. " more")
+        ui.craftNeedFS:SetTextColor(0.90, 0.30, 0.30)
+    else
+        ui.craftNeedFS:SetText("you have enough")
+        ui.craftNeedFS:SetTextColor(0.30, 0.85, 0.30)
     end
 end
 
@@ -7610,9 +8261,12 @@ function ui.RefreshCraft()
         ui.craftSel = 1
         ui.craftExpanded[1] = true
     end
+    -- RefreshCraftTree paints the made panel too -- one call, so the left
+    -- panel's quantities and the right panel's targets cannot disagree.
     ui.RefreshCraftTree()
     ui.UpdateCraftList()
     ui.UpdateCraftSummary()
+    ui.UpdateCraftNeed()
 end
 
 -- Paint the Cost / Sells-for / Net lines for the selected recipe.

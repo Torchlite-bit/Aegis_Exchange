@@ -784,6 +784,9 @@ local function loadTable(name)
 end
 
 loadTable("SELLL")
+-- BEFORE LISTBOX: the three Crafting bands live in CRAFTL and LISTBOX reads
+-- them, so loading LISTBOX first indexes a nil table.
+loadTable("CRAFTL")
 loadTable("LISTBOX")
 
 do
@@ -946,12 +949,7 @@ H.section("the Crafting tab's three panels fit side by side")
 -- than assumed -- and this repo already has the machinery, which has now
 -- caught a wrong measurement (ColumnsFitAt reading the frame instead of the
 -- row) and a change that broke a different tab (the Sell bag column).
-CRAFTL = {
-    left_w  = field("CRAFTL", "left_w"),
-    right_w = field("CRAFTL", "right_w"),
-    gap     = field("CRAFTL", "gap"),
-    edge    = field("CRAFTL", "edge"),
-}
+-- CRAFTL itself is loaded whole, above -- LISTBOX reads it.
 CRAFT_COLS_END = constant("CRAFT_COLS_END")
 PANEL_H_INSET = constant("PANEL_H_INSET")
 do
@@ -960,6 +958,9 @@ do
     fn()
     fn = assert(loadstring(extract("function ui.CraftMidWidthAt("),
                            "CraftMidWidthAt"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftRowWidthAt("),
+                           "CraftRowWidthAt"))
     fn()
     fn = assert(loadstring(extract("function ui.CraftPanelsFitAt("),
                            "CraftPanelsFitAt"))
@@ -1006,20 +1007,182 @@ H.eq("the three panels and their gutters account for the whole width",
         + ui.CraftMidWidthAt(MIN_W) + CRAFTL.gap + CRAFTL.right_w,
      ui.PanelWidthAt(MIN_W))
 
--- ...and the fit is measured against the ROW, not the panel. Those differ by
--- the two row pads, and the check above cannot tell them apart: dropping the
--- pad makes the test MORE permissive, so it still passes at every width that
--- already worked. The width below is the one that separates them -- the panel
--- fits the columns exactly, and the row inside it is short by both pads.
-local craftExactW = CRAFT_COLS_END + 442   -- inverse of ui.CraftMidWidthAt
-H.eq("...the inverse is right", ui.CraftMidWidthAt(craftExactW),
+-- ...and the fit is measured against the ROW, not the panel. THREE terms
+-- separate the two -- the scrollbar lane and the two row pads -- and the check
+-- above cannot tell any of them apart: dropping one makes the test MORE
+-- permissive, so it still passes at every width that already worked.
+--
+-- So each term gets a width that isolates it. `craftPanelW(n)` is the window
+-- width at which the middle PANEL is exactly n wide, and the four checks below
+-- walk up from "the panel is exactly the columns" to "the panel is the columns
+-- plus every term", asserting refused, refused, refused, accepted. Drop the
+-- lane and the third one passes; drop the pads and the second one does.
+local craftInverse = PANEL_H_INSET + CRAFTL.edge * 2
+    + CRAFTL.left_w + CRAFTL.right_w + CRAFTL.gap * 2
+local craftPanelW = function(n) return n + craftInverse end
+
+H.eq("...the inverse is right", ui.CraftMidWidthAt(craftPanelW(CRAFT_COLS_END)),
      CRAFT_COLS_END)
-H.check("a width where the PANEL fits but the ROW does not is refused",
-        not ui.CraftPanelsFitAt(craftExactW),
-        craftExactW .. " accepted, so the row pad is not being counted")
-H.check("...and the same width plus the pads is accepted",
-        ui.CraftPanelsFitAt(craftExactW + ROWPAD.l + ROWPAD.r),
-        "the panels never fit, so the check above proves nothing")
+H.check("a panel sized to the columns exactly is refused",
+        not ui.CraftPanelsFitAt(craftPanelW(CRAFT_COLS_END)),
+        "accepted, so neither the pads nor the bar lane are counted")
+H.check("...the columns plus the ROW PADS is still refused",
+        not ui.CraftPanelsFitAt(
+            craftPanelW(CRAFT_COLS_END + ROWPAD.l + ROWPAD.r)),
+        "accepted, so the scrollbar lane is not being counted")
+H.check("...the columns plus the BAR LANE is still refused",
+        not ui.CraftPanelsFitAt(
+            craftPanelW(CRAFT_COLS_END + CRAFTL.bar_lane)),
+        "accepted, so the row pads are not being counted")
+H.check("...and the columns plus all three terms is accepted",
+        ui.CraftPanelsFitAt(craftPanelW(
+            CRAFT_COLS_END + CRAFTL.bar_lane + ROWPAD.l + ROWPAD.r)),
+        "the panels never fit, so the checks above prove nothing")
+
+-- THE LANE IS SELLL'S NUMBERS, not new ones: it is the same bar on the same
+-- client, and the Sell tab's bag list is the one other place in this window
+-- with a BOX on the far side of a scrollbar. The lane has to hold the bar
+-- pushed out by bar_x, the bar itself, and then a bleed before the box's
+-- border may start.
+H.check("the middle table's scrollbar lane clears the bar AND the border",
+        CRAFTL.bar_lane
+            >= SELLL.bar_x + SELLL.bar_w + field("SELLL", "well_overhang"),
+        "lane is " .. CRAFTL.bar_lane .. ", the bar and border need "
+            .. (SELLL.bar_x + SELLL.bar_w + field("SELLL", "well_overhang")))
+
+-- ---- the two OUTER panels' rows -----------------------------------------
+
+do
+    local fn = assert(loadstring(extract("function ui.CraftSideRowW("),
+                                 "CraftSideRowW"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftMadeRowW("),
+                           "CraftMadeRowW"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftLabelW("),
+                           "CraftLabelW"))
+    fn()
+end
+-- The outer panels pay the two row pads and NOT the scrollbar lane: their bar
+-- is hidden and the wheel scrolls them. Paying it would cost a seventh of a
+-- panel whose entire problem is width.
+H.eq("a recipe row is the left panel less its two pads",
+     ui.CraftSideRowW(), CRAFTL.left_w - ROWPAD.l - ROWPAD.r)
+H.eq("a made row is the right panel less its two pads",
+     ui.CraftMadeRowW(), CRAFTL.right_w - ROWPAD.l - ROWPAD.r)
+H.check("neither pays the scrollbar lane",
+        ui.CraftSideRowW() > CRAFTL.left_w - CRAFTL.bar_lane,
+        "the outer panels are being charged for a bar they do not draw")
+
+-- Every name on those rows has to leave room for what the row ends with, and
+-- the four cases differ: a recipe row ends with the stepper, a reagent row
+-- with a have/need count, and a reagent's name starts further in. Getting one
+-- wrong does not throw -- it wraps a name onto the row below it.
+local recipeName  = ui.CraftLabelW(ui.CraftSideRowW(), CRAFTL.ex_w + 2,
+                                   CRAFTL.step_w + 4)
+local reagentName = ui.CraftLabelW(ui.CraftSideRowW(), CRAFTL.ex_w + 2,
+                                   CRAFTL.count_w + 4)
+local madeName    = ui.CraftLabelW(ui.CraftMadeRowW(), 0, CRAFTL.count_w + 4)
+
+H.check("a recipe name has room left over", recipeName > 0,
+        "recipe names get " .. recipeName .. "px")
+H.check("a reagent name has room left over", reagentName > 0,
+        "reagent names get " .. reagentName .. "px")
+H.check("a made-panel name has room left over", madeName > 0,
+        "made names get " .. madeName .. "px")
+
+-- The stepper is the widest tail, so a recipe name is the tightest of the
+-- three. Asserted because it is the one that decides whether the left panel
+-- can be trimmed further: trim it and this is what goes first.
+H.check("the stepper is what squeezes a recipe name",
+        recipeName < reagentName,
+        "the stepper is not the widest thing a row ends with")
+
+-- ...and the tail really is subtracted. Dropping it makes the answer BIGGER,
+-- which is the direction that reads as working right up until a name wraps.
+H.eq("the tail is taken off", ui.CraftLabelW(100, 0, 40), 60)
+H.eq("...and so is the indent", ui.CraftLabelW(100, 14, 40), 46)
+H.eq("a tail wider than the row floors at one, never zero or below",
+     ui.CraftLabelW(40, 0, 90), 1)
+
+-- ---- headings and status lines clear their own box border ---------------
+
+-- WHY THIS EXISTS. A box is drawn WELL_BLEED outside the list it holds, and
+-- its backdrop border then straddles that edge by ANOTHER WELL_BLEED -- so a
+-- heading above a box has to clear 12px, not 6. All three panels were built
+-- with 6 and all three drew their heading through their own top border.
+--
+-- Nothing throws when this is wrong. The text simply has the border across
+-- it, which is exactly the class of bug this suite exists for.
+do
+    local fn = assert(loadstring(extract("function ui.CraftBoxEdge("),
+                                 "CraftBoxEdge"))
+    fn()
+    fn = assert(loadstring(extract("function ui.CraftBoxClear("),
+                           "CraftBoxClear"))
+    fn()
+end
+CRAFT_HDR_BAND = constant("CRAFT_HDR_BAND")
+WELL_BLEED = constant("WELL_BLEED")
+
+H.eq("the box edge is one bleed outside its list",
+     ui.CraftBoxEdge(100), 100 - WELL_BLEED)
+H.eq("...and what is drawn outside it must clear two",
+     ui.CraftBoxClear(100), 100 - WELL_BLEED * 2)
+
+-- The heading above each box. The middle one's box reaches CRAFT_HDR_BAND
+-- higher than the others' to enclose its column headers and the rule.
+local hdrBottom = CRAFTL.hdr_y + CRAFTL.hdr_h
+H.check("the LEFT panel's heading clears its box",
+        hdrBottom <= ui.CraftBoxClear(CRAFTL.side_top),
+        "heading reaches " .. hdrBottom .. ", border starts at "
+            .. ui.CraftBoxClear(CRAFTL.side_top))
+H.check("the RIGHT panel's heading clears its box",
+        hdrBottom <= ui.CraftBoxClear(CRAFTL.made_top),
+        "heading reaches " .. hdrBottom .. ", border starts at "
+            .. ui.CraftBoxClear(CRAFTL.made_top))
+H.check("the MIDDLE panel's heading clears its box",
+        hdrBottom <= ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND),
+        "heading reaches " .. hdrBottom .. ", border starts at "
+            .. ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND))
+
+-- The middle panel's search strip and pager sit above its box too, and they
+-- are TALLER than a heading -- so the heading check above cannot stand in for
+-- them. The pager is the tallest of the three and therefore the binding one.
+H.check("the MIDDLE panel's search box clears its box",
+        CRAFTL.strip_y + CRAFTL.strip_h
+            <= ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND),
+        "the search box overlaps the table's own top border")
+H.check("...and so does the pager beside it",
+        CRAFTL.pager_y + CRAFTL.pager_h
+            <= ui.CraftBoxClear(CRAFTL.mid_top - CRAFT_HDR_BAND),
+        "the pager overlaps the table's own top border")
+H.check("the RIGHT panel's Reset button clears its box",
+        CRAFTL.reset_y + CRAFTL.reset_h
+            <= ui.CraftBoxClear(CRAFTL.made_top),
+        "Reset overlaps the made panel's top border")
+
+-- ...and the status line below each one.
+local footTop = CRAFTL.foot_y + CRAFTL.foot_h
+H.check("the LEFT panel's list stops clear of the profit block under it",
+        CRAFTL.est_y + CRAFTL.est_h <= ui.CraftBoxClear(CRAFTL.side_bot),
+        "the profit block reaches " .. (CRAFTL.est_y + CRAFTL.est_h)
+            .. ", the recipe box's border starts at "
+            .. ui.CraftBoxClear(CRAFTL.side_bot))
+H.check("the MIDDLE panel's status line clears its box",
+        footTop <= ui.CraftBoxClear(CRAFTL.mid_bot),
+        "status reaches " .. footTop .. ", border starts at "
+            .. ui.CraftBoxClear(CRAFTL.mid_bot))
+H.check("the RIGHT panel's footer clears its box",
+        footTop <= ui.CraftBoxClear(CRAFTL.made_bot),
+        "footer reaches " .. footTop .. ", border starts at "
+            .. ui.CraftBoxClear(CRAFTL.made_bot))
+
+-- The middle table keeps the ten rows it had as a full-width pane. Three
+-- panels is a layout change, not a smaller table -- and the row count is what
+-- a player would actually notice going backwards.
+H.eq("the middle table still holds ten rows at the smallest window",
+     ui.ListRowsAt(MIN_H, LISTBOX.craft, 26, 34), 10)
 
 -- ---------------------------------------------------------------------------
 H.section("rows are held clear of the box border they sit inside")

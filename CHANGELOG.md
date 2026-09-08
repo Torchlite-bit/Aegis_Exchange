@@ -12,6 +12,58 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.56.0]
+
+The second half of ROADMAP 2h §4 — the Crafting tab rebuilt as three panels
+side by side, with the quantity stepper on the recipes themselves.
+
+### Added
+- **The Crafting tab is three panels, not two.** Tracked recipes on the left,
+  the reagent search results in the middle, what you have made on the right —
+  side by side, nothing stacked.
+  - **A `[-] n [+]` stepper on every recipe row**, and every number downstream
+    follows it: the reagent totals beside it, the shortfall the middle panel
+    reports, and the target on the right. Hold **shift** to step five at a time.
+  - **Reagent rows read `have / need`**, green when you have enough and red
+    when you do not — where "have" is *your* bags and *your* bank. Not the
+    account-wide total the tooltip shows: an alt three zones away cannot hand
+    you thread, and an item posted at the auction house is not a reagent until
+    somebody fails to buy it.
+  - **A "N short" count in the panel's heading**, across every tracked recipe
+    whether it is expanded or not — the one number that says whether there is
+    shopping left to do.
+  - **A "made this session" panel** reading `made / want` per recipe, with its
+    own footer totals and a **Reset**. Manual reset only, as before.
+  - Clicking a reagent still fires a **real auction query**, and the middle
+    panel's bottom bar now says how many more of it you need.
+- **The counts stay honest while you shop.** Buy ten thread in the middle
+  panel and the reagent line beside it stops saying you are seven short.
+
+### Fixed
+- **Long names no longer wrap onto the row below them.** The 1.12 client has no
+  ellipsising font string — setting a width makes it *wrap*, and nothing clips
+  a row, so the second line simply draws over its neighbour. Narrow columns now
+  measure and cut.
+
+### Internal
+- **The scrollbar is a term in the layout, and it was missing.** The widths in
+  1.55.0 were derived without a lane for the middle table's bar —
+  FauxScrollFrameTemplate anchors it *inside* the scroll frame's right edge,
+  on top of the last column. The lane is now the Sell tab's own measured
+  numbers rather than new ones, and the geometry suite asserts all three terms
+  of the fit separately: drop the pads or drop the lane and a different width
+  is refused.
+- **Every heading and status line on the tab is asserted clear of its own box
+  border.** A backdrop edge is drawn *centred* on the frame boundary, so a
+  heading above a box has to clear twice the bleed, not once. All three panels
+  were built with one and drew their heading through their own border; nothing
+  throws when that happens, which is what the suite is for.
+- `ui.HideScrollBar` was a closure inside `ui.BuildBuyTab` and called from the
+  Crafting tab — which worked only because the Buy tab happens to be built one
+  line earlier. It is a top-level function now.
+- The made-count and bag changes both repaint through **one once-per-frame
+  flush** rather than inline in the handlers that feed them.
+
 ## [1.55.0]
 
 The first half of ROADMAP 2h §4 — the numbers and the space the Crafting tab's
@@ -4035,6 +4087,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.56.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
