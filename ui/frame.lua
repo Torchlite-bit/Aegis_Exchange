@@ -4723,6 +4723,10 @@ function ui.BuildBuyTab()
     -- search box than stepping to the level fields, so the two search boxes
     -- keep it and nothing else does. See ui.LinkTabOrder.
     box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
+    -- Shift-click an item anywhere in the game and its name lands here.
+    -- Registered BEFORE the Advanced query box, so with neither focused the
+    -- default strip's box wins -- and only one of the two is ever visible.
+    ui.RegisterLinkTarget(box)
     ui.buyBox = box
     ui.buyNameLbl = stripLabel("Name", box)
 
@@ -4813,6 +4817,7 @@ function ui.BuildBuyTab()
     ui.buyQueryBox:SetScript("OnEscapePressed", function()
         ui.buyQueryBox:ClearFocus()
     end)
+    ui.RegisterLinkTarget(ui.buyQueryBox)
     -- The OTHER autocomplete box, and the other half of the traversal
     -- exception. See ui.LinkTabOrder.
     ui.buyQueryBox:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
@@ -7620,6 +7625,8 @@ ui.GrowCraftSideRows = function(n)
     box:SetAutoFocus(false)
     box:SetScript("OnEnterPressed", function() ui.DoCraftSearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
+    -- Shift-click an item anywhere in the game and its name lands here.
+    ui.RegisterLinkTarget(box)
     ui.craftBox = box
 
     -- Search button sits to the RIGHT of the box (not below it), so the yellow
@@ -12469,4 +12476,118 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         return
     end
     ui.ShowBlizzardUI()
+end
+
+-- ---------------------------------------------------------------------------
+-- Shift-click an item into a search box
+--
+-- The stock UI does this: shift-click an item in your bags with the auction
+-- house open and its name lands in the browse box. Our window REPLACES that
+-- browse box, so without this the gesture just stops working the moment a
+-- player installs Aegis -- a thing taken away, which is worse than a thing
+-- never offered.
+-- ---------------------------------------------------------------------------
+
+-- Every edit box that will accept a shift-clicked item, in registration order.
+ui.linkTargets = {}
+-- ...and whichever of them currently has the keyboard, if any.
+ui.linkFocus = nil
+
+-- Where a shift-clicked item should land.
+--
+-- FOCUS FIRST, then whatever is on screen. A player who has clicked into a box
+-- has said where they want the name; anyone else means "the box I am looking
+-- at", and only the visible tab's boxes are visible. That is why no tab name
+-- is needed here -- the panels do the filtering by being hidden.
+--
+-- Both arguments are INJECTED rather than read off ui, so this is a rule about
+-- two lists and not a function that needs a client to run.
+function ui.LinkTargetFor(focus, targets)
+    if focus and focus:IsVisible() then return focus end
+    local i = 1
+    while i <= table.getn(targets or {}) do
+        local b = targets[i]
+        if b and b:IsVisible() then return b end
+        i = i + 1
+    end
+    return nil
+end
+
+-- Take a link if we want it. Returns true when it was consumed.
+function ui.InsertItemLink(link)
+    -- CHAT WINS. If the player is typing a message, a shift-clicked item
+    -- belongs in that message -- that is what the gesture means everywhere
+    -- else in the game, and taking it would be a surprise, not a feature.
+    if ChatFrameEditBox and ChatFrameEditBox:IsVisible() then return false end
+
+    local name = util.ItemNameFromLink(link)
+    if not name then
+        -- A bare itemstring carries no name. Ask the client, which is cheap
+        -- for something the player is holding -- it is in their bags, so it
+        -- is cached.
+        name = GetItemInfo and GetItemInfo(link)
+    end
+    if not name or name == "" then return false end
+
+    local box = ui.LinkTargetFor(ui.linkFocus, ui.linkTargets)
+    if not box then return false end
+    box:SetText(name)
+    -- Focus so Enter searches straight away, and select the text so a second
+    -- shift-click replaces rather than appends.
+    if box.SetFocus then box:SetFocus() end
+    if box.HighlightText then box:HighlightText() end
+    return true
+end
+
+-- Register an edit box as a shift-click target.
+function ui.RegisterLinkTarget(box)
+    if not box then return box end
+    table.insert(ui.linkTargets, box)
+    -- The FOCUS half is pcall'd, and the registration above is not.
+    --
+    -- SetScript throws on a script name the widget does not have, and this is
+    -- a builder: an error here would cost the whole tab, not the feature.
+    -- OnEditFocusLost is already used elsewhere in this file so the family
+    -- exists, but OnEditFocusGained is not, and no suite can ask a client.
+    -- Losing focus tracking degrades to "the visible box", which is still the
+    -- right answer nearly every time -- losing the tab does not degrade.
+    local ok, err = pcall(function()
+        local gained = box:GetScript("OnEditFocusGained")
+        box:SetScript("OnEditFocusGained", function()
+            ui.linkFocus = box
+            if gained then gained() end
+        end)
+        -- SAVE-AND-REPLACE, not SetScript over the top: SetScript REPLACES a
+        -- handler rather than adding to one, and boxes elsewhere in this
+        -- window carry OnEditFocusLost handlers that commit their value. A
+        -- registration that quietly dropped one of those would lose an edit.
+        local lost = box:GetScript("OnEditFocusLost")
+        box:SetScript("OnEditFocusLost", function()
+            if ui.linkFocus == box then ui.linkFocus = nil end
+            if lost then lost() end
+        end)
+    end)
+    if not ok then ui.linkFocusFailure = err end
+    return box
+end
+
+-- The hook itself. ChatEdit_InsertLink is what the client calls for EVERY
+-- shift-click on an item -- bags, the character sheet, a loot window, a
+-- merchant, another player's link in chat -- so hooking it once covers all of
+-- them instead of hooking each frame's OnClick.
+--
+-- SAVED ORIGINAL + REPLACEMENT, never a secure hook (HARD RULE 7). Ours gets
+-- first refusal and falls through whenever it does not want the link, so chat,
+-- the Blizzard auction house and anything else that consumes this keep working
+-- exactly as they did.
+if type(ChatEdit_InsertLink) == "function" then
+    ui.origInsertLink = ChatEdit_InsertLink
+    ChatEdit_InsertLink = function(text)
+        -- pcall: this runs on a client function every shift-click in the game
+        -- makes, including with our window shut. An error here would break
+        -- linking into chat for the whole session.
+        local ok, took = pcall(ui.InsertItemLink, text)
+        if ok and took then return true end
+        return ui.origInsertLink(text)
+    end
 end

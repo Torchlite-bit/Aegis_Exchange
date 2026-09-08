@@ -18,6 +18,32 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.8]
+
+### Added
+- **Shift-click an item to put its name in the search box** — from your bags,
+  the character sheet, a loot window, a merchant, or someone's link in chat.
+  The stock UI does this into the auction house's browse box; our window
+  replaces that box, so without it the gesture simply stopped working the
+  moment you installed Aegis.
+  - Works on the **Buy** tab in both modes and on the **Crafting** tab. The
+    name lands in whichever box you have clicked into; failing that, whichever
+    is on screen.
+  - **Typing in chat wins.** Shift-clicking while composing a message puts the
+    link in the message, the way it does everywhere else in the game.
+  - When Aegis does not want the link it is handed straight back to the client,
+    so chat, the Blizzard auction house and every other consumer keep working
+    exactly as they did.
+
+### Internal
+- The name is **read off the link**, never asked of `GetItemInfo` — the link
+  already carries it, and on 1.12 that lookup answers only for cached items
+  and costs a server round trip for anything else.
+- The hook is a saved original plus a replacement (HARD RULE 7), and our half
+  runs under `pcall`: it is on a client function that fires for every
+  shift-click in the game, including with our window shut, so an error in it
+  would break chat linking for the whole session.
+
 ## [1.52.7]
 
 The Crafting tab, on a real client. Three panels that each took the shape their
@@ -4160,6 +4186,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

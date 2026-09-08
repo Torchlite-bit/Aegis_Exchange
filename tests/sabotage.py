@@ -2007,6 +2007,56 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # ---- shift-click an item into a search box -----------------------------
+    # The name read as the whole link, so the search box fills with
+    # "|cff1eff00|Hitem:2589..." and every search returns nothing.
+    ("link-name-is-the-whole-link", "core/util.lua",
+     '    local _, _, name = string.find(link, "|h%[(.-)%]|h")',
+     "    local name = link",
+     "util"),
+
+    # A greedy capture instead of a lazy one. Identical on one link, and wrong
+    # the moment a line holds two of them.
+    ("link-name-greedy", "core/util.lua",
+     '    local _, _, name = string.find(link, "|h%[(.-)%]|h")',
+     '    local _, _, name = string.find(link, "|h%[(.*)%]|h")',
+     "util"),
+
+    # A bare itemstring answered with an empty name instead of nil, so the
+    # caller never falls back to the client and the box is cleared.
+    ("link-name-empty-is-a-name", "core/util.lua",
+     '    if name and name ~= "" then return name end',
+     "    if name then return name end",
+     "util"),
+
+    # Focus ignored, so the name always lands in whichever box is registered
+    # first -- the Buy tab's -- however deliberately the player clicked into
+    # another one.
+    ("link-target-ignores-focus", "ui/frame.lua",
+     "    if focus and focus:IsVisible() then return focus end",
+     "",
+     "shiftclick"),
+
+    # ...and the visibility test dropped, so a hidden box takes the name and
+    # it lands where nobody can see it.
+    ("link-target-takes-hidden-boxes", "ui/frame.lua",
+     "        if b and b:IsVisible() then return b end",
+     "        if b then return b end",
+     "shiftclick"),
+
+    # The link stolen from a message the player is typing.
+    ("link-steals-from-chat", "ui/frame.lua",
+     "    if ChatFrameEditBox and ChatFrameEditBox:IsVisible() then return false end",
+     "",
+     "shiftclick"),
+
+    # We decline the link and then drop it instead of passing it on, so
+    # shift-clicking into chat stops working while Aegis is loaded.
+    ("link-declined-is-dropped", "ui/frame.lua",
+     "        return ui.origInsertLink(text)",
+     "        return false",
+     "shiftclick"),
+
     # ---- the three guarantees that used to assert nothing -------------------
     # Every one of these passed silently before v1.52.6, because nothing
     # extracted the function that was written to catch them.
@@ -2776,6 +2826,7 @@ SUITES = {
     "tooltip.hook": "tests/units/tooltip_hook_test.lua",
     "craft.plan": "tests/units/craft_plan_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
+    "shiftclick": "tests/units/shiftclick_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

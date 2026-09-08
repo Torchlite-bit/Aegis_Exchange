@@ -2971,6 +2971,35 @@ made-this-session list was never added when it was built, so it was the one
 list in the window whose row height and row count nothing checked. It is in
 `LISTS` now.
 
+#### §7 Shift-click an item into a search box — v1.52.8
+
+Not on the 2h list, and it should have been. The stock UI puts a shift-clicked
+item's name in the auction house browse box; our window REPLACES that box, so
+installing Aegis took the gesture away. **A feature removed by our own
+replacement is a regression whether or not we ever built it** -- and nothing
+was going to surface it except somebody trying it.
+
+**`ChatEdit_InsertLink` is the one place to hook.** The client routes every
+shift-click on an item through it -- bags, character sheet, loot window,
+merchant, a link in chat -- so one saved-original-and-replaced function covers
+all of them, where hooking each frame's OnClick would cover the ones we thought
+of.
+
+**Chat wins, and that is not a courtesy.** Shift-clicking while composing a
+message means "put it in the message" everywhere else in the game. Taking it
+because our window happens to be open would be a surprise, not a feature.
+
+**The name is read off the link, not looked up.** The link already carries it;
+`GetItemInfo` on 1.12 answers only for cached items and costs a server round
+trip otherwise -- the same reason `util.ItemInfo` exists.
+
+Two things the tests had to be taught. The lazy capture and a greedy one are
+identical on ONE link, so the sabotage escaped until a case with two links in
+one string separated them. And a check for "no `hooksecurefunc` in this file"
+passed on the comment NEXT TO ui.HookAuctionFrame explaining why we do not use
+one -- the checker fooled by its own documentation that `definitions.py` was
+written about. `lua50.py` already bans it properly; the duplicate came out.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

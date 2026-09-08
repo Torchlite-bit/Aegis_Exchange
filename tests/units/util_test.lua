@@ -352,4 +352,50 @@ while si <= table.getn(shapes) do
 end
 W.itemInfoShape = "vanilla"
 
+-- ---------------------------------------------------------------------------
+H.section("the display name out of an item link")
+-- ---------------------------------------------------------------------------
+
+-- Shift-clicking an item hands us the full link. The NAME is read off it
+-- rather than asked of GetItemInfo, which on 1.12 answers only for cached
+-- items and costs a server round trip for anything else. A parse cannot fail
+-- for an item the player is holding; a lookup can.
+local LINK = "|cff1eff00|Hitem:2589:0:0:0|h[Linen Cloth]|h|r"
+H.eq("the name comes out of a full link",
+     util.ItemNameFromLink(LINK), "Linen Cloth")
+H.eq("...with no colour codes on it",
+     util.ItemNameFromLink("|Hitem:2589:0:0:0|h[Linen Cloth]|h"), "Linen Cloth")
+
+-- Names with the characters that would break a lazy pattern.
+H.eq("a name with brackets in it",
+     util.ItemNameFromLink("|Hitem:1:0:0:0|h[Pattern: Red Linen Robe]|h"),
+     "Pattern: Red Linen Robe")
+H.eq("a name with an apostrophe",
+     util.ItemNameFromLink("|Hitem:1:0:0:0|h[Thief's Blade]|h"),
+     "Thief's Blade")
+
+-- A BARE ITEMSTRING CARRIES NO NAME. Answering "item" or "" here would put
+-- nonsense in a search box; nil lets the caller fall back to the client.
+H.isNil("a bare itemstring has no name",
+        util.ItemNameFromLink("item:2589:0:0:0"))
+H.isNil("an empty name is not a name",
+        util.ItemNameFromLink("|Hitem:1:0:0:0|h[]|h"))
+H.isNil("plain text is not a link", util.ItemNameFromLink("Linen Cloth"))
+H.isNil("nil is handled", util.ItemNameFromLink(nil))
+H.isNil("a number is handled", util.ItemNameFromLink(2589))
+
+-- LAZY, NOT GREEDY. One link makes the two identical; two links in one string
+-- is what separates them, and a greedy capture swallows everything between the
+-- first "[" and the LAST "]" -- returning one run-on name for the pair. The
+-- helper is general, so it has to survive a chat line, not just the single
+-- link a shift-click hands it.
+H.eq("two links in one string yields the FIRST name",
+     util.ItemNameFromLink(
+         "|Hitem:2589:0:0:0|h[Linen Cloth]|h and |Hitem:2592:0:0:0|h[Wool Cloth]|h"),
+     "Linen Cloth")
+
+-- The id parser still works on the same links, so the two agree about what a
+-- link is.
+H.eq("...and the id comes off the same link", util.ItemIdFromLink(LINK), 2589)
+
 os.exit(H.report("util"))
