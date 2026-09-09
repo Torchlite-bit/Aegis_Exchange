@@ -12737,6 +12737,27 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             .. "  known=" .. tostring(A.db.VendorBuyCount()))
         return
     end
+    -- The item-fact sweep, on or off. Its own command rather than a checkbox
+    -- because the reason to reach for it is "the client is misbehaving", and
+    -- that is not a moment to go hunting through a settings tab.
+    if string.find(cmd, "sweep", 1, true) then
+        if string.find(cmd, "on", 1, true) then
+            A.db.SetSetting("harvest", true)
+            A.db.StartHarvest()
+            ChatMsg("Aegis: item sweep ON. It asks the SERVER about items you"
+                .. " have never seen; turn it off if the client stutters.")
+        elseif string.find(cmd, "off", 1, true) then
+            A.db.SetSetting("harvest", false)
+            A.db.StopHarvest()
+            ChatMsg("Aegis: item sweep OFF. Item facts are still learned"
+                .. " from bags, browsing and lookups; that path is free.")
+        else
+            ChatMsg("Aegis: item sweep is "
+                .. (A.db.Setting("harvest") and "ON" or "OFF")
+                .. " -- /aex sweep on | off")
+        end
+        return
+    end
     if string.find(cmd, "cache", 1, true) then
         -- How far the item-fact harvest has got. Worth being able to ask,
         -- because the sweep is silent by design and "is it doing anything"

@@ -2030,6 +2030,21 @@ end
      "geometry"),
 
     # ---- the item-fact sweep -----------------------------------------------
+    # The sweep back ON by default. It asks the SERVER about 120000 items the
+    # player has never seen; measured on a real client that is ~25
+    # GET_ITEM_INFO_RECEIVED a second, for ever, on a 32-bit process.
+    ("harvest-on-by-default", "core/db.lua",
+     "    harvest        = false,",
+     "    harvest        = true,",
+     "db"),
+
+    # ...or the setting present but not consulted, which is the same thing
+    # with a switch that does nothing.
+    ("harvest-ignores-its-setting", "core/db.lua",
+     '    if not db.Setting("harvest") then return false end',
+     "",
+     "db"),
+
     # The sweep back to a burst: 500 GetItemInfo calls every step. On 1.12 a
     # cache miss puts an item query on the wire, so this is a thousand a second
     # from login -- the reported freezes with nothing visible in Task Manager.

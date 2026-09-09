@@ -339,6 +339,18 @@ H.check("the per-step budget is a pace, not a burst",
 -- a scan is paging is HARD RULE 10's flood by another door -- and it lands
 -- exactly when the player is watching, because they opened the auction house
 -- to do something.
+-- OFF BY DEFAULT. A probe on a real client caught GET_ITEM_INFO_RECEIVED
+-- arriving ~25 times a second with the sweep running, and a Lua heap of
+-- 222 MB climbing. 1.12 is a 32-bit process and every one of those answers
+-- also grows the client's own item cache, which gcinfo() cannot see -- so the
+-- measured half is the smaller half.
+H.check("the sweep is OFF unless asked for", not db.Setting("harvest"),
+        "it walks 120000 ids at the server by default")
+db.harvestAt = 1
+H.check("...and does not start", not db.StartHarvest(), "it started anyway")
+H.check("...nor run", not db.HarvestRunning(), "it is running")
+
+db.SetSetting("harvest", true)
 db.harvestAt = 1
 db.StartHarvest()
 H.check("the sweep runs when nothing else needs the client",
@@ -362,5 +374,6 @@ H.check("a finished sweep is not restarted", not db.StartHarvest(),
         "closing the auction house restarts a sweep that is already done")
 H.check("...and stays stopped", not db.HarvestRunning(), "it came back")
 db.harvestAt = 1
+db.SetSetting("harvest", false)
 
 os.exit(H.report("db"))

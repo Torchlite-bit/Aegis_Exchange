@@ -154,6 +154,27 @@ local LEDGER_MAX = 500
 -- Defaults for every user setting. db.Setting falls back to these, so adding a
 -- new setting here is enough -- no migration of old saves needed.
 local SETTING_DEFAULTS = {
+    -- THE ITEM-FACT SWEEP, AND IT IS OFF.
+    --
+    -- It walked ids 1..120000 asking the client about each one. On 1.12 a
+    -- cache miss is not free -- it puts an item query on the wire, and the
+    -- server answers with GET_ITEM_INFO_RECEIVED. A probe on a real client
+    -- caught that event arriving ~25 times a SECOND, continuously, and a Lua
+    -- heap of 222 MB climbing ~9 MB over the sample.
+    --
+    -- 1.12 IS A 32-BIT PROCESS. Every answer also grows the client's own item
+    -- cache, which is C-side and therefore invisible to gcinfo() -- so the
+    -- measured Lua figure is the SMALLER half of the cost. A steady climb
+    -- toward the address-space ceiling is a crash to desktop, and it is a
+    -- climb rather than a spike, which is why nothing showed in Task Manager.
+    --
+    -- The addon already learns item facts OPPORTUNISTICALLY -- from bags, from
+    -- browsing, from any successful lookup -- and that path costs nothing
+    -- because the client had the data anyway. The sweep only ever bought us
+    -- facts about items the player has never seen and may never see.
+    --
+    -- Off by default. `/aex sweep on` for anyone who wants it back.
+    harvest        = false,
     duration       = 480,       -- default post duration, minutes (120/480/1440)
     -- Default pricing: undercut the lowest competitor by a FLAT 1 copper. That
     -- is the behaviour most sellers want out of the box -- just enough to be
@@ -1276,6 +1297,7 @@ end)
 
 -- Begin (or resume) the sweep. Idempotent.
 function db.StartHarvest()
+    if not db.Setting("harvest") then return false end
     if not db.harvestAt then return false end
     -- A NEGATIVE accumulator is the initial delay. Login is the busiest the
     -- client ever is, and this is the least urgent thing in the addon, so the

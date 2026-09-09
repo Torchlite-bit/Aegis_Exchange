@@ -18,6 +18,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.14]
+
+### Changed
+- **The item-fact sweep is OFF by default.** 1.52.13 slowed it and paused it at
+  the auction house; a probe on a real client then showed that was not enough.
+  `GET_ITEM_INFO_RECEIVED` — the server *answering* an item query — was
+  arriving about **25 times a second, continuously**, with a Lua heap of
+  **222 MB that climbed ~9 MB during the sample**.
+  - **1.12 is a 32-bit process**, and every one of those answers also grows the
+    client's own item cache, which is C-side and so invisible to `gcinfo()`.
+    The measured Lua figure is the *smaller* half of the cost. A steady climb
+    toward the address-space ceiling is a crash to desktop — and it is a climb
+    rather than a spike, which is why nothing ever showed in Task Manager.
+  - **Nothing is lost that you would notice.** The addon already learns item
+    facts opportunistically — from your bags, from browsing, from any
+    successful lookup — and that path is free because the client had the data
+    anyway. The sweep only ever bought facts about items you have never seen.
+  - **`/aex sweep on` / `off`** to control it, and `/aex sweep` to ask. A slash
+    command rather than a settings checkbox because the moment you reach for it
+    is "the client is misbehaving", which is not a moment to go hunting through
+    a tab.
+
 ## [1.52.13]
 
 ### Fixed
@@ -4274,6 +4296,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
