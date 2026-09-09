@@ -12751,10 +12751,16 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             A.db.StopHarvest()
             ChatMsg("Aegis: item sweep OFF. Item facts are still learned"
                 .. " from bags, browsing and lookups; that path is free.")
+        elseif string.find(cmd, "purge", 1, true) then
+            local n = A.db.PurgeFacts()
+            ChatMsg("Aegis: dropped " .. n .. " harvested item facts."
+                .. " They reload from SavedVariables at every login, so this"
+                .. " is what actually gives the memory back -- log out to"
+                .. " write it, then back in.")
         else
             ChatMsg("Aegis: item sweep is "
                 .. (A.db.Setting("harvest") and "ON" or "OFF")
-                .. " -- /aex sweep on | off")
+                .. " -- /aex sweep on | off | purge")
         end
         return
     end

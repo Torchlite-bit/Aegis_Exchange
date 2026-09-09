@@ -344,6 +344,17 @@ H.check("the per-step budget is a pace, not a burst",
 -- 222 MB climbing. 1.12 is a 32-bit process and every one of those answers
 -- also grows the client's own item cache, which gcinfo() cannot see -- so the
 -- measured half is the smaller half.
+-- PURGING IS A SEPARATE ACTION FROM STOPPING. `facts` lives in
+-- SavedVariables, so it is deserialised back into Lua at every login: a sweep
+-- that ran last week still costs memory today, however off it is now.
+db.PurgeFacts()          -- earlier sections in this suite record facts too
+db.SetItemFacts(1234, 2, 20, "INVTYPE_CHEST")
+db.SetItemFacts(5678, 1, 10, "")
+H.eq("facts accumulate", db.HarvestCount(), 2)
+H.eq("purging reports what it dropped", db.PurgeFacts(), 2)
+H.eq("...and they are gone", db.HarvestCount(), 0)
+H.isNil("...individually too", db.ItemFacts(1234))
+
 H.check("the sweep is OFF unless asked for", not db.Setting("harvest"),
         "it walks 120000 ids at the server by default")
 db.harvestAt = 1

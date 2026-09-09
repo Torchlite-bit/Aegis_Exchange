@@ -2038,6 +2038,13 @@ end
      "    harvest        = true,",
      "db"),
 
+    # A purge that reports a number and clears nothing -- the one action that
+    # actually gives the memory back, doing nothing.
+    ("harvest-purge-keeps-the-facts", "core/db.lua",
+     "    if db.account then db.account.facts = {} end",
+     "",
+     "db"),
+
     # ...or the setting present but not consulted, which is the same thing
     # with a switch that does nothing.
     ("harvest-ignores-its-setting", "core/db.lua",

@@ -1224,6 +1224,23 @@ function db.ItemFacts(itemId)
     return db.account.facts[itemId]
 end
 
+-- Throw away every harvested fact.
+--
+-- TURNING THE SWEEP OFF DOES NOT SHRINK WHAT IT ALREADY COLLECTED. `facts`
+-- lives in SavedVariables, so it is deserialised back into Lua at EVERY login
+-- and stays there for the session -- a sweep that ran for an hour last week is
+-- still costing memory today. Stopping the growth and undoing it are two
+-- different actions and the player needs both.
+--
+-- Safe to lose: every fact here is re-learnable from the item itself, and the
+-- opportunistic path relearns the ones that matter as you play.
+function db.PurgeFacts()
+    local n = db.HarvestCount()
+    if db.account then db.account.facts = {} end
+    db.harvestAt = 1
+    return n
+end
+
 function db.HarvestCount()
     if not db.account or not db.account.facts then return 0 end
     return A.util.CountKeys(db.account.facts)

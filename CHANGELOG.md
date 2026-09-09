@@ -18,6 +18,20 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.15]
+
+### Added
+- **`/aex sweep purge`** — throws away every fact the item sweep collected.
+  - **Turning the sweep off does not shrink what it already gathered.** Those
+    facts live in SavedVariables, so they are read back into Lua at *every*
+    login and stay there for the session: a sweep that ran for an hour last
+    week is still costing you memory today. Stopping the growth and undoing it
+    are two different actions, and 1.52.14 only did the first.
+  - Safe to lose. Every fact is re-learnable from the item itself, and the
+    opportunistic path relearns the ones that matter as you play.
+  - Log out after purging — SavedVariables are written on logout, not
+    continuously.
+
 ## [1.52.14]
 
 ### Changed
@@ -4296,6 +4310,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
