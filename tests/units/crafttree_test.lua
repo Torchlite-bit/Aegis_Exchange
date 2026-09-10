@@ -76,6 +76,8 @@ for _, sig in ipairs({
     "function ui.CraftLabelFont(",
     "function ui.CraftRowFont(",
     "function ui.PaintCraftRow(",
+    "function ui.ListValue(",
+    "function ui.ListNet(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -585,6 +587,7 @@ local function Cell()
     c.SetPoint = function(self, pt, _, _, x) self.point, self.x = pt, x end
     c.SetFontObject = function(self, o) self.font = o end
     c.SetFont = function(self, path) self.font = path end
+    c.SetWidth = function(self, w) self.width = w end
     return c
 end
 
@@ -616,6 +619,15 @@ end
 local sec = paint({ kind = "section", key = "reagents", name = "REAGENTS",
                     caption = "HAVE/NEED", count = 6, short = 2 })
 H.eq("a section shows its caption, not a count", sec.ct.text, "HAVE/NEED")
+
+-- THE CAPTION GETS THE STEPPER'S LANE TOO. `ct` is 44px, which is what a count
+-- needs; "MADE/WANT" is wider, and a FontString with a width WRAPS -- it came
+-- out as two lines drawn over the row below. A section row has no stepper and
+-- no vendor mark, so that lane is free.
+H.eq("a caption is given the stepper's lane as well",
+     sec.ct.width, CRAFTL.count_w + CRAFTL.step_w)
+H.check("...which is wider than a count needs",
+        sec.ct.width > CRAFTL.count_w, "the caption still has to wrap")
 H.check("a section has an expander", sec.exBtn.shown, "no expander")
 H.check("...and no stepper", not sec.step.shown, "a section got a stepper")
 H.eq("an open section reads minus", sec.ex.text, "\226\136\146")
@@ -658,6 +670,8 @@ H.check("...and has no expander of its own", not sub_.exBtn.shown,
 local rg = paint({ kind = "reagent", name = "Dreamfoil", itemId = 13463,
                    need = 40, have = 18, short = 22, source = "vendor" })
 H.eq("a reagent shows have over need", rg.ct.text, "18/40")
+H.eq("...in a count-sized cell, not a caption-sized one",
+     rg.ct.width, CRAFTL.count_w)
 H.eq("...and marks a cheaper vendor", rg.src.text, "v")
 H.check("...with no stepper and no expander",
         not rg.step.shown and not rg.exBtn.shown, "a reagent got a control")
@@ -683,6 +697,11 @@ H.eq("...and the next kind on that widget gets the list font back",
      reused.label.font, GameFontHighlightSmall)
 H.eq("...its count cell too", reused.ct.font, GameFontHighlightSmall)
 H.eq("...and it is a reagent now, not a caption", reused.ct.text, "18/40")
+-- The WIDTH comes back too. The section branch widens the count cell and the
+-- pool hands that same widget a reagent line on the next repaint -- the same
+-- trap as the font, one line further down.
+H.eq("...and the widened count cell is narrowed again",
+     reused.ct.width, CRAFTL.count_w)
 
 -- The controls come back too, in both directions.
 local ctl = StubRow()
@@ -693,5 +712,69 @@ H.check("...and a reagent on the same widget hides it again",
         not ctl.step.shown, "the stepper was left on a reagent line")
 H.check("...and the expander with it", not ctl.exBtn.shown,
         "the expander was left on a reagent line")
+
+-- ---------------------------------------------------------------------------
+H.section("what the whole run is worth")
+-- ---------------------------------------------------------------------------
+
+-- BY CRAFTS, not by items wanted -- the same ceil the shopping list buys its
+-- reagents on. Ask for five of something made in twos and you buy for THREE
+-- crafts and end up holding six; valuing five while paying for six is a Net
+-- that quietly flatters every recipe with a yield above one.
+local VALUE = { ["Greater Arcane Elixir"] = 40000,   -- 4g per craft (of 2)
+                ["Flask of the Titans"]   = 250000 } -- 25g per craft (of 1)
+local VOPTS = {
+    valueOf   = function(p) return VALUE[p.name] end,
+    wantOf    = function(p) return WANT[p.name] or 1 end,
+    craftsFor = function(want, made) return craft.CraftsFor(want, made) end,
+}
+
+local val, vknown = ui.ListValue(PROJECTS, VOPTS)
+-- Greater Arcane Elixir: want 5, made 2 -> 3 crafts x 4g   = 12g
+-- Flask of the Titans:   want 2, made 1 -> 2 crafts x 25g  = 50g
+H.eq("the run's value is every recipe at its own craft count", val, 620000)
+H.check("...and it is a complete answer", vknown, "a recipe was unpriced")
+
+-- The trap, stated as a number: five items x 4g would be 20g for the elixirs
+-- and a total of 70g, which is more than you are actually going to hold.
+H.neq("...which is NOT items-wanted times the unit price", val, 700000)
+
+-- ONE UNPRICED RECIPE MAKES THE WHOLE TOTAL UNKNOWN. A total that silently
+-- omits a recipe is worse than no total: it is a smaller number that still
+-- looks like an answer, and it is smaller in the direction that reads as
+-- "this run is not worth doing".
+local partial, pknown = ui.ListValue(PROJECTS, {
+    valueOf = function(p)
+        if p.name == "Flask of the Titans" then return nil end
+        return VALUE[p.name]
+    end,
+    wantOf = VOPTS.wantOf, craftsFor = VOPTS.craftsFor })
+H.check("one unpriced recipe makes the total unknown", not pknown,
+        "it claimed to know")
+H.eq("...and what it did price is still there", partial, 120000)
+
+H.eq("nothing tracked is worth nothing", ui.ListValue({}, VOPTS), 0)
+H.eq("...and a nil list too", ui.ListValue(nil, VOPTS), 0)
+H.check("an empty list is a COMPLETE answer",
+        ({ ui.ListValue({}, VOPTS) })[2], "zero of nothing is not unknown")
+H.eq("no injections values nothing, rather than crashing",
+     ui.ListValue(PROJECTS, {}), 0)
+
+-- ---- the cut ------------------------------------------------------------
+
+-- THE CUT COMES OFF THE SALE, NOT OFF THE PROFIT. 5% of what the buyer pays
+-- leaves before you ever see it; taking it off the difference instead makes
+-- every thin margin look wider than it is.
+H.eq("net is the sale less the cut less the mats",
+     ui.ListNet(100000, 60000, 0.05), 35000)
+H.neq("...which is NOT the difference less the cut",
+      ui.ListNet(100000, 60000, 0.05),
+      math.floor((100000 - 60000) * 0.95))
+
+H.eq("no cut is the plain difference", ui.ListNet(100000, 60000, 0), 40000)
+H.eq("...and a missing cut is treated as none",
+     ui.ListNet(100000, 60000, nil), 40000)
+H.eq("a run that loses money says so", ui.ListNet(50000, 60000, 0.05), -12500)
+H.eq("nil in is zero out", ui.ListNet(nil, nil, 0.05), 0)
 
 os.exit(H.report("crafttree"))

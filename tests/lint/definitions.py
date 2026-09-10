@@ -98,6 +98,16 @@ REMOVED_ON_PURPOSE = {
     "ui.ShopAll": "v1.52.25 -- renamed ui.CraftPriceAll with the button, "
         "because it prices the list rather than buying it",
 
+    # ONE SCOPE ON THE SHOPPING PANEL, and it is the list's. The per-recipe
+    # Cost/Sells/Net moved to the recipe row's own tooltip, where it is
+    # attached to the recipe it describes rather than to whichever row was
+    # clicked last -- and the panel's five money figures are painted by one
+    # function, because they are five views of two numbers.
+    "ui.UpdateCraftSummary": "v1.52.29 -- the SELECTED recipe's economics; "
+        "the panel is list-scope now and ui.UpdateCraftMoney paints all of it",
+    "ui.UpdateCraftSpend": "v1.52.29 -- folded into ui.UpdateCraftMoney; Cost "
+        "and Spent have to add up, so they may not be computed in two places",
+
     # THE THIRD PANEL. The Crafting tab held tracked recipes and a made-this-
     # session count in a panel of its own; both are on the recipe ROWS now
     # (`1/5` IS the made count and the wanted count), and deleting the panel

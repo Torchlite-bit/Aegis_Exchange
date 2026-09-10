@@ -69,7 +69,7 @@ local function Reset()
     ui.craftTitle = { SetText = function() end }
     ui.craftStatus = { text = "", SetText = function(self, t) self.text = t end }
     ui.UpdateCraftList = function() end
-    ui.UpdateCraftSummary = function() end
+    ui.UpdateCraftMoney = function() end
     ui.RefreshCraftStatus = function() end
     ui.RefreshCraftButtons = function() end
     A.buy.Search = function(term, cb)

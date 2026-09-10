@@ -18,6 +18,48 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.29]
+
+### Changed
+- **The shopping panel is one scope now, and it is the list's.** Above the box:
+  `Cost` — what the whole run costs — and `Sells`, what everything tracked would
+  fetch. On the bottom bar: `Spent`, `Profit/Loss`, and `Made N`.
+  - The **selected recipe's** Cost / Sells / Net moved to **the recipe row's own
+    tooltip**. They were three figures on the bottom bar describing whichever
+    row was clicked last, sitting under a list about every recipe at once — two
+    scopes on one panel, which is how `Cost 64c+` over six reagents came to read
+    as the cost of the list. On the row they are unambiguous, and *every* recipe
+    has them rather than only the selected one.
+  - **`Sells` is valued by crafts, not by items wanted** — the same ceil the
+    shopping list buys reagents on. Ask for five of something made in twos and
+    you buy for three crafts and hold six; valuing five while paying for six
+    flatters every recipe with a yield above one, which is every recipe anyone
+    runs at volume.
+  - **The 5% cut comes off the sale, not off the profit.** It leaves before you
+    ever see it. Off the difference instead, every thin margin looks wider than
+    it is — and a thin margin is the only kind where the answer changes what you
+    do.
+  - One unpriced recipe makes `Sells` and `Profit` read `?` rather than quoting
+    a total that silently omits it. A smaller number that still looks like an
+    answer is worse than no answer, and it is smaller in the direction that
+    reads as "not worth doing".
+
+### Fixed
+- **`MADE/WANT` wrapped onto two lines**, drawn over the row below it — new in
+  v1.52.27. The count cell is 44px, which is what a *count* needs; a section
+  row has no stepper and no vendor mark, so the caption gets that lane too. The
+  cell is narrowed again for every other kind, because one pool serves them all.
+
+### Internal
+- Five money figures, **one painter**. `Cost` and `Spent` have to add up, and a
+  pair that has to add up is exactly the pair that must not be computed in two
+  places — they were, in two functions. `ui.UpdateCraftSpend` and
+  `ui.UpdateCraftSummary` are now `ui.UpdateCraftMoney`.
+- `ui.ListValue` and `ui.ListNet` are pure and tested; five sabotages, including
+  both directions of the yield and the cut.
+
+---
+
 ## [1.52.28]
 
 ### Changed
@@ -4747,6 +4789,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

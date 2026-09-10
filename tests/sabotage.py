@@ -2365,6 +2365,58 @@ end
      "    table_bot   = 60,",
      "geometry"),
 
+    # ---- the panel is one scope now (v1.52.29) ---------------------------
+
+    # The run's value taken at ITEMS WANTED rather than at crafts. Ask for five
+    # of something made in twos and you buy for three crafts and hold six --
+    # valuing five while paying for six flatters every recipe with a yield
+    # above one, which is every recipe anyone runs at volume.
+    ("craft-value-ignores-the-yield", "ui/frame.lua",
+     """            local crafts = want
+            if opts.craftsFor then crafts = opts.craftsFor(want, p.made) end
+            total = total + per * crafts""",
+     "            total = total + per * want",
+     "crafttree"),
+
+    # ...and one unpriced recipe quietly dropped, so the total is a smaller
+    # number that still looks like an answer -- smaller in the direction that
+    # reads as "this run is not worth doing".
+    ("craft-value-hides-an-unpriced-recipe", "ui/frame.lua",
+     """        else
+            known = false
+        end
+        i = i + 1
+    end
+    return total, known""",
+     """        end
+        i = i + 1
+    end
+    return total, known""",
+     "crafttree"),
+
+    # The cut taken off the PROFIT instead of off the sale. 5% of what the
+    # buyer pays leaves before you ever see it; off the difference it makes
+    # every thin margin look wider -- and thin margins are the only ones where
+    # the answer changes what you do.
+    ("craft-cut-comes-off-the-profit", "ui/frame.lua",
+     "    return math.floor((value or 0) * (1 - (cut or 0)) - (cost or 0))",
+     "    return math.floor(((value or 0) - (cost or 0)) * (1 - (cut or 0)))",
+     "crafttree"),
+
+    # The widened caption cell left on the next row the pool hands out -- the
+    # same one-pool trap as the font, one line further down.
+    ("craft-caption-width-not-restored", "ui/frame.lua",
+     '    if e.kind ~= "section" then row.ct:SetWidth(CRAFTL.count_w) end',
+     "    local _ = e.kind",
+     "crafttree"),
+
+    # ...and the caption back in a count-sized cell, where "MADE/WANT" wraps
+    # into two lines drawn over the row below it.
+    ("craft-caption-in-a-count-cell", "ui/frame.lua",
+     "        row.ct:SetWidth(CRAFTL.count_w + CRAFTL.step_w)",
+     "        row.ct:SetWidth(CRAFTL.count_w)",
+     "crafttree"),
+
     # ---- concept parity (v1.52.27) ---------------------------------------
 
     # "1 RECIPES". A heading is the one line on a panel nobody can miss, which
@@ -2510,11 +2562,11 @@ end
     # over the box border and the first row inside it -- which is what put
     # "Net need prices" across "Price recipe" on the footer.
     ("craft-footer-fontstring-has-a-width", "ui/frame.lua",
-     """    ui.craftNetFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+     """    ui.craftMadeFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
         CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)""",
-     """    ui.craftNetFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+     """    ui.craftMadeFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
         CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
-    ui.craftNetFS:SetWidth(80)""",
+    ui.craftMadeFS:SetWidth(80)""",
      "geometry"),
 
     # The footer's middle third measured from the wrong end, so the centre

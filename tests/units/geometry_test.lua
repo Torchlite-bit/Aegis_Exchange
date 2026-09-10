@@ -1473,8 +1473,8 @@ do
     -- Listed by name rather than matched by pattern, because the list IS the
     -- claim: these are the widgets the rule governs, and a new one added
     -- without being added here is a new one nobody checked.
-    for _, w in ipairs({ "craftShortFS", "craftBuyLbl", "craftBuyAllFS",
-                         "craftCostFS", "craftValueFS", "craftNetFS",
+    for _, w in ipairs({ "craftShortFS", "craftCostFS", "craftValueFS",
+                         "craftSpentFS", "craftNetFS", "craftMadeFS",
                          "craftStatus", "craftNeedFS", "craftPageText" }) do
         H.check("ui." .. w .. " is not given a width",
                 not string.find(src, "ui." .. w .. ":SetWidth(", 1, true),

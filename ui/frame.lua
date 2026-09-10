@@ -7896,22 +7896,22 @@ function ui.BuildCraftTab()
         CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.hdr_y)
     ui.CraftLabelFont(ui.craftShortFS, 10)
 
-    -- ---- ABOVE the box: what the whole list costs ------------------------
+    -- ---- ABOVE the box: what the WHOLE RUN costs and is worth -------------
     --
-    -- A shopping list's headline number is what it costs to fill and how far
-    -- through that you are, so that is what sits above it -- painted by
-    -- ui.UpdateCraftSpend. The SELECTED RECIPE's economics are on the bottom
-    -- bar instead: a conclusion belongs there, and putting the two scopes on
-    -- one line over one list is what would make them read as one figure.
-    local halfW = ui.CraftBtnW(ui.WindowW(), 2)
-
-    ui.craftBuyLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftBuyLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
+    -- ONE SCOPE ON THIS PANEL, AND IT IS THE LIST'S. What the run costs and
+    -- what it sells for sit above the list; how far through it you are sits on
+    -- the bottom bar. Nothing here is about the SELECTED recipe any more --
+    -- that moved to the recipe row's own tooltip, where it is attached to the
+    -- recipe it describes instead of to whichever row was clicked last.
+    --
+    -- Two scopes on one panel is what made "Cost 64c+" over a list of six
+    -- reagents read as the cost of the list. It was the cost of one recipe.
+    ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftCostFS:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
         -CRAFTL.est_y)
-    ui.craftBuyLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
-    ui.craftBuyAllFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftBuyAllFS:SetPoint("TOPRIGHT", panel, "TOPLEFT",
+    ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftValueFS:SetPoint("TOPRIGHT", panel, "TOPLEFT",
         CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.est_y)
 
     -- ---- the action row --------------------------------------------------
@@ -8087,27 +8087,28 @@ ui.GrowCraftSideRows = function(n)
     end
     ui.GrowCraftSideRows(CSIDE_ROWS)
 
-    -- The panel's bottom bar: the SELECTED recipe's economics, three figures
-    -- across it. A conclusion belongs on the bottom bar; the list's own
-    -- headline is above the box, where the list is.
-    local thirdW = ui.CraftBtnW(ui.WindowW(), 3)
-
-    ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftCostFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
+    -- The panel's bottom bar: HOW FAR THROUGH THE RUN YOU ARE. What has gone,
+    -- what the run nets if you finish it, and how many you have made. Three
+    -- figures on one scope -- the same one as the line above the box.
+    --
+    -- Net is here rather than up top because it is the CONCLUSION: Cost and
+    -- Sells are the two inputs, and a conclusion belongs on the bottom bar.
+    ui.craftSpentFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftSpentFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
         CRAFTL.edge + CRAFTL.row_l, CRAFTL.foot_y)
 
     -- Centred by anchoring its BOTTOM -- a FontString's bottom-centre -- to
     -- the middle of the second third.
-    ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftValueFS:SetPoint("BOTTOM", panel, "BOTTOMLEFT",
+    ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.craftNetFS:SetPoint("BOTTOM", panel, "BOTTOMLEFT",
         ui.CraftFootMid(ui.WindowW()), CRAFTL.foot_y)
 
     -- Anchored from the panel's LEFT like everything else in this column.
     -- BOTTOMRIGHT relative to the PANEL's bottom-right would be the WINDOW's
-    -- right edge, not the shopping panel's, and would put the Net figure over
-    -- the results table's footer.
-    ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.craftNetFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+    -- right edge, not the shopping panel's, and would put this over the
+    -- results table's footer.
+    ui.craftMadeFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.craftMadeFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
         CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
 
 
@@ -8290,12 +8291,10 @@ function ui.LayoutCraftPanels()
     local w = ui.WindowW()
     local leftW = ui.CraftWidthsAt(w)
     local midX, midR = ui.CraftMidX(w), ui.CraftMidR()
-    -- The divisions of the shopping panel's width: halves for the money line,
-    -- quarters for the action row. The footer's thirds are inside
+    -- The action row's quarters. The money lines are anchored to the panel's
+    -- two edges and need no division at all; the footer's thirds live inside
     -- ui.CraftFootMid, which is the only one that needs a midpoint.
-    -- ONE function of n rather than three constants -- see ui.CraftBtnW.
-    local halfW = ui.CraftBtnW(w, 2)
-    local btnW  = ui.CraftBtnW(w, 4)
+    local btnW = ui.CraftBtnW(w, 4)
 
     local function place(f, point, rel, relPoint, x, y)
         if not f then return end
@@ -8310,9 +8309,9 @@ function ui.LayoutCraftPanels()
     -- anchor is the alignment.
     place(ui.craftShortFS, "TOPRIGHT", panel, "TOPLEFT",
           CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.hdr_y)
-    place(ui.craftBuyLbl, "TOPLEFT", panel, "TOPLEFT",
+    place(ui.craftCostFS, "TOPLEFT", panel, "TOPLEFT",
           CRAFTL.edge + CRAFTL.row_l, -CRAFTL.est_y)
-    place(ui.craftBuyAllFS, "TOPRIGHT", panel, "TOPLEFT",
+    place(ui.craftValueFS, "TOPRIGHT", panel, "TOPLEFT",
           CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.est_y)
 
     -- The action row: four buttons on one pitch. Placed from the SAME
@@ -8336,15 +8335,15 @@ function ui.LayoutCraftPanels()
     -- scroll frame, so they follow it. Only things sized by a number do.
 
     -- ...and the footer bar's three figures.
-    place(ui.craftCostFS, "BOTTOMLEFT", panel, "BOTTOMLEFT",
+    place(ui.craftSpentFS, "BOTTOMLEFT", panel, "BOTTOMLEFT",
           CRAFTL.edge + CRAFTL.row_l, CRAFTL.foot_y)
-    place(ui.craftValueFS, "BOTTOM", panel, "BOTTOMLEFT",
+    place(ui.craftNetFS, "BOTTOM", panel, "BOTTOMLEFT",
           ui.CraftFootMid(w), CRAFTL.foot_y)
     -- ...anchored from the panel's LEFT like everything else in this column.
     -- BOTTOMRIGHT relative to the PANEL's bottom-right would be the WINDOW's
-    -- right edge, not the shopping panel's, and would have put the Net figure
-    -- over the results table's footer.
-    place(ui.craftNetFS, "BOTTOMRIGHT", panel, "BOTTOMLEFT",
+    -- right edge, not the shopping panel's, and would have put this over the
+    -- results table's footer.
+    place(ui.craftMadeFS, "BOTTOMRIGHT", panel, "BOTTOMLEFT",
           CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
 
     -- ---- middle panel ---------------------------------------------------
@@ -8796,6 +8795,12 @@ function ui.PaintCraftRow(row, e, rowW)
         row.ct:SetText(e.caption or "")
         row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         ui.CraftLabelFont(row.ct, 9)
+        -- THE CAPTION GETS THE STEPPER'S LANE AS WELL. `ct` is 44px, which is
+        -- what a count needs; "MADE/WANT" is wider than that and a FontString
+        -- with a width WRAPS -- it came out as two lines drawn over the row
+        -- below. A section row has no stepper and no vendor mark, so the lane
+        -- beside it is free and the caption may have it.
+        row.ct:SetWidth(CRAFTL.count_w + CRAFTL.step_w)
 
     elseif e.kind == "recipe" then
         showEx, showStep = true, true
@@ -8869,6 +8874,11 @@ function ui.PaintCraftRow(row, e, rowW)
 
     row.label:ClearAllPoints()
     row.label:SetPoint("LEFT", row, "LEFT", indent, 0)
+    -- ...and every other kind gets the count cell back at its own width. The
+    -- section branch above widens it, and the pool hands that same widget a
+    -- reagent line on the next repaint -- the same trap as the font.
+    if e.kind ~= "section" then row.ct:SetWidth(CRAFTL.count_w) end
+
     -- THE COUNT IS ALWAYS THE LAST CELL, and on a recipe row the stepper sits
     -- in FRONT of it: `[-] [+]  1/5`. The five is what the pair moves, so the
     -- pair reads as a control ON that number rather than as two more buttons
@@ -8922,6 +8932,49 @@ function ui.UnitSpent(n, spent)
     return math.floor((tonumber(spent) or 0) / n)
 end
 
+
+-- What the whole tracked list would SELL for, at the quantities you asked for.
+--
+-- BY CRAFTS, not by items wanted -- the same ceil the shopping list buys its
+-- reagents on. Ask for five of something made in twos and you buy for three
+-- crafts and end up holding six; valuing five while paying for six is a Net
+-- that quietly flatters every recipe with a yield above one, and those are
+-- exactly the recipes anyone runs at volume.
+--
+-- `known` goes false as soon as ONE recipe has no price. A total that silently
+-- omits a recipe is worse than no total: it is a smaller number that still
+-- looks like an answer.
+function ui.ListValue(projects, opts)
+    opts = opts or {}
+    local total, known = 0, true
+    local i = 1
+    while i <= table.getn(projects or {}) do
+        local p = projects[i]
+        local per = opts.valueOf and opts.valueOf(p) or nil
+        if per then
+            local want = (opts.wantOf and opts.wantOf(p)) or 1
+            local crafts = want
+            if opts.craftsFor then crafts = opts.craftsFor(want, p.made) end
+            total = total + per * crafts
+        else
+            known = false
+        end
+        i = i + 1
+    end
+    return total, known
+end
+
+-- What the run nets: what it sells for, less the auction house's cut, less
+-- what the materials cost.
+--
+-- THE CUT COMES OFF THE SALE, NOT OFF THE PROFIT. Five percent of what the
+-- buyer pays leaves before you ever see it. Taking it off the difference
+-- instead makes every thin margin look wider than it is -- and a thin margin
+-- is the only kind where the answer changes what you do.
+function ui.ListNet(value, cost, cut)
+    return math.floor((value or 0) * (1 - (cut or 0)) - (cost or 0))
+end
+
 -- The aggregated shopping line for one reagent NAME, or nil.
 --
 -- BY NAME, because that is what the caller has: a breakdown line under an
@@ -8940,41 +8993,91 @@ function ui.ShoppingRowFor(rows, name)
     return nil
 end
 
--- The money line above the box: what has gone, and what the whole run costs.
+-- Paint every money figure on the shopping panel.
 --
--- ONE SCOPE, THE LIST'S. The panel's bottom bar carries the SELECTED recipe's
--- economics; this line is about the shopping, and the two never share a row.
+-- ONE FUNCTION FOR ALL FIVE, because they are five views of two numbers and
+-- the moment they are painted in two places they start disagreeing about which
+-- two. `Cost` and `Spent` were computed by different functions in different
+-- files' worth of code, and the pair that has to add up is exactly the pair
+-- that must not.
 --
--- The right half is spent + still-to-buy, so the fraction reads honestly from
--- the first purchase to the last -- see ui.ShoppingSpend. Before anything is
--- bought it is exactly what the list costs, which is what this line said when
--- it was labelled "Buy all", so nothing was lost by making it a fraction.
-function ui.UpdateCraftSpend()
-    if not ui.craftBuyAllFS or not ui.craftBuyLbl then return end
+--   Cost   what the whole run costs: what has gone PLUS what is left to buy
+--   Sells  what everything tracked would fetch, at the quantities you asked
+--   Spent  how much of Cost has already left the bags
+--   Net    Sells less the auction house's cut, less Cost -- the conclusion
+--   Made   how many of the tracked items you have finished this session
+--
+-- The `+` on Cost is ui.ShoppingTotal's `complete`: a line still to buy with
+-- no price at all. Money already SPENT never makes it incomplete -- that is a
+-- fact, not an estimate -- and an incomplete Cost makes Net unknown, because a
+-- profit computed against a floor is a profit that is too good.
+function ui.UpdateCraftMoney()
+    if not ui.craftCostFS then return end
     local DASH = "\226\128\148"
-    local left, complete = ui.ShoppingTotal(ui.craftFlat)
+    local cr = A.craft
+    local projects = cr and cr.Projects() or {}
+
+    local togo, complete = ui.ShoppingTotal(ui.craftFlat)
     local spent = ui.ShoppingSpend(ui.craftFlat,
         A.buy and A.buy.SessionBought or nil)
-    local budget = spent + left
+    local cost = spent + togo
 
-    if spent > 0 then
-        ui.craftBuyLbl:SetText("Spent " .. util.FormatMoney(spent, true))
-        ui.craftBuyLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    local value, known = ui.ListValue(projects, {
+        valueOf   = cr and function(p) return cr.ValueOf(p) end,
+        wantOf    = cr and function(p) return cr.Want(p) end,
+        craftsFor = cr and function(a, b) return cr.CraftsFor(a, b) end,
+    })
+
+    -- ---- above the box ---------------------------------------------------
+    if cost > 0 then
+        ui.craftCostFS:SetText("Cost " .. util.FormatMoney(cost, true)
+            .. (complete and "" or "+"))
+        ui.craftCostFS:SetTextColor(C.text[1], C.text[2], C.text[3])
     else
-        ui.craftBuyLbl:SetText("Spent " .. DASH)
-        ui.craftBuyLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.craftCostFS:SetText("Cost " .. DASH)
+        ui.craftCostFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     end
 
-    if budget > 0 then
-        -- The "+" is ui.ShoppingTotal's `complete`: a line still to buy that
-        -- has no price at all. Money already SPENT never makes the budget
-        -- incomplete -- it is a fact, not an estimate.
-        ui.craftBuyAllFS:SetText("of " .. util.FormatMoney(budget, true)
-            .. (complete and "" or "+"))
-        ui.craftBuyAllFS:SetTextColor(C.text[1], C.text[2], C.text[3])
+    if known and value > 0 then
+        ui.craftValueFS:SetText("Sells " .. util.FormatMoney(value, true))
+        ui.craftValueFS:SetTextColor(C.text[1], C.text[2], C.text[3])
     else
-        ui.craftBuyAllFS:SetText(DASH)
-        ui.craftBuyAllFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.craftValueFS:SetText("Sells |cff808080?|r")
+        ui.craftValueFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    -- ---- the bottom bar --------------------------------------------------
+    if spent > 0 then
+        ui.craftSpentFS:SetText("Spent " .. util.FormatMoney(spent, true))
+        ui.craftSpentFS:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        ui.craftSpentFS:SetText("Spent " .. DASH)
+        ui.craftSpentFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    if known and complete and cost > 0 then
+        local cut = (cr and cr.AH_CUT) or 0
+        local net = ui.ListNet(value, cost, cut)
+        local word = net >= 0 and "Profit " or "Loss "
+        ui.craftNetFS:SetText(word .. util.FormatMoney(math.abs(net), true))
+        if net >= 0 then
+            ui.craftNetFS:SetTextColor(0.30, 0.85, 0.30)
+        else
+            ui.craftNetFS:SetTextColor(0.90, 0.30, 0.30)
+        end
+    else
+        ui.craftNetFS:SetText("Net |cff808080?|r")
+        ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    local _, made = ui.MadeSummary(projects,
+        cr and function(id) return cr.MadeCount(id) end,
+        cr and function(p) return cr.Want(p) end)
+    if made > 0 then
+        ui.craftMadeFS:SetText("Made " .. made)
+        ui.craftMadeFS:SetTextColor(0.30, 0.85, 0.30)
+    else
+        ui.craftMadeFS:SetText("")
     end
 end
 
@@ -8989,7 +9092,7 @@ end
 -- player asked for by pointing at something. The scanning tooltips are
 -- separate frames for the opposite reason; see HARD RULE 16's corollary.
 function ui.ShowCraftRowTooltip(owner, e)
-    if not e or (e.kind ~= "reagent" and e.kind ~= "sub") then
+    if not e or e.kind == "section" then
         GameTooltip:Hide()
         return
     end
@@ -9002,7 +9105,47 @@ function ui.ShowCraftRowTooltip(owner, e)
     end
     if not shown then GameTooltip:SetText(e.name or "") end
 
-    if e.kind == "sub" then
+    if e.kind == "recipe" then
+        -- THE PER-RECIPE ECONOMICS LIVE HERE NOW. They used to be three
+        -- figures on the panel's bottom bar, describing whichever row was
+        -- clicked last while the list above them was about every recipe at
+        -- once -- two scopes on one panel, which is how "Cost 64c+" over six
+        -- reagents came to read as the cost of the list. Attached to the row
+        -- they are unambiguous, and EVERY recipe has them rather than only
+        -- whichever one is selected.
+        local cr = A.craft
+        local p = cr and cr.Projects()[e.index]
+        GameTooltip:AddLine((e.made or 0) .. " of " .. (e.want or 0)
+            .. " made this session", 0.8, 0.75, 0.6)
+        if p then
+            local cost, costOk = cr.CostOf(p)
+            local value, valueOk = cr.ValueOf(p)
+            if costOk then
+                GameTooltip:AddLine("Mats " .. util.FormatMoney(cost, true)
+                    .. " per craft", 0.8, 0.75, 0.6)
+            elseif cost > 0 then
+                GameTooltip:AddLine("Mats " .. util.FormatMoney(cost, true)
+                    .. "+ per craft", 0.8, 0.75, 0.6)
+            end
+            if valueOk then
+                GameTooltip:AddLine("Sells " .. util.FormatMoney(value, true)
+                    .. " per craft", 0.8, 0.75, 0.6)
+            end
+            local net, netOk = cr.NetOf(p)
+            if netOk then
+                local word = net >= 0 and "Profit " or "Loss "
+                local r, g, b = 0.30, 0.85, 0.30
+                if net < 0 then r, g, b = 0.90, 0.30, 0.30 end
+                GameTooltip:AddLine(word
+                    .. util.FormatMoney(math.abs(net), true)
+                    .. " after the cut", r, g, b)
+            else
+                GameTooltip:AddLine("Press Price all to fill in the prices.",
+                    0.55, 0.52, 0.45)
+            end
+        end
+
+    elseif e.kind == "sub" then
         -- A breakdown line: what THIS recipe asks for, and the reminder that
         -- the line you buy from is the aggregated one below it.
         GameTooltip:AddLine("Needs " .. (e.per or 1) .. " per craft \226\128\148 "
@@ -9088,7 +9231,7 @@ function ui.UpdateCraftTree()
     ui.UpdateCraftShort()
 
     -- ...and the money line above the box.
-    ui.UpdateCraftSpend()
+    ui.UpdateCraftMoney()
 end
 
 -- The header's shopping-left line.
@@ -9117,7 +9260,7 @@ function ui.StepCraftRow(row, delta)
     -- The whole tab follows this number: the reagent totals on the left, what
     -- the middle panel says you still need, and the economics on the right.
     ui.RefreshCraftTree()
-    ui.UpdateCraftSummary()
+    ui.UpdateCraftMoney()
     ui.UpdateCraftNeed()
 end
 
@@ -9129,7 +9272,7 @@ function ui.SelectCraftProject(index)
     -- list because nothing about it changed -- but the economics did, and
     -- one entry point is what stops the two drifting.
     ui.RefreshCraftTree()
-    ui.UpdateCraftSummary()
+    ui.UpdateCraftMoney()
 end
 
 function ui.ResetCraftMade()
@@ -9231,7 +9374,7 @@ function ui.CraftDeleteProject()
     A.craft.DeleteProject(ui.craftSel)
     ui.craftSel = nil
     ui.RefreshCraftTree()
-    ui.UpdateCraftSummary()
+    ui.UpdateCraftMoney()
 end
 
 -- ---- search + results (Buy-style, shared row helpers) ------------------
@@ -9255,7 +9398,7 @@ function ui.DoCraftSearch()
         onResults = function(rows)
             ui.craftResults = rows
             ui.UpdateCraftList()
-            ui.UpdateCraftSummary()   -- the search fed the price DB
+            ui.UpdateCraftMoney()   -- the search fed the price DB
         end,
         onState = function() ui.RefreshCraftStatus() end,
     })
@@ -9340,7 +9483,7 @@ function ui.RunCraftQueue()
             if ui.craftQueue ~= q then return end
             ui.craftResults = rows
             ui.UpdateCraftList()
-            ui.UpdateCraftSummary()
+            ui.UpdateCraftMoney()
             ui.RunCraftQueue()
         end,
         onState = function() ui.RefreshCraftStatus() end,
@@ -9413,7 +9556,7 @@ function ui.CraftPriceRecipe()
         return
     end
     ui.StartCraftQueue(q, "Pricing", function()
-        ui.UpdateCraftSummary()
+        ui.UpdateCraftMoney()
         if ui.craftStatus then
             ui.craftStatus:SetText("Priced \226\128\148 net updated.")
         end
@@ -9472,65 +9615,8 @@ function ui.RefreshCraft()
     -- shopping list and the quantities driving it cannot disagree.
     ui.RefreshCraftTree()
     ui.UpdateCraftList()
-    ui.UpdateCraftSummary()
+    ui.UpdateCraftMoney()
     ui.UpdateCraftNeed()
-end
-
--- Paint the Cost / Sells-for / Net lines for the selected recipe.
-function ui.UpdateCraftSummary()
-    if not ui.craftCostFS then return end
-    local DASH = "\226\128\148"
-    local p = ui.craftSel and A.craft and A.craft.Projects()[ui.craftSel]
-    if not p then
-        ui.craftCostFS:SetText("Cost " .. DASH)
-        ui.craftValueFS:SetText("Sells " .. DASH)
-        ui.craftNetFS:SetText("Net " .. DASH)
-        ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        return
-    end
-    local cost, complete = A.craft.CostOf(p)
-    local value, known = A.craft.ValueOf(p)
-
-    -- "Cost", not "Reagents:". These two share ONE line as two halves of a
-    -- 182px panel now, so the label pays for itself in characters -- and a
-    -- label wide enough to push the money off the end is a label that has
-    -- stopped labelling anything.
-    if cost > 0 and not complete then
-        ui.craftCostFS:SetText("Cost " .. util.FormatMoney(cost, true) .. "+")
-    elseif complete then
-        ui.craftCostFS:SetText("Cost " .. util.FormatMoney(cost, true))
-    else
-        ui.craftCostFS:SetText("Cost |cff808080?|r")
-    end
-
-    if known then
-        ui.craftValueFS:SetText("Sells " .. util.FormatMoney(value, true))
-    else
-        ui.craftValueFS:SetText("Sells |cff808080?|r")
-    end
-
-    local net, netKnown = A.craft.NetOf(p)
-    if netKnown then
-        local word = net >= 0 and "Profit " or "Loss "
-        ui.craftNetFS:SetText(word .. util.FormatMoney(math.abs(net), true))
-        if net >= 0 then
-            ui.craftNetFS:SetTextColor(0.30, 0.85, 0.30)
-        else
-            ui.craftNetFS:SetTextColor(0.90, 0.30, 0.30)
-        end
-    else
-        -- "Net ?", to match "Cost ?" and "Sells ?" beside it. It used to
-        -- read "Net need prices -- Price recipe", which is an instruction in a
-        -- cell a third of a panel wide: it wrapped, and its second line drew
-        -- across the first. The instruction now goes on the middle panel's
-        -- status line, which is a whole panel wide and is where this tab puts
-        -- its "here is what to do next" text already.
-        ui.craftNetFS:SetText("Net |cff808080?|r")
-        ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        if ui.craftStatus and not ui.CraftQueueRunning() then
-            ui.craftStatus:SetText("Press Price all to fill in the prices.")
-        end
-    end
 end
 
 function ui.UpdateCraftList()
@@ -9605,7 +9691,7 @@ function ui.CraftCapture()
     if ui.craftBuilt then
         ui.craftSel = 1               -- new project is inserted at the front
         ui.RefreshCraftTree()
-        ui.UpdateCraftSummary()
+        ui.UpdateCraftMoney()
     end
 end
 
