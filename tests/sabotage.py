@@ -2506,6 +2506,69 @@ end
             name = r.name, itemId = id, per = per,""",
      "craft.plan"),
 
+    # ---- the shopping list -------------------------------------------------
+    # The aggregation dropped: a reagent two recipes want gets the SECOND
+    # recipe's figure instead of the sum, so the list quietly under-buys.
+    ("shop-does-not-aggregate", "core/buy.lua",
+     "        need[id] = need[id] + n",
+     "        need[id] = n",
+     "craft.plan"),
+
+    # ...and the quantity stepper ignored, so the list is for one of each
+    # however many you asked for.
+    ("shop-ignores-the-quantity", "core/buy.lua",
+     "        addReagents(p, craft.CraftsFor(want, p.made), p.name)",
+     "        addReagents(p, 1, p.name)",
+     "craft.plan"),
+
+    # What you own not taken off, so the list tells you to buy what is in
+    # your bags.
+    ("shop-ignores-what-you-own", "core/buy.lua",
+     "        local short = need[id] - have",
+     "        local short = need[id]",
+     "craft.plan"),
+
+    # A surplus recorded as a negative shortfall.
+    ("shop-surplus-goes-negative", "core/buy.lua",
+     "        if short < 0 then short = 0 end\n        -- A thing you are going to CRAFT is not a thing you are short OF --",
+     "        -- A thing you are going to CRAFT is not a thing you are short OF --",
+     "craft.plan"),
+
+    # An intermediate counted as BOTH something to craft and something to buy,
+    # so you are told to buy the bolt and the cloth to make it.
+    ("shop-double-counts-the-intermediate", "core/buy.lua",
+     "        if short > 0 and not crafted[id] then shortCount = shortCount + 1 end",
+     "        if short > 0 then shortCount = shortCount + 1 end",
+     "craft.plan"),
+
+    # The WHOLE need expanded rather than the shortfall, so owning half the
+    # bolts still buys cloth for all of them.
+    ("shop-expands-the-whole-need", "core/buy.lua",
+     "                        addReagents(sub, craft.CraftsFor(short, sub.made),",
+     "                        addReagents(sub, craft.CraftsFor(need[id], sub.made),",
+     "craft.plan"),
+
+    # Expansion on by default, turning a recipe list into raw materials with
+    # nobody asking for it.
+    ("shop-expands-unasked", "core/buy.lua",
+     "    local recipeFor = opts.expand and opts.recipeFor or nil",
+     "    local recipeFor = opts.recipeFor",
+     "craft.plan"),
+
+    # THE CYCLE GUARD. Two recipes that make each other, and the walk never
+    # ends -- which on this client is a hung game, not a wrong number.
+    ("shop-cycle-hangs", "core/buy.lua",
+     "        local n = table.getn(order)\n        local k = 1",
+     "        local n = 999999\n        local k = 1",
+     "craft.plan"),
+
+    # A tie sent to the auction house. A vendor's price is fixed and always in
+    # stock; an auction at the same money may be gone when you get there.
+    ("shop-tie-goes-to-the-ah", "core/buy.lua",
+     "        if vendor <= market then return \"vendor\", vendor end",
+     "        if vendor < market then return \"vendor\", vendor end",
+     "craft.plan"),
+
     # ---- crafting: the three panels' own arithmetic ------------------------
     # What you own read as the ACCOUNT total rather than what is in your hands.
     # Every bucket added makes the answer bigger, which reads as "you need

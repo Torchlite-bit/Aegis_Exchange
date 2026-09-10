@@ -2397,6 +2397,163 @@ function craft.NeedFor(project, wanted, haveOf)
 end
 
 -- ---------------------------------------------------------------------------
+-- The shopping list
+-- ---------------------------------------------------------------------------
+
+-- Where to buy one reagent, and what a unit costs there.
+--
+-- A tie goes to the VENDOR. A vendor's price is fixed and always in stock; an
+-- auction at the same money is a listing that may be gone when you get there.
+function craft.CheaperSource(vendor, market)
+    if vendor and market then
+        if vendor <= market then return "vendor", vendor end
+        return "ah", market
+    end
+    if vendor then return "vendor", vendor end
+    if market then return "ah", market end
+    return nil, nil
+end
+
+-- How deep sub-reagent expansion may go.
+--
+-- A GUARD, not a feature. Recipes can refer to each other in a loop -- a
+-- server can define one, and a mis-captured recipe certainly can -- and an
+-- unbounded walk would hang the client. Four is deeper than any real crafting
+-- chain in this game.
+craft.SHOP_MAX_DEPTH = 4
+
+-- Every tracked recipe's reagents, aggregated into ONE list.
+--
+-- THE AGGREGATION IS THE POINT, and it is the whole difference between a
+-- recipe tree and a shopping list. Track three recipes that each want Linen
+-- Cloth and the tree shows it three times in three places, so you shop for it
+-- three times and still get the total wrong. This says "Linen Cloth 40" once.
+--
+-- SUB-REAGENTS EXPAND. If you are short of something you can make yourself,
+-- what you actually need to BUY is what that recipe needs -- so a shortfall of
+-- Bolt of Linen becomes the Linen Cloth to make it, and the bolt is marked as
+-- something you craft rather than something you shop for. Only for recipes we
+-- hold: we capture those from the profession window, so coverage is whatever
+-- you have opened.
+--
+-- EVERYTHING IS INJECTED -- wantOf, haveOf, recipeFor, vendorOf, marketOf --
+-- so this is arithmetic over numbers and tables and a suite can run it without
+-- a client. Same discipline as craft.NeedFor, and for the same reason: this
+-- file knows about recipes, not about containers or auction houses.
+--
+-- Returns rows, shortCount. Each row:
+--   { name, itemId, need, have, short, from = { recipe names },
+--     craftable = true|nil, source = "vendor"|"ah"|nil, unit = copper|nil }
+function craft.ShoppingList(projects, opts)
+    opts = opts or {}
+    local wantOf, haveOf = opts.wantOf, opts.haveOf
+    local recipeFor = opts.expand and opts.recipeFor or nil
+    local need, from, order = {}, {}, {}
+
+    local function add(id, name, n, why)
+        if not id or n <= 0 then return end
+        if need[id] == nil then
+            need[id] = 0
+            from[id] = {}
+            table.insert(order, { id = id, name = name })
+        end
+        need[id] = need[id] + n
+        -- WHICH recipes want it, so a row can say why it is on the list. A
+        -- linear scan because these lists are a handful of names.
+        if why then
+            local seen, k = false, 1
+            while k <= table.getn(from[id]) do
+                if from[id][k] == why then seen = true end
+                k = k + 1
+            end
+            if not seen then table.insert(from[id], why) end
+        end
+    end
+
+    local function addReagents(p, crafts, why)
+        local rs = p.reagents or {}
+        local ri = 1
+        while ri <= table.getn(rs) do
+            local r = rs[ri]
+            add(ResolveId(r.itemId, r.name), r.name, (r.count or 1) * crafts, why)
+            ri = ri + 1
+        end
+    end
+
+    -- Pass one: what the tracked recipes themselves ask for.
+    local pi = 1
+    while pi <= table.getn(projects or {}) do
+        local p = projects[pi]
+        local want = (wantOf and wantOf(p)) or 1
+        addReagents(p, craft.CraftsFor(want, p.made), p.name)
+        pi = pi + 1
+    end
+
+    -- Passes two and on: replace a shortfall you can craft with what IT needs.
+    --
+    -- `order` is measured BEFORE each pass, so anything added by this pass is
+    -- considered on the NEXT one. That is what makes the depth cap a real
+    -- bound rather than a suggestion.
+    local crafted = {}
+    local depth = 1
+    while recipeFor and depth <= craft.SHOP_MAX_DEPTH do
+        local grew = false
+        local n = table.getn(order)
+        local k = 1
+        while k <= n do
+            local id = order[k].id
+            if not crafted[id] then
+                local short = need[id] - ((haveOf and haveOf(id)) or 0)
+                if short > 0 then
+                    local sub = recipeFor(id)
+                    if sub then
+                        crafted[id] = true
+                        grew = true
+                        addReagents(sub, craft.CraftsFor(short, sub.made),
+                            order[k].name)
+                    end
+                end
+            end
+            k = k + 1
+        end
+        if not grew then break end
+        depth = depth + 1
+    end
+
+    local rows, shortCount = {}, 0
+    local i = 1
+    while i <= table.getn(order) do
+        local id, nm = order[i].id, order[i].name
+        local have = (haveOf and haveOf(id)) or 0
+        local short = need[id] - have
+        if short < 0 then short = 0 end
+        -- A thing you are going to CRAFT is not a thing you are short OF --
+        -- its own reagents are already on this list, and counting both would
+        -- tell you to buy the bolt and the cloth to make it.
+        if short > 0 and not crafted[id] then shortCount = shortCount + 1 end
+        local src, unit = craft.CheaperSource(
+            opts.vendorOf and opts.vendorOf(id) or nil,
+            opts.marketOf and opts.marketOf(id) or nil)
+        table.insert(rows, {
+            name = nm, itemId = id, need = need[id], have = have, short = short,
+            from = from[id], craftable = crafted[id] and true or nil,
+            source = src, unit = unit,
+        })
+        i = i + 1
+    end
+
+    -- What you still have to BUY first: that is what the list is for. Then
+    -- alphabetical, so a line does not move under the cursor as counts change.
+    table.sort(rows, function(a, b)
+        local as = (a.short > 0 and not a.craftable) and 1 or 0
+        local bs = (b.short > 0 and not b.craftable) and 1 or 0
+        if as ~= bs then return as > bs end
+        return (a.name or "") < (b.name or "")
+    end)
+    return rows, shortCount
+end
+
+-- ---------------------------------------------------------------------------
 -- What you have actually made
 -- ---------------------------------------------------------------------------
 

@@ -18,6 +18,34 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.18]
+
+The arithmetic behind a real shopping list. The panel that shows it is next;
+nothing on screen changes yet.
+
+### Added
+- **`craft.ShoppingList` — one line per reagent, not one per recipe.** Track
+  three recipes that each want Bolt of Woolen Cloth and the tree shows it three
+  times in three places, so you shop for it three times and still get the total
+  wrong. This aggregates: **one line, one total, one shortfall.**
+- **Sub-reagents expand into what you actually buy.** Short of something you
+  can *make*? Then what you need to buy is what that recipe needs — a shortfall
+  of Bolt of Woolen Cloth becomes the Wool Cloth to make it, and the bolt stops
+  being a shopping line rather than being counted twice.
+  - Only the **shortfall** expands: owning two of the four bolts buys cloth for
+    two, not four.
+  - Depth-capped. A recipe cycle is something a server can define and a
+    mis-captured recipe can invent, and an unbounded walk is a hung client.
+- **Vendor or auction house, per line.** `craft.CheaperSource` picks the
+  cheaper of the two and returns the price it chose. **A tie goes to the
+  vendor** — its price is fixed and always in stock; an auction at the same
+  money is a listing that may be gone when you get there.
+
+### Internal
+- Everything is injected — `wantOf`, `haveOf`, `recipeFor`, `vendorOf`,
+  `marketOf` — so it is arithmetic a suite runs without a client. Nine new
+  sabotages, including the cycle guard and the tie.
+
 ## [1.52.17]
 
 ### Fixed
@@ -4350,6 +4378,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -333,4 +333,154 @@ H.eq("a zero width means no cutting",
      ui.FitString("Green Woolen Bag", 0, six), "Green Woolen Bag")
 H.eq("nil text is empty text", ui.FitString(nil, 60, six), "")
 
+-- ---------------------------------------------------------------------------
+H.section("the shopping list: one line per reagent, not one per recipe")
+-- ---------------------------------------------------------------------------
+
+-- THE AGGREGATION IS THE POINT. A recipe TREE shows Linen Cloth under each of
+-- the three recipes that want it, so you shop for it three times and still get
+-- the total wrong. A shopping LIST says "Linen Cloth 40" once. That is the
+-- whole difference, and it is what the Crafting tab was missing.
+local BAG = { name = "Green Woolen Bag", itemId = 4241, made = 1, reagents = {
+    { name = "Bolt of Woolen Cloth", itemId = 2997, count = 4 },
+    { name = "Fine Thread",          itemId = 2320, count = 2 },
+} }
+local BOOTS = { name = "Woolen Boots", itemId = 4310, made = 1, reagents = {
+    { name = "Bolt of Woolen Cloth", itemId = 2997, count = 3 },
+    { name = "Coarse Thread",        itemId = 2321, count = 1 },
+} }
+local ONE = function() return 1 end
+local NONE = function() return 0 end
+
+local function byName(rows, name)
+    local i = 1
+    while i <= table.getn(rows) do
+        if rows[i].name == name then return rows[i] end
+        i = i + 1
+    end
+    return nil
+end
+
+local rows, short = craft.ShoppingList({ BAG, BOOTS },
+    { wantOf = ONE, haveOf = NONE })
+H.eq("three distinct reagents, not four lines", table.getn(rows), 3)
+H.eq("the shared reagent is ONE line", byName(rows, "Bolt of Woolen Cloth").need,
+     4 + 3)
+H.eq("...and says which recipes want it",
+     table.getn(byName(rows, "Bolt of Woolen Cloth").from), 2)
+H.eq("an unshared reagent is untouched", byName(rows, "Fine Thread").need, 2)
+H.eq("everything is short when you own nothing", short, 3)
+
+-- The quantity feeds straight through: five bags is five times the reagents.
+local five = function(p) return p.itemId == 4241 and 5 or 1 end
+rows = craft.ShoppingList({ BAG, BOOTS }, { wantOf = five, haveOf = NONE })
+H.eq("the stepper scales the shared line", byName(rows, "Bolt of Woolen Cloth").need,
+     4 * 5 + 3)
+
+-- WHAT YOU OWN COMES OFF THE TOTAL, once -- not once per recipe, which is the
+-- double-count a tree invites.
+local have = function(id) return id == 2997 and 5 or 0 end
+rows, short = craft.ShoppingList({ BAG, BOOTS }, { wantOf = ONE, haveOf = have })
+local bolt = byName(rows, "Bolt of Woolen Cloth")
+H.eq("need is unchanged by what you hold", bolt.need, 7)
+H.eq("have is counted once", bolt.have, 5)
+H.eq("...so the shortfall is the difference", bolt.short, 2)
+H.eq("part of a need is still a need", short, 3)
+
+-- ...and covering it fully takes the line off the shopping count.
+local _, covered = craft.ShoppingList({ BAG, BOOTS }, { wantOf = ONE,
+    haveOf = function(id) return id == 2997 and 7 or 0 end })
+H.eq("owning all of one reagent leaves the other two", covered, 2)
+
+-- A SURPLUS FLOORS AT ZERO. Owning more than you need must not subtract from
+-- the rest of the list.
+rows, short = craft.ShoppingList({ BAG },
+    { wantOf = ONE, haveOf = function(id) return id == 2997 and 99 or 0 end })
+H.eq("a surplus is not a negative shortfall", byName(rows, "Bolt of Woolen Cloth").short, 0)
+H.eq("...and it is not counted as short", short, 1)
+
+-- Buy-first ordering: the list is for shopping, so what you still have to buy
+-- sorts above what you already hold.
+H.eq("what you must buy sorts first", rows[1].name, "Fine Thread")
+
+H.eq("no recipes is an empty list",
+     table.getn(craft.ShoppingList({}, { wantOf = ONE, haveOf = NONE })), 0)
+H.eq("...and nil too",
+     table.getn(craft.ShoppingList(nil, { wantOf = ONE, haveOf = NONE })), 0)
+
+-- ---------------------------------------------------------------------------
+H.section("sub-reagents expand into what you actually buy")
+-- ---------------------------------------------------------------------------
+
+-- If you are short of something you can MAKE, what you have to buy is what
+-- that recipe needs. A shortfall of Bolt of Woolen Cloth becomes the Wool
+-- Cloth to make it, and the bolt stops being a shopping line.
+local BOLT = { name = "Bolt of Woolen Cloth", itemId = 2997, made = 1,
+    reagents = { { name = "Wool Cloth", itemId = 2592, count = 3 } } }
+local recipeFor = function(id) return id == 2997 and BOLT or nil end
+
+rows, short = craft.ShoppingList({ BAG }, { wantOf = ONE, haveOf = NONE,
+    expand = true, recipeFor = recipeFor })
+H.eq("the sub-reagent is on the list",
+     byName(rows, "Wool Cloth").need, 4 * 3)
+H.check("the intermediate is marked as something you craft",
+        byName(rows, "Bolt of Woolen Cloth").craftable, "not marked")
+H.check("...and is NOT counted as something to buy",
+        short == 2, "short is " .. short .. "; the bolt is being double-counted")
+
+-- Only the SHORTFALL expands. Owning two bolts of the four means buying the
+-- cloth for two, not for four.
+rows = craft.ShoppingList({ BAG }, { wantOf = ONE,
+    haveOf = function(id) return id == 2997 and 2 or 0 end,
+    expand = true, recipeFor = recipeFor })
+H.eq("only the shortfall is expanded", byName(rows, "Wool Cloth").need, 2 * 3)
+
+-- Off by default: a recipe tree that silently turned into raw materials would
+-- be a surprise.
+rows = craft.ShoppingList({ BAG }, { wantOf = ONE, haveOf = NONE,
+    recipeFor = recipeFor })
+H.isNil("expansion does not happen unless asked", byName(rows, "Wool Cloth"))
+
+-- A CYCLE MUST NOT HANG THE CLIENT. Two recipes that make each other is
+-- something a server can define and a mis-capture can invent.
+local A1 = { name = "A", itemId = 101, made = 1,
+    reagents = { { name = "B", itemId = 102, count = 1 } } }
+local B1 = { name = "B", itemId = 102, made = 1,
+    reagents = { { name = "A", itemId = 101, count = 1 } } }
+local loop = function(id)
+    if id == 101 then return A1 end
+    if id == 102 then return B1 end
+    return nil
+end
+local cyc = craft.ShoppingList({ A1 }, { wantOf = ONE, haveOf = NONE,
+    expand = true, recipeFor = loop })
+H.check("a recipe cycle terminates", table.getn(cyc) > 0,
+        "the walk produced nothing")
+
+-- ---------------------------------------------------------------------------
+H.section("vendor or auction house, per line")
+-- ---------------------------------------------------------------------------
+
+H.eq("the cheaper of the two wins", craft.CheaperSource(100, 250), "vendor")
+H.eq("...either way", craft.CheaperSource(300, 250), "ah")
+
+-- A TIE GOES TO THE VENDOR. Its price is fixed and always in stock; an auction
+-- at the same money is a listing that may be gone when you get there.
+H.eq("a tie goes to the vendor", craft.CheaperSource(200, 200), "vendor")
+
+H.eq("only a vendor price is still an answer", craft.CheaperSource(100, nil), "vendor")
+H.eq("only a market price is too", craft.CheaperSource(nil, 250), "ah")
+H.isNil("neither is no answer", craft.CheaperSource(nil, nil))
+
+local _, unit = craft.CheaperSource(100, 250)
+H.eq("...and it returns the price it chose", unit, 100)
+
+rows = craft.ShoppingList({ BAG }, { wantOf = ONE, haveOf = NONE,
+    vendorOf = function(id) return id == 2320 and 50 or nil end,
+    marketOf = function(id) return id == 2320 and 90 or 300 end })
+H.eq("a vendored reagent says so", byName(rows, "Fine Thread").source, "vendor")
+H.eq("...at the vendor's price", byName(rows, "Fine Thread").unit, 50)
+H.eq("one only the auction house has says that",
+     byName(rows, "Bolt of Woolen Cloth").source, "ah")
+
 os.exit(H.report("craft.plan"))

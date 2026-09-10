@@ -3105,6 +3105,45 @@ was the only implementation of its idea. **It was, and this is the caller it
 was waiting for** -- which is the argument for that pass's restraint, made in
 retrospect.
 
+### PSL — the Crafting tab as a shopping list — **BUILDING**
+
+Scoped with the project owner against **Profession Shopping List**. Its public
+docs deliberately point you in-game ("a full list of features can be found by
+reading the tooltips on the tracking window"), so only the core concept is
+confirmed from the source: track recipes, and it shows you the materials you
+need to craft them, as ONE list.
+
+That named the gap. Our tab is a recipe TREE: a reagent two recipes want
+appears twice, under each of them, and you shop for it twice. A shopping LIST
+says it once with the total. Settled with the owner: all four of aggregation,
+sub-reagent expansion, shop-the-list, and vendor-vs-AH; three panels stay, the
+LEFT one swaps from the tree to the list and the recipes move right.
+
+#### §1 The arithmetic — v1.52.18
+
+Split from the widgets deliberately, the same way 2h §4 was, and for the same
+reason: this half can be proven and the other half cannot.
+
+**The aggregation is the whole idea.** Everything else is decoration on it.
+
+**Sub-reagent expansion has one subtlety worth keeping:** only the SHORTFALL
+expands. Owning two of four bolts means buying the cloth for two. Expanding the
+whole need is the mistake that reads as working -- every number is plausible
+and the list is quietly double what it should be -- so it has a sabotage.
+
+**And an intermediate must not be counted twice.** If a bolt is going to be
+crafted, it is not also a thing to shop for; its own reagents are already on
+the list. Counting both tells you to buy the bolt AND the cloth to make it.
+
+**The cycle guard is not hypothetical.** Recipes that refer to each other in a
+loop are something a server can define and a mis-capture can invent, and on
+this client an unbounded walk is a hung game rather than a wrong number. The
+pass measures `order` BEFORE it runs, so what a pass adds is considered on the
+next one -- which is what makes the depth cap a bound and not a suggestion.
+
+**A tie goes to the vendor.** Fixed price, always in stock; an auction at the
+same money is a listing that may be gone when you get there.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.
