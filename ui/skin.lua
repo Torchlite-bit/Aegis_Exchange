@@ -245,6 +245,11 @@ local function SkinWidget(f)
         -- A.ui.SetButtonKind: pfUI restyles, then we re-assert the one thing
         -- we actually care about.
         if A.ui and A.ui.InputText then A.ui.InputText(f) end
+        -- ...AND AGAIN A FRAME LATER. Re-applying here is not enough: the
+        -- colour is right unskinned and wrong under pfUI, so pfUI touches the
+        -- box after this line runs and we do not control when. A frame later
+        -- it is done, whatever it was. See ui.DeferInputText.
+        if A.ui and A.ui.DeferInputText then A.ui.DeferInputText() end
         f.aegisSkinned = true
         return true
     elseif otype == "Slider" then

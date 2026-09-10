@@ -683,7 +683,41 @@ function ui.InputText(e)
         if path then pcall(function() e:SetFont(path, size, flags) end) end
     end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])
+    -- REGISTERED, so the colour can be re-asserted after somebody else's
+    -- pass -- see ui.ReapplyInputText. Deduped on the box itself because
+    -- ui.RefreshSettings calls this on every repaint, and an ever-growing
+    -- list of the same four boxes is a leak with a very slow fuse.
+    if not e.aegisInputBox then
+        e.aegisInputBox = true
+        table.insert(ui.inputBoxes, e)
+    end
     return e
+end
+
+-- Every edit box this window has coloured, in creation order.
+ui.inputBoxes = {}
+
+-- Put the input colour back on all of them.
+--
+-- Bounded by the number of edit boxes in the window -- a handful -- and it is
+-- four calls each, so this is cheap enough to run on a timer tick without
+-- thinking about it.
+function ui.ReapplyInputText()
+    -- THE COUNT IS TAKEN BEFORE THE WALK, and that is not a micro-optimisation.
+    -- ui.InputText REGISTERS what it colours, so re-colouring a registered box
+    -- appends to the very list this is iterating -- and re-reading table.getn
+    -- each time round is a loop whose end moves away as fast as the cursor
+    -- reaches it. The dedupe flag stops that today, so the bound looks
+    -- redundant; it is what makes the walk terminate if the flag ever fails,
+    -- and a hung client is not a bug you get to debug.
+    --
+    -- Same reasoning as craft.ShoppingList measuring `order` before each pass.
+    local n = table.getn(ui.inputBoxes)
+    local i = 1
+    while i <= n do
+        ui.InputText(ui.inputBoxes[i])
+        i = i + 1
+    end
 end
 
 function ui.FlattenEditBox(e)
@@ -705,6 +739,31 @@ function ui.FlattenEditBox(e)
     e:SetBackdropColor(0.06, 0.05, 0.04, 1)
     e:SetBackdropBorderColor(0.42, 0.35, 0.20)
     return ui.InputText(e)
+end
+
+-- Re-assert the input colour ONE FRAME after somebody else's skin pass.
+--
+-- WHY DEFERRED, AND NOT JUST "AFTER". The colour is correct unskinned and
+-- wrong under pfUI, which means pfUI touches the box after we do -- and
+-- ui/skin.lua's EditBox branch already re-applies it immediately, so whatever
+-- pfUI is doing happens after THAT too. We do not control when, and chasing it
+-- with a fourth "call it later" is how the last three attempts went.
+--
+-- A frame later, it is done, whenever it was. Same trick and the same reason
+-- as AegisExchangeHider: when an ordering cannot be reasoned about from here,
+-- stop reasoning about it and wait a tick.
+--
+-- ONE SHOT. The driver hides itself, so N boxes skinned in one pass arm one
+-- pass, not N -- and an idle window costs nothing.
+local inputTick = CreateFrame("Frame", "AegisExchangeInputTick")
+inputTick:Hide()
+inputTick:SetScript("OnUpdate", function()
+    inputTick:Hide()
+    ui.ReapplyInputText()
+end)
+
+function ui.DeferInputText()
+    inputTick:Show()
 end
 
 -- A square check box, at any size, in either skin.

@@ -18,6 +18,36 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.34]
+
+### Fixed
+- **The input colour now survives pfUI.** v1.52.33 fixed the unskinned case —
+  the font object had to be detached before `SetTextColor` would stick — and
+  under pfUI it was still dull, which says pfUI touches the box *after* we do:
+  after the colour is set at build, and after `ui/skin.lua` re-applies it inline.
+  - So the window keeps a **registry of every edit box it has coloured**, and
+    re-colours all of them **one frame after any skin pass**. A frame later it
+    is done, whatever it was and whenever it happened. Same trick and the same
+    reason as `AegisExchangeHider`: when an ordering cannot be reasoned about
+    from here, stop reasoning about it and wait a tick.
+  - One shot — the driver hides itself, so a pass that skins six boxes arms one
+    re-apply, not six, and an idle window costs nothing.
+
+### Internal
+- **`ui.ReapplyInputText` takes its count before it walks.** Re-colouring a box
+  *registers* it, so the walk appends to the list it is iterating — re-reading
+  `table.getn` each time round is a loop whose end moves away as fast as the
+  cursor reaches it. The dedupe flag stops that today; the bound is what makes
+  it terminate if the flag ever fails, and a hung client is not a bug you get to
+  debug. Found by a sabotage that hung the test runner outright.
+  - That sabotage is **not** in the suite, and there is a note saying why:
+    proving the bound needs a permanently failing dedupe, which turns the
+    unbounded walk into a hang rather than a failure. A sabotage that hangs the
+    harness is worse than none. A test forges a single failure instead and
+    asserts the list does not run away.
+
+---
+
 ## [1.52.33]
 
 ### Fixed
@@ -4915,6 +4945,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

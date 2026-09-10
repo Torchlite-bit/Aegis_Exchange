@@ -2517,6 +2517,34 @@ end
      "    if dim then return dim, dim, dim end",
      "crafttree"),
 
+    # ---- the input colour, fourth attempt (v1.52.34) ---------------------
+
+    # The registry never filled, so there is nothing to re-colour after pfUI's
+    # pass -- which is the only pass that was ever the problem.
+    ("input-boxes-not-registered", "ui/frame.lua",
+     """    if not e.aegisInputBox then
+        e.aegisInputBox = true
+        table.insert(ui.inputBoxes, e)
+    end""",
+     "    local _ = e",
+     "rowchrome"),
+
+    # THE BOUND ON ui.ReapplyInputText HAS NO SABOTAGE, deliberately. Removing
+    # it is only wrong when the dedupe ALSO fails, and forging that turns the
+    # unbounded walk into a HANG rather than a failure -- it hung this runner
+    # when it was first written, which is what a player would have got. A
+    # sabotage that hangs the harness is worse than none, so the bound is
+    # covered by a test that forges a single dedupe failure and asserts the
+    # list does not run away, and by the comment on the loop.
+
+    # The deferred pass never armed. Re-applying inline has been in skin.lua
+    # since v1.52.32 and the box was still dull under pfUI, so inline alone is
+    # known-insufficient -- that is the whole reason the tick exists.
+    ("input-deferred-pass-not-armed", "ui/skin.lua",
+     "        if A.ui and A.ui.DeferInputText then A.ui.DeferInputText() end",
+     "        local _ = f",
+     "rowchrome"),
+
     # ---- the input colour, third attempt (v1.52.33) ----------------------
 
     # The font object left attached. InputBoxTemplate backs its box with

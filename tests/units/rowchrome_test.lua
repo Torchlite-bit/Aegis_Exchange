@@ -48,6 +48,11 @@ ui = {}
 -- two entries this file asserts about are needed; palette.py is what checks
 -- every colour the UI reads resolves.
 C = {}
+
+-- ui.InputText registers each box here. In ui/frame.lua this is a file-scope
+-- line immediately after the function; extracting the function does not bring
+-- it, so the suite declares it before first use.
+ui.inputBoxes = {}
 do
     local src = Source()
     for _, key in ipairs({ "input", "text" }) do
@@ -68,6 +73,7 @@ for _, sig in ipairs({
     "function ui.SetButtonKind(",
     "function ui.MarkChosen(",
     "function ui.PaintSortHeaders(",
+    "function ui.ReapplyInputText(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -346,6 +352,56 @@ do
     H.eq("...without being given a nil font", b.font, nil)
 end
 
+-- ---- ...AND IT CAN BE PUT BACK -----------------------------------------
+
+-- The colour is right unskinned and wrong under pfUI, which means pfUI touches
+-- the box AFTER we do -- after ui.InputText at build, and after skin.lua's own
+-- immediate re-apply. We do not control when, so every box is registered and
+-- the lot are re-coloured a frame after any skin pass.
+ui.inputBoxes = {}       -- a clean registry for this section
+
+local a, b = StubBox(), StubBox()
+ui.InputText(a)
+ui.InputText(b)
+H.eq("a coloured box is registered", table.getn(ui.inputBoxes), 2)
+
+-- DEDUPED ON THE BOX. ui.RefreshSettings colours the settings boxes on every
+-- repaint, and a list that grew by four each time is a leak with a very slow
+-- fuse -- the kind that is fine for an hour and not for an evening.
+ui.InputText(a)
+ui.InputText(a)
+H.eq("...once, however many times it is coloured",
+     table.getn(ui.inputBoxes), 2)
+
+-- Something else repaints them in its own colour; we put ours back.
+a.colored, b.colored = { 0, 0, 0 }, { 0, 0, 0 }
+ui.ReapplyInputText()
+H.listEq("re-applying restores the first", a.colored, C.input)
+H.listEq("...and every other one", b.colored, C.input)
+
+H.survives("an empty registry is not a crash", function()
+    ui.inputBoxes = {}
+    ui.ReapplyInputText()
+end)
+
+-- ...AND THE WALK TERMINATES EVEN IF THE DEDUPE FAILS. Re-colouring a box
+-- REGISTERS it, so this iterates the list it appends to: re-reading the count
+-- each time round is a loop whose end moves away as fast as the cursor reaches
+-- it. The count is taken before the walk. A sabotage that removed the dedupe
+-- hung the test runner outright, which is what a player would get.
+do
+    ui.inputBoxes = {}
+    local c = StubBox()
+    c.aegisInputBox = nil
+    ui.InputText(c)
+    -- Forge the failure: clear the flag so re-colouring registers it again.
+    ui.inputBoxes[1].aegisInputBox = nil
+    ui.ReapplyInputText()
+    H.check("a failed dedupe grows the list but does not hang",
+            table.getn(ui.inputBoxes) < 10,
+            "it registered " .. table.getn(ui.inputBoxes) .. " times")
+end
+
 -- ---- ...AND IT SURVIVES THE SKIN ----------------------------------------
 
 -- ui.InputText runs when a box is BUILT. A.skin.Apply() runs LAST, after every
@@ -369,6 +425,12 @@ do
     H.check("the skin puts our input colour back on an edit box",
             string.find(branch, "A.ui.InputText(f)", 1, true) ~= nil,
             "pfUI restyles the box after we colour it, so the colour is lost")
+    -- ...and arms the deferred pass, because doing it inline is provably not
+    -- enough: that call has been there since v1.52.32 and the box was still
+    -- dull under pfUI.
+    H.check("...and arms the one a frame later",
+            string.find(branch, "A.ui.DeferInputText()", 1, true) ~= nil,
+            "pfUI touches the box after this branch runs, so inline loses")
 end
 
 -- ---- EVERY edit box goes through it -------------------------------------
