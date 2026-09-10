@@ -81,6 +81,11 @@ REMOVED_ON_PURPOSE = {
     "buy.DeleteList":         "v1.52.6 -- with buy.Lists",
     "buy.AddItemToList":      "v1.52.6 -- with buy.Lists",
     "buy.RemoveItemFromList": "v1.52.6 -- with buy.Lists",
+    # v1.52.19. The left panel stopped being a recipe TREE and became the
+    # shopping list, so its click handler is ui.OnShoppingClick -- a reagent
+    # line searches that reagent. There is no tree left to click.
+    "ui.OnCraftTreeClick": "v1.52.19 -- renamed ui.OnShoppingClick when the "
+                           "left panel became the shopping list",
 }
 
 

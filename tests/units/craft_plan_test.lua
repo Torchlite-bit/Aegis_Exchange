@@ -218,6 +218,7 @@ for _, sig in ipairs({
     "function ui.OwnedFromRows(",
     "function ui.MadeSummary(",
     "function ui.FitString(",
+    "function ui.ShoppingTotal(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -482,5 +483,41 @@ H.eq("a vendored reagent says so", byName(rows, "Fine Thread").source, "vendor")
 H.eq("...at the vendor's price", byName(rows, "Fine Thread").unit, 50)
 H.eq("one only the auction house has says that",
      byName(rows, "Bolt of Woolen Cloth").source, "ah")
+
+-- ---------------------------------------------------------------------------
+H.section("what the whole list costs to fill")
+-- ---------------------------------------------------------------------------
+
+-- Only what you are SHORT of, at the cheaper source, times how many. What you
+-- already own is not a cost, and neither is something you are going to craft
+-- -- its own reagents are already priced further down the list.
+-- `need` differs from `short` on every line, because that is the pair the
+-- total can confuse: pricing the NEED quotes the cost of the whole recipe,
+-- including what is already in your bags.
+local LIST = {
+    { name = "Wool Cloth",  need = 30, short = 10, unit = 5,   craftable = nil },
+    { name = "Fine Thread", need = 12, short = 4,  unit = 25,  craftable = nil },
+    { name = "Bolt",        need = 8,  short = 3,  unit = 100, craftable = true },
+    { name = "Dye",         need = 6,  short = 0,  unit = 40,  craftable = nil },
+}
+local total, complete = ui.ShoppingTotal(LIST)
+H.eq("the shortfalls, at their unit prices", total, 10 * 5 + 4 * 25)
+H.check("...and it is a complete answer", complete, "marked incomplete")
+
+-- A LINE WITH NO PRICE makes the total a floor, not an answer. Quoting a
+-- number that silently omits a reagent is worse than saying "and some more".
+local noprice = ui.ShoppingTotal({
+    { name = "A", short = 2, unit = 10 },
+    { name = "B", short = 5, unit = nil },
+})
+H.eq("an unpriced line does not contribute", noprice, 20)
+local _, ok2 = ui.ShoppingTotal({
+    { name = "A", short = 2, unit = 10 },
+    { name = "B", short = 5, unit = nil },
+})
+H.check("...and the total says it is incomplete", not ok2, "claimed complete")
+
+H.eq("an empty list costs nothing", ui.ShoppingTotal({}), 0)
+H.eq("...and a nil one too", ui.ShoppingTotal(nil), 0)
 
 os.exit(H.report("craft.plan"))

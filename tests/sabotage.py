@@ -2241,8 +2241,8 @@ end
     # The outer panels given a share big enough to starve the middle table.
     # Before v1.52.10 this was a fixed width; the guarantee is the same.
     ("craft-panels-do-not-fit", "ui/frame.lua",
-     "    left_frac  = 0.20,   -- tracked recipes and their reagents",
-     "    left_frac  = 0.40,   -- tracked recipes and their reagents",
+     "    left_frac  = 0.19,   -- the shopping list",
+     "    left_frac  = 0.40,   -- the shopping list",
      "geometry"),
 
     # THE ORDER OF THE TWO CLAMPS. Applying the outer panels' minimums AFTER
@@ -2568,6 +2568,34 @@ end
      "        if vendor <= market then return \"vendor\", vendor end",
      "        if vendor < market then return \"vendor\", vendor end",
      "craft.plan"),
+
+    # The Buy-all figure counting what you already own, so it quotes the cost
+    # of the whole recipe rather than of the shopping still to do.
+    ("shoptotal-prices-the-need-not-the-short", "ui/frame.lua",
+     "                total = total + r.unit * r.short",
+     "                total = total + r.unit * (r.need or r.short)",
+     "craft.plan"),
+
+    # ...and counting the intermediates, whose own reagents are already priced
+    # further down the list -- the bolt AND the cloth to make it.
+    ("shoptotal-double-counts-the-intermediate", "ui/frame.lua",
+     "        if r.short > 0 and not r.craftable then",
+     "        if r.short > 0 then",
+     "craft.plan"),
+
+    # An unpriced line silently omitted AND the total still claimed complete,
+    # which is a number that is wrong with no way to tell.
+    ("shoptotal-hides-what-it-cannot-price", "ui/frame.lua",
+     "                complete = false",
+     "",
+     "craft.plan"),
+
+    # The two outer panels back to unequal shares, from when the left held a
+    # whole recipe tree. The recipe rows are the tighter of the two now.
+    ("craft-shares-unbalanced", "ui/frame.lua",
+     "    right_frac = 0.19,   -- tracked recipes",
+     "    right_frac = 0.13,   -- tracked recipes",
+     "geometry"),
 
     # ---- crafting: the three panels' own arithmetic ------------------------
     # What you own read as the ACCOUNT total rather than what is in your hands.

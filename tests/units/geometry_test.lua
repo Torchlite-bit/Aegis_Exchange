@@ -1277,31 +1277,35 @@ do
 end
 
 -- Every name on those rows has to leave room for what the row ends with, and
--- the four cases differ: a recipe row ends with the stepper, a reagent row
--- with a have/need count, and a reagent's name starts further in. Getting one
--- wrong does not throw -- it wraps a name onto the row below it.
+-- the two panels end differently: a SHOPPING line ends with a source mark and
+-- a have/need, a RECIPE line ends with a made/want and the +/- pair. Getting
+-- one wrong does not throw -- it wraps a name onto the row below it.
 -- Measured at the SMALLEST window, which is where they are tightest -- the
 -- panels grow with it now, so anything that fits here fits everywhere.
-local recipeName  = ui.CraftLabelW(ui.CraftSideRowW(MIN_W), CRAFTL.ex_w + 2,
-                                   CRAFTL.step_w + 4)
-local reagentName = ui.CraftLabelW(ui.CraftSideRowW(MIN_W), CRAFTL.ex_w + 2,
-                                   CRAFTL.count_w + 4)
-local madeName    = ui.CraftLabelW(ui.CraftMadeRowW(MIN_W), 0,
-                                   CRAFTL.count_w + 4)
+CRAFTL.src_w = field("CRAFTL", "src_w")
+local shopName   = ui.CraftLabelW(ui.CraftSideRowW(MIN_W), 0,
+                                  CRAFTL.src_w + CRAFTL.count_w + 6)
+local recipeName = ui.CraftLabelW(ui.CraftMadeRowW(MIN_W), 0,
+                                  CRAFTL.count_w + CRAFTL.step_w + 8)
 
+H.check("a shopping name has room left over", shopName > 0,
+        "shopping names get " .. shopName .. "px")
 H.check("a recipe name has room left over", recipeName > 0,
         "recipe names get " .. recipeName .. "px")
-H.check("a reagent name has room left over", reagentName > 0,
-        "reagent names get " .. reagentName .. "px")
-H.check("a made-panel name has room left over", madeName > 0,
-        "made names get " .. madeName .. "px")
 
--- The stepper is the widest tail, so a recipe name is the tightest of the
--- three. Asserted because it is the one that decides whether the left panel
--- can be trimmed further: trim it and this is what goes first.
-H.check("the stepper is what squeezes a recipe name",
-        recipeName < reagentName,
-        "the stepper is not the widest thing a row ends with")
+-- THE RECIPE ROW IS THE TIGHTER OF THE TWO -- it ends with a count AND the
+-- +/- pair, where a shopping line ends with a one-letter mark and a count.
+-- Asserted because it is the one that decides whether these panels can be
+-- trimmed further: trim them and this is what goes first.
+H.check("a recipe row is the tighter of the two", recipeName < shopName,
+        "the +/- pair is not the widest thing a row ends with")
+
+-- ...and both are legible at the SMALLEST window, which is where they are
+-- worst. The panels are shares now, so anything that fits here fits wider.
+H.check("a shopping name is not cut to nothing at the minimum",
+        shopName >= 60, "shopping names get only " .. shopName .. "px")
+H.check("...nor is a recipe name",
+        recipeName >= 60, "recipe names get only " .. recipeName .. "px")
 
 -- ...and the tail really is subtracted. Dropping it makes the answer BIGGER,
 -- which is the direction that reads as working right up until a name wraps.

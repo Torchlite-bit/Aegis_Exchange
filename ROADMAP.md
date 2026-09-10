@@ -3144,6 +3144,32 @@ next one -- which is what makes the depth cap a bound and not a suggestion.
 **A tie goes to the vendor.** Fixed price, always in stock; an auction at the
 same money is a listing that may be gone when you get there.
 
+#### §2 The panel — v1.52.19
+
+The widgets, on §1's arithmetic. Left becomes the shopping list; the recipes
+and everything that describes ONE recipe move right.
+
+**The economics had to move with the recipes.** Cost, Sells, Net, Price and
+Remove all describe the SELECTED recipe. Left above a list of reagents they
+would read as the cost of the list -- which is a different number, and one the
+panel now shows in its own right as "Buy all".
+
+**The stepper lost its number and got smaller.** `1/5` is made-over-want, and
+the five IS what the +/- move -- so the pair needs no figure between them. That
+is what let the cluster go from 54px to 34 and fit the narrower panel.
+
+**Equal shares now.** 20/18 dated from a left panel holding a whole recipe tree
+and a right panel holding two cells. Both hold a name and a count today, and
+the RECIPE row is the tighter of the two -- it ends with a count AND the pair,
+where a shopping line ends with a one-letter mark and a count. The geometry
+suite asserts that ordering, because it is what decides which panel gives up
+width first if either has to.
+
+**The tree state went with the tree.** `ui.craftExpanded` had nothing left to
+expand -- a flat list across every tracked recipe has no nodes -- and
+`ui.OnCraftTreeClick` became `ui.OnShoppingClick`, recorded in definitions.py
+so the lint knows the loss was deliberate.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

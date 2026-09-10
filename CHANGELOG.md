@@ -18,6 +18,34 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.19]
+
+### Changed
+- **The Crafting tab's left panel is a shopping list, not a recipe tree.**
+  Track three recipes that each want Bolt of Woolen Cloth and the tree showed
+  it three times in three places. Now it is **one line** — the name, whether a
+  vendor sells it cheaper, and `have/need`.
+  - **Red** when you are short, **green** when you are not, and **dimmed** when
+    it is something you will craft rather than buy — its own reagents are
+    already further down the list.
+  - **`v`** beside a line means a merchant sells it cheaper than the auction
+    house does.
+  - **"Buy all"** above the list is what the whole shortfall costs at the
+    cheaper source. A `+` on the end means a line has no price yet, so the
+    figure is a floor rather than an answer.
+  - Click a line and the middle panel searches that reagent, exactly as before.
+- **The tracked recipes moved to the right panel**, taking their economics with
+  them: `Cost` / `Sells` above the box, `Price` / `Remove` under them, and the
+  `Net` on the footer. Leaving those over a list of *reagents* would have read
+  as the cost of the list.
+  - Each recipe row is `name`, `made/want`, and the `[-] [+]` that move the
+    want. The pair needs no number of its own — the `5` in `1/5` **is** the
+    stepper's value, which is what let the cluster shrink from 54px to 34 when
+    it moved into the narrower panel.
+- The two outer panels now take **equal shares** of the width. The old 20/18
+  split dated from when the left held a whole tree and the right held two
+  cells.
+
 ## [1.52.18]
 
 The arithmetic behind a real shopping list. The panel that shows it is next;
@@ -4378,6 +4406,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
