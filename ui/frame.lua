@@ -7773,6 +7773,18 @@ function ui.BuildCraftTab()
         CRAFTL.edge + leftW - CRAFTL.row_r - halfW, -CRAFTL.est_y)
     ui.craftBuyAllFS:SetWidth(halfW); ui.craftBuyAllFS:SetJustifyH("RIGHT")
 
+    -- The btn_y row on THIS side: one button that starts the walk and stops
+    -- it. Full width of the panel, because it is the only thing on the row and
+    -- "Shop all" is what the list is for.
+    local shopBtn = ui.MakeButton(panel, "primary", "AegisExchangeCraftShopButton")
+    shopBtn:SetWidth(leftW - CRAFTL.row_l - CRAFTL.row_r)
+    shopBtn:SetHeight(CRAFTL.btn_h)
+    shopBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
+        -CRAFTL.btn_y)
+    shopBtn:SetText("Shop all")
+    shopBtn:SetScript("OnClick", function() ui.ShopAll() end)
+    ui.craftShopBtn = shopBtn
+
     local sideBox = CraftBox(panel)
     sideBox:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
         -ui.CraftBoxEdge(LISTBOX.craftSide.top))
@@ -8149,6 +8161,7 @@ ui.GrowCraftMadeRows = function(n)
     end
 
     ui.LayoutCraftPanels()
+    ui.RefreshCraftButtons()
     ui.RefreshCraftTree()
 end
 
@@ -8188,6 +8201,11 @@ function ui.LayoutCraftPanels()
           CRAFTL.edge + CRAFTL.row_l, -CRAFTL.est_y)
     place(ui.craftBuyAllFS, "TOPLEFT", panel, "TOPLEFT",
           CRAFTL.edge + leftW - CRAFTL.row_r - halfW, -CRAFTL.est_y)
+    place(ui.craftShopBtn, "TOPLEFT", panel, "TOPLEFT",
+          CRAFTL.edge + CRAFTL.row_l, -CRAFTL.btn_y)
+    if ui.craftShopBtn then
+        ui.craftShopBtn:SetWidth(leftW - CRAFTL.row_l - CRAFTL.row_r)
+    end
     if ui.craftBuyLbl   then ui.craftBuyLbl:SetWidth(halfW)   end
     if ui.craftBuyAllFS then ui.craftBuyAllFS:SetWidth(halfW) end
     if ui.craftSideBox    then ui.craftSideBox:SetWidth(leftW)    end
@@ -8659,11 +8677,118 @@ end
 -- (when it's an auctionable item) and each reagent, one after another, so the
 -- price DB is filled and the profit estimate resolves. Only the last search's
 -- listings remain on the right; the rest just warm the DB.
+-- The names to shop, in list order.
+--
+-- What you are still SHORT of and are NOT going to craft yourself. An
+-- intermediate's own reagents are already on this list further down, so
+-- queuing the intermediate as well would search for something you were never
+-- going to buy -- and every search costs a trip through the query gate.
+--
+-- Pure, so the suite can check the two exclusions without an auction house.
+function ui.ShoppingQueue(rows)
+    local names = {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.name and r.short and r.short > 0 and not r.craftable then
+            table.insert(names, r.name)
+        end
+        i = i + 1
+    end
+    return names
+end
+
+-- ONE sequential-search runner, for BOTH "Price" and "Shop all".
+--
+-- Two copies of "search these names in turn" is how they drift: one grows a
+-- cancel and the other does not, one clears its queue when the auction house
+-- refuses and the other leaves it armed for ever. Same lesson as the Sell
+-- tab's headers and rows, applied to behaviour instead of to numbers.
+--
+-- `verb` is what the status line says while it runs. `done` is called when the
+-- queue empties -- not when it is cancelled, because a cancelled run has not
+-- finished anything.
+ui.craftQueue = nil
+
+function ui.CraftQueueRunning()
+    return ui.craftQueue and true or false
+end
+
+function ui.CancelCraftQueue()
+    ui.craftQueue = nil
+    ui.RefreshCraftButtons()
+end
+
+function ui.StartCraftQueue(names, verb, done)
+    if not A.buy or table.getn(names or {}) == 0 then return false end
+    ui.craftQueue = { names = names, verb = verb or "Searching", done = done }
+    ui.RefreshCraftButtons()
+    ui.RunCraftQueue()
+    return true
+end
+
+function ui.RunCraftQueue()
+    local q = ui.craftQueue
+    if not q then return end
+    if table.getn(q.names) == 0 then
+        ui.craftQueue = nil
+        ui.RefreshCraftButtons()
+        if q.done then q.done() end
+        return
+    end
+    local term = table.remove(q.names, 1)
+    ui.craftBox:SetText(term)
+    ui.craftTitle:SetText(term)
+    local ok = A.buy.Search(term, {
+        onResults = function(rows)
+            -- THE QUEUE THIS SEARCH BELONGED TO, by identity. A reply can land
+            -- after the player cancelled or started a different run, and
+            -- chaining off a stale one would restart a queue they stopped.
+            if ui.craftQueue ~= q then return end
+            ui.craftResults = rows
+            ui.UpdateCraftList()
+            ui.UpdateCraftSummary()
+            ui.RunCraftQueue()
+        end,
+        onState = function() ui.RefreshCraftStatus() end,
+    })
+    if not ok then
+        ui.craftQueue = nil
+        ui.RefreshCraftButtons()
+        if ui.craftStatus then
+            ui.craftStatus:SetText("AH busy \226\128\148 try again.")
+        end
+        return
+    end
+    if ui.craftStatus then
+        ui.craftStatus:SetText(q.verb .. "... ("
+            .. table.getn(q.names) .. " left)")
+    end
+end
+
+-- A running queue turns its button into the way to stop it. One button that
+-- both starts and stops is the whole control, and it cannot get out of step
+-- with the queue because it is painted from the queue.
+function ui.RefreshCraftButtons()
+    local running = ui.CraftQueueRunning()
+    if ui.craftShopBtn then
+        ui.craftShopBtn:SetText(running and "Stop" or "Shop all")
+    end
+    if ui.craftPriceBtn then
+        if running then ui.craftPriceBtn:Disable() else ui.craftPriceBtn:Enable() end
+    end
+end
+
+-- Price every part of the selected recipe: the crafted item (when it is one)
+-- and each reagent, so the price DB is filled and the profit estimate
+-- resolves. Only the last search's listings stay on screen; the rest just warm
+-- the DB.
 function ui.CraftPriceRecipe()
     if not A.buy or not A.craft then return end
+    if ui.CraftQueueRunning() then return ui.CancelCraftQueue() end
     local p = ui.craftSel and A.craft.Projects()[ui.craftSel]
     if not p then
-        ChatMsg("Aegis: select a recipe on the left first.")
+        ChatMsg("Aegis: select a recipe on the right first.")
         return
     end
     local q = {}
@@ -8677,40 +8802,32 @@ function ui.CraftPriceRecipe()
         ChatMsg("Aegis: nothing to price for this recipe.")
         return
     end
-    ui.craftPriceQueue = q
-    ui.CraftRunPriceQueue()
-end
-
-function ui.CraftRunPriceQueue()
-    if not ui.craftPriceQueue or table.getn(ui.craftPriceQueue) == 0 then
-        ui.craftPriceQueue = nil
+    ui.StartCraftQueue(q, "Pricing", function()
         ui.UpdateCraftSummary()
         if ui.craftStatus then
-            ui.craftStatus:SetText("Priced \226\128\148 net updated on the left.")
+            ui.craftStatus:SetText("Priced \226\128\148 net updated.")
         end
+    end)
+end
+
+-- Walk the shopping list, searching each thing you still have to buy.
+--
+-- Paced entirely by the query gate -- A.buy.Search refuses while the client
+-- is shut, and the next search only starts when the previous one's results
+-- land -- so a ten-line list takes as long as ten searches and not a moment
+-- less. That is the client's rule, not ours; see HARD RULE 10.
+function ui.ShopAll()
+    if ui.CraftQueueRunning() then return ui.CancelCraftQueue() end
+    local names = ui.ShoppingQueue(ui.craftFlat)
+    if table.getn(names) == 0 then
+        ChatMsg("Aegis: nothing to shop for \226\128\148 the list is covered.")
         return
     end
-    local term = table.remove(ui.craftPriceQueue, 1)
-    ui.craftBox:SetText(term)
-    ui.craftTitle:SetText(term)
-    local ok = A.buy.Search(term, {
-        onResults = function(rows)
-            ui.craftResults = rows
-            ui.UpdateCraftList()
-            ui.UpdateCraftSummary()
-            ui.CraftRunPriceQueue()   -- next part
-        end,
-        onState = function() ui.RefreshCraftStatus() end,
-    })
-    if not ok then
-        ui.craftPriceQueue = nil
-        if ui.craftStatus then ui.craftStatus:SetText("AH busy \226\128\148 try again.") end
-        return
-    end
-    if ui.craftStatus then
-        ui.craftStatus:SetText("Pricing... ("
-            .. table.getn(ui.craftPriceQueue) .. " left)")
-    end
+    ui.StartCraftQueue(names, "Shopping", function()
+        if ui.craftStatus then
+            ui.craftStatus:SetText("Shopped the whole list.")
+        end
+    end)
 end
 
 function ui.RefreshCraftStatus()
@@ -12564,6 +12681,10 @@ A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     -- have it resume against whatever the owner list holds NEXT time, which
     -- may be a different character's book.
     ui.cancelAllActive = nil
+    -- ...and so does a shopping walk, for the same reason: every search it has
+    -- left to make needs a session, and the queue would otherwise sit armed
+    -- until the next visit and then fire against it.
+    if ui.CancelCraftQueue then ui.CancelCraftQueue() end
     if ui.frame then ui.frame:Hide() end
     -- Clear the Sell tab's per-item cache so next session gets fresh prices.
     A.sell.StopBatchScan()

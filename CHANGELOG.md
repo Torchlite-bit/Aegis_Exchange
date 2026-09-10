@@ -18,6 +18,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.20]
+
+### Added
+- **"Shop all"** — one button walks the shopping list, searching each thing you
+  still have to buy, instead of you clicking them one at a time.
+  - It searches **only what you are short of**, and **not** the intermediates —
+    their own reagents are already on the list further down, so queuing them
+    would search for something you were never going to buy. Every search costs
+    a trip through the query gate, so both exclusions are time as much as
+    correctness.
+  - **Press it again to stop.** The button *is* the state: it reads "Stop"
+    while a walk is running, and it is painted from the queue, so the two
+    cannot get out of step.
+  - Paced entirely by the client's query gate — the next search starts when the
+    previous one's results land. A ten-line list takes as long as ten searches
+    and not a moment less. That is the client's rule (HARD RULE 10), not ours.
+  - A walk **ends with the auction house session**. Left armed, its remaining
+    searches would fire against whatever session came next — possibly a
+    different trip to a different auctioneer.
+
+### Internal
+- **One sequential-search runner for both "Price" and "Shop all".** They were
+  about to be two copies of "search these names in turn", which is how they
+  drift: one grows a cancel and the other does not, one clears its queue when
+  the client refuses and the other leaves it armed.
+- **A reply that arrives after you pressed Stop no longer restarts the walk.**
+  Every search is asynchronous, so a cancelled run's results still land — and
+  chaining off them resumes the thing you just stopped. The callback checks the
+  queue it belonged to *by identity*, which also covers starting a different
+  run while one is in flight. New `craftqueue` suite drives the runner with
+  stubbed replies to prove it.
+
 ## [1.52.19]
 
 ### Changed
@@ -4406,6 +4438,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

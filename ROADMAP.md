@@ -3170,6 +3170,33 @@ expand -- a flat list across every tracked recipe has no nodes -- and
 `ui.OnCraftTreeClick` became `ui.OnShoppingClick`, recorded in definitions.py
 so the lint knows the loss was deliberate.
 
+#### §3 Shop the whole list — v1.52.20
+
+**The runner already existed and was about to be copied.** "Price recipe" has
+walked a list of names since it was written; "Shop all" is the same walk over a
+different list. Two copies is how they drift -- one grows a cancel and the
+other does not -- so there is one runner and both call it with a verb.
+
+**The interesting bug is not in the walk, it is in the replies.** Every search
+here is asynchronous. Press Stop while one is in flight and its results still
+land, and chaining off them restarts the walk that was just cancelled -- which
+is the one thing the player asked not to happen. The callback checks the queue
+it belonged to BY IDENTITY, which also covers pricing a recipe while a shopping
+walk is running, a click away.
+
+That is not something reading the code makes obvious, so `craftqueue_test.lua`
+drives the runner with stubbed replies and fires them out of order: a reply
+after a cancel, and a reply belonging to a run that was replaced.
+
+**Two exclusions in the queue, and both are time.** Covered lines and
+intermediates are skipped. Every search is a trip through the query gate and
+the gate is the slow part, so searching for something you already hold, or for
+a bolt you were always going to craft, costs the player seconds each.
+
+**A walk ends with the session** for the same reason Cancel All does: its
+remaining searches need an auction house, and an armed queue would fire against
+the next one.
+
 ### 2h — original scope
 
 **Decided.** Add a real-time purchasing and material tracking widget to the AH interface to streamline bulk crafting and recipe purchases.

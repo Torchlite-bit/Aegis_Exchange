@@ -219,6 +219,7 @@ for _, sig in ipairs({
     "function ui.MadeSummary(",
     "function ui.FitString(",
     "function ui.ShoppingTotal(",
+    "function ui.ShoppingQueue(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -519,5 +520,40 @@ H.check("...and the total says it is incomplete", not ok2, "claimed complete")
 
 H.eq("an empty list costs nothing", ui.ShoppingTotal({}), 0)
 H.eq("...and a nil one too", ui.ShoppingTotal(nil), 0)
+
+-- ---------------------------------------------------------------------------
+H.section("what Shop all actually searches for")
+-- ---------------------------------------------------------------------------
+
+-- Two exclusions, and every search costs a trip through the query gate, so
+-- both of them are time as well as correctness.
+local QLIST = {
+    { name = "Wool Cloth",  short = 10, craftable = nil },
+    { name = "Dye",         short = 0,  craftable = nil },   -- already covered
+    { name = "Bolt",        short = 3,  craftable = true },  -- we craft this
+    { name = "Fine Thread", short = 4,  craftable = nil },
+}
+local q = ui.ShoppingQueue(QLIST)
+H.eq("only what is left to buy", table.getn(q), 2)
+H.eq("...in list order", q[1], "Wool Cloth")
+H.eq("...and the rest of it", q[2], "Fine Thread")
+
+-- COVERED LINES ARE NOT SEARCHED. Searching something you already hold enough
+-- of is a wasted trip through the gate, and the gate is the slow part.
+local covered = ui.ShoppingQueue({ { name = "Dye", short = 0 } })
+H.eq("nothing short is nothing to shop", table.getn(covered), 0)
+
+-- NEITHER ARE INTERMEDIATES. Their own reagents are already on the list
+-- further down; queuing the intermediate searches for something you were
+-- never going to buy.
+local inter = ui.ShoppingQueue({ { name = "Bolt", short = 9, craftable = true } })
+H.eq("an intermediate is not shopped for", table.getn(inter), 0)
+
+H.eq("an empty list is an empty queue", table.getn(ui.ShoppingQueue({})), 0)
+H.eq("...and a nil one too", table.getn(ui.ShoppingQueue(nil)), 0)
+
+-- A line with no name cannot be searched for, whatever its numbers say.
+H.eq("a nameless line is skipped",
+     table.getn(ui.ShoppingQueue({ { short = 5 } })), 0)
 
 os.exit(H.report("craft.plan"))

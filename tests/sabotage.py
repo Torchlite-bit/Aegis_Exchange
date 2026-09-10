@@ -2597,6 +2597,41 @@ end
      "    right_frac = 0.13,   -- tracked recipes",
      "geometry"),
 
+    # Shop all searching things you already have enough of -- every one a
+    # wasted trip through the query gate, which is the slow part.
+    ("shopqueue-searches-covered-lines", "ui/frame.lua",
+     "        if r.name and r.short and r.short > 0 and not r.craftable then",
+     "        if r.name and r.short and not r.craftable then",
+     "craft.plan"),
+
+    # ...and searching the intermediates, whose own reagents are already on the
+    # list -- looking for something you were never going to buy.
+    ("shopqueue-searches-intermediates", "ui/frame.lua",
+     "        if r.name and r.short and r.short > 0 and not r.craftable then",
+     "        if r.name and r.short and r.short > 0 then",
+     "craft.plan"),
+
+    # THE STALE-REPLY GUARD. A search that lands after the player pressed Stop
+    # chains off the queue it belonged to and restarts a walk they cancelled.
+    ("craftqueue-chains-after-cancel", "ui/frame.lua",
+     "            if ui.craftQueue ~= q then return end",
+     "",
+     "craftqueue"),
+
+    # A queue left armed when the client refuses, so it fires against whatever
+    # session comes next -- possibly a different trip to a different auctioneer.
+    ("craftqueue-armed-after-refusal", "ui/frame.lua",
+     "        ui.craftQueue = nil\n        ui.RefreshCraftButtons()\n        if ui.craftStatus then",
+     "        if ui.craftStatus then",
+     "craftqueue"),
+
+    # The whole list fired at once instead of one search per reply, which is
+    # the pacing the query gate exists to impose (HARD RULE 10).
+    ("craftqueue-does-not-wait", "ui/frame.lua",
+     "            ui.RunCraftQueue()\n        end,\n        onState = function() ui.RefreshCraftStatus() end,",
+     "        end,\n        onState = function() ui.RefreshCraftStatus() end,",
+     "craftqueue"),
+
     # ---- crafting: the three panels' own arithmetic ------------------------
     # What you own read as the ACCOUNT total rather than what is in your hands.
     # Every bucket added makes the answer bigger, which reads as "you need
@@ -3138,6 +3173,7 @@ SUITES = {
     "external.buttons": "tests/units/external_buttons_test.lua",
     "shiftclick": "tests/units/shiftclick_test.lua",
     "rowbudget": "tests/units/rowbudget_test.lua",
+    "craftqueue": "tests/units/craftqueue_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
