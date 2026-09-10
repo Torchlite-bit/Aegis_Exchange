@@ -3119,6 +3119,11 @@ says it once with the total. Settled with the owner: all four of aggregation,
 sub-reagent expansion, shop-the-list, and vendor-vs-AH; three panels stay, the
 LEFT one swaps from the tree to the list and the recipes move right.
 
+**§4 then took the third panel back out.** The recipes had been moved to it one
+release earlier, and moving them again -- into the shopping panel, as a
+collapsible section -- is what freed the width. See §4 for the arithmetic that
+settled it.
+
 #### §1 The arithmetic — v1.52.18
 
 Split from the widgets deliberately, the same way 2h §4 was, and for the same
@@ -3196,6 +3201,58 @@ a bolt you were always going to craft, costs the player seconds each.
 **A walk ends with the session** for the same reason Cancel All does: its
 remaining searches need an auction house, and an armed queue would fire against
 the next one.
+
+#### §4 Two panels — v1.52.21
+
+**The concept was drawn before anything was built**, at 1:1 against the widths
+`ui.CraftWidthsAt` actually returns, so the comparison was arithmetic rather
+than taste. Two candidates: two panels (shopping + search), or three (shopping
++ search + a session-purchases panel). Settled with the owner in favour of two.
+
+**The number that decided it.** At the smallest window the tab has 960px of
+panel and the results table's floor is 572 of it. Three panels leave the
+shopping tree **174px** -- 60 for a recipe NAME once the expander, the stepper
+and the made/want count are taken off, which is about ten characters. Two
+panels leave it **358**, and the name 244. There is no window width at which
+three panels give the tree as much room as two give it at the smallest.
+
+**The third panel was already a duplicate.** It held the tracked recipes and a
+made-this-session count -- and a recipe row carries `1/5`, which IS the made
+count and the wanted count. The candidate three-panel design had the same
+problem from the other end: "18 of 40" is `18/40` on the reagent line one panel
+over. The only figure a session panel could show that nothing else does is
+**money**, and 184px for one column of copper is a bad trade against the panel
+you are actually reading. Deferred to a footer line instead.
+
+**ONE FLAT LIST, not two boxes stacked.** Two boxes at fixed heights cannot
+give the space a collapsed section frees to the other one, which is most of the
+reason a section collapses. One list also keeps `ui.PlaceRow`'s flat anchoring,
+the row pool and `ui.RowBudget` -- all of which exist because of the drag stall
+in §6 above, and none of which wants a second pool per kind of row.
+
+**A breakdown is not a shopping line.** Expanding a recipe shows what THAT
+recipe asks for; the aggregated Reagents section below is what you buy from.
+Both are computable from `craft.ShoppingList` -- pass it a single-project array
+for the breakdown -- so the two cannot disagree about a total. The ceil is
+injected for the same reason: five of something made in twos is three crafts,
+and a breakdown that rounds differently from the list it breaks down is two
+numbers for one quantity, side by side, on screen.
+
+**`open` is keyed by NAME.** Removing a recipe shifts every index after it, and
+an index-keyed set would leave whichever recipe slid into the hole expanded --
+silently, and looking entirely reasonable. It has a sabotage.
+
+**The one real bug this found.** `ui.UpdateCraftNeed` looked its reagent up by
+`kind == "reagent"` and then read `shortBy` -- a field only its own private
+copy carries. Shopping rows have never had a `kind`, so the branch was dead;
+marking the rows made it live, and it would have compared `nil` with a number
+and thrown. Which is also why `kind` is stamped whether or not the section is
+folded: a lookup that works only while something happens to be unfolded is
+worse than one that never works.
+
+**Deferred, not dropped:** per-item session spend. `buy.session` already keeps
+units and copper per item id, so the footer line and a reagent-row tooltip are
+a small piece of work on top of this one.
 
 ### 2h — original scope
 

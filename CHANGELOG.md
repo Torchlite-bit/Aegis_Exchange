@@ -18,6 +18,74 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.21]
+
+### Changed
+- **The Crafting tab is two panels, not three.** Shopping on the left, the
+  results table on the right, and the third panel deleted.
+  - **The shopping panel goes from 174px to 358** at the smallest window — more
+    than double. A recipe name had **60px** after the expander, the stepper and
+    the made/want count, which is about ten characters: *Greater Ar…*. It now
+    has 244.
+  - **The panel that was deleted was largely a duplicate.** A recipe row carries
+    `1/5` — made over wanted — so "made this session" was a second rendering of
+    a number already on screen. The counts are on the recipe rows now.
+  - The shares are **38.5 / 61.5**, which at the minimum window is exactly what
+    the results table's floor leaves (930 − 572 = 358) and holds all the way up
+    to 1400.
+
+### Added
+- **Recipes and reagents are two collapsible sections of one list.** `+` and `-`
+  on the section headers; the Recipes header carries the count and the Reagents
+  header how many lines you are still short of.
+  - **Expand a recipe to see its own reagents**, indented and dimmed, at the
+    quantity *that* recipe asks for. It is a **breakdown, not a shopping line** —
+    what you buy from is the aggregated Reagents section below, where Dreamfoil
+    is one line of forty rather than three lines under three recipes. Clicking a
+    breakdown line searches for the aggregated one anyway.
+  - The breakdown multiplies by **crafts, not by items wanted**: five of
+    something made in twos is three crafts, so a reagent taking two of them is
+    six — the same ceil the shopping list uses, injected so the two cannot round
+    differently about the same recipe on the same screen.
+  - **Collapse state is remembered per character**, in `AegisExchangeCharDB`,
+    because which professions you are working is a per-character fact. Open
+    recipes are keyed by **name**, not index — remove a recipe and every index
+    after it shifts, and an index-keyed set would open whichever recipe slid
+    into the hole.
+- **`Price`, `Shop all`, `Remove` and `Reset` are one action row** across the
+  shopping panel. They fit there because the panel is 358px; three of them were
+  on the third panel until now.
+- **The selected recipe's economics moved to the panel's bottom bar** — Cost,
+  Sells and the Profit/Loss. A conclusion belongs on the bottom bar; what the
+  whole list costs to fill stays above the box, where the list is.
+
+### Fixed
+- **`ui.UpdateCraftNeed` read a field that has never existed.** It looked the
+  shopped reagent up by `kind == "reagent"` and then read `shortBy` off it — a
+  name only its own private copy carries. The branch was unreachable until this
+  release started marking the rows with `kind`, at which point it would have
+  compared `nil` with a number and thrown. It reads `short` now, and `kind` is
+  stamped whether or not the Reagents section is folded, so the lookup cannot
+  depend on what happens to be collapsed.
+- **One repaint per frame instead of two.** The bag flag and the made flag drove
+  two separate repaints in the same frame over the same rows; now that the
+  recipes and the reagents are one list, the second would have thrown the first
+  away. HARD RULE 16's flush does one.
+
+### Internal
+- `ui.CraftWidthsAt` returns **two** widths. A caller left behind writing
+  `local l, _, r = …` gets `nil`, which is the failure you want — a stale third
+  width would place widgets over the results table.
+- `ui.CraftHalfW` became `ui.CraftBtnW(w, n)`: the shopping panel divides its
+  width by two, three and four, and three constants for one division is three
+  places to get the gutter count wrong. The one that matters is the button row,
+  whose plates draw outside themselves.
+- New `tests/units/crafttree_test.lua` (51 checks) over `ui.CraftTreeRows`,
+  `ui.ShoppingRowFor` and `ui.ToggleCraftRow`, with ten sabotages — including
+  one for the `kind`-stamping bug above and one that keys `open` by index.
+
+---
+
 ## [1.52.20]
 
 ### Added
@@ -4438,6 +4506,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

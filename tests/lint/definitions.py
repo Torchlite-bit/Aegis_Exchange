@@ -91,6 +91,20 @@ REMOVED_ON_PURPOSE = {
     # verb -- rather than a second copy that drifts.
     "ui.CraftRunPriceQueue": "v1.52.20 -- folded into ui.RunCraftQueue, the "
                              "one sequential-search runner",
+
+    # THE THIRD PANEL. The Crafting tab held tracked recipes and a made-this-
+    # session count in a panel of its own; both are on the recipe ROWS now
+    # (`1/5` IS the made count and the wanted count), and deleting the panel
+    # took the shopping panel from 174px to 358 at the smallest window.
+    "ui.UpdateCraftMade": "v1.52.21 -- the made-this-session panel; the counts "
+        "are on the recipe rows in the shopping tree, painted by "
+        "ui.PaintCraftRow",
+    "ui.CraftMadeRowW": "v1.52.21 -- with ui.UpdateCraftMade; there is no "
+        "right-hand panel to measure a row in",
+    "ui.CraftHalfW": "v1.52.21 -- generalised to ui.CraftBtnW(w, n): the "
+        "shopping panel now divides its width by two, three and four, and "
+        "three constants for one division is three places to get the gutter "
+        "count wrong",
 }
 
 

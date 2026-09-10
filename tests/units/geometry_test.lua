@@ -840,15 +840,11 @@ do
     CRAFT_ROW_H = constant("CRAFT_ROW_H")
     local _, mx
     _, mx = pairConst("CSIDE_ROWS", "CSIDE_ROWS_MAX")
-    table.insert(LISTS, { name = "craft recipe tree", box = LISTBOX.craftSide,
+    table.insert(LISTS, { name = "craft shopping tree", box = LISTBOX.craftSide,
                           rowH = constant("CSIDE_ROW_H"), max = mx })
     _, mx = pairConst("CRAFT_ROWS", "CRAFT_ROWS_MAX")
     table.insert(LISTS, { name = "Crafting", box = LISTBOX.craft,
                           rowH = CRAFT_ROW_H, max = mx })
-    _, mx = pairConst("MADE_ROWS", "MADE_ROWS_MAX")
-    table.insert(LISTS, { name = "craft made-this-session",
-                          box = LISTBOX.craftMade,
-                          rowH = constant("MADE_ROW_H"), max = mx })
     _, h = pairConst("AUC_ROWS", "AUC_ROW_H")
     table.insert(LISTS, { name = "Auctions", box = LISTBOX.auc,
                           rowH = h, max = constant("AUC_ROWS_MAX") })
@@ -863,7 +859,7 @@ do
                           rowH = h, max = constant("LIST_ROWS_MAX") })
 end
 
-H.eq("every list is accounted for", table.getn(LISTS), 7)
+H.eq("every list is accounted for", table.getn(LISTS), 6)
 
 for _, L in ipairs(LISTS) do
     local function area(winH)
@@ -1091,7 +1087,7 @@ H.check("the row's end is past its last text column",
 H.eq("...and is the Bid button's right edge",
      CRAFT_COLS_END, field("RCX", "bid") + 38)
 
-H.check("all three panels fit at the smallest allowed window",
+H.check("both panels fit at the smallest allowed window",
         ui.CraftPanelsFitAt(MIN_W),
         "middle panel gets " .. ui.CraftMidWidthAt(MIN_W)
             .. "px, columns need " .. CRAFT_COLS_END)
@@ -1104,45 +1100,60 @@ H.check("the BUY column set would not fit there",
         "Buy needs " .. constant("BUY_COLS_END") .. ", middle panel has "
             .. ui.CraftMidWidthAt(MIN_W))
 
--- THE PROPORTIONS HOLD AT EVERY WIDTH. The outer panels were FIXED and the
--- middle took every surplus pixel, on the argument that a recipe name and a
--- made-count do not get more readable with more room. On a real client they
--- plainly do: drag the window wide and the middle table grew to twice the tab
--- while the columns either side stayed at the width they need at the MINIMUM.
+-- THE PROPORTION HOLDS AT EVERY WIDTH. The outer panel was FIXED and the
+-- middle took every surplus pixel, on the argument that a recipe name does not
+-- get more readable with more room. On a real client it plainly does.
 local function craftShare(w)
-    local l, m, r = ui.CraftWidthsAt(w)
-    local total = l + m + r
-    return l / total, m / total, r / total
+    local l, m = ui.CraftWidthsAt(w)
+    local total = l + m
+    return l / total, m / total
 end
 
 for _, w in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
-    local l, m, r = craftShare(w)
-    H.check("at " .. w .. " the left panel keeps its share",
+    local l, m = craftShare(w)
+    H.check("at " .. w .. " the shopping panel keeps its share",
             math.abs(l - CRAFTL.left_frac) < 0.02,
             "left is " .. string.format("%.3f", l) .. ", wanted "
                 .. CRAFTL.left_frac)
-    H.check("...and the right panel keeps its share",
-            math.abs(r - CRAFTL.right_frac) < 0.02,
-            "right is " .. string.format("%.3f", r) .. ", wanted "
-                .. CRAFTL.right_frac)
-    H.check("...and all three are positive",
-            l > 0 and m > 0 and r > 0, "a panel came out at zero or less")
+    H.check("...and both panels are positive",
+            l > 0 and m > 0, "a panel came out at zero or less")
 end
 
--- ALL THREE GROW. The old assertion was that the middle grew by the WHOLE of
--- any extra width; the point of this change is that it does not.
+-- THERE IS NO THIRD PANEL. CraftWidthsAt returns TWO values, and a caller left
+-- behind writing `local l, _, r = ...` has to get nil rather than a number --
+-- a stale third width would place widgets over the results table.
 do
-    local l0, m0, r0 = ui.CraftWidthsAt(MIN_W)
-    local l1, m1, r1 = ui.CraftWidthsAt(MIN_W + 200)
-    H.check("the left panel grows with the window", l1 > l0,
+    local _, _, third = ui.CraftWidthsAt(MIN_W)
+    H.eq("CraftWidthsAt returns exactly two widths", third, nil)
+end
+
+-- BOTH GROW. The old assertion was that the middle grew by the WHOLE of any
+-- extra width; the point of this change is that it does not.
+do
+    local l0, m0 = ui.CraftWidthsAt(MIN_W)
+    local l1, m1 = ui.CraftWidthsAt(MIN_W + 200)
+    H.check("the shopping panel grows with the window", l1 > l0,
             "it stayed at " .. l0)
-    H.check("the right panel grows with the window", r1 > r0,
-            "it stayed at " .. r0)
     H.check("the middle panel grows with the window", m1 > m0,
             "it stayed at " .. m0)
-    H.check("...and the middle still takes the largest part of the extra",
-            (m1 - m0) > (l1 - l0) and (m1 - m0) > (r1 - r0),
+    H.check("...and the middle still takes the larger part of the extra",
+            (m1 - m0) > (l1 - l0),
             "the middle got " .. (m1 - m0) .. " of 200")
+end
+
+-- THE WHOLE POINT OF THE REDESIGN, as a number. The third panel was deleted so
+-- the shopping tree could hold a recipe NAME; at 174px it had 60 for one,
+-- after the expander, the stepper and the made/want count. Asserted against
+-- what a row really leaves rather than against 358, so a change to any of
+-- those columns has to face this too.
+do
+    local l = ui.CraftWidthsAt(MIN_W)
+    local rowW = l - CRAFTL.row_l - CRAFTL.row_r
+    local nameW = rowW - field("CRAFTL", "ex_w") - field("CRAFTL", "step_w")
+        - field("CRAFTL", "count_w") - 8
+    H.check("a recipe name gets at least 200px at the smallest window",
+            nameW >= 200,
+            "it gets " .. nameW .. "px, out of a " .. l .. "px panel")
 end
 
 -- A MIDDLE ROW IS ITS PANEL LESS THREE TERMS, stated as an identity. The
@@ -1161,34 +1172,36 @@ end
 -- all. Checked at the minimum window AND below it, because the window can be
 -- restored to a saved size and a clamp that only holds at MIN_W is not a
 -- clamp.
-for _, w in ipairs({ MIN_W, 900, 800 }) do
-    local l, m, r = ui.CraftWidthsAt(w)
+-- 700 and 750 are in here because they are the widths where the MINIMUM would
+-- bind if it were applied after the budget rather than before: the share alone
+-- is already under it, so an order that lets the minimum win last hands the
+-- shopping panel 156px it does not have and puts the results table under it.
+for _, w in ipairs({ MIN_W, 900, 800, 750, 700 }) do
+    local l, m = ui.CraftWidthsAt(w)
     H.check("the middle panel keeps its floor at " .. w,
             m >= ui.CraftMidFloor(),
             "middle is " .. m .. ", floor is " .. ui.CraftMidFloor())
-    -- ...and the outer two survive being scaled back. Giving the budget to one
-    -- of them alone drives the other NEGATIVE at a width this narrow -- which
-    -- is a panel anchored inside-out, not a narrow panel.
-    H.check("...and both outer panels are still positive at " .. w,
-            l > 0 and r > 0,
-            "left " .. l .. ", right " .. r
-                .. " -- one panel absorbed the whole budget")
+    -- ...and the shopping panel survives being cut back to what is left. It
+    -- goes BELOW its own minimum here, which is the documented order -- but
+    -- never to zero or past it, which is a panel anchored inside-out.
+    H.check("...and the shopping panel is still positive at " .. w,
+            l > 0, "left is " .. l .. " -- the floor took the whole width")
 end
 
-H.check("all three panels fit at the smallest allowed window (again, via the shares)",
+H.check("both panels fit at the smallest allowed window (again, via the share)",
         ui.CraftPanelsFitAt(MIN_W),
         "middle panel gets " .. ui.CraftMidWidthAt(MIN_W)
             .. "px, columns need " .. CRAFT_COLS_END)
 
--- EVERY TERM ACCOUNTED FOR. Three panels, two gutters and two margins have to
--- add up to exactly the space there is -- no more, or they overlap; no less,
--- and there is a strip of nothing down the tab. Checking only "does the middle
--- one fit" cannot see a dropped gutter: losing one makes the middle WIDER, so
--- the fit passes and the panels quietly overlap.
+-- EVERY TERM ACCOUNTED FOR. Two panels, one gutter and two margins have to add
+-- up to exactly the space there is -- no more, or they overlap; no less, and
+-- there is a strip of nothing down the tab. Checking only "does the middle one
+-- fit" cannot see a dropped gutter: losing it makes the middle WIDER, so the
+-- fit passes and the panels quietly overlap.
 for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
-    local l, m, r = ui.CraftWidthsAt(w)
+    local l, m = ui.CraftWidthsAt(w)
     H.eq("the panels and gutters account for the whole width at " .. w,
-         CRAFTL.edge * 2 + l + CRAFTL.gap + m + CRAFTL.gap + r,
+         CRAFTL.edge * 2 + l + CRAFTL.gap + m,
          ui.PanelWidthAt(w))
 end
 
@@ -1224,22 +1237,22 @@ H.check("the middle table's scrollbar lane clears the bar AND the border",
         "lane is " .. CRAFTL.bar_lane .. ", the bar and border need "
             .. (SELLL.bar_x + SELLL.bar_w + field("SELLL", "well_overhang")))
 
--- ---- the two OUTER panels' rows -----------------------------------------
+-- ---- the SHOPPING panel's rows ------------------------------------------
 
 do
     local fn = assert(loadstring(extract("function ui.CraftSideRowW("),
                                  "CraftSideRowW"))
     fn()
-    fn = assert(loadstring(extract("function ui.CraftMadeRowW("),
-                           "CraftMadeRowW"))
+    fn = assert(loadstring(extract("function ui.CraftBtnW("),
+                           "CraftBtnW"))
     fn()
     fn = assert(loadstring(extract("function ui.CraftLabelW("),
                            "CraftLabelW"))
     fn()
 end
--- The outer panels pay their own row pads and NOT the scrollbar lane: their
--- bar is hidden and the wheel scrolls them. Paying it would cost a seventh of
--- a panel whose entire problem is width.
+-- The shopping panel pays its own row pads and NOT the scrollbar lane: its bar
+-- is hidden and the wheel scrolls it. Paying it would cost 30px out of a panel
+-- whose entire problem is width.
 -- Both bleeds, read here because this is the first section that needs them:
 -- how far a BOX border reaches inward, and how far a BUTTON's plate is drawn
 -- outward past the button.
@@ -1247,13 +1260,38 @@ WELL_BLEED = constant("WELL_BLEED")
 BTN_EDGE   = constant("BTN_EDGE")
 CRAFTL.row_l = field("CRAFTL", "row_l")
 CRAFTL.row_r = field("CRAFTL", "row_r")
+CRAFTL.btn_gap = field("CRAFTL", "btn_gap")
 for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
-    local l, _, r = ui.CraftWidthsAt(w)
-    H.eq("a recipe row at " .. w .. " is the left panel less its two pads",
-         ui.CraftSideRowW(w), l - CRAFTL.row_l - CRAFTL.row_r)
-    H.eq("a made row at " .. w .. " is the right panel less its two pads",
-         ui.CraftMadeRowW(w), r - CRAFTL.row_l - CRAFTL.row_r)
+    local l = ui.CraftWidthsAt(w)
+    local room = l - CRAFTL.row_l - CRAFTL.row_r
+    H.eq("a shopping row at " .. w .. " is the panel less its two pads",
+         ui.CraftSideRowW(w), room)
+
+    -- N THINGS AND N-1 GUTTERS MUST NOT EXCEED THE ROW. This is the check
+    -- ui.CraftBtnW exists for: the action row's four buttons draw a plate
+    -- BTN_EDGE outside themselves, so a division that is a few pixels
+    -- generous is a button running under the box border.
+    for _, n in ipairs({ 2, 3, 4 }) do
+        local each = ui.CraftBtnW(w, n)
+        H.check("at " .. w .. ", " .. n .. " across fit the row",
+                each * n + CRAFTL.btn_gap * (n - 1) <= room,
+                n .. " x " .. each .. " plus gutters is "
+                    .. (each * n + CRAFTL.btn_gap * (n - 1))
+                    .. ", the row is " .. room)
+        H.check("...and are not needlessly narrow",
+                (each + 1) * n + CRAFTL.btn_gap * (n - 1) > room,
+                "one more pixel each would still have fitted")
+    end
 end
+
+-- ...and it never returns a width a Button would ignore. A zero or negative
+-- SetWidth makes a Button take its texture's size instead, which is how a
+-- button ends up wider than the panel it is in.
+H.check("a division too fine to fit still returns a positive width",
+        ui.CraftBtnW(MIN_W, 400) >= 1,
+        "it returned " .. ui.CraftBtnW(MIN_W, 400))
+H.eq("...and n = 0 is treated as one", ui.CraftBtnW(MIN_W, 0),
+     ui.CraftBtnW(MIN_W, 1))
 
 -- THOSE PADS ARE NOT ROWPAD, and that is the whole finding. ROWPAD.l is 2 --
 -- INSIDE the 6px a backdrop border reaches inward -- so a recipe name and a
@@ -1276,36 +1314,50 @@ do
             "the outer panels are being charged for a bar they do not draw")
 end
 
--- Every name on those rows has to leave room for what the row ends with, and
--- the two panels end differently: a SHOPPING line ends with a source mark and
--- a have/need, a RECIPE line ends with a made/want and the +/- pair. Getting
+-- FOUR KINDS OF ROW SHARE THE SHOPPING PANEL, and every one of them ends
+-- differently: a SHOPPING line ends with a source mark and a have/need, a
+-- RECIPE line with a made/want and the +/- pair, a BREAKDOWN line starts one
+-- indent further in, and a SECTION header is the widest of the lot. Getting
 -- one wrong does not throw -- it wraps a name onto the row below it.
 -- Measured at the SMALLEST window, which is where they are tightest -- the
--- panels grow with it now, so anything that fits here fits everywhere.
-CRAFTL.src_w = field("CRAFTL", "src_w")
-local shopName   = ui.CraftLabelW(ui.CraftSideRowW(MIN_W), 0,
+-- panel grows with it, so anything that fits here fits everywhere.
+CRAFTL.src_w     = field("CRAFTL", "src_w")
+CRAFTL.ex_w      = field("CRAFTL", "ex_w")
+CRAFTL.sub_indent = field("CRAFTL", "sub_indent")
+local sideRow    = ui.CraftSideRowW(MIN_W)
+local shopName   = ui.CraftLabelW(sideRow, CRAFTL.ex_w,
                                   CRAFTL.src_w + CRAFTL.count_w + 6)
-local recipeName = ui.CraftLabelW(ui.CraftMadeRowW(MIN_W), 0,
+local recipeName = ui.CraftLabelW(sideRow, CRAFTL.ex_w,
                                   CRAFTL.count_w + CRAFTL.step_w + 8)
+local subName    = ui.CraftLabelW(sideRow, CRAFTL.ex_w + CRAFTL.sub_indent,
+                                  CRAFTL.count_w + 6)
 
 H.check("a shopping name has room left over", shopName > 0,
         "shopping names get " .. shopName .. "px")
 H.check("a recipe name has room left over", recipeName > 0,
         "recipe names get " .. recipeName .. "px")
+H.check("a breakdown name has room left over", subName > 0,
+        "breakdown names get " .. subName .. "px")
 
--- THE RECIPE ROW IS THE TIGHTER OF THE TWO -- it ends with a count AND the
--- +/- pair, where a shopping line ends with a one-letter mark and a count.
--- Asserted because it is the one that decides whether these panels can be
--- trimmed further: trim them and this is what goes first.
-H.check("a recipe row is the tighter of the two", recipeName < shopName,
+-- THE RECIPE ROW IS THE TIGHTEST OF THE THREE -- it ends with a count AND the
+-- +/- pair, where a shopping line ends with a one-letter mark and a count and
+-- a breakdown line with a count alone. Asserted because it is the one that
+-- decides whether this panel can be trimmed further: trim it and this goes
+-- first.
+H.check("a recipe row is the tightest of the three",
+        recipeName < shopName and recipeName < subName,
         "the +/- pair is not the widest thing a row ends with")
 
--- ...and both are legible at the SMALLEST window, which is where they are
--- worst. The panels are shares now, so anything that fits here fits wider.
+-- ...and all three are legible at the SMALLEST window, which is where they are
+-- worst. THIS IS THE REDESIGN'S WHOLE CLAIM: the third panel was deleted so
+-- these numbers could stop being about ten characters. 60px was the old floor
+-- and it was exactly what a recipe name got.
 H.check("a shopping name is not cut to nothing at the minimum",
-        shopName >= 60, "shopping names get only " .. shopName .. "px")
+        shopName >= 200, "shopping names get only " .. shopName .. "px")
 H.check("...nor is a recipe name",
-        recipeName >= 60, "recipe names get only " .. recipeName .. "px")
+        recipeName >= 200, "recipe names get only " .. recipeName .. "px")
+H.check("...nor is a breakdown name",
+        subName >= 200, "breakdown names get only " .. subName .. "px")
 
 -- ...and the tail really is subtracted. Dropping it makes the answer BIGGER,
 -- which is the direction that reads as working right up until a name wraps.
@@ -1318,8 +1370,8 @@ H.eq("a tail wider than the row floors at one, never zero or below",
 
 -- WHY THIS EXISTS. A box is drawn WELL_BLEED outside the list it holds, and
 -- its backdrop border then straddles that edge by ANOTHER WELL_BLEED -- so a
--- heading above a box has to clear 12px, not 6. All three panels were built
--- with 6 and all three drew their heading through their own top border.
+-- heading above a box has to clear 12px, not 6. Every panel was built with 6
+-- and every one drew its heading through its own top border.
 --
 -- Nothing throws when this is wrong. The text simply has the border across
 -- it, which is exactly the class of bug this suite exists for.
@@ -1338,20 +1390,15 @@ H.eq("the box edge is one bleed outside its list",
 H.eq("...and what is drawn outside it must clear two",
      ui.CraftBoxClear(100), 100 - WELL_BLEED * 2)
 
--- ONE TOP AND ONE BOTTOM for all three boxes. Three panels starting at three
--- heights read as three unrelated windows that happen to be adjacent, which is
--- what the first pass looked like on a real client. The middle panel's LIST
--- starts lower than the other two -- it has a column-header band and a rule
--- inside its box -- but the BOX edge, which is the line you actually see, is
--- the same for all three.
+-- ONE TOP AND ONE BOTTOM for both boxes. Two panels starting at two heights
+-- read as two unrelated windows that happen to be adjacent, which is what the
+-- first pass looked like on a real client. The middle panel's LIST starts
+-- lower -- it has a column-header band and a rule inside its box -- but the
+-- BOX edge, which is the line you actually see, is the same for both.
 local craftBoxTop = ui.CraftBoxEdge(CRAFTL.side_top)
-H.eq("the RIGHT panel's box starts on the same line as the left's",
-     ui.CraftBoxEdge(CRAFTL.made_top), craftBoxTop)
-H.eq("...and so does the MIDDLE panel's, once its header band is counted",
+H.eq("the MIDDLE panel's box starts on the same line as the shopping panel's, once its header band is counted",
      ui.CraftBoxEdge(CRAFTL.mid_top - CRAFT_HDR_BAND), craftBoxTop)
-H.eq("the RIGHT panel's box ends on the same line as the left's",
-     CRAFTL.made_bot, CRAFTL.side_bot)
-H.eq("...and so does the MIDDLE panel's", CRAFTL.mid_bot, CRAFTL.side_bot)
+H.eq("...and ends on the same line too", CRAFTL.mid_bot, CRAFTL.side_bot)
 
 -- Everything drawn ABOVE the boxes has the same top border to clear, and the
 -- band is shared: the left panel's two buttons and the middle's search strip
@@ -1393,26 +1440,19 @@ do
     local f = assert(io.open(SRC, "r"), "run this from the repo root")
     local src = f:read("*a")
     f:close()
-    H.check("no recipe row is given a width",
+    H.check("no shopping row is given a width",
             not string.find(src, "row:SetWidth(ui.CraftSideRowW", 1, true),
             "a row sized by a number can hold a stale one")
-    H.check("no made-this-session row is given a width",
-            not string.find(src, "row:SetWidth(ui.CraftMadeRowW", 1, true),
-            "a row sized by a number can hold a stale one")
-    -- Both go through ui.PlaceRow WITH BOTH PADS, which anchors left AND
+    -- They go through ui.PlaceRow WITH BOTH PADS, which anchors left AND
     -- right to the scroll frame. Passing only padL would leave the rows
     -- unstretched and the clipping back.
-    H.check("...the recipe rows are placed on their scroll frame, both edges",
+    H.check("...the shopping rows are placed on their scroll frame, both edges",
             string.find(src,
                 "ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,", 1, true) ~= nil
             and string.find(src,
                 "CSIDE_ROW_H,\n                CRAFTL.row_l, CRAFTL.row_r)",
                 1, true) ~= nil,
-            "the recipe rows are not placed with both pads")
-    H.check("...and so are the made-this-session rows",
-            string.find(src,
-                "ui.PlaceRow(row, madeScroll, i, MADE_ROW_H,", 1, true) ~= nil,
-            "the made rows are not placed on their scroll frame")
+            "the shopping rows are not placed with both pads")
 
     -- FLAT, NOT CHAINED. ui.PlaceRow computes an offset from the scroll frame
     -- so every row is ONE hop from its parent. Chaining row i to row i-1 makes
@@ -1426,22 +1466,18 @@ do
             "rows are placed relative to something other than their scroll frame")
 end
 
--- ONE ROW HEIGHT. Three lists side by side at three row heights read as three
+-- ONE ROW HEIGHT. Two lists side by side at two row heights read as two
 -- unrelated tables; nothing lines up across the tab.
-H.eq("the recipe rows are the middle table's height",
+H.eq("the shopping rows are the middle table's height",
      constant("CSIDE_ROW_H"), CRAFT_ROW_H)
-H.eq("...and so are the made-this-session rows",
-     constant("MADE_ROW_H"), CRAFT_ROW_H)
 
 -- ...and every panel still fills its box at the smallest allowed window. Ten
--- rows is what the middle table had as a full-width pane; aligning the three
+-- rows is what the middle table had as a full-width pane; aligning the two
 -- panels is a layout change, not a smaller table.
 H.eq("the middle table still holds ten rows at the smallest window",
      ui.ListRowsAt(MIN_H, LISTBOX.craft, CRAFT_ROW_H, 34), 10)
-H.eq("...the recipe list holds ten too",
+H.eq("...and the shopping tree holds ten too",
      ui.ListRowsAt(MIN_H, LISTBOX.craftSide, CRAFT_ROW_H, 38), 10)
-H.eq("...and so does the made-this-session list",
-     ui.ListRowsAt(MIN_H, LISTBOX.craftMade, CRAFT_ROW_H, 34), 10)
 
 -- ---------------------------------------------------------------------------
 H.section("rows are held clear of the box border they sit inside")

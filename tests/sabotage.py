@@ -146,6 +146,100 @@ SABOTAGES = [
     # `sortbykey-nil-guards-direction-aware` below. One bug, one sabotage.
 
     # Treating a missing unit price as zero -- the other tempting shortcut.
+    # ---- the Crafting tab's shopping tree (v1.52.21) ---------------------
+    #
+    # Two sections of one flat list. Every entry below is a way for that
+    # flattening to be wrong that nothing outside this suite would notice.
+
+    # The BREAKDOWN under an expanded recipe multiplies by CRAFTS, not by items
+    # wanted. Wanting five of something made in twos is three crafts; getting
+    # this wrong makes the breakdown and the aggregate disagree about the same
+    # recipe, side by side, on screen.
+    ("craft-breakdown-skips-the-ceil", "ui/frame.lua",
+     "                if opts.craftsFor then crafts = opts.craftsFor(m.want, p.made) end",
+     "                if opts.craftsFor then crafts = m.want end",
+     "crafttree"),
+
+    # `open` is keyed by NAME. Removing a recipe shifts every index after it,
+    # and a set keyed by index would leave whichever recipe slid into the hole
+    # expanded instead.
+    ("craft-open-keyed-by-index", "ui/frame.lua",
+     "            local isOpen = (m.name and open[m.name]) and true or nil",
+     "            local isOpen = (m.index and open[m.index]) and true or nil",
+     "crafttree"),
+
+    # `kind` is stamped on the shopping rows WHETHER OR NOT the section is
+    # collapsed: ui.UpdateCraftNeed looks the reagent up by it, and a lookup
+    # that works only while a section happens to be unfolded is worse than one
+    # that never works.
+    ("craft-kind-only-when-open", "ui/frame.lua",
+     '        r.kind = "reagent"',
+     '        r.kindLater = "reagent"',
+     "crafttree"),
+
+    # ...and the shopping rows are LISTED, never copied. The paint reads
+    # `source`, `unit`, `from` and `craftable` straight off the engine's row.
+    ("craft-copies-shopping-rows", "ui/frame.lua",
+     "            table.insert(rows, shop[k])",
+     "            table.insert(rows, { name = shop[k].name, kind = shop[k].kind })",
+     "crafttree"),
+
+    # Something you are going to CRAFT is not shopping -- its own reagents are
+    # already on the list, so counting it too says buy the bolt AND the cloth.
+    ("craft-short-counts-craftables", "ui/frame.lua",
+     "        if (r.short or 0) > 0 and not r.craftable then short = short + 1 end",
+     "        if (r.short or 0) > 0 then short = short + 1 end",
+     "crafttree"),
+
+    # A collapsed section is stored as nil, not false: the closed state is
+    # nearly all of them, and `false` would put a key in the saved variables
+    # for every one.
+    ("craft-toggle-stores-false", "ui/frame.lua",
+     "        st[e.key] = (not st[e.key]) or nil",
+     "        st[e.key] = not st[e.key]",
+     "crafttree"),
+
+    # Finding the aggregated line for a reagent is a lookup BY NAME, not "the
+    # first row" -- which would shop for whatever happens to sort first.
+    ("craft-shoppingrowfor-takes-the-first", "ui/frame.lua",
+     "        if rows[i].name == name then return rows[i] end",
+     "        if rows[i] then return rows[i] end",
+     "crafttree"),
+
+    # ---- the Crafting tab's two-panel geometry (v1.52.21) -----------------
+
+    # N things across a row need N-1 gutters between them. Forget them and four
+    # buttons overflow their panel -- and a button's plate draws BTN_EDGE
+    # outside itself, so it lands under the box border.
+    ("craft-btnw-forgets-the-gutters", "ui/frame.lua",
+     """    local room = left - CRAFTL.row_l - CRAFTL.row_r
+        - (CRAFTL.btn_gap * (n - 1))""",
+     """    local room = left - CRAFTL.row_l - CRAFTL.row_r""",
+     "geometry"),
+
+    # Two panels have ONE gutter between them. Dropping it makes the middle
+    # panel WIDER, so every fit check still passes and the panels overlap.
+    ("craft-widths-forget-the-gutter", "ui/frame.lua",
+     """    local avail = ui.PanelWidthAt(w or 0)
+        - (CRAFTL.edge * 2) - CRAFTL.gap""",
+     """    local avail = ui.PanelWidthAt(w or 0)
+        - (CRAFTL.edge * 2)""",
+     "geometry"),
+
+    # THE MINIMUM COMES FIRST AND THE FLOOR COMES LAST. Applying the shopping
+    # panel's minimum after the budget lets it push straight past what the
+    # results table has to have, which is the table running under the panel
+    # beside it.
+    ("craft-widths-minimum-outranks-the-floor", "ui/frame.lua",
+     """    if left < CRAFTL.left_min then left = CRAFTL.left_min end
+
+    local budget = avail - ui.CraftMidFloor()
+    if left > budget then left = budget end""",
+     """    local budget = avail - ui.CraftMidFloor()
+    if left > budget then left = budget end
+    if left < CRAFTL.left_min then left = CRAFTL.left_min end""",
+     "geometry"),
+
     ("sort-missing-unit-as-zero", "ui/frame.lua",
      """        return r.unit
     end""",
@@ -2237,54 +2331,25 @@ end
      "    table_bot   = 60,",
      "geometry"),
 
-    # ---- the Crafting tab's three panels ----------------------------------
-    # The outer panels given a share big enough to starve the middle table.
+    # ---- the Crafting tab's two panels ------------------------------------
+    # The shopping panel given a share big enough to starve the middle table.
     # Before v1.52.10 this was a fixed width; the guarantee is the same.
     ("craft-panels-do-not-fit", "ui/frame.lua",
-     "    left_frac  = 0.19,   -- the shopping list",
-     "    left_frac  = 0.40,   -- the shopping list",
+     "    left_frac  = 0.385,  -- the shopping list",
+     "    left_frac  = 0.70,   -- the shopping list",
      "geometry"),
 
-    # THE ORDER OF THE TWO CLAMPS. Applying the outer panels' minimums AFTER
-    # the budget lets them push straight past it -- at a 900px window they hold
-    # 182 and 152 and leave the middle table 86px short of its own columns.
-    # The floor outranks the minimums; this swaps them back.
-    ("craft-minimums-outrank-the-floor", "ui/frame.lua",
-     """    if left  < CRAFTL.left_min  then left  = CRAFTL.left_min  end
-    if right < CRAFTL.right_min then right = CRAFTL.right_min end
+    # THE ORDER OF THE TWO CLAMPS lives in craft-widths-minimum-outranks-the-
+    # floor, up with the rest of the two-panel geometry. The pair that scaled
+    # two outer panels TOGETHER went with the third panel in v1.52.21 -- there
+    # is only one outer panel to scale now.
 
-    -- The most the outer two may take between them. Scaled TOGETHER, never one
-    -- alone -- shaving one is what makes a window look lopsided as it narrows.
-    local budget = avail - ui.CraftMidFloor()
-    if left + right > budget then
-        local total = left + right
-        left  = math.floor(budget * left / total)
-        right = budget - left
-    end""",
-     """    local budget = avail - ui.CraftMidFloor()
-    if left + right > budget then
-        local total = left + right
-        left  = math.floor(budget * left / total)
-        right = budget - left
-    end
-    if left  < CRAFTL.left_min  then left  = CRAFTL.left_min  end
-    if right < CRAFTL.right_min then right = CRAFTL.right_min end""",
-     "geometry"),
-
-    # Only ONE of the two scaled back, so the tab goes lopsided as it narrows.
-    ("craft-scales-one-panel-alone", "ui/frame.lua",
-     """        local total = left + right
-        left  = math.floor(budget * left / total)
-        right = budget - left""",
-     "        right = budget - left",
-     "geometry"),
-
-    # The outer panels back to FIXED, which is what this release changed: the
-    # middle takes every surplus pixel and the columns either side stay at the
-    # width they need at the minimum however wide the window gets.
+    # The shopping panel back to FIXED, which is what v1.52.10 changed: the
+    # middle would take every surplus pixel and the column beside it stay at
+    # the width it needs at the minimum however wide the window gets.
     ("craft-outer-panels-do-not-grow", "ui/frame.lua",
-     "    local left  = math.floor(avail * CRAFTL.left_frac)",
-     "    local left  = CRAFTL.left_min",
+     "    local left = math.floor(avail * CRAFTL.left_frac)",
+     "    local left = CRAFTL.left_min",
      "geometry"),
 
     # The middle panel's floor forgetting the scrollbar lane, so the shares are
@@ -2388,12 +2453,13 @@ end
      "    foot_y = 22, foot_h = 12,",
      "geometry"),
 
-    # The three boxes back to three different tops -- the exact thing the
-    # aligned layout fixed, and the thing a screenshot showed before the
-    # suite could.
+    # The two boxes back to two different tops -- the exact thing the aligned
+    # layout fixed, and the thing a screenshot showed before the suite could.
+    # The middle box reaches CRAFT_HDR_BAND further down INSIDE itself for its
+    # column headers, so its band is the outlier by exactly that and no more.
     ("craft-boxes-not-aligned-at-the-top", "ui/frame.lua",
-     "    made_top = 70, made_bot = 30,",
-     "    made_top = 40, made_bot = 30,",
+     "    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "    mid_top  = 70, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
      "geometry"),
 
     # ...and to three different bottoms.
@@ -2409,22 +2475,17 @@ end
      "    mid_top  = 70, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
      "geometry"),
 
-    # One panel's rows back to their own height, so nothing lines up across
-    # the tab.
+    # ONE ROW HEIGHT across the tab. Two lists side by side at two heights
+    # read as two unrelated tables; nothing lines up.
     ("craft-side-rows-own-height", "ui/frame.lua",
      "local CSIDE_ROW_H  = CRAFT_ROW_H",
      "local CSIDE_ROW_H  = 20",
      "geometry"),
 
-    ("craft-made-rows-own-height", "ui/frame.lua",
-     "local MADE_ROW_H   = CRAFT_ROW_H",
-     "local MADE_ROW_H   = 18",
-     "geometry"),
-
     # The left panel's buttons run down through the top of its own box.
     ("craft-buttons-through-the-box", "ui/frame.lua",
-     "    btn_y   = 38, btn_h   = 18,    -- Price recipe | Remove recipe",
-     "    btn_y   = 56, btn_h   = 18,    -- Price recipe | Remove recipe",
+     "    btn_y   = 38, btn_h   = 18,    -- Price | Shop all | Remove | Reset",
+     "    btn_y   = 56, btn_h   = 18,    -- Price | Shop all | Remove | Reset",
      "geometry"),
 
     # A name measured against the whole row, ignoring what the row ENDS with --
@@ -2448,10 +2509,12 @@ end
      "local CRAFT_COLS_END = 390 + 40",
      "geometry"),
 
-    # Only one gutter counted, so the panels overlap by the width of the other.
-    ("craft-mid-width-misses-a-gutter", "ui/frame.lua",
-     "        - (CRAFTL.edge * 2) - (CRAFTL.gap * 2)",
+    # The gutter counted TWICE, from when there were two of them, so the
+    # panels no longer account for the whole width and a strip of nothing runs
+    # down the tab. (Dropping it entirely is craft-widths-forget-the-gutter.)
+    ("craft-mid-width-counts-a-gutter-twice", "ui/frame.lua",
      "        - (CRAFTL.edge * 2) - CRAFTL.gap",
+     "        - (CRAFTL.edge * 2) - (CRAFTL.gap * 2)",
      "geometry"),
 
     # ---- crafting: how many to make ---------------------------------------
@@ -2590,11 +2653,12 @@ end
      "",
      "craft.plan"),
 
-    # The two outer panels back to unequal shares, from when the left held a
-    # whole recipe tree. The recipe rows are the tighter of the two now.
-    ("craft-shares-unbalanced", "ui/frame.lua",
-     "    right_frac = 0.19,   -- tracked recipes",
-     "    right_frac = 0.13,   -- tracked recipes",
+    # The shopping panel back to something like its old 174px, which is the
+    # width that cut a recipe name to about ten characters and the whole reason
+    # the third panel was deleted.
+    ("craft-shopping-panel-back-to-a-sliver", "ui/frame.lua",
+     "    left_frac  = 0.385,  -- the shopping list",
+     "    left_frac  = 0.19,   -- the shopping list",
      "geometry"),
 
     # Shop all searching things you already have enough of -- every one a
@@ -3174,6 +3238,7 @@ SUITES = {
     "shiftclick": "tests/units/shiftclick_test.lua",
     "rowbudget": "tests/units/rowbudget_test.lua",
     "craftqueue": "tests/units/craftqueue_test.lua",
+    "crafttree": "tests/units/crafttree_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
