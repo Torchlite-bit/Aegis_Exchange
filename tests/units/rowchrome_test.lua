@@ -44,10 +44,39 @@ local function extract(signature)
 end
 
 ui = {}
+-- ui.InputText reads the palette, so the palette has to exist here. Only the
+-- two entries this file asserts about are needed; palette.py is what checks
+-- every colour the UI reads resolves.
+C = {}
+
+-- ui.InputText registers each box here. In ui/frame.lua this is a file-scope
+-- line immediately after the function; extracting the function does not bring
+-- it, so the suite declares it before first use.
+ui.inputBoxes = {}
 do
-    local fn, err = loadstring(extract("function ui.AddRowChrome("),
-                               "AddRowChrome")
-    if not fn then error("will not compile: " .. tostring(err)) end
+    local src = Source()
+    for _, key in ipairs({ "input", "text" }) do
+        local _, _, body = string.find(src,
+            "\n    " .. key .. "%s*=%s*{([^}]*)}")
+        assert(body, "no C." .. key .. " in the palette")
+        local t = {}
+        for num in string.gfind(body, "([%d%.%-]+)") do
+            table.insert(t, tonumber(num))
+        end
+        C[key] = t
+    end
+end
+for _, sig in ipairs({
+    "function ui.AddRowChrome(",
+    "function ui.InputText(",
+    "function ui.FlattenEditBox(",
+    "function ui.SetButtonKind(",
+    "function ui.MarkChosen(",
+    "function ui.PaintSortHeaders(",
+    "function ui.ReapplyInputText(",
+}) do
+    local fn, err = loadstring(extract(sig), sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
     fn()
 end
 
@@ -225,5 +254,331 @@ H.eq("exactly one selection tint colour",
 local calls = occurrences("ui%.AddRowChrome%(")
 H.check("every results table wears the chrome", calls >= 6,
         "found " .. calls .. " mentions (want 1 definition + 5 call sites)")
+
+-- ---------------------------------------------------------------------------
+H.section("what you type is a chosen colour, not an inherited one")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS IS TESTABLE. "Is it legible" needs a client and a person. What does
+-- not is the rule underneath: an edit box sits on a near-black backdrop, so its
+-- text must be BRIGHTER than the body copy around it -- and it was dimmer,
+-- because it was never set at all and InputBoxTemplate's chat font came
+-- through. That is a comparison, and a comparison can be asserted.
+
+local function StubBox(noColor)
+    -- `order` records the calls in sequence, because the ORDER is the fix:
+    -- SetFont has to come first.
+    local b = { colored = nil, backdrop = nil, font = nil, order = {} }
+    b.GetRegions = function() return end
+    b.SetBackdrop = function(s, t) s.backdrop = t end
+    b.SetBackdropColor = function() end
+    b.SetBackdropBorderColor = function() end
+    b.GetFont = function() return "Fonts\\ARIALN.TTF", 12, "" end
+    b.SetFont = function(s, path, size, flags)
+        s.font = { path, size, flags }
+        table.insert(s.order, "font")
+    end
+    if not noColor then
+        b.SetTextColor = function(s, r, g, bl)
+            s.colored = { r, g, bl }
+            table.insert(s.order, "colour")
+        end
+    end
+    return b
+end
+
+local box = ui.InputText(StubBox())
+H.check("an edit box is given a colour", box.colored ~= nil,
+        "nothing set it, so it inherits the chat font's")
+H.listEq("...and it is the palette's input colour", box.colored, C.input)
+
+-- THE FONT OBJECT IS DETACHED FIRST, and this is the part that was missing
+-- through three attempts at this bug. InputBoxTemplate backs its box with a
+-- font OBJECT (ChatFontNormal), and a FontInstance backed by an object takes
+-- that object's colour -- SetTextColor on it does not reliably survive the
+-- next redraw. SetFont with the box's OWN current font gives it a private
+-- instance, after which the colour sticks.
+H.check("the box is given its own font", box.font ~= nil,
+        "a box backed by a font OBJECT loses SetTextColor on the next redraw")
+H.eq("...which is the font it already had, not a new one",
+     box.font[1], "Fonts\\ARIALN.TTF")
+H.eq("...at the size it already had", box.font[2], 12)
+H.listEq("the font comes BEFORE the colour", box.order,
+         { "font", "colour" })
+
+-- THE ONE THAT MATTERS. Body copy is read in bulk and can sit back; a figure
+-- you are entering is a character or two on near-black and has to come
+-- forward. Equal is not good enough -- equal is what "just use C.text" gives,
+-- and it is the shade that was reported as hard to read.
+local brighter = true
+local strictly = false
+for i = 1, 3 do
+    if C.input[i] < C.text[i] then brighter = false end
+    if C.input[i] > C.text[i] then strictly = true end
+end
+H.check("input text is no darker than body text anywhere", brighter,
+        "a channel of C.input is below C.text")
+H.check("...and brighter in at least one channel", strictly,
+        "C.input is the same shade as C.text")
+
+-- THE FLATTENED BOXES AND THE STOCK-ART ONES READ THE SAME. Three of this
+-- window's edit boxes keep InputBoxTemplate's art and never go through
+-- ui.FlattenEditBox -- and one of them sits on the same ROW as three that do.
+-- That row is what this was reported on.
+local flat = ui.FlattenEditBox(StubBox())
+H.check("a flattened box is coloured too", flat.colored ~= nil,
+        "ui.FlattenEditBox does not go through ui.InputText")
+H.listEq("...to exactly the same colour", flat.colored, C.input)
+H.check("...and still gets its backdrop", flat.backdrop ~= nil,
+        "flattening stopped doing its own job")
+
+-- Defensive, not permissive: this runs over widgets the client builds, and a
+-- missing method must be nothing rather than an error.
+H.survives("nil is not a crash", function() ui.InputText(nil) end)
+H.survives("a widget with no SetTextColor is not a crash", function()
+    ui.InputText(StubBox(true))
+end)
+-- A widget with no font of its own to read back must still get the colour.
+H.survives("a widget with no GetFont is not a crash", function()
+    local b = StubBox()
+    b.GetFont = nil
+    ui.InputText(b)
+end)
+do
+    local b = StubBox()
+    b.GetFont = function() return nil end
+    ui.InputText(b)
+    H.listEq("...and is still coloured", b.colored, C.input)
+    H.eq("...without being given a nil font", b.font, nil)
+end
+
+-- ---- ...AND IT CAN BE PUT BACK -----------------------------------------
+
+-- The colour is right unskinned and wrong under pfUI, which means pfUI touches
+-- the box AFTER we do -- after ui.InputText at build, and after skin.lua's own
+-- immediate re-apply. We do not control when, so every box is registered and
+-- the lot are re-coloured a frame after any skin pass.
+ui.inputBoxes = {}       -- a clean registry for this section
+
+local a, b = StubBox(), StubBox()
+ui.InputText(a)
+ui.InputText(b)
+H.eq("a coloured box is registered", table.getn(ui.inputBoxes), 2)
+
+-- DEDUPED ON THE BOX. ui.RefreshSettings colours the settings boxes on every
+-- repaint, and a list that grew by four each time is a leak with a very slow
+-- fuse -- the kind that is fine for an hour and not for an evening.
+ui.InputText(a)
+ui.InputText(a)
+H.eq("...once, however many times it is coloured",
+     table.getn(ui.inputBoxes), 2)
+
+-- Something else repaints them in its own colour; we put ours back.
+a.colored, b.colored = { 0, 0, 0 }, { 0, 0, 0 }
+ui.ReapplyInputText()
+H.listEq("re-applying restores the first", a.colored, C.input)
+H.listEq("...and every other one", b.colored, C.input)
+
+H.survives("an empty registry is not a crash", function()
+    ui.inputBoxes = {}
+    ui.ReapplyInputText()
+end)
+
+-- ...AND THE WALK TERMINATES EVEN IF THE DEDUPE FAILS. Re-colouring a box
+-- REGISTERS it, so this iterates the list it appends to: re-reading the count
+-- each time round is a loop whose end moves away as fast as the cursor reaches
+-- it. The count is taken before the walk. A sabotage that removed the dedupe
+-- hung the test runner outright, which is what a player would get.
+do
+    ui.inputBoxes = {}
+    local c = StubBox()
+    c.aegisInputBox = nil
+    ui.InputText(c)
+    -- Forge the failure: clear the flag so re-colouring registers it again.
+    ui.inputBoxes[1].aegisInputBox = nil
+    ui.ReapplyInputText()
+    H.check("a failed dedupe grows the list but does not hang",
+            table.getn(ui.inputBoxes) < 10,
+            "it registered " .. table.getn(ui.inputBoxes) .. " times")
+end
+
+-- ---- ...AND IT SURVIVES THE SKIN ----------------------------------------
+
+-- ui.InputText runs when a box is BUILT. A.skin.Apply() runs LAST, after every
+-- widget exists, so anything pfUI does to an edit box happens afterwards and
+-- wins -- which is why the flat-undercut amount read dull under pfUI and only
+-- under pfUI. skin.lua re-asserts the colour, exactly as its button branch
+-- already re-asserts ui.SetButtonKind.
+--
+-- Anchored on the CALL, not the name: a check that searches for "InputText"
+-- matches the comment above the call explaining what InputText is for, and
+-- would pass with the call deleted. That has happened three times here.
+do
+    local f = assert(io.open("ui/skin.lua", "r"), "run this from the repo root")
+    local sk = f:read("*a")
+    f:close()
+    local from = string.find(sk, 'elseif otype == "EditBox" then', 1, true)
+    assert(from, "no EditBox branch in ui/skin.lua")
+    local to = string.find(sk, "\n    elseif ", from + 10, true)
+        or string.find(sk, "\n    end", from, true)
+    local branch = string.sub(sk, from, to)
+    H.check("the skin puts our input colour back on an edit box",
+            string.find(branch, "A.ui.InputText(f)", 1, true) ~= nil,
+            "pfUI restyles the box after we colour it, so the colour is lost")
+    -- ...and arms the deferred pass, because doing it inline is provably not
+    -- enough: that call has been there since v1.52.32 and the box was still
+    -- dull under pfUI.
+    H.check("...and arms the one a frame later",
+            string.find(branch, "A.ui.DeferInputText()", 1, true) ~= nil,
+            "pfUI touches the box after this branch runs, so inline loses")
+end
+
+-- ---- EVERY edit box goes through it -------------------------------------
+
+-- One definition, one call inside ui.FlattenEditBox, and one at each of the
+-- three boxes that keep the stock art. Miss one and it is dim next to the
+-- others -- which is the whole bug, not a tidy-up.
+local inputs = occurrences("ui%.InputText%(")
+H.check("every edit box in the window is coloured", inputs >= 5,
+        "found " .. inputs .. " mentions (want 1 definition, 1 in "
+            .. "FlattenEditBox, 3 stock-art boxes)")
+
+-- ...and the coin boxes are CENTRED. Right-aligned put the digit hard against
+-- the box edge and so against the coin two pixels past it. Each box holds one
+-- denomination, so there is no units column to line up -- which is the only
+-- thing right-alignment buys here.
+--
+-- Scoped to MakeMoneyGSC's own body rather than counted across the file: plenty
+-- of other things in this window are justified, and a count over all of them
+-- would pass or fail for reasons that have nothing to do with the coin boxes.
+local money
+do
+    local from = string.find(src, "MakeMoneyGSC = function(", 1, true)
+    assert(from, "no MakeMoneyGSC in the source")
+    local to = string.find(src, "\nend\n", from, true)
+    assert(to, "MakeMoneyGSC never ends")
+    money = string.sub(src, from, to)
+end
+H.check("the money boxes are centred",
+        string.find(money, 'SetJustifyH("CENTER")', 1, true) ~= nil,
+        "the coin boxes do not centre their digits")
+H.check("...and none of the three is right-aligned",
+        string.find(money, 'SetJustifyH("RIGHT")', 1, true) == nil,
+        "a digit is still jammed against its coin")
+
+-- ---------------------------------------------------------------------------
+H.section("the chosen option in a segmented row")
+-- ---------------------------------------------------------------------------
+
+-- A segmented row -- % / Flat, 6h / 24h / 72h, Undercut / Market / None -- is a
+-- VALUE YOU HAVE SET, exactly like the number in the box beside it. The two
+-- were saying so in two different colours: the figure bright and the mode that
+-- governs it dim.
+
+-- ui.SetButtonKind reaches for these; neither decides anything here.
+BTN_KIND = { quiet = {}, primary = {}, accent = {} }
+local repaints
+RepaintButton = function() repaints = repaints + 1 end
+
+local function Btn(kind)
+    return { aegisButton = true, aegisKind = kind or "quiet" }
+end
+
+local pct, flat = Btn(), Btn()
+repaints = 0
+ui.MarkChosen({ pct, flat }, function(b) return b == flat end)
+
+H.listEq("the chosen one reads in the input colour", flat.aegisTextColor,
+         C.input)
+H.eq("...and the others are left to their plate's own colour",
+     pct.aegisTextColor, nil)
+H.eq("the chosen one is promoted", flat.aegisKind, "primary")
+H.eq("...and the others go back to what they were", pct.aegisKind, "quiet")
+H.eq("both were repainted", repaints, 2)
+
+-- IT HAS TO COME BACK OFF. Choose the other one and the first must lose the
+-- colour, or every option a row has ever had reads as chosen.
+ui.MarkChosen({ pct, flat }, function(b) return b == pct end)
+H.listEq("choosing the other moves the colour", pct.aegisTextColor, C.input)
+H.eq("...and takes it off the first", flat.aegisTextColor, nil)
+
+-- CLEARED TO NIL, NOT TO A COLOUR. `aegisTextColor` is an OVERRIDE that
+-- RepaintButton reads back on every hover and press; writing a colour into it
+-- for the unchosen ones would make the kind stop deciding the default, and a
+-- row of accent buttons would come back wrong.
+H.eq("the override is removed, not overwritten", flat.aegisTextColor, nil)
+
+-- ...and the base kind is still remembered from BEFORE anything was chosen, so
+-- a row that was never "quiet" is not made quiet by being deselected.
+local acc = Btn("accent")
+ui.MarkChosen({ acc }, function() return true end)
+ui.MarkChosen({ acc }, function() return false end)
+H.eq("a deselected accent button goes back to accent", acc.aegisKind, "accent")
+H.eq("...with no leftover text override", acc.aegisTextColor, nil)
+
+H.survives("an empty row is not a crash", function()
+    ui.MarkChosen({}, function() return true end)
+end)
+H.survives("...nor a nil one", function()
+    ui.MarkChosen(nil, function() return true end)
+end)
+
+-- ---------------------------------------------------------------------------
+H.section("column captions are uppercased in ONE place")
+-- ---------------------------------------------------------------------------
+
+-- Six tables each uppercasing their own headings is six places to forget one,
+-- which is how the Crafting tab spent four releases in caps while the five
+-- beside it were in sentence case. ui.MakeHeaderCell does it for all of them.
+local hdr
+do
+    local from = string.find(src, "function ui.MakeHeaderCell(", 1, true)
+    assert(from, "no ui.MakeHeaderCell in the source")
+    local to = string.find(src, "\nend\n", from, true)
+    assert(to, "ui.MakeHeaderCell never ends")
+    hdr = string.sub(src, from, to)
+end
+-- ANCHORED ON THE CALL, NOT THE NAME. The first version of this looked for
+-- "string.upper" and matched the COMMENT above the call explaining what
+-- string.upper is for -- so it passed with the call deleted. That is the third
+-- time a check in this repo has been satisfied by its own documentation; the
+-- rule is to search for something prose cannot contain.
+H.check("the header cell uppercases what it is given",
+        string.find(hdr, "fs:SetText(string.upper(", 1, true) ~= nil,
+        "every table would have to remember to do it itself")
+
+-- ...AND THE SORT ARROW MUST NOT UNDO IT. PaintSortHeaders rewrites the label
+-- to hang an arrow off it, so a caption capitalised only at creation comes back
+-- in sentence case the first time you sort by that column -- one column out of
+-- seven, which reads as a rendering glitch rather than as a missed call.
+local UP, DOWN = "\226\134\145", "\226\134\147"
+
+local function Header(base)
+    return { baseText = base, label = { text = nil,
+             SetText = function(self, t) self.text = t end } }
+end
+
+local h = { unit = Header("Unit price"), pct = Header("% mkt") }
+ui.PaintSortHeaders(h, "unit", "asc")
+H.eq("the sorted column keeps its caps", h.unit.label.text, "UNIT PRICE " .. UP)
+H.eq("...and so does every other one", h.pct.label.text, "% MKT")
+
+ui.PaintSortHeaders(h, "unit", "desc")
+H.eq("descending flips the arrow, not the case",
+     h.unit.label.text, "UNIT PRICE " .. DOWN)
+
+ui.PaintSortHeaders(h, "pct", "asc")
+H.eq("the arrow moves with the sort", h.pct.label.text, "% MKT " .. UP)
+H.eq("...and comes off the one it left", h.unit.label.text, "UNIT PRICE")
+
+-- The base text is what it was GIVEN, never what was last drawn -- otherwise
+-- sorting twice would append two arrows.
+ui.PaintSortHeaders(h, "pct", "asc")
+H.eq("sorting the same column twice does not stack arrows",
+     h.pct.label.text, "% MKT " .. UP)
+
+H.survives("no headers is not a crash", function()
+    ui.PaintSortHeaders(nil, "unit", "asc")
+end)
 
 os.exit(H.report("rowchrome"))

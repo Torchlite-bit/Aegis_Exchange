@@ -154,6 +154,27 @@ local LEDGER_MAX = 500
 -- Defaults for every user setting. db.Setting falls back to these, so adding a
 -- new setting here is enough -- no migration of old saves needed.
 local SETTING_DEFAULTS = {
+    -- THE ITEM-FACT SWEEP, AND IT IS OFF.
+    --
+    -- It walked ids 1..120000 asking the client about each one. On 1.12 a
+    -- cache miss is not free -- it puts an item query on the wire, and the
+    -- server answers with GET_ITEM_INFO_RECEIVED. A probe on a real client
+    -- caught that event arriving ~25 times a SECOND, continuously, and a Lua
+    -- heap of 222 MB climbing ~9 MB over the sample.
+    --
+    -- 1.12 IS A 32-BIT PROCESS. Every answer also grows the client's own item
+    -- cache, which is C-side and therefore invisible to gcinfo() -- so the
+    -- measured Lua figure is the SMALLER half of the cost. A steady climb
+    -- toward the address-space ceiling is a crash to desktop, and it is a
+    -- climb rather than a spike, which is why nothing showed in Task Manager.
+    --
+    -- The addon already learns item facts OPPORTUNISTICALLY -- from bags, from
+    -- browsing, from any successful lookup -- and that path costs nothing
+    -- because the client had the data anyway. The sweep only ever bought us
+    -- facts about items the player has never seen and may never see.
+    --
+    -- Off by default. `/aex sweep on` for anyone who wants it back.
+    harvest        = false,
     duration       = 480,       -- default post duration, minutes (120/480/1440)
     -- Default pricing: undercut the lowest competitor by a FLAT 1 copper. That
     -- is the behaviour most sellers want out of the box -- just enough to be
@@ -170,6 +191,9 @@ local SETTING_DEFAULTS = {
     tipMinBuyout   = true,      -- "Aegis Min Buyout" (most recent daily low)
     tipVendor      = true,      -- "Sell to Vendor" (what a merchant PAYS)
     tipVendorBuy   = true,      -- "Buy from Vendor" (what a merchant CHARGES)
+    -- "Inventory": how many you own and where, per character. The longest
+    -- block on the tooltip, so it gets its own switch like every other line.
+    tipInventory   = true,
     -- Stack totals -- "(x20 = 24g)" after a unit price. false = always show,
     -- true = only while Shift is held, which is how aux does it and keeps the
     -- tooltip short on a bank full of stacks.
@@ -270,6 +294,137 @@ function db.Items()
     if not bucket then bucket = {}; realms[key] = bucket end
     if not bucket.items then bucket.items = {} end
     return bucket.items
+end
+
+-- ---------------------------------------------------------------------------
+-- Inventory: how many of an item you own, and where
+-- ---------------------------------------------------------------------------
+
+-- The four places an item can be. Ordered, because the tooltip prints them in
+-- this order and a second list of the same four is how they drift apart.
+db.INVENTORY_BUCKETS = { "bags", "bank", "ah", "mail" }
+
+-- The current realm's per-character inventory, created on demand.
+--
+-- REALM-SCOPED, which is the opposite of vendor prices and deliberately so. A
+-- vendor's price is a fact about the game and is the same everywhere; twenty
+-- Silk Cloth on a character you cannot reach from here is not stock you have,
+-- it is stock somebody else has. Same accessor discipline as db.Items -- the
+-- realm split lives in one place.
+function db.Inventories()
+    if not db.account then return nil end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.inventory then bucket.inventory = {} end
+    return bucket.inventory
+end
+
+function db.CharKey()
+    local name = UnitName and UnitName("player") or nil
+    if not name or name == "" then return nil end
+    return name
+end
+
+-- Record one bucket for the CURRENT character, with the moment it was read.
+--
+-- The timestamp is the point. Only bags can be read on demand; bank, auctions
+-- and mail are readable exactly while you are standing at them, so every one
+-- of those numbers is a memory of a visit and has to carry its age. See
+-- tooltip.Extend, which says so on screen rather than in a settings tooltip
+-- nobody opens.
+--
+-- The CLASS token is stored beside them because nothing on 1.12 can ask what
+-- class an offline character is. It is one string, written whenever that
+-- character plays, and it is the only way the tooltip can colour a name.
+function db.SetInventoryBucket(bucket, counts, class)
+    local inv = db.Inventories()
+    local who = db.CharKey()
+    if not inv or not who or not bucket then return nil end
+    local rec = inv[who]
+    if not rec then rec = { t = {} }; inv[who] = rec end
+    if not rec.t then rec.t = {} end
+    rec[bucket] = counts or {}
+    rec.t[bucket] = time()
+    if class and class ~= "" then rec.class = class end
+    return rec
+end
+
+-- How many of `itemId` each character on this realm holds, and where.
+--
+-- Returns rows, total. Each row is
+--   { name, class, you, bags, bank, ah, mail, total, oldest }
+-- where `you` marks the character you are logged in as and `oldest` is the
+-- age in seconds of the stalest bucket that actually contributed a count --
+-- so a row whose whole answer came from a two-day-old bank snapshot can say
+-- so, and one that is all live bags does not have to.
+--
+-- `liveBags` (optional) is the current character's bag counts read just now.
+-- Passing them in rather than reading containers here keeps this file free of
+-- container code -- and bags are the ONE bucket that can be exact, so the
+-- caller that can be exact supplies them.
+--
+-- Characters holding none of the item are left out entirely. A tooltip listing
+-- every alt you have ever logged in on, most of them saying zero, is a worse
+-- answer than a short list.
+function db.InventoryRows(itemId, liveBags)
+    local rows, total = {}, 0
+    local inv = db.account and db.Inventories()
+    if not itemId or not inv then return rows, total end
+    local me = db.CharKey()
+    local now = time()
+    -- The character you are ON gets a row whether or not anything has ever
+    -- been STORED for them.
+    --
+    -- Without this, a player who has not opened a bank since installing the
+    -- addon has no record at all, so the loop below finds nobody and their own
+    -- bags -- the one bucket that is exact and always available -- are
+    -- invisible. That is the common case on a fresh install, and it presents
+    -- as the block never appearing.
+    local seed = inv
+    if me and liveBags and (liveBags[itemId] or 0) > 0 and not inv[me] then
+        seed = { [me] = { t = {} } }
+        for who, rec in pairs(inv) do seed[who] = rec end
+    end
+    for who, rec in pairs(seed) do
+        local row = { name = who, class = rec.class, you = (who == me),
+                      total = 0 }
+        local oldest = nil
+        local i = 1
+        while i <= table.getn(db.INVENTORY_BUCKETS) do
+            local b = db.INVENTORY_BUCKETS[i]
+            local n
+            if b == "bags" and who == me and liveBags then
+                n = liveBags[itemId]        -- exact, read a moment ago
+            else
+                n = rec[b] and rec[b][itemId]
+                if n and n > 0 then
+                    local when = rec.t and rec.t[b]
+                    local age = when and (now - when) or nil
+                    if age and (not oldest or age > oldest) then oldest = age end
+                end
+            end
+            n = n or 0
+            row[b] = n
+            row.total = row.total + n
+            i = i + 1
+        end
+        row.oldest = oldest
+        if row.total > 0 then
+            table.insert(rows, row)
+            total = total + row.total
+        end
+    end
+    -- You first, then the biggest holdings. Your own row is the one you are
+    -- acting on; the rest are context for it.
+    table.sort(rows, function(a, b)
+        if a.you ~= b.you then return a.you end
+        if a.total ~= b.total then return a.total > b.total end
+        return (a.name or "") < (b.name or "")
+    end)
+    return rows, total
 end
 
 -- Observed disenchant results for the current realm, created on demand.
@@ -1033,7 +1188,21 @@ db.HARVEST_MAX_ID = 120000
 
 -- Ids examined per step. Paced on ids EXAMINED, not ids recorded -- aux paces
 -- on recorded, which means a cold cache walks its whole range in one frame.
-db.HARVEST_BUDGET = 500
+--
+-- WAS 500 EVERY 0.5s -- a thousand GetItemInfo calls a second, from login to
+-- id 120000, for about two minutes, every session, whatever else was going on.
+--
+-- The comment inside db.HarvestStep said a nil return "is the common case and
+-- costs nothing". THAT WAS ASSERTED, NOT MEASURED, and it is the same shape of
+-- mistake as believing 1.12 routes shift-clicks through ChatEdit_InsertLink:
+-- on this client GetItemInfo for an item the cache has never seen does not
+-- simply return nil, it puts an item query on the wire. A thousand a second is
+-- not free, and it is invisible to Task Manager because the cost is in the
+-- client's item-cache and network path rather than in Lua.
+--
+-- 50 per second instead. The sweep takes longer to finish and nothing else
+-- changes: it is the least urgent thing in the addon and it says so.
+db.HARVEST_BUDGET = 50
 
 -- What we keep, and nothing else: three fields that answer the disenchant
 -- question. Names, textures and stack sizes have their own tables already.
@@ -1055,6 +1224,23 @@ function db.ItemFacts(itemId)
     return db.account.facts[itemId]
 end
 
+-- Throw away every harvested fact.
+--
+-- TURNING THE SWEEP OFF DOES NOT SHRINK WHAT IT ALREADY COLLECTED. `facts`
+-- lives in SavedVariables, so it is deserialised back into Lua at EVERY login
+-- and stays there for the session -- a sweep that ran for an hour last week is
+-- still costing memory today. Stopping the growth and undoing it are two
+-- different actions and the player needs both.
+--
+-- Safe to lose: every fact here is re-learnable from the item itself, and the
+-- opportunistic path relearns the ones that matter as you play.
+function db.PurgeFacts()
+    local n = db.HarvestCount()
+    if db.account then db.account.facts = {} end
+    db.harvestAt = 1
+    return n
+end
+
 function db.HarvestCount()
     if not db.account or not db.account.facts then return 0 end
     return A.util.CountKeys(db.account.facts)
@@ -1074,7 +1260,8 @@ function db.HarvestStep(fromId, budget)
         if not db.ItemFacts(id) then
             -- The bare id, not a link: GetItemInfo takes either, and an id
             -- cannot be mis-formatted. nil here means "the client has never
-            -- seen this item", which is the common case and costs nothing.
+            -- seen this item" -- the common case, and NOT free: see the note
+            -- on db.HARVEST_BUDGET for why this is paced the way it is.
             local info = A.util.ItemInfo(id)
             if info and type(info.quality) == "number" then
                 db.SetItemFacts(id, info.quality, info.minLevel, info.equipLoc)
@@ -1109,7 +1296,7 @@ local harvester = CreateFrame("Frame", "AegisExchangeHarvester")
 harvester:Hide()
 db.harvestAt = 1
 
-local HARVEST_DELAY = 0.5
+local HARVEST_DELAY = 1.0
 
 harvester:SetScript("OnUpdate", function()
     harvester.accum = (harvester.accum or 0) + arg1
@@ -1127,6 +1314,7 @@ end)
 
 -- Begin (or resume) the sweep. Idempotent.
 function db.StartHarvest()
+    if not db.Setting("harvest") then return false end
     if not db.harvestAt then return false end
     -- A NEGATIVE accumulator is the initial delay. Login is the busiest the
     -- client ever is, and this is the least urgent thing in the addon, so the
@@ -1139,6 +1327,20 @@ end
 function db.StopHarvest()
     harvester:Hide()
 end
+
+-- The sweep YIELDS to the auction house, and this is the whole point of it
+-- being pausable.
+--
+-- HARD RULE 10 is about not flooding the client's auction path; a background
+-- sweep firing item queries into the same client while a scan is paging is the
+-- same flood by another door -- and it lands exactly when the player is
+-- watching, because they opened the auction house to do something.
+--
+-- db.StopHarvest existed and NOTHING CALLED IT. The housekeeping pass flagged
+-- it as unreachable and kept it on the grounds that it was the only
+-- implementation of its idea. It was: this is the caller it was waiting for.
+A.RegisterEvent("AUCTION_HOUSE_SHOW", function() db.StopHarvest() end)
+A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() db.StartHarvest() end)
 
 function db.HarvestRunning()
     return harvester:IsShown() and true or false

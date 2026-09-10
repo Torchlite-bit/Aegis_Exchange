@@ -88,6 +88,21 @@ step "No two widgets hang off the same anchor"
 # is what 1.20.0 shipped in the settings panel.
 python3 tests/lint/anchorchain.py || fail=1
 
+step "List rows opt out of pfUI's button skinner"
+# A Button that gets ui.AddRowChrome is a list row, and pfUI's SkinButton draws
+# its plate THROUGH the row's own first and last pixels. skin.lua carried a
+# comment saying result rows could not be affected; they had been for releases.
+python3 tests/lint/rowskin.py --selftest >/dev/null || { \
+    echo "rowskin selftest FAILED"; python3 tests/lint/rowskin.py --selftest; \
+    fail=1; }
+python3 tests/lint/rowskin.py || fail=1
+
+step "No row is anchored to the row above it"
+python3 tests/lint/rowchain.py --selftest >/dev/null || { \
+    echo "rowchain selftest FAILED"; python3 tests/lint/rowchain.py --selftest; \
+    fail=1; }
+python3 tests/lint/rowchain.py || fail=1
+
 step "Every colour the UI reads exists in the palette"
 python3 tests/lint/palette.py --selftest >/dev/null || { \
     echo "palette selftest FAILED"; python3 tests/lint/palette.py --selftest; \

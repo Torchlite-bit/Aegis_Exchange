@@ -412,15 +412,30 @@ player can now DO, never how much moved.
 MINOR. The larger claim wins.
 
 **Every shipped change bumps.** Not once per merge — once per piece of work.
-Fix a bug on a feature branch and the PATCH goes up; add a capability and the
-MINOR goes up and PATCH resets. The merge lands at whatever the branch has
-reached, so a branch that adds a feature and then fixes three things in it
-merges as `1.50.3`, not `1.50.0`.
+The number is a running account of what happened, which is what makes "quote
+the version in the title bar" worth asking for: a player on 1.52.2 and a player
+on 1.52.5 are not running the same code, and a scheme that only bumps at merge
+time cannot tell them apart.
 
-The number is a running account of what happened, which is what makes
-"quote the version in the title bar" worth asking for: a player on 1.49.2 and a
-player on 1.49.5 are not running the same code, and a scheme that only bumps at
-merge time cannot tell them apart.
+### ONE PUSH, ONE MINOR
+
+**A body of work that lands in one merge takes a SINGLE MINOR bump, and every
+change inside it is a PATCH under that.** Each phase, each fix found along the
+way, each piece of polish — PATCH. The MINOR moves at the *next* body of work,
+not at the next feature within this one.
+
+So the 2h overhaul is `1.52.0` … `1.52.5` — six pieces of work, one MINOR —
+and it does **not** become 1.53 because §2 added a tooltip block and §4 added a
+stepper. The whole push is the capability; the phases are how it got built.
+
+**Where this went wrong before.** That same overhaul was first numbered
+1.52.0 → 1.56.0, one MINOR per phase, on the reading that "a phase that adds a
+capability is a MINOR". It ran the number up by five for one merge. The MINOR
+now counts the *push*, and PATCH counts the work inside it.
+
+**Ask the owner before moving the MINOR.** If a piece of work feels like the
+start of a new body rather than a continuation, say so and wait — the call is
+theirs, and staying on the current MINOR is always the safe default.
 
 **Not a release at all**, and therefore not a bump: anything under `tests/`,
 `tools/` or `design/`, and edits to `CLAUDE.md` / `ROADMAP.md`. None of it ships.

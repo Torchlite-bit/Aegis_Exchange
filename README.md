@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.51.1)
+# Aegis: Exchange (v1.52.34)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -288,10 +288,33 @@ is holding, so showing exactly that page is what keeps every Cancel pointed at
 the auction you clicked. The trade is that **undercut counts are per page**, and
 the status line says so.
 
-### 🔨 Crafting — is this even worth making?
-Open a profession, pick a recipe, hit **Add to Aegis**. The Crafting tab then
-lists every reagent — click one to shop for it like any other item. And it does
-the maths you were doing in your head:
+### 🔨 Crafting — one shopping list for everything you're making
+Open a profession, pick a recipe, hit **Add to Aegis**. Track as many as you
+like, set how many of each you want with `[-] 5 [+]`, and the tab turns the lot
+into **one shopping list**:
+
+> **Dreamfoil** &nbsp; `18/40` &nbsp;&nbsp; **Gromsblood** &nbsp; `12/42`
+> &nbsp;&nbsp; **Crystal Vial** &nbsp; `22/28` ᵛ
+
+Two recipes wanting Dreamfoil is **one line for forty**, not two lines you shop
+for twice. It counts what's already in your bags and bank, and a small `v`
+means a **vendor sells it cheaper** than the auction house does.
+
+- **Click a reagent** to search for it — a real auction query, not a filter over
+  what's already on screen.
+- **Price all** walks the whole list for you, searching each thing you're still
+  short of, so the prices and the run's total fill in. It buys nothing. Press it
+  again to stop.
+- **Expand a recipe** to see what *it* needs, at the quantity you asked for.
+  Wanting five of something made in twos is three crafts, so it says six
+  Dreamfoil — not ten.
+- **Something you can craft yourself** goes dim instead of red: its own reagents
+  are already further down the list, so you're not told to buy the bolt *and*
+  the cloth to make it.
+- **Spent 41g 20s of 104g 30s** tracks the run as you buy. Hover any reagent for
+  what you've paid for it so far, and the average per unit.
+
+And it still does the maths you were doing in your head:
 
 > **mats 12g 40s → sells 18g** · **Profit 4g 71s** *(after the 5% cut)*
 
@@ -511,7 +534,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.51.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.52.34`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.

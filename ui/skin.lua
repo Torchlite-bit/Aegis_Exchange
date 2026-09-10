@@ -193,9 +193,12 @@ local function SkinWidget(f)
     -- (top-level categories carry a plate, subcategories are bare indented
     -- text) and pfUI's SkinButton gives every Button the same plate, which
     -- erased the distinction and made the sidebar read as a stack of buttons.
-    -- Result rows were never affected: those are Frames, so the Button branch
-    -- below never reached them, which is why only the tree showed it.
-    -- Marked with aegisNoSkin at creation.
+    -- THIS ONCE SAID result rows were safe "because those are Frames". They
+    -- were, and then BuildResultRow became a Button so a row could take a
+    -- click and a highlight -- and every results table in the window has been
+    -- plated ever since, which nothing noticed because the note here said it
+    -- could not happen. Marked with aegisNoSkin at creation, and
+    -- tests/lint/rowskin.py checks that rather than trusting a comment.
     if f.aegisNoSkin then
         f.aegisSkinned = true
         return false
@@ -232,6 +235,21 @@ local function SkinWidget(f)
     elseif otype == "EditBox" then
         Strip(f)
         Backdrop(f)
+        -- ...AND PUT OUR TEXT COLOUR BACK. ui.InputText sets it when the box
+        -- is BUILT, and skin.Apply runs last -- after every widget exists --
+        -- so anything pfUI does to a box here happens afterwards and wins.
+        -- The reported symptom was the flat-undercut amount reading too dull
+        -- to see under some pfUI configurations, and it was dull only there.
+        --
+        -- Same arrangement, same reason, as the button branch above calling
+        -- A.ui.SetButtonKind: pfUI restyles, then we re-assert the one thing
+        -- we actually care about.
+        if A.ui and A.ui.InputText then A.ui.InputText(f) end
+        -- ...AND AGAIN A FRAME LATER. Re-applying here is not enough: the
+        -- colour is right unskinned and wrong under pfUI, so pfUI touches the
+        -- box after this line runs and we do not control when. A frame later
+        -- it is done, whatever it was. See ui.DeferInputText.
+        if A.ui and A.ui.DeferInputText then A.ui.DeferInputText() end
         f.aegisSkinned = true
         return true
     elseif otype == "Slider" then

@@ -147,6 +147,24 @@ function util.ItemIdFromLink(link)
     return tonumber(id)
 end
 
+-- The DISPLAY NAME out of an item link -- "Silk Cloth" from
+-- "|cff...|Hitem:2589:0:0:0|h[Silk Cloth]|h|r".
+--
+-- READ OFF THE LINK, never asked of GetItemInfo. The link the client hands a
+-- shift-click already carries the name, and GetItemInfo on 1.12 answers only
+-- for cached items and costs a server round trip for anything else -- see the
+-- note above util.ItemInfo. A parse cannot fail for an item the player is
+-- holding; a lookup can.
+--
+-- Returns nil for a bare itemstring ("item:2589:0:0:0"), which carries no
+-- name -- the caller decides what to do about that.
+function util.ItemNameFromLink(link)
+    if type(link) ~= "string" then return nil end
+    local _, _, name = string.find(link, "|h%[(.-)%]|h")
+    if name and name ~= "" then return name end
+    return nil
+end
+
 -- ---------------------------------------------------------------------------
 -- Time
 -- ---------------------------------------------------------------------------

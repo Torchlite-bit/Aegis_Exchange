@@ -153,6 +153,18 @@ tests/
     vendorbuy_test.lua      what a merchant CHARGES (unlimited stock beats a
                             cheaper limited one), and the two measured deposit
                             corrections
+    craft_plan_test.lua     "make five of these": the ceil from items wanted
+                            to crafts, the reagent totals that follow, and the
+                            create message the made-counter reads
+    tooltip_hook_test.lua   the save-and-replace hooks themselves: that they
+                            install, that return values survive, and that a
+                            link the CLIENT refuses does not become our error
+    inventory_test.lua      how many you own and where: the bag/bank walkers,
+                            the dirty-flag cache, live bags beating the
+                            snapshot, and per-realm scoping
+    session_buys_test.lua   "purchased N this session": units not auctions,
+                            both purchase paths, and when the line may name an
+                            item at all
     scan_leak_test.lua      the callback leak behind the multi-second freeze:
                             a finished scan stops collecting, a live one takes
                             only its own pages, and the price DB still fills

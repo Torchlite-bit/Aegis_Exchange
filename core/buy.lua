@@ -68,11 +68,6 @@ local function Store()
     return A.db and A.db.account and A.db.account.shopping
 end
 
-function buy.Lists()
-    local s = Store()
-    return s and s.lists or {}
-end
-
 function buy.Recent()
     local s = Store()
     return s and s.recent or {}
@@ -171,57 +166,20 @@ function buy.MoveFavorite(index, dir)
     return to
 end
 
-function buy.AddList(name)
-    local s = Store()
-    if not s or not name or name == "" then return nil end
-    local list = { name = name, items = {} }
-    table.insert(s.lists, list)
-    return list
-end
-
-function buy.RenameList(index, name)
-    local s = Store()
-    if not s or not name or name == "" then return end
-    local list = s.lists[index]
-    if list then list.name = name end
-end
-
-function buy.DeleteList(index)
-    local s = Store()
-    if s and s.lists[index] then table.remove(s.lists, index) end
-end
-
--- Add an item name to a list (no duplicates). Returns true if newly added.
-function buy.AddItemToList(index, itemName)
-    local s = Store()
-    if not s or not itemName or itemName == "" then return false end
-    local list = s.lists[index]
-    if not list then return false end
-    local i = 1
-    while i <= table.getn(list.items) do
-        if string.lower(list.items[i]) == string.lower(itemName) then
-            return false
-        end
-        i = i + 1
-    end
-    table.insert(list.items, itemName)
-    return true
-end
-
-function buy.RemoveItemFromList(index, itemName)
-    local s = Store()
-    if not s then return end
-    local list = s.lists[index]
-    if not list then return end
-    local i = 1
-    while i <= table.getn(list.items) do
-        if list.items[i] == itemName then
-            table.remove(list.items, i)
-        else
-            i = i + 1
-        end
-    end
-end
+-- SHOPPING LISTS: the engine is GONE, the saved data is NOT.
+--
+-- buy.Lists / AddList / RenameList / DeleteList / AddItemToList /
+-- RemoveItemFromList lived here after the Advanced redesign removed the
+-- sidebar that was their only caller. They were kept on the reasoning that
+-- re-homing the feature would then cost a UI rather than a rewrite -- but the
+-- Crafting tab's tracked recipes ARE that feature's shape, and they were built
+-- on `crafting`, not on these. Nothing is coming back to them.
+--
+-- `account.shopping.lists` in core/db.lua STAYS. A player who used the sidebar
+-- before the redesign still has their lists in SavedVariables, and dropping
+-- the field would delete them on the next save -- which is a migration a
+-- player cannot upgrade into, i.e. the one thing MAJOR is reserved for. An
+-- unread table costs nothing; deleted data cannot be got back.
 
 -- ---------------------------------------------------------------------------
 -- Query language (ROADMAP Phase 2a)
@@ -1944,6 +1902,82 @@ function buy.BatchCost(rows)
 end
 
 -- Start a batch buyout of `rows`. Returns (true) or (false, reason).
+-- ---------------------------------------------------------------------------
+-- What you have bought this session
+-- ---------------------------------------------------------------------------
+
+-- Auction house purchases since login, by item.
+--
+-- IN MEMORY ONLY, and that IS the definition of "this session": it lives from
+-- login to logout and is never written to SavedVariables. The History ledger
+-- is the durable record of what was spent; this is the scratch number that
+-- answers "how many have I got so far" while you are still shopping, and a
+-- persisted one would answer that question wrongly the next day.
+--
+-- It deliberately does NOT reset when the auction house closes. Buying out a
+-- crafting run takes several trips to the auctioneer, and a counter that
+-- cleared on the way out would clear in the middle of the thing it counts --
+-- the same reasoning that made the crafting tally manual-only.
+--
+-- COUNTS UNITS, NOT AUCTIONS. Buying a stack of twenty Fine Thread is twenty
+-- thread. "How many have I bought" is a question about items, and answering it
+-- with a number of auctions is the kind of wrong that looks right.
+buy.session = {}   -- itemId -> { n = units, spent = copper, name = "..." }
+
+-- Book one purchase.
+--
+-- Called from the ENGINE, at the two places an auction is actually bought,
+-- rather than from the UI beside the ledger write. The engine holds every fact
+-- this needs -- the id, the stack size, the price -- and a purchase made
+-- through a path that forgot to book it would be counted by neither. It also
+-- means the tally is reachable from a suite, which ui/frame.lua is not.
+function buy.RecordPurchase(itemId, name, stack, copper)
+    if not itemId then return nil end
+    stack = stack or 1
+    if stack < 1 then stack = 1 end
+    local rec = buy.session[itemId]
+    if not rec then
+        rec = { n = 0, spent = 0, name = name }
+        buy.session[itemId] = rec
+    end
+    rec.n     = rec.n + stack
+    rec.spent = rec.spent + (copper or 0)
+    if name then rec.name = name end
+    return rec.n, rec.spent
+end
+
+-- Units and copper bought this session for one item. ALWAYS two numbers, so no
+-- caller has to branch on nil to render a zero.
+function buy.SessionBought(itemId)
+    local rec = itemId and buy.session[itemId]
+    if not rec then return 0, 0 end
+    return rec.n, rec.spent
+end
+
+function buy.ClearSession()
+    buy.session = {}
+end
+
+-- The one item a result set is about, or nil when it is about several.
+--
+-- The status line NAMES an item, so it may only do that when there is one to
+-- name. A search for "cloth" returns Linen, Wool and Silk; reporting one of
+-- their tallies beside all three would be a true number attached to the wrong
+-- thing, which is worse than no number.
+function buy.SoleItemId(rows)
+    local id = nil
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.itemId then
+            if id and r.itemId ~= id then return nil end
+            id = r.itemId
+        end
+        i = i + 1
+    end
+    return id
+end
+
 function buy.StartBatch(rows, onDone, onStep)
     if buy.batch.active then return false, "A buyout is already running." end
     if not rows or table.getn(rows) == 0 then
@@ -1962,7 +1996,12 @@ function buy.StartBatch(rows, onDone, onStep)
         if r.buyout and r.buyout > 0 and not r.mine then
             local fp = buy.Fingerprint(r)
             if not owed[fp] then
-                owed[fp] = { count = 0, price = r.buyout, name = r.name }
+                -- `stack` and `itemId` ride along for the session tally. Safe
+                -- to keep on the bucket rather than per row: the fingerprint
+                -- keys on name, stack size and price, so everything collapsed
+                -- into one bucket is the same item at the same stack size.
+                owed[fp] = { count = 0, price = r.buyout, name = r.name,
+                             itemId = r.itemId, stack = r.count or 1 }
                 table.insert(order, fp)
             end
             owed[fp].count = owed[fp].count + 1
@@ -2029,6 +2068,7 @@ function buy.BatchStep()
     st.timeout = buy.TIMEOUT
     buy.driver:Show()
     PlaceAuctionBid("list", index, info.price)
+    buy.RecordPurchase(info.itemId, info.name, info.stack, info.price)
     -- Reported per PURCHASE, with what was bought, so the caller can book each
     -- one as it happens. Booking the whole batch at the end would lose
     -- everything bought before an abort -- and an abort is the case where an
@@ -2053,6 +2093,7 @@ function buy.Buyout(row)
     st.timeout = buy.TIMEOUT
     buy.driver:Show()
     PlaceAuctionBid("list", row.index, row.buyout)
+    buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)
     return true
 end
 
@@ -2265,6 +2306,319 @@ function craft.NetOf(project)
     return math.floor(value * (1 - craft.AH_CUT) - cost), true
 end
 
+-- ---------------------------------------------------------------------------
+-- How many to make, and what that costs in reagents
+-- ---------------------------------------------------------------------------
+
+-- Upper bound on the quantity stepper. Not a game limit -- a guard, so a stuck
+-- key or a bad saved value cannot ask for a reagent total that overflows the
+-- column it is drawn in.
+craft.WANT_MAX = 999
+
+-- How many of the finished item this project is set to make. Defaults to one,
+-- so a recipe captured before the stepper existed reads as "one of these".
+function craft.Want(project)
+    local n = project and project.want
+    if not n or n < 1 then return 1 end
+    if n > craft.WANT_MAX then return craft.WANT_MAX end
+    return n
+end
+
+-- Set it, clamped, and persist. Returns the value actually stored.
+function craft.SetWant(index, n)
+    local s = CStore()
+    local p = s and s.projects[index]
+    if not p then return nil end
+    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end
+    if n > craft.WANT_MAX then n = craft.WANT_MAX end
+    p.want = n
+    return n
+end
+
+-- Nudge it by `delta` and persist. The stepper's whole job.
+function craft.StepWant(index, delta)
+    local s = CStore()
+    local p = s and s.projects[index]
+    if not p then return nil end
+    return craft.SetWant(index, craft.Want(p) + (delta or 0))
+end
+
+-- CRAFTS needed to produce `wanted` finished items from a recipe that yields
+-- `made` per craft.
+--
+-- THE CEIL IS THE WHOLE FUNCTION. The stepper counts finished ITEMS, which is
+-- how anyone says it out loud, and for most recipes that is also the number of
+-- crafts. They diverge the moment a recipe makes more than one: wanting five of
+-- something made in twos is 2.5 crafts, and a truncated 2 shops you one item
+-- short EVERY time. The divide is not new -- craft.CostForItem already divides
+-- by `made` to get a per-unit cost, for exactly this reason.
+function craft.CraftsFor(wanted, made)
+    wanted = math.floor(tonumber(wanted) or 1)
+    made   = math.floor(tonumber(made) or 1)
+    if made < 1 then made = 1 end
+    if wanted < 1 then return 0 end
+    return math.ceil(wanted / made)
+end
+
+-- What `wanted` finished items need, reagent by reagent.
+--
+-- Returns rows, shortCount. Each row is
+--   { name, itemId, per, need, have, short }
+-- where `per` is the recipe's own figure, `need` is that times the crafts, and
+-- `short` is what you would still have to buy.
+--
+-- `haveOf` is a function itemId -> how many you own, injected rather than read
+-- here -- the same discipline as db.InventoryRows taking live bags. This file
+-- knows about recipes and prices; it has no business walking containers, and a
+-- caller that can answer exactly is the one that should.
+function craft.NeedFor(project, wanted, haveOf)
+    local rows, shortCount = {}, 0
+    if not project or not project.reagents then return rows, shortCount end
+    local crafts = craft.CraftsFor(wanted or craft.Want(project), project.made)
+    local i = 1
+    while i <= table.getn(project.reagents) do
+        local r = project.reagents[i]
+        local id = ResolveId(r.itemId, r.name)
+        local per = r.count or 1
+        local need = per * crafts
+        local have = 0
+        if haveOf and id then have = haveOf(id) or 0 end
+        local short = need - have
+        if short < 0 then short = 0 end
+        if short > 0 then shortCount = shortCount + 1 end
+        table.insert(rows, {
+            name = r.name, itemId = id, per = per,
+            need = need, have = have, short = short,
+        })
+        i = i + 1
+    end
+    return rows, shortCount
+end
+
+-- ---------------------------------------------------------------------------
+-- The shopping list
+-- ---------------------------------------------------------------------------
+
+-- Where to buy one reagent, and what a unit costs there.
+--
+-- A tie goes to the VENDOR. A vendor's price is fixed and always in stock; an
+-- auction at the same money is a listing that may be gone when you get there.
+function craft.CheaperSource(vendor, market)
+    if vendor and market then
+        if vendor <= market then return "vendor", vendor end
+        return "ah", market
+    end
+    if vendor then return "vendor", vendor end
+    if market then return "ah", market end
+    return nil, nil
+end
+
+-- How deep sub-reagent expansion may go.
+--
+-- A GUARD, not a feature. Recipes can refer to each other in a loop -- a
+-- server can define one, and a mis-captured recipe certainly can -- and an
+-- unbounded walk would hang the client. Four is deeper than any real crafting
+-- chain in this game.
+craft.SHOP_MAX_DEPTH = 4
+
+-- Every tracked recipe's reagents, aggregated into ONE list.
+--
+-- THE AGGREGATION IS THE POINT, and it is the whole difference between a
+-- recipe tree and a shopping list. Track three recipes that each want Linen
+-- Cloth and the tree shows it three times in three places, so you shop for it
+-- three times and still get the total wrong. This says "Linen Cloth 40" once.
+--
+-- SUB-REAGENTS EXPAND. If you are short of something you can make yourself,
+-- what you actually need to BUY is what that recipe needs -- so a shortfall of
+-- Bolt of Linen becomes the Linen Cloth to make it, and the bolt is marked as
+-- something you craft rather than something you shop for. Only for recipes we
+-- hold: we capture those from the profession window, so coverage is whatever
+-- you have opened.
+--
+-- EVERYTHING IS INJECTED -- wantOf, haveOf, recipeFor, vendorOf, marketOf --
+-- so this is arithmetic over numbers and tables and a suite can run it without
+-- a client. Same discipline as craft.NeedFor, and for the same reason: this
+-- file knows about recipes, not about containers or auction houses.
+--
+-- Returns rows, shortCount. Each row:
+--   { name, itemId, need, have, short, from = { recipe names },
+--     craftable = true|nil, source = "vendor"|"ah"|nil, unit = copper|nil }
+function craft.ShoppingList(projects, opts)
+    opts = opts or {}
+    local wantOf, haveOf = opts.wantOf, opts.haveOf
+    local recipeFor = opts.expand and opts.recipeFor or nil
+    local need, from, order = {}, {}, {}
+
+    local function add(id, name, n, why)
+        if not id or n <= 0 then return end
+        if need[id] == nil then
+            need[id] = 0
+            from[id] = {}
+            table.insert(order, { id = id, name = name })
+        end
+        need[id] = need[id] + n
+        -- WHICH recipes want it, so a row can say why it is on the list. A
+        -- linear scan because these lists are a handful of names.
+        if why then
+            local seen, k = false, 1
+            while k <= table.getn(from[id]) do
+                if from[id][k] == why then seen = true end
+                k = k + 1
+            end
+            if not seen then table.insert(from[id], why) end
+        end
+    end
+
+    local function addReagents(p, crafts, why)
+        local rs = p.reagents or {}
+        local ri = 1
+        while ri <= table.getn(rs) do
+            local r = rs[ri]
+            add(ResolveId(r.itemId, r.name), r.name, (r.count or 1) * crafts, why)
+            ri = ri + 1
+        end
+    end
+
+    -- Pass one: what the tracked recipes themselves ask for.
+    local pi = 1
+    while pi <= table.getn(projects or {}) do
+        local p = projects[pi]
+        local want = (wantOf and wantOf(p)) or 1
+        addReagents(p, craft.CraftsFor(want, p.made), p.name)
+        pi = pi + 1
+    end
+
+    -- Passes two and on: replace a shortfall you can craft with what IT needs.
+    --
+    -- `order` is measured BEFORE each pass, so anything added by this pass is
+    -- considered on the NEXT one. That is what makes the depth cap a real
+    -- bound rather than a suggestion.
+    local crafted = {}
+    local depth = 1
+    while recipeFor and depth <= craft.SHOP_MAX_DEPTH do
+        local grew = false
+        local n = table.getn(order)
+        local k = 1
+        while k <= n do
+            local id = order[k].id
+            if not crafted[id] then
+                local short = need[id] - ((haveOf and haveOf(id)) or 0)
+                if short > 0 then
+                    local sub = recipeFor(id)
+                    if sub then
+                        crafted[id] = true
+                        grew = true
+                        addReagents(sub, craft.CraftsFor(short, sub.made),
+                            order[k].name)
+                    end
+                end
+            end
+            k = k + 1
+        end
+        if not grew then break end
+        depth = depth + 1
+    end
+
+    local rows, shortCount = {}, 0
+    local i = 1
+    while i <= table.getn(order) do
+        local id, nm = order[i].id, order[i].name
+        local have = (haveOf and haveOf(id)) or 0
+        local short = need[id] - have
+        if short < 0 then short = 0 end
+        -- A thing you are going to CRAFT is not a thing you are short OF --
+        -- its own reagents are already on this list, and counting both would
+        -- tell you to buy the bolt and the cloth to make it.
+        if short > 0 and not crafted[id] then shortCount = shortCount + 1 end
+        local src, unit = craft.CheaperSource(
+            opts.vendorOf and opts.vendorOf(id) or nil,
+            opts.marketOf and opts.marketOf(id) or nil)
+        table.insert(rows, {
+            name = nm, itemId = id, need = need[id], have = have, short = short,
+            from = from[id], craftable = crafted[id] and true or nil,
+            source = src, unit = unit,
+        })
+        i = i + 1
+    end
+
+    -- What you still have to BUY first: that is what the list is for. Then
+    -- alphabetical, so a line does not move under the cursor as counts change.
+    table.sort(rows, function(a, b)
+        local as = (a.short > 0 and not a.craftable) and 1 or 0
+        local bs = (b.short > 0 and not b.craftable) and 1 or 0
+        if as ~= bs then return as > bs end
+        return (a.name or "") < (b.name or "")
+    end)
+    return rows, shortCount
+end
+
+-- ---------------------------------------------------------------------------
+-- What you have actually made
+-- ---------------------------------------------------------------------------
+
+-- Crafted items since login, by item id.
+--
+-- IN MEMORY, and MANUAL RESET ONLY -- never on AUCTION_HOUSE_CLOSED. A crafting
+-- run spans several trips to the auctioneer, so a counter that cleared on the
+-- way out would clear in the middle of the thing it counts. Same reasoning as
+-- the Buy tab's session tally.
+craft.made = {}
+
+function craft.RecordMade(itemId, n)
+    if not itemId then return nil end
+    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end
+    craft.made[itemId] = (craft.made[itemId] or 0) + n
+    return craft.made[itemId]
+end
+
+function craft.MadeCount(itemId)
+    return (itemId and craft.made[itemId]) or 0
+end
+
+function craft.ClearMade()
+    craft.made = {}
+end
+
+-- The prefix the client puts in front of a created item, e.g. "You create: ".
+--
+-- Read from the client's own globals so it works in any locale, with the
+-- English literal only as a fallback off Turtle. LOOT_ITEM_CREATED_SELF is
+-- "You create: %s." -- everything before the %s is the prefix.
+function craft.CreatePrefix(fmt)
+    fmt = fmt or LOOT_ITEM_CREATED_SELF or "You create: %s."
+    -- PLAIN find, so the needle is the two literal characters "%" and "s".
+    -- Escaping it as "%%s" is right for a PATTERN and wrong here: with plain
+    -- matching it looks for two percent signs, never matches, and every locale
+    -- silently falls back to the English prefix.
+    local at = string.find(fmt, "%s", 1, true)
+    if not at or at < 2 then return "You create: " end
+    return string.sub(fmt, 1, at - 1)
+end
+
+-- Did this chat line say we made something? Returns itemId, count.
+--
+-- THE CREATE MESSAGE IS THE ONLY SIGNAL. 1.12 has no spell-success event to
+-- hang a craft counter on, but the client prints the line above to
+-- CHAT_MSG_LOOT every time you make something. It is an O(1) string test on an
+-- event that does not storm -- and it is the same discipline as the purchase
+-- counter: never infer from bags what the game will tell you directly.
+--
+-- The multiple form is "You create: %sx%d." (no space), so a trailing "x12"
+-- after the link is the count.
+function craft.ParseCreate(msg)
+    if type(msg) ~= "string" then return nil end
+    local head = craft.CreatePrefix()
+    if string.find(msg, head, 1, true) ~= 1 then return nil end
+    local id = util.ItemIdFromLink(msg)
+    if not id then return nil end
+    -- The count sits after the link's colour terminator ("...|h|rx12."), so
+    -- anchor on the END of the line rather than on any part of the link.
+    local _, _, n = string.find(msg, "x(%d+)[%.%s]*$")
+    return id, tonumber(n) or 1
+end
+
 -- Capture the recipe selected in the craft window (Enchanting).
 function craft.CaptureCraft()
     if not GetCraftSelectionIndex then return nil, "No profession open." end
@@ -2304,3 +2658,26 @@ function craft.Current()
     end
     return nil, "No profession open."
 end
+
+-- You made something. The client prints "You create: [Item]" to CHAT_MSG_LOOT
+-- on every craft, and that is the only signal 1.12 offers -- there is no
+-- spell-success event on this client.
+--
+-- REGISTERED AT THE END OF THE FILE, not beside the other handlers. `craft` is
+-- a file-scope local declared partway down; a closure written above that line
+-- captures the nil GLOBAL of the same name and fails only when it runs. This
+-- one did exactly that.
+--
+-- O(1): one prefix test, and an early return on the loot lines that are not
+-- creates, which is nearly all of them.
+A.RegisterEvent("CHAT_MSG_LOOT", function()
+    local id, n = craft.ParseCreate(arg1)
+    if id then
+        craft.RecordMade(id, n)
+        -- The UI hangs a FLAG-SETTER here, never a repaint. This handler is on
+        -- a chat event that prints a line per item, so a big loot lands
+        -- several of them in a few frames -- HARD RULE 16, and the same shape
+        -- as sell.mailDirty.
+        if craft.onMade then craft.onMade(id, n) end
+    end
+end)

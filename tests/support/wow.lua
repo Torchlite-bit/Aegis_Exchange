@@ -155,7 +155,30 @@ function time() return W.now end
 
 W.realm   = "TestRealm"
 W.player  = "Tester"
+W.class   = "MAGE"
 function GetRealmName() return W.realm end
+
+-- Returns localized name, ENGLISH TOKEN. The token is the one that matters:
+-- it is what RAID_CLASS_COLORS is keyed by, and the only thing worth storing
+-- about an offline character, because nothing on 1.12 can ask a character
+-- that is not logged in what class it is.
+function UnitClass(unit)
+    if unit ~= "player" then return nil end
+    return W.class, W.class
+end
+
+-- Real 1.12 global, keyed by the English token.
+RAID_CLASS_COLORS = {
+    WARRIOR = { r = .78, g = .61, b = .43 },
+    PALADIN = { r = .96, g = .55, b = .73 },
+    HUNTER  = { r = .67, g = .83, b = .45 },
+    ROGUE   = { r = 1,   g = .96, b = .41 },
+    PRIEST  = { r = 1,   g = 1,   b = 1   },
+    SHAMAN  = { r = .14, g = .35, b = 1   },
+    MAGE    = { r = .41, g = .80, b = .94 },
+    WARLOCK = { r = .58, g = .51, b = .79 },
+    DRUID   = { r = 1,   g = .49, b = .04 },
+}
 function UnitName(unit) if unit == "player" then return W.player end return nil end
 -- "npc" answers only at a FACTION auctioneer; at a neutral (goblin) one the
 -- client returns nil. The old version ignored its argument and always said
@@ -479,6 +502,98 @@ function GetAuctionSellItemInfo()
 end
 
 -- ---------------------------------------------------------------------------
+-- Mailbox
+-- ---------------------------------------------------------------------------
+
+-- 1.12 has NO GetInboxItemLink -- an attachment can be NAMED and not
+-- identified, which is why anything counting mail has to resolve through the
+-- scan-fed name map and quietly misses what that map has never seen. Modelling
+-- that gap matters: a mock that handed back a link would make the addon look
+-- like it could do something the client cannot.
+W.inbox = {}          -- array of { name, count, subject, money, daysLeft }
+function W.SetInbox(rows) W.inbox = rows or {} end
+
+function GetInboxNumItems() return table.getn(W.inbox) end
+
+function GetInboxItem(index)
+    local m = W.inbox[index]
+    if not m or not m.name then return nil end
+    return m.name, "icon", m.count or 1, m.quality or 1, 1
+end
+
+function GetInboxHeaderInfo(index)
+    local m = W.inbox[index]
+    if not m then return nil end
+    return "icon", 0, m.sender or "Someone", m.subject or "",
+           m.money or 0, 0, m.daysLeft or 30
+end
+
+-- ---------------------------------------------------------------------------
+-- GameTooltip
+-- ---------------------------------------------------------------------------
+
+-- The real frame, near enough for the HOOK layer to be exercised.
+--
+-- There was none at all until v1.53.1, so tooltip.Install() returned early on
+-- its `if not GameTooltip then return end` guard and every hook in the file
+-- was untested -- which is how a hook that turned another addon's error into
+-- an error carrying OUR file name shipped without anything noticing.
+--
+-- W.tooltipThrows[method] = "message" makes that method refuse, the way 1.12's
+-- SetHyperlink refuses a link it cannot render ("Unknown link type"). Modelling
+-- the REFUSAL is the point: a tooltip that accepts everything cannot show that
+-- a wrapper mishandles a rejection.
+W.tooltipCalls  = {}    -- every Set* that reached the ORIGINAL, in order
+W.tooltipThrows = {}    -- method name -> error message it should throw
+
+local function gttCall(name, a1, a2)
+    table.insert(W.tooltipCalls, { method = name, a1 = a1, a2 = a2 })
+    local err = W.tooltipThrows[name]
+    if err then error(err, 0) end
+end
+
+GameTooltip = {
+    lines = {},
+    shown = 0,
+}
+function GameTooltip:SetOwner(owner, anchor) self.owner = owner end
+function GameTooltip:Show() self.shown = self.shown + 1 end
+function GameTooltip:Hide() end
+function GameTooltip:SetText(t) self.text = t end
+function GameTooltip:AddLine(text, r, g, b)
+    table.insert(self.lines, { left = text, r = r, g = g, b = b })
+end
+function GameTooltip:AddDoubleLine(l, r) table.insert(self.lines, { left = l, right = r }) end
+function GameTooltip:NumLines() return table.getn(self.lines) end
+
+-- The methods ui/tooltip.lua hooks. SetBagItem returns two values on 1.12
+-- (hasCooldown, repairCost) and the wrapper has to pass both up, so it does
+-- here too.
+function GameTooltip:SetBagItem(bag, slot) gttCall("SetBagItem", bag, slot); return nil, 0 end
+function GameTooltip:SetInventoryItem(u, s) gttCall("SetInventoryItem", u, s) end
+function GameTooltip:SetAuctionItem(l, i) gttCall("SetAuctionItem", l, i) end
+function GameTooltip:SetAuctionSellItem() gttCall("SetAuctionSellItem") end
+function GameTooltip:SetHyperlink(link) gttCall("SetHyperlink", link) end
+function GameTooltip:SetMerchantItem(i) gttCall("SetMerchantItem", i) end
+function GameTooltip:SetInboxItem(i) gttCall("SetInboxItem", i) end
+function GameTooltip:SetLootItem(i) gttCall("SetLootItem", i) end
+function GameTooltip:SetQuestItem(t, i) gttCall("SetQuestItem", t, i) end
+function GameTooltip:SetQuestLogItem(t, i) gttCall("SetQuestLogItem", t, i) end
+function GameTooltip:SetTradeSkillItem(i, r) gttCall("SetTradeSkillItem", i, r) end
+function GameTooltip:SetCraftItem(i, r) gttCall("SetCraftItem", i, r) end
+function GameTooltip:SetCraftSpell(i) gttCall("SetCraftSpell", i) end
+
+-- Wipe the tooltip back to an unhooked frame, so a suite that installs the
+-- hooks does not leak them into the next one.
+function W.ResetTooltip()
+    W.tooltipCalls  = {}
+    W.inbox         = {}
+    W.tooltipThrows = {}
+    GameTooltip.lines = {}
+    GameTooltip.shown = 0
+end
+
+-- ---------------------------------------------------------------------------
 -- Merchants
 -- ---------------------------------------------------------------------------
 
@@ -740,6 +855,12 @@ function W.Reset()
     W.itemInfoShape = "vanilla"
     W.itemInfoCalls = 0
     W.merchant      = {}
+    W.tooltipCalls  = {}
+    W.inbox         = {}
+    W.tooltipThrows = {}
+    W.class         = "MAGE"
+    W.player        = "Tester"
+    W.realm         = "TestRealm"
     W.clientDepositRate = 0.05
     W.npcFaction    = "Alliance"
     C_Item          = nil

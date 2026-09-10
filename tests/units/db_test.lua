@@ -321,4 +321,70 @@ local kept = db.ItemFacts(456)
 H.check("facts written by the current reader survive a reload", kept ~= nil)
 H.eq("...intact", kept and kept.r, 40)
 
+-- ---------------------------------------------------------------------------
+H.section("the item-fact sweep yields, and is paced")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. The sweep ran 500 ids every 0.5s -- a thousand GetItemInfo
+-- calls a second, from login to id 120000, every session. On 1.12 a miss does
+-- not just return nil, it puts an item query on the wire, and a thousand a
+-- second is invisible to Task Manager because the cost is in the client's
+-- item-cache and network path rather than in Lua. It was reported as freezes
+-- and stalls "with no abnormal spikes".
+H.check("the per-step budget is a pace, not a burst",
+        db.HARVEST_BUDGET <= 100,
+        "the sweep examines " .. db.HARVEST_BUDGET .. " ids per step")
+
+-- IT YIELDS TO THE AUCTION HOUSE. A background sweep firing item queries while
+-- a scan is paging is HARD RULE 10's flood by another door -- and it lands
+-- exactly when the player is watching, because they opened the auction house
+-- to do something.
+-- OFF BY DEFAULT. A probe on a real client caught GET_ITEM_INFO_RECEIVED
+-- arriving ~25 times a second with the sweep running, and a Lua heap of
+-- 222 MB climbing. 1.12 is a 32-bit process and every one of those answers
+-- also grows the client's own item cache, which gcinfo() cannot see -- so the
+-- measured half is the smaller half.
+-- PURGING IS A SEPARATE ACTION FROM STOPPING. `facts` lives in
+-- SavedVariables, so it is deserialised back into Lua at every login: a sweep
+-- that ran last week still costs memory today, however off it is now.
+db.PurgeFacts()          -- earlier sections in this suite record facts too
+db.SetItemFacts(1234, 2, 20, "INVTYPE_CHEST")
+db.SetItemFacts(5678, 1, 10, "")
+H.eq("facts accumulate", db.HarvestCount(), 2)
+H.eq("purging reports what it dropped", db.PurgeFacts(), 2)
+H.eq("...and they are gone", db.HarvestCount(), 0)
+H.isNil("...individually too", db.ItemFacts(1234))
+
+H.check("the sweep is OFF unless asked for", not db.Setting("harvest"),
+        "it walks 120000 ids at the server by default")
+db.harvestAt = 1
+H.check("...and does not start", not db.StartHarvest(), "it started anyway")
+H.check("...nor run", not db.HarvestRunning(), "it is running")
+
+db.SetSetting("harvest", true)
+db.harvestAt = 1
+db.StartHarvest()
+H.check("the sweep runs when nothing else needs the client",
+        db.HarvestRunning(), "it never started")
+
+W.FireEvent(A.frame, "AUCTION_HOUSE_SHOW")
+H.check("...and stops the moment the auction house opens",
+        not db.HarvestRunning(),
+        "the sweep keeps firing item queries while a scan pages")
+
+W.FireEvent(A.frame, "AUCTION_HOUSE_CLOSED")
+H.check("...and picks up again when it closes", db.HarvestRunning(),
+        "the sweep never resumes, so the facts are never gathered")
+
+-- A FINISHED sweep must not be restarted by closing the auction house --
+-- db.harvestAt is nil when it has reached the top of the range, and
+-- db.StartHarvest returns false rather than showing the frame again.
+db.StopHarvest()
+db.harvestAt = nil
+H.check("a finished sweep is not restarted", not db.StartHarvest(),
+        "closing the auction house restarts a sweep that is already done")
+H.check("...and stays stopped", not db.HarvestRunning(), "it came back")
+db.harvestAt = 1
+db.SetSetting("harvest", false)
+
 os.exit(H.report("db"))

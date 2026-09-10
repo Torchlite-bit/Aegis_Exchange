@@ -84,6 +84,20 @@ local function anyLineWith(t, needle)
     return nil
 end
 
+-- Either half. The Inventory rows carry the character on the left and the
+-- count plus its breakdown on the right, so a left-only search cannot see
+-- half of what that block prints.
+local function anyHalfWith(t, needle)
+    for i = 1, table.getn(t.lines) do
+        local L = t.lines[i]
+        if string.find(L.left or "", needle, 1, true)
+            or string.find(L.right or "", needle, 1, true) then
+            return L
+        end
+    end
+    return nil
+end
+
 -- A green chest whose item level the shipped table knows, and priced
 -- materials so the value can actually be computed.
 W.AddItem(900, { name = "Test Chest", quality = GREEN,
@@ -602,5 +616,56 @@ H.eq("what a merchant pays", lineFor(both, "Sell to Vendor:").right,
      A.util.FormatMoney(60, true))
 H.eq("what a merchant charges", lineFor(both, "Buy from Vendor:").right,
      A.util.FormatMoney(250, true))
+
+-- ---------------------------------------------------------------------------
+H.section("Inventory -- how many I own, and where")
+-- ---------------------------------------------------------------------------
+
+W.AddItem(930, { name = "Test Twine", quality = 1, type = "Trade Goods" })
+local TWINE = W.items[930].link
+
+local noInv = Capture()
+A.tooltip.Extend(noInv, 930, 1)
+H.isNil("owning none of it shows no block", lineFor(noInv, "Inventory"))
+
+W.SetBags({ [0] = { { link = TWINE, count = 6 } } })
+A.sell.bagsDirty = true
+local inv = Capture()
+A.tooltip.Extend(inv, 930, 1)
+local head = lineFor(inv, "Inventory")
+H.check("owning some of it opens the block", head ~= nil)
+H.eq("...with the account total on the right", head and head.right, "6 total")
+H.check("...and a row for you",
+        anyLineWith(inv, "Tester") ~= nil)
+H.check("...naming where it is", anyHalfWith(inv, "6 bags") ~= nil)
+
+-- Bags alone are LIVE, so the "as of your last visit" line must not appear --
+-- a caveat on a number that does not need one teaches players to ignore it.
+H.isNil("a bags-only holding carries no staleness line",
+        anyLineWith(inv, "as of"))
+
+-- Put some in the bank and the caveat appears, because now something in the
+-- block really is a memory.
+W.SetBags({ [0] = { { link = TWINE, count = 6 } },
+            [-1] = { { link = TWINE, count = 20 } } })
+A.sell.bagsDirty = true
+W.FireEvent(A.frame, "BANKFRAME_OPENED")
+local banked = Capture()
+A.tooltip.Extend(banked, 930, 1)
+H.eq("the total spans both", lineFor(banked, "Inventory").right, "26 total")
+H.check("...the bank is named", anyHalfWith(banked, "20 bank") ~= nil)
+H.check("...and NOW the caveat appears", anyLineWith(banked, "as of") ~= nil)
+
+-- Empty buckets are not printed. "0 ah, 0 mail" on every row is noise on a
+-- block that is already the longest thing on the tooltip.
+H.isNil("a bucket holding none of it is not listed",
+        anyHalfWith(banked, "0 mail"))
+
+-- Its own switch, and it must not take the others with it.
+A.db.SetSetting("tipInventory", false)
+local offInv = Capture()
+A.tooltip.Extend(offInv, 930, 1)
+H.isNil("switched off, the block is gone", lineFor(offInv, "Inventory"))
+A.db.SetSetting("tipInventory", true)
 
 os.exit(H.report("tooltip"))

@@ -68,6 +68,64 @@ REMOVED_ON_PURPOSE = {
                     "this plain-text box had no callers left",
     "ui.CountChecked": "v1.50.1 -- UpdateSelCount counts ui.CollectQueries, "
                        "which is the number the button actually shows",
+    # v1.52.6. The shopping-list ENGINE, unreachable since the Advanced
+    # redesign removed the sidebar that was its only caller. It was kept on
+    # the reasoning that re-homing the feature would cost a UI rather than a
+    # rewrite -- and then the Crafting tab's tracked recipes turned out to BE
+    # that feature's shape and were built on `crafting` instead. The saved
+    # data (account.shopping.lists) is deliberately NOT deleted.
+    "buy.Lists":  "v1.52.6 -- the shopping-list engine; tracked recipes are "
+                  "the same idea built on `crafting`",
+    "buy.AddList":            "v1.52.6 -- with buy.Lists",
+    "buy.RenameList":         "v1.52.6 -- with buy.Lists",
+    "buy.DeleteList":         "v1.52.6 -- with buy.Lists",
+    "buy.AddItemToList":      "v1.52.6 -- with buy.Lists",
+    "buy.RemoveItemFromList": "v1.52.6 -- with buy.Lists",
+    # v1.52.19. The left panel stopped being a recipe TREE and became the
+    # shopping list, so its click handler is ui.OnShoppingClick -- a reagent
+    # line searches that reagent. There is no tree left to click.
+    "ui.OnCraftTreeClick": "v1.52.19 -- renamed ui.OnShoppingClick when the "
+                           "left panel became the shopping list",
+    # v1.52.20. "Price recipe" and "Price all" are the same walk over different
+    # lists, so there is ONE runner (ui.RunCraftQueue) and both call it with a
+    # verb -- rather than a second copy that drifts.
+    "ui.CraftRunPriceQueue": "v1.52.20 -- folded into ui.RunCraftQueue, the "
+                             "one sequential-search runner",
+
+    # It never bought anything -- it SEARCHES, so the prices fill in and the
+    # list's estimate resolves. "Shop all" read as "spend my gold", which is an
+    # alarming thing to press to find out what something costs.
+    "ui.ShopAll": "v1.52.25 -- renamed ui.CraftPriceAll with the button, "
+        "because it prices the list rather than buying it",
+
+    # It was never Crafting-only in principle and is not in practice any
+    # more: ui.MakeHeaderCell applies it to every column caption in the window.
+    "ui.CraftLabelFont": "v1.52.31 -- renamed ui.LabelFont; every table's "
+        "headings go through it now, not just the Crafting tab's",
+
+    # ONE SCOPE ON THE SHOPPING PANEL, and it is the list's. The per-recipe
+    # Cost/Sells/Net moved to the recipe row's own tooltip, where it is
+    # attached to the recipe it describes rather than to whichever row was
+    # clicked last -- and the panel's five money figures are painted by one
+    # function, because they are five views of two numbers.
+    "ui.UpdateCraftSummary": "v1.52.29 -- the SELECTED recipe's economics; "
+        "the panel is list-scope now and ui.UpdateCraftMoney paints all of it",
+    "ui.UpdateCraftSpend": "v1.52.29 -- folded into ui.UpdateCraftMoney; Cost "
+        "and Spent have to add up, so they may not be computed in two places",
+
+    # THE THIRD PANEL. The Crafting tab held tracked recipes and a made-this-
+    # session count in a panel of its own; both are on the recipe ROWS now
+    # (`1/5` IS the made count and the wanted count), and deleting the panel
+    # took the shopping panel from 174px to 358 at the smallest window.
+    "ui.UpdateCraftMade": "v1.52.21 -- the made-this-session panel; the counts "
+        "are on the recipe rows in the shopping tree, painted by "
+        "ui.PaintCraftRow",
+    "ui.CraftMadeRowW": "v1.52.21 -- with ui.UpdateCraftMade; there is no "
+        "right-hand panel to measure a row in",
+    "ui.CraftHalfW": "v1.52.21 -- generalised to ui.CraftBtnW(w, n): the "
+        "shopping panel now divides its width by two, three and four, and "
+        "three constants for one division is three places to get the gutter "
+        "count wrong",
 }
 
 

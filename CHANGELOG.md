@@ -10,6 +10,1070 @@ printed in the window title bar — quote it in bug reports.
 > list at startup, so `/reload` won't pick them up — you need to fully restart
 > the client. Everything else is `/reload`-safe.
 
+> **One push, one MINOR.** A body of work that lands in one merge takes a
+> single MINOR bump, and every change inside it — each phase, each fix found
+> along the way — is a PATCH under it. So the 2h overhaul is `1.52.0` through
+> `1.52.5`, not five MINORs. The MINOR moves again at the next body of work,
+> not at the next feature within this one.
+
+---
+
+## [1.52.34]
+
+### Fixed
+- **The input colour now survives pfUI.** v1.52.33 fixed the unskinned case —
+  the font object had to be detached before `SetTextColor` would stick — and
+  under pfUI it was still dull, which says pfUI touches the box *after* we do:
+  after the colour is set at build, and after `ui/skin.lua` re-applies it inline.
+  - So the window keeps a **registry of every edit box it has coloured**, and
+    re-colours all of them **one frame after any skin pass**. A frame later it
+    is done, whatever it was and whenever it happened. Same trick and the same
+    reason as `AegisExchangeHider`: when an ordering cannot be reasoned about
+    from here, stop reasoning about it and wait a tick.
+  - One shot — the driver hides itself, so a pass that skins six boxes arms one
+    re-apply, not six, and an idle window costs nothing.
+
+### Internal
+- **`ui.ReapplyInputText` takes its count before it walks.** Re-colouring a box
+  *registers* it, so the walk appends to the list it is iterating — re-reading
+  `table.getn` each time round is a loop whose end moves away as fast as the
+  cursor reaches it. The dedupe flag stops that today; the bound is what makes
+  it terminate if the flag ever fails, and a hung client is not a bug you get to
+  debug. Found by a sabotage that hung the test runner outright.
+  - That sabotage is **not** in the suite, and there is a note saying why:
+    proving the bound needs a permanently failing dedupe, which turns the
+    unbounded walk into a hang rather than a failure. A sabotage that hangs the
+    harness is worse than none. A test forges a single failure instead and
+    asserts the list does not run away.
+
+---
+
+## [1.52.33]
+
+### Fixed
+- **The input colour was being set and then lost, and the reason was the font
+  object.** `InputBoxTemplate` backs its edit box with a font *object*
+  (`ChatFontNormal`) rather than a font of its own, and a FontInstance backed by
+  an object takes that object's colour — `SetTextColor` on it does not survive
+  the next redraw. So the call ran, and the colour went.
+  `ui.InputText` now calls `SetFont` with the box's **own current font** first,
+  which gives it a private font instance; after that the colour sticks. Nothing
+  about the typeface or size changes — only who owns it.
+  - The two earlier attempts (v1.52.24, v1.52.32) both re-arranged *when* the
+    colour was set — at build, then again after skinning — and neither touched
+    the mechanism, which is why neither worked.
+  - The settings panel also re-asserts it from `ui.RefreshSettings`, which runs
+    after every build and skin path that panel has.
+
+### Internal
+- Two sabotages for the mechanism itself: the detach removed, and the two calls
+  in the wrong order — which re-attaches the object and throws the colour away
+  again, with no error and no visible difference in the source.
+
+---
+
+## [1.52.32]
+
+### Fixed
+- **Every results table in the window was being plated by pfUI.** Buy, Crafting
+  search results, Auctions, History, the Sell listings and the Sell bag list —
+  all six. pfUI's `SkinButton` gives every Button its generic plate, and on a
+  list row that border is drawn *through* the row's own first and last pixels,
+  which is where the clipping came from. The Crafting tab's Shopping panel
+  opted out in v1.52.25 and has been the only clean list on screen since; that
+  is the whole difference the redesign was being judged against.
+  - **`ui/skin.lua` carried a comment saying this could not happen** — "result
+    rows were never affected: those are Frames, so the Button branch never
+    reached them". They were Frames. Then `BuildResultRow` became a Button so a
+    row could take a click and a highlight, six lines above where that note
+    still sat. A claim in a comment is not a check.
+  - New `tests/lint/rowskin.py` checks it instead: a Button that gets
+    `ui.AddRowChrome` is a list row, and a list row must set `aegisNoSkin`.
+    Four self-test cases, including an opt-out set on the wrong widget.
+- **The input colour did not survive the skin.** `ui.InputText` runs when a box
+  is built; `A.skin.Apply()` runs last, after every widget exists — so anything
+  pfUI does to an edit box happens afterwards and wins. That is why the
+  flat-undercut amount read dull under pfUI and only under pfUI. `skin.lua`
+  re-asserts it now, exactly as its button branch already re-asserts
+  `ui.SetButtonKind`.
+- **`C.input` is flat white.** Everything else in this window is warm, which is
+  precisely why the one thing you are editing should not be: against a pfUI
+  backdrop the warm off-white sat close enough to the surrounding tan to be
+  hard to pick out.
+
+### Internal
+- **The lints are sabotage targets now.** `rowchain.py` has guarded the
+  row-anchor freeze since v1.52.16 and had never once been watched fail — which
+  is how it spent that whole time unable to see two of the pools it was written
+  for. It and `rowskin.py` are in `SUITES`, each with a planted bug that must
+  trip them.
+- Two of this release's own sabotages were wrong first: one flipped a comment
+  from "MUST NOT" to "MAY" and left the code in place, which proves nothing.
+
+---
+
+## [1.52.31]
+
+### Changed
+- **Every table's column headings read the same way** — caps in the narrow face
+  the Crafting tab got in v1.52.27. Buy, Auctions, History, Sell listings and
+  the bag list all followed their own definition tables; the Crafting tab spent
+  four releases in caps beside five in sentence case.
+  - Uppercased in `ui.MakeHeaderCell`, which is the one place a heading is
+    built. Six tables each remembering to do it themselves is six places to
+    forget one.
+  - The sort arrow no longer undoes it. `ui.PaintSortHeaders` rewrites the label
+    to hang the arrow off it, so a caption capitalised only at creation came
+    back in sentence case the first time you sorted by that column — one column
+    out of seven, which reads as a rendering glitch rather than a missed call.
+  - The Crafting tab's captions go back to sentence case *in the source*. What a
+    definition table owns is the wording; the casing is decided once.
+
+### Internal
+- **Four hand-rolled copies of the quality-colour lookup collapsed into
+  `ui.QualityColor`** — the results rows, the Auctions rows and the bag list all
+  had their own `if ITEM_QUALITY_COLORS[q] then … else C.text`. One place decides
+  now, and it is the one that already has tests and a dimming factor. The two
+  remaining mentions are a different question (naming all six qualities in a
+  dropdown, and building a `|cff…|r` string for chat) and stay as they are.
+- `ui.CraftLabelFont` is `ui.LabelFont`: it was never Crafting-only in
+  principle, and every table's headings go through it now.
+
+### Note
+- **History still does not quality-colour its item column, deliberately.** The
+  ledger stores a name and an id, never a quality, so colouring there means a
+  `GetItemInfo` per row inside a repaint `ui.ScanMailSales` can trigger while the
+  client is storming `MAIL_INBOX_UPDATE` — HARD RULE 16, and the shape that
+  froze Courier. The Type column carries the colour that matters there.
+- **The Sell listings table has no item column at all** — every row is the same
+  item, the one in the sell slot — so there is nothing for an icon to sit beside.
+
+---
+
+## [1.52.30]
+
+### Fixed
+- **The Sell tab had two row pools still anchored row-to-row** — the bag list
+  and the listings table. That is the chain that made dragging and resizing the
+  window stall: the client resolves those recursively, so placing the last row
+  walks every row above it, and nothing in Lua does that work, which is why the
+  addon's own trace showed silence through the freeze. Both go 34 deep, both
+  are on the same tab, and **posting an item repaints both** — which is the Sell
+  tab freeze that was reported repeatedly and never fully accounted for. They
+  are flat-anchored now, like every other pool since v1.52.16.
+- **The lint that exists to catch exactly that was green and wrong.**
+  `tests/lint/rowchain.py` spelled the subscript `i` literally; these two pools
+  count with `bi` and `li`, so it never looked at them. It sat green through the
+  entire freeze investigation it was written for. The pattern takes any index
+  variable now, and the lint has a **self-test** — eleven cases, five shapes it
+  must catch and six it must leave alone — wired into `run.sh`. A lint nobody
+  has watched fail is a lint nobody has tested.
+- `run.sh` called `section` for one heading, a function that does not exist
+  (it is `step`). Harmless, and it had been printing an error to stderr on every
+  run.
+
+---
+
+## [1.52.29]
+
+### Changed
+- **The shopping panel is one scope now, and it is the list's.** Above the box:
+  `Cost` — what the whole run costs — and `Sells`, what everything tracked would
+  fetch. On the bottom bar: `Spent`, `Profit/Loss`, and `Made N`.
+  - The **selected recipe's** Cost / Sells / Net moved to **the recipe row's own
+    tooltip**. They were three figures on the bottom bar describing whichever
+    row was clicked last, sitting under a list about every recipe at once — two
+    scopes on one panel, which is how `Cost 64c+` over six reagents came to read
+    as the cost of the list. On the row they are unambiguous, and *every* recipe
+    has them rather than only the selected one.
+  - **`Sells` is valued by crafts, not by items wanted** — the same ceil the
+    shopping list buys reagents on. Ask for five of something made in twos and
+    you buy for three crafts and hold six; valuing five while paying for six
+    flatters every recipe with a yield above one, which is every recipe anyone
+    runs at volume.
+  - **The 5% cut comes off the sale, not off the profit.** It leaves before you
+    ever see it. Off the difference instead, every thin margin looks wider than
+    it is — and a thin margin is the only kind where the answer changes what you
+    do.
+  - One unpriced recipe makes `Sells` and `Profit` read `?` rather than quoting
+    a total that silently omits it. A smaller number that still looks like an
+    answer is worse than no answer, and it is smaller in the direction that
+    reads as "not worth doing".
+
+### Fixed
+- **`MADE/WANT` wrapped onto two lines**, drawn over the row below it — new in
+  v1.52.27. The count cell is 44px, which is what a *count* needs; a section
+  row has no stepper and no vendor mark, so the caption gets that lane too. The
+  cell is narrowed again for every other kind, because one pool serves them all.
+
+### Internal
+- Five money figures, **one painter**. `Cost` and `Spent` have to add up, and a
+  pair that has to add up is exactly the pair that must not be computed in two
+  places — they were, in two functions. `ui.UpdateCraftSpend` and
+  `ui.UpdateCraftSummary` are now `ui.UpdateCraftMoney`.
+- `ui.ListValue` and `ui.ListNet` are pure and tested; five sabotages, including
+  both directions of the yield and the cut.
+
+---
+
+## [1.52.28]
+
+### Changed
+- **The chosen option in a segmented row reads in the input colour** — the same
+  near-white the edit boxes got in v1.52.24. `%` / `Flat`, `6h` / `24h` / `72h`,
+  `Undercut` / `Market` / `None`: every one of those is a *value you have set*,
+  exactly like the number in the box beside it, and the two were saying so in
+  two different shades — the figure bright and the mode governing it dim.
+  Unchosen options keep their plate's own colour, which is what makes the
+  difference read as chosen rather than as decoration.
+  - It goes through `aegisTextColor`, the existing per-button override
+    `RepaintButton` re-reads on every hover and press, so a mouseover cannot
+    wipe it — and it is cleared to **nil**, not to a colour, so the button's
+    kind stays the one thing deciding the default.
+
+### Internal
+- `rowchrome_test.lua` runs the real `ui.MarkChosen` against stub buttons: that
+  the colour lands on the chosen one, that it *comes off* when the choice moves
+  (or every option a row ever held reads as chosen), and that a deselected
+  accent button goes back to accent rather than to quiet. Two sabotages.
+
+---
+
+## [1.52.27]
+
+### Changed
+- **The Crafting tab's headings and rows follow the concept.**
+  - Headings and column captions are **caps in a narrow face** —
+    `SHOPPING`, `SEARCH`, `RECIPES`, `REAGENTS`, `ITEM / CT / UNIT / STACK /
+    %MKT`. 1.12 has no letter-spacing and no font-variant, so the caps and the
+    narrower face *are* small caps here; pretending otherwise with inserted
+    spaces would break every width measurement on the tab.
+  - **Section rows carry a column caption**, `MADE/WANT` and `HAVE/NEED`. `1/5`
+    and `18/40` are two fractions in one list meaning different things, and
+    nothing was saying which.
+  - **The panel heading counts both sections**: `4 RECIPES · 9 TO BUY`, with
+    the second half dropped entirely when there is nothing left to buy — a zero
+    there is the finished state and should look finished, not be reported.
+  - **Sections fold with `−`/`+`, recipes open with `▸`/`▾`.** Two different
+    gestures: a section folds a block away, a recipe opens a breakdown inside
+    one. The same mark for both said they did the same thing.
+  - **The stepper sits in front of the count**: `[-] [+]  1/5`. The five is
+    what the pair moves, so the pair reads as a control *on* that number rather
+    than as two more buttons after it.
+  - **Breakdown lines read `· Dreamfoil ×3`.** Indentation alone was not enough
+    to separate a component of the row above from another entry in the list.
+
+### Fixed
+- **A reused row kept the previous kind's font.** One widget pool serves
+  sections, recipes, breakdown lines and shopping lines; a row that drew a
+  section header is left in caps, and a font set on a FontString stays set — so
+  the list read correctly until you scrolled it. Every cell is restored at the
+  top of the paint now.
+
+### Internal
+- `ui.PaintCraftRow` gets a suite. It has four branches and one widget pool,
+  which is exactly where a "looks right until you scroll" bug hides, and the
+  font one was already in there. 29 checks against a stub row that records what
+  it was asked to draw, plus six sabotages including the stepper order and the
+  controls left behind on the wrong kind.
+- The suite reads `CRAFTL`'s column widths out of the source rather than
+  restating them: it asserts the ORDER of the cells, the geometry suite owns
+  the numbers, and two copies is how two suites come to disagree.
+
+---
+
+## [1.52.26]
+
+### Added
+- **Item names in the shopping panel read in their quality colour** — a rare is
+  blue, an epic purple — from FrameXML's own `ITEM_QUALITY_COLORS`, so they
+  match the rest of the game exactly. The results table has done this since
+  v1.24.0; the panel beside it had not, which was most of what made the two
+  halves of the tab look like different addons.
+  - **The name carries quality, the count carries state.** Both were carrying
+    state, so a rare reagent and a common one looked identical and the only
+    thing either name told you was something the count next to it already said.
+  - A reagent you are going to **craft** is *dimmed* rather than greyed. Set
+    aside is one fact and quality is another; swapping the name for a flat grey
+    threw away the one you can see from across the panel.
+  - Selection still wins over quality on a recipe row — exactly one row is
+    selected and its economics are on the footer bar, so that has to be findable
+    at a glance.
+
+### Internal
+- **Quality is asked for once per list rebuild, never per repaint.**
+  `GetItemInfo` is a per-item client query and this tab repaints from a
+  `BAG_UPDATE` flag, which storms — HARD RULE 16. `ui.StampCraftQuality` runs
+  in `ui.FlattenCraft` and `ui.CraftQualityOf` memoises, so once an id resolves
+  it is a table read for the rest of the session.
+  - An id that does **not** resolve is deliberately not cached: "the client has
+    not loaded that item yet" is temporary, and remembering it would leave the
+    name uncoloured until logout.
+- Four sabotages, including both directions of that memo. The one that caches
+  the miss had to be written twice — assigning `nil` to a table key *removes*
+  it, so the first version was a no-op that proved nothing.
+
+---
+
+## [1.52.25]
+
+### Fixed
+- **The Crafting tab's shopping rows were being plated by pfUI**, and that plate
+  was drawn straight through the row's own first and last pixels — every name
+  and every count clipped at both ends, and correct without the skin.
+  `ui/skin.lua` has had an opt-out for exactly this since v1.23.0 and every
+  other clickable list row in the window sets it; these never did, from the day
+  they were built. The results table beside them was never affected because
+  those rows are Frames, so the skinner's Button branch never reached them —
+  which is why only one of the two panels showed it.
+- **The footer economics wrapped onto each other.** `Cost` / `Sells` / `Net`
+  were FontStrings with a width, and a width makes a FontString *wrap* — so
+  "Net need prices — Price recipe" became two lines drawn on top of one
+  another. Nothing on this tab's chrome carries a width now; alignment comes
+  from the anchor, which cannot wrap. The `Net` cell reads `Net ?` to match
+  `Cost ?` and `Sells ?` beside it, and the instruction moved to the middle
+  panel's status line, which is a whole panel wide.
+- **`ui.FitString` will no longer cut a coloured string.** The cut is by byte
+  index and every money figure is wrapped in `|cffRRGGBB…|r`; landing inside one
+  leaves the escape half-written, so the client draws the raw bytes *and*
+  colours the rest of the line with whatever it read. One clipped price would
+  corrupt everything after it.
+
+### Changed
+- **"Shop all" is now "Price all".** It buys nothing — it searches, so the unit
+  prices, the `%Mkt` column and the list's own estimate fill in (the `+` on that
+  estimate means "some lines still have no price"). The old name read as "spend
+  my gold", which is an alarming thing to press to find out what something
+  costs. It is the same operation as `Price` at a different scope, and the two
+  now say so.
+
+### Internal
+- The geometry suite names the nine Crafting chrome FontStrings and asserts none
+  of them is given a width — the list *is* the claim, so a new one added without
+  being added there is a new one nobody checked. The pfUI opt-out is asserted
+  against `ui.GrowCraftSideRows`'s own body: five other row pools set the same
+  flag, so a whole-file search passes whatever the Crafting tab does.
+- Six sabotages. One of them found a bug in itself first: `row.aegisNoSkin` is
+  not unique at that indentation, and the mutation was landing on the Buy tab's
+  category rows instead.
+
+---
+
+## [1.52.24]
+
+### Fixed
+- **What you type is now a colour we chose.** Every edit box in the window
+  inherited `InputBoxTemplate`'s font — the client's chat font, coloured for a
+  chat frame over the world — and we then sat it on a near-black backdrop.
+  Nothing was *wrong* with it; it had simply never been picked. It is brighter
+  than the body copy around it now, which is the rule that matters: text you
+  read in bulk can sit back, a figure you are entering is one or two characters
+  and has to come forward.
+  - It reaches the three boxes that keep the **stock art** as well as the ones
+    we restyle — the two search fields and the settings percent box. That last
+    one shares a row with three coin boxes, which is where this was spotted.
+- **The gold / silver / copper boxes centre their digits.** Right-aligned put
+  the figure hard against the box edge, and so against the coin two pixels past
+  it — `[    1]` and its coin read as one glued blob. Each box holds a single
+  denomination, so there is no units column to line up, which is the only thing
+  right-alignment was buying.
+
+### Internal
+- New palette entry `C.input`, and `ui.InputText` as the one place that applies
+  it. `rowchrome_test.lua` asserts the comparison rather than the shade —
+  input text must be no darker than `C.text` in any channel and brighter in at
+  least one — so "just use C.text" fails, which is the shade that was reported.
+  Four sabotages: an uncoloured box, a flattened box left out, a colour no
+  brighter than body copy, and the coin boxes back to right-aligned.
+
+---
+
+## [1.52.23]
+
+### Fixed
+- **A running "Shop all" no longer lets you pull the list out from under it.**
+  `Remove` and `Reset` stayed live during a walk: `Remove` would delete the
+  recipe whose reagents the walk was still searching for — leaving a queue of
+  names nothing on the list wants any more, each one a trip through the query
+  gate spent on nothing — and `Reset` cleared the made counts the walk exists to
+  fill. Only `Price` was gated. All three are now.
+- **"Select a recipe on the right first."** There has been no right-hand panel
+  since 1.52.21. Both of the tab's select-a-recipe messages now name the
+  Shopping list, and say it in the same words.
+
+### Docs
+- **The README's Crafting section described the tab as it was five releases
+  ago** — "lists every reagent, click one to shop for it". It now covers what
+  actually ships: one aggregated shopping list across every tracked recipe, the
+  `[-] 5 [+]` quantity, have/need counts against your bags and bank, the vendor
+  mark, `Shop all`, expanding a recipe for its own breakdown, why an
+  intermediate goes dim instead of red, and the session spend line.
+
+### Internal
+- `craftqueue_test.lua` runs the REAL `ui.RefreshCraftButtons` against four fake
+  buttons rather than the stub the runner tests use, so which buttons a walk
+  gates is asserted rather than assumed. Two sabotages: one that leaves `Remove`
+  and `Reset` live, one that inverts the gate.
+
+---
+
+## [1.52.22]
+
+### Added
+- **The Crafting tab says what this session has spent.** The line above the
+  shopping list reads `Spent 41g 20s` / `of 104g 30s` — what has already gone
+  on reagents from this list, over what the whole run costs.
+  - **The denominator is spent + still-to-buy.** Putting the spend over the
+    *remaining* cost gives you "spent 30g of 24g" — the bigger number on top,
+    called progress. Before you buy anything the right-hand figure is exactly
+    what the list costs, which is what this line used to say as "Buy all", so
+    nothing was lost by making it a fraction.
+  - A line you have already **covered still counts**. The money left the bags
+    whether or not the shortfall is now zero; skipping covered lines would make
+    the total *fall* as you finished the shopping.
+  - Money already spent never carries the `+` — that suffix means a line still
+    to buy has no price at all. What you paid is a fact, not an estimate.
+- **Hover a reagent for what it has cost you.** The item's own tooltip, then
+  what the list wants (`Need 40, have 18 — 22 to buy`), then
+  `Bought 18 this session for 30g (1g 66s each)`.
+  - This is the one figure the deleted third panel could have shown that no row
+    can, and it costs a hover instead of 184px of the tab.
+  - The per-unit average is **nil, not zero**, for something never bought:
+    "0c each" is a price, and a wrong one.
+  - Hovering a **breakdown line** under an expanded recipe says what that recipe
+    needs per craft and points at the aggregated line below it, which is the one
+    you buy from.
+
+### Internal
+- `ui.ShoppingSpend` owns "what has gone" and `ui.ShoppingTotal` keeps owning
+  "what is still to buy"; the money line adds them. One walk computing both is
+  how a fraction ends up with a numerator and a denominator that disagree.
+- The line follows purchases with no new event handler: buying changes the bags,
+  and the Crafting tab's `BAG_UPDATE` flag already repaints once a frame behind
+  HARD RULE 16's flush.
+- `crafttree_test.lua` grows to 70 checks; three more sabotages — a spend that
+  skips covered lines, one that adds the unit count instead of the copper, and
+  an average that returns zero where it must return nil.
+
+---
+
+## [1.52.21]
+
+### Changed
+- **The Crafting tab is two panels, not three.** Shopping on the left, the
+  results table on the right, and the third panel deleted.
+  - **The shopping panel goes from 174px to 358** at the smallest window — more
+    than double. A recipe name had **60px** after the expander, the stepper and
+    the made/want count, which is about ten characters: *Greater Ar…*. It now
+    has 244.
+  - **The panel that was deleted was largely a duplicate.** A recipe row carries
+    `1/5` — made over wanted — so "made this session" was a second rendering of
+    a number already on screen. The counts are on the recipe rows now.
+  - The shares are **38.5 / 61.5**, which at the minimum window is exactly what
+    the results table's floor leaves (930 − 572 = 358) and holds all the way up
+    to 1400.
+
+### Added
+- **Recipes and reagents are two collapsible sections of one list.** `+` and `-`
+  on the section headers; the Recipes header carries the count and the Reagents
+  header how many lines you are still short of.
+  - **Expand a recipe to see its own reagents**, indented and dimmed, at the
+    quantity *that* recipe asks for. It is a **breakdown, not a shopping line** —
+    what you buy from is the aggregated Reagents section below, where Dreamfoil
+    is one line of forty rather than three lines under three recipes. Clicking a
+    breakdown line searches for the aggregated one anyway.
+  - The breakdown multiplies by **crafts, not by items wanted**: five of
+    something made in twos is three crafts, so a reagent taking two of them is
+    six — the same ceil the shopping list uses, injected so the two cannot round
+    differently about the same recipe on the same screen.
+  - **Collapse state is remembered per character**, in `AegisExchangeCharDB`,
+    because which professions you are working is a per-character fact. Open
+    recipes are keyed by **name**, not index — remove a recipe and every index
+    after it shifts, and an index-keyed set would open whichever recipe slid
+    into the hole.
+- **`Price`, `Shop all`, `Remove` and `Reset` are one action row** across the
+  shopping panel. They fit there because the panel is 358px; three of them were
+  on the third panel until now.
+- **The selected recipe's economics moved to the panel's bottom bar** — Cost,
+  Sells and the Profit/Loss. A conclusion belongs on the bottom bar; what the
+  whole list costs to fill stays above the box, where the list is.
+
+### Fixed
+- **`ui.UpdateCraftNeed` read a field that has never existed.** It looked the
+  shopped reagent up by `kind == "reagent"` and then read `shortBy` off it — a
+  name only its own private copy carries. The branch was unreachable until this
+  release started marking the rows with `kind`, at which point it would have
+  compared `nil` with a number and thrown. It reads `short` now, and `kind` is
+  stamped whether or not the Reagents section is folded, so the lookup cannot
+  depend on what happens to be collapsed.
+- **One repaint per frame instead of two.** The bag flag and the made flag drove
+  two separate repaints in the same frame over the same rows; now that the
+  recipes and the reagents are one list, the second would have thrown the first
+  away. HARD RULE 16's flush does one.
+
+### Internal
+- `ui.CraftWidthsAt` returns **two** widths. A caller left behind writing
+  `local l, _, r = …` gets `nil`, which is the failure you want — a stale third
+  width would place widgets over the results table.
+- `ui.CraftHalfW` became `ui.CraftBtnW(w, n)`: the shopping panel divides its
+  width by two, three and four, and three constants for one division is three
+  places to get the gutter count wrong. The one that matters is the button row,
+  whose plates draw outside themselves.
+- New `tests/units/crafttree_test.lua` (51 checks) over `ui.CraftTreeRows`,
+  `ui.ShoppingRowFor` and `ui.ToggleCraftRow`, with ten sabotages — including
+  one for the `kind`-stamping bug above and one that keys `open` by index.
+
+---
+
+## [1.52.20]
+
+### Added
+- **"Shop all"** — one button walks the shopping list, searching each thing you
+  still have to buy, instead of you clicking them one at a time.
+  - It searches **only what you are short of**, and **not** the intermediates —
+    their own reagents are already on the list further down, so queuing them
+    would search for something you were never going to buy. Every search costs
+    a trip through the query gate, so both exclusions are time as much as
+    correctness.
+  - **Press it again to stop.** The button *is* the state: it reads "Stop"
+    while a walk is running, and it is painted from the queue, so the two
+    cannot get out of step.
+  - Paced entirely by the client's query gate — the next search starts when the
+    previous one's results land. A ten-line list takes as long as ten searches
+    and not a moment less. That is the client's rule (HARD RULE 10), not ours.
+  - A walk **ends with the auction house session**. Left armed, its remaining
+    searches would fire against whatever session came next — possibly a
+    different trip to a different auctioneer.
+
+### Internal
+- **One sequential-search runner for both "Price" and "Shop all".** They were
+  about to be two copies of "search these names in turn", which is how they
+  drift: one grows a cancel and the other does not, one clears its queue when
+  the client refuses and the other leaves it armed.
+- **A reply that arrives after you pressed Stop no longer restarts the walk.**
+  Every search is asynchronous, so a cancelled run's results still land — and
+  chaining off them resumes the thing you just stopped. The callback checks the
+  queue it belonged to *by identity*, which also covers starting a different
+  run while one is in flight. New `craftqueue` suite drives the runner with
+  stubbed replies to prove it.
+
+## [1.52.19]
+
+### Changed
+- **The Crafting tab's left panel is a shopping list, not a recipe tree.**
+  Track three recipes that each want Bolt of Woolen Cloth and the tree showed
+  it three times in three places. Now it is **one line** — the name, whether a
+  vendor sells it cheaper, and `have/need`.
+  - **Red** when you are short, **green** when you are not, and **dimmed** when
+    it is something you will craft rather than buy — its own reagents are
+    already further down the list.
+  - **`v`** beside a line means a merchant sells it cheaper than the auction
+    house does.
+  - **"Buy all"** above the list is what the whole shortfall costs at the
+    cheaper source. A `+` on the end means a line has no price yet, so the
+    figure is a floor rather than an answer.
+  - Click a line and the middle panel searches that reagent, exactly as before.
+- **The tracked recipes moved to the right panel**, taking their economics with
+  them: `Cost` / `Sells` above the box, `Price` / `Remove` under them, and the
+  `Net` on the footer. Leaving those over a list of *reagents* would have read
+  as the cost of the list.
+  - Each recipe row is `name`, `made/want`, and the `[-] [+]` that move the
+    want. The pair needs no number of its own — the `5` in `1/5` **is** the
+    stepper's value, which is what let the cluster shrink from 54px to 34 when
+    it moved into the narrower panel.
+- The two outer panels now take **equal shares** of the width. The old 20/18
+  split dated from when the left held a whole tree and the right held two
+  cells.
+
+## [1.52.18]
+
+The arithmetic behind a real shopping list. The panel that shows it is next;
+nothing on screen changes yet.
+
+### Added
+- **`craft.ShoppingList` — one line per reagent, not one per recipe.** Track
+  three recipes that each want Bolt of Woolen Cloth and the tree shows it three
+  times in three places, so you shop for it three times and still get the total
+  wrong. This aggregates: **one line, one total, one shortfall.**
+- **Sub-reagents expand into what you actually buy.** Short of something you
+  can *make*? Then what you need to buy is what that recipe needs — a shortfall
+  of Bolt of Woolen Cloth becomes the Wool Cloth to make it, and the bolt stops
+  being a shopping line rather than being counted twice.
+  - Only the **shortfall** expands: owning two of the four bolts buys cloth for
+    two, not four.
+  - Depth-capped. A recipe cycle is something a server can define and a
+    mis-captured recipe can invent, and an unbounded walk is a hung client.
+- **Vendor or auction house, per line.** `craft.CheaperSource` picks the
+  cheaper of the two and returns the price it chose. **A tie goes to the
+  vendor** — its price is fixed and always in stock; an auction at the same
+  money is a listing that may be gone when you get there.
+
+### Internal
+- Everything is injected — `wantOf`, `haveOf`, `recipeFor`, `vendorOf`,
+  `marketOf` — so it is arithmetic a suite runs without a client. Nine new
+  sabotages, including the cycle guard and the tie.
+
+## [1.52.17]
+
+### Fixed
+- **No list creates more than six rows in one frame.** This is the remaining
+  resize stall — the one that happens *once*, on the first big resize, and
+  never again afterwards.
+  - The row pools are built on demand, so dragging from the minimum size to a
+    large one asked **nine lists for up to thirty new rows each, all in the
+    frame the drag ended on**. A single Crafting recipe row is a Button, three
+    FontStrings, a Frame and two more Buttons with backdrops — each of which
+    pfUI then skins. Hundreds of widget creations, in one frame.
+  - **"After that stall I can resize all I want" is what identified it.** A
+    one-time cost that never recurs is creation, not layout: by the second
+    resize the rows already existed. And the recovering frame held 43 events at
+    5/s — *below* the ambient rate, mostly the player's own mouse — so nothing
+    was flooding in. The main thread was simply busy building widgets.
+  - The work now spreads over a handful of frames. A list is briefly a few rows
+    short and fills on the next paint.
+
+## [1.52.16]
+
+### Fixed
+- **Every list's rows are placed directly on their scroll frame instead of
+  being chained to the row above.** This is the likeliest cause of the stalls
+  on **dragging**, on **resizing**, and on the **repaint after a post** — and
+  of the crash when the window is dragged very large.
+  - All **nine** row pools anchored row *i* to row *i-1*, up to **38 deep**.
+    That makes a row's position a *dependency chain* back to the scroll frame,
+    and the client resolves those **recursively** — placing the last row means
+    walking every row above it.
+  - **None of that work is Lua**, which is exactly why it stayed invisible:
+    `/aex debug` showed silence through a ten-second freeze because the time
+    was going to the client's layout resolver, not to us. It fires whenever the
+    frame tree is invalidated — which is *dragging the window*, resizing it, or
+    repainting after a post. Precisely the set of things that stalled.
+  - Deeper chain, longer walk. A bigger window means more rows means a longer
+    walk, which fits "resize too big and it crashes to desktop".
+  - Same pixels, same frame count. Depth **n → 1**.
+- `tests/lint/rowchain.py` fails the build if any pool goes back to chaining.
+
+## [1.52.15]
+
+### Added
+- **`/aex sweep purge`** — throws away every fact the item sweep collected.
+  - **Turning the sweep off does not shrink what it already gathered.** Those
+    facts live in SavedVariables, so they are read back into Lua at *every*
+    login and stay there for the session: a sweep that ran for an hour last
+    week is still costing you memory today. Stopping the growth and undoing it
+    are two different actions, and 1.52.14 only did the first.
+  - Safe to lose. Every fact is re-learnable from the item itself, and the
+    opportunistic path relearns the ones that matter as you play.
+  - Log out after purging — SavedVariables are written on logout, not
+    continuously.
+
+## [1.52.14]
+
+### Changed
+- **The item-fact sweep is OFF by default.** 1.52.13 slowed it and paused it at
+  the auction house; a probe on a real client then showed that was not enough.
+  `GET_ITEM_INFO_RECEIVED` — the server *answering* an item query — was
+  arriving about **25 times a second, continuously**, with a Lua heap of
+  **222 MB that climbed ~9 MB during the sample**.
+  - **1.12 is a 32-bit process**, and every one of those answers also grows the
+    client's own item cache, which is C-side and so invisible to `gcinfo()`.
+    The measured Lua figure is the *smaller* half of the cost. A steady climb
+    toward the address-space ceiling is a crash to desktop — and it is a climb
+    rather than a spike, which is why nothing ever showed in Task Manager.
+  - **Nothing is lost that you would notice.** The addon already learns item
+    facts opportunistically — from your bags, from browsing, from any
+    successful lookup — and that path is free because the client had the data
+    anyway. The sweep only ever bought facts about items you have never seen.
+  - **`/aex sweep on` / `off`** to control it, and `/aex sweep` to ask. A slash
+    command rather than a settings checkbox because the moment you reach for it
+    is "the client is misbehaving", which is not a moment to go hunting through
+    a tab.
+
+## [1.52.13]
+
+### Fixed
+- **The item-fact sweep no longer floods the client.** It ran **500
+  `GetItemInfo` calls every half second — a thousand a second** — from login
+  until it reached item id 120000, every session, whatever else was happening.
+  On 1.12 a cache miss does not merely return nil; it puts an item query on
+  the wire. This is the most likely cause of the freezes and stalls reported
+  with *"no abnormal spikes in RAM, CPU or GPU"* — the cost is in the client's
+  item-cache and network path, not in Lua, so nothing outside the game can see
+  it.
+  - **50 per second now**, and it **stops entirely while the auction house is
+    open**, resuming when you close it. A background sweep firing item queries
+    while a scan is paging is the same flood HARD RULE 10 exists to prevent,
+    arriving by another door — and it landed exactly when you were watching.
+  - The trade-off is stated plainly: the sweep takes longer to finish. It is
+    the least urgent thing in the addon and it is the only thing that got
+    slower.
+  - `db.StopHarvest` had existed with **no callers** since it was written; the
+    last housekeeping pass flagged it and kept it. This is the caller it was
+    waiting for.
+
+## [1.52.12]
+
+### Fixed
+- **"% Mkt" no longer clips on the Blizzlike Buy tab.** The tail added in
+  1.52.10 was applied to a chain of offsets measured from the row's *left*,
+  ending in a surplus recomputed per mode — right in Advanced and wrong in
+  Blizzlike, which is exactly what was reported. The last column and its header
+  are **anchored to the row's right edge** now. An anchor cannot drift.
+- **The Crafting tab's outer rows no longer clip.** They were given a *width*,
+  which a relayout had to walk both pools re-setting — so any row built while
+  that number was stale drew past its own box. They are **anchored to both
+  edges of their scroll frame**, the way the middle table's rows always were,
+  and that table is the one that never clipped.
+- **Resizing past the maximum no longer breaks the layout.** `SetMaxResize` is
+  asked for and does not hold on this client — a window dragged to ~1467 was
+  reported, 67px past `MAX_W`. Every width-derived layout in the addon is
+  written and asserted for `MIN_W..MAX_W`; outside that range none of those
+  guarantees apply. The resize grip now clamps what the drag produced, through
+  the same arithmetic the restore path uses.
+
+## [1.52.11]
+
+### Changed
+- **The three Crafting panels keep their proportions when you resize.** They
+  were fixed and the middle took every surplus pixel, on the argument that a
+  recipe name and a made-count do not get more readable with more room. On a
+  real window they plainly do — drag it wide and the table grew to twice the
+  tab while the columns either side stayed at the width they need at the
+  *minimum*. It is **20 / 62 / 18** at every size now.
+  - The middle table still has a floor, and that floor outranks the shares: if
+    the proportions would leave its columns without room, both outer panels are
+    scaled back **together** — never one alone, which is what makes a window
+    look lopsided as it narrows.
+
+## [1.52.10]
+
+### Fixed
+- **"% Mkt" no longer runs into the table's right border on the Buy tab.** Every
+  surplus pixel went to the Item column, so the last column ended *exactly* on
+  the row's right edge — 6px from the border, which is the border's own
+  half-width and reads as touching it. It now keeps a tail, counted by the fit
+  check as well as the layout so it holds at the smallest window too.
+- **The Crafting tab's outer panels no longer clip their own rows.** They used
+  `ROWPAD`, whose left pad of 2 is *inside* the 6px a border reaches inward —
+  so recipe names and made-counts started underneath their own box edge, and
+  the `[+]` button's plate ran into the right one. Those panels have their own
+  pads now, and the right one allows for the fact that a button's backdrop is
+  drawn outside the button.
+- **The Buy and Bid buttons on a Crafting row are smaller** (44×16 and 38×16).
+  At 50×17 in a 26px row they were the widest thing on the line, for a
+  three-letter label.
+
+## [1.52.9]
+
+### Fixed
+- **Shift-click now works on shift + LEFT click, the way the stock UI does.**
+  The first attempt hooked `ChatEdit_InsertLink`, on the reasoning that the
+  client routes every shift-click through it. **That is not true on 1.12** —
+  `ContainerFrame.lua` inserts into the chat box directly, so the hook never
+  fired for a bag item and shift+left opened the stack-split dialog instead.
+  It hooks `ContainerFrameItemButton_OnClick` now, with the conditions read off
+  the client's own source.
+  - Picking up, splitting, Ctrl-dressing and every right-click path are
+    untouched — we take the click only where the split dialog would have
+    opened, and hand it straight back otherwise.
+
+## [1.52.8]
+
+### Added
+- **Shift-click an item to put its name in the search box** — from your bags,
+  the character sheet, a loot window, a merchant, or someone's link in chat.
+  The stock UI does this into the auction house's browse box; our window
+  replaces that box, so without it the gesture simply stopped working the
+  moment you installed Aegis.
+  - Works on the **Buy** tab in both modes and on the **Crafting** tab. The
+    name lands in whichever box you have clicked into; failing that, whichever
+    is on screen.
+  - **Typing in chat wins.** Shift-clicking while composing a message puts the
+    link in the message, the way it does everywhere else in the game.
+  - When Aegis does not want the link it is handed straight back to the client,
+    so chat, the Blizzard auction house and every other consumer keep working
+    exactly as they did.
+
+### Internal
+- The name is **read off the link**, never asked of `GetItemInfo` — the link
+  already carries it, and on 1.12 that lookup answers only for cached items
+  and costs a server round trip for anything else.
+- The hook is a saved original plus a replacement (HARD RULE 7), and our half
+  runs under `pcall`: it is on a client function that fires for every
+  shift-click in the game, including with our window shut, so an error in it
+  would break chat linking for the whole session.
+
+## [1.52.7]
+
+The Crafting tab, on a real client. Three panels that each took the shape their
+own contents wanted read as three unrelated windows sitting next to each other,
+not as one tab.
+
+### Fixed
+- **All three panels now share one top edge and one bottom edge.** They started
+  at three different heights and the left one stopped less than halfway down
+  the tab.
+- **One row height across all three lists** (26, the middle table's — it has
+  per-row buttons and cannot shrink). They were 26 / 20 / 18, so nothing lined
+  up from a recipe on the left to what it was short of in the middle.
+- **The profit estimate and the two buttons moved ABOVE the recipe list.**
+  Below it, they forced that list to stop 144px short of the panel bottom and
+  left the numbers floating on bare panel. Cost and Sells now share one line
+  above the box; the **net moved to the panel's footer bar**, where a
+  conclusion belongs and where the concept puts it.
+- **The recipe list and the made-this-session list get the same row chrome as
+  every other table in the window** — the zebra stripe, the hairline and the
+  hover. Two of the three lists had none, which is what made them read as
+  loose text rather than as tables.
+- **The middle panel's heading is the same size and on the same line as the
+  other two.** It was `GameFontNormalLarge` on its own baseline, which made the
+  middle panel look like the page and the outer two like margin notes.
+- The search box, the Search button and the pager are all one height and start
+  on one line with the left panel's buttons.
+
+### Internal
+- Six new geometry sabotages, and the suite now asserts what a screenshot had
+  to catch: that the three boxes share a top and a bottom, that all three
+  panels use one row height, and that each still fills its box with ten rows at
+  the smallest allowed window.
+- The made-this-session list was the **seventh** list in the window and the
+  only one the per-list geometry checks did not cover. It does now.
+
+## [1.52.6]
+
+The housekeeping pass 2h kept deferring things into. No behaviour change —
+one deletion the owner had already settled, and three layout guarantees that
+were written down and never enforced.
+
+### Removed
+- **The shopping-list engine** — `buy.Lists`, `AddList`, `RenameList`,
+  `DeleteList`, `AddItemToList`, `RemoveItemFromList`. Unreachable since the
+  Advanced redesign removed the sidebar that was their only caller, and kept on
+  the reasoning that re-homing the feature would cost a UI rather than a
+  rewrite. The Crafting tab's tracked recipes turned out to *be* that feature's
+  shape and were built on `crafting` instead, so nothing was coming back.
+  - **The saved data is NOT deleted.** A player who used the sidebar before the
+    redesign still has their lists in SavedVariables; dropping the field would
+    erase them on the next save, which is the one thing MAJOR is reserved for.
+    An unread table costs nothing.
+
+### Internal
+- **Three guarantees that asserted nothing are now asserted.**
+  `ui.StripFitsAt`, `ui.AllCategoriesFitAt` and `ui.TableSlack` each compute
+  whether a layout promise holds at a given window size, and each was written
+  so the arithmetic "lives here, where it can be checked" — and then nothing
+  checked it. `ui.AllCategoriesFitAt` said *"Asserted true at MIN_H"* in its
+  own comment, which was not true of anything. Six new sabotages.
+- **The suite's constant reader was silently wrong on a wrapped expression.**
+  `BUY_STRIP_W` is a sum written over two lines; stopping at the first returned
+  300 instead of 538 — a number that compiles, looks plausible, and makes a fit
+  check pass at every width. It reads the continuation now, and there is a
+  sabotage that removes the second line.
+
+## [1.52.5]
+
+The second half of ROADMAP 2h §4 — the Crafting tab rebuilt as three panels
+side by side, with the quantity stepper on the recipes themselves.
+
+### Added
+- **The Crafting tab is three panels, not two.** Tracked recipes on the left,
+  the reagent search results in the middle, what you have made on the right —
+  side by side, nothing stacked.
+  - **A `[-] n [+]` stepper on every recipe row**, and every number downstream
+    follows it: the reagent totals beside it, the shortfall the middle panel
+    reports, and the target on the right. Hold **shift** to step five at a time.
+  - **Reagent rows read `have / need`**, green when you have enough and red
+    when you do not — where "have" is *your* bags and *your* bank. Not the
+    account-wide total the tooltip shows: an alt three zones away cannot hand
+    you thread, and an item posted at the auction house is not a reagent until
+    somebody fails to buy it.
+  - **A "N short" count in the panel's heading**, across every tracked recipe
+    whether it is expanded or not — the one number that says whether there is
+    shopping left to do.
+  - **A "made this session" panel** reading `made / want` per recipe, with its
+    own footer totals and a **Reset**. Manual reset only, as before.
+  - Clicking a reagent still fires a **real auction query**, and the middle
+    panel's bottom bar now says how many more of it you need.
+- **The counts stay honest while you shop.** Buy ten thread in the middle
+  panel and the reagent line beside it stops saying you are seven short.
+
+### Fixed
+- **Long names no longer wrap onto the row below them.** The 1.12 client has no
+  ellipsising font string — setting a width makes it *wrap*, and nothing clips
+  a row, so the second line simply draws over its neighbour. Narrow columns now
+  measure and cut.
+
+### Internal
+- **The scrollbar is a term in the layout, and it was missing.** The widths in
+  1.55.0 were derived without a lane for the middle table's bar —
+  FauxScrollFrameTemplate anchors it *inside* the scroll frame's right edge,
+  on top of the last column. The lane is now the Sell tab's own measured
+  numbers rather than new ones, and the geometry suite asserts all three terms
+  of the fit separately: drop the pads or drop the lane and a different width
+  is refused.
+- **Every heading and status line on the tab is asserted clear of its own box
+  border.** A backdrop edge is drawn *centred* on the frame boundary, so a
+  heading above a box has to clear twice the bleed, not once. All three panels
+  were built with one and drew their heading through their own border; nothing
+  throws when that happens, which is what the suite is for.
+- `ui.HideScrollBar` was a closure inside `ui.BuildBuyTab` and called from the
+  Crafting tab — which worked only because the Buy tab happens to be built one
+  line earlier. It is a top-level function now.
+- The made-count and bag changes both repaint through **one once-per-frame
+  flush** rather than inline in the handlers that feed them.
+
+## [1.52.4]
+
+The first half of ROADMAP 2h §4 — the numbers and the space the Crafting tab's
+three panels need. The panels themselves are the next release.
+
+### Added
+- **A quantity on every tracked recipe**, remembered across sessions, and the
+  reagent totals that follow from it. Set a recipe to five and every reagent
+  says what five costs.
+  - **The quantity counts finished items, not crafts.** They are the same for
+    most recipes and stop being the same the moment one yields more than one:
+    wanting five of something made in twos is *three* crafts, not two, and
+    rounding down shops you one item short every time with every number on
+    screen looking reasonable.
+  - Reagent rows carry what you already own, so the shortfall is what you
+    actually have to buy. Reagents Aegis cannot identify are still listed —
+    dropping them would silently shorten the shopping list by exactly the
+    things you have never bought before.
+- **A "made this session" tally.** 1.12 has no spell-success event, so this
+  reads the `You create: [Item]` line the client prints on every craft —
+  including the `x12` form. Ordinary loot is not counted as a craft.
+  - **Manual reset only.** A crafting run spans several trips to the
+    auctioneer, so it deliberately does not clear when the auction house
+    closes — that would clear it mid-run.
+
+### Internal
+- The Crafting tab's column positions existed **twice**, once at file scope and
+  once inside the builder. That is how the Sell tab's headers and rows came to
+  disagree, so they are one table now, and where a row really ends
+  (`CRAFT_COLS_END` — the Bid button's edge, not the last text column's) is
+  asked for rather than re-added by hand.
+- The three panels' widths are **derived from the fit, not chosen**. The first
+  pass tried 200/210 and the geometry suite refused it 24px short — before a
+  single widget existed, which is why that assertion was written first.
+
+---
+
+## [1.52.3]
+
+Third of four pieces of ROADMAP 2h. The Crafting tab is the last one.
+
+### Added
+- **The Inventory block now covers your whole account.** Every character on the
+  realm that holds the item, each in their **class colour**, the one you are on
+  at full strength and the rest held back:
+
+  ```
+  Inventory                                    66 total
+      Torchlight     25  (3 bags, 5 bank, 17 ah)
+      Subtilizer     39  (10 bags, 9 bank, 10 ah, 10 mail)
+      Torchlite       2  (1 bags, 1 bank)
+      bags are live; bank, auctions and mail are as of your last visit
+  ```
+  - **Your auctions are counted across every page.** The client only holds
+    fifty at a time, so this walks the pages when the auction house opens — and
+    **yields the moment you press Next** on the Auctions tab, because your click
+    is a real intent and the bookkeeping is not. It restarts on your next visit.
+  - **Your mailbox is counted too**, behind a dirty flag flushed once per frame.
+    `MAIL_INBOX_UPDATE` is *the* storm event and reading an attachment is a
+    per-item call — doing it in the handler is what hard-froze another addon.
+    - 1.12 has **no** `GetInboxItemLink`, so an attachment can be named but not
+      identified. Mail counts resolve through the name map the scanner fills,
+      which means they cover what you trade in and quietly miss the rest. That
+      is the honest limit of the API, not a bug.
+  - You appear first, then whoever holds the most — a glance finds where the
+    stock actually is.
+  - Cancelling your last auction clears the count rather than leaving the old
+    number up until you post again.
+
+---
+
+## [1.52.2]
+
+### Fixed
+- **`ui\tooltip.lua:489: Unknown link type` while hovering.** Aegis was not
+  the cause and was carrying the blame.
+  - 1.12's `SetHyperlink` throws that for any link it cannot render — a spell,
+    an enchant, a profession link, a malformed or nil one. Any addon in the
+    session can hand it one, and so can the stock UI. Without our hook the
+    error is attributed to whoever called it; **with** our hook there is a Lua
+    frame of ours in between, so the red line named `ui/tooltip.lua` for a link
+    Aegis never touched. The misattribution was our bug even though the link
+    was not.
+  - The call into the client's own method is guarded now, and our price lines
+    are skipped when it refuses — appending them to a tooltip that failed to
+    build is how one item's numbers end up under another item's name.
+  - **Not swallowed silently.** Refusals are counted and the last one kept, and
+    `/aex diag` prints both, so a link storm still shows up as a link storm.
+
+### Internal
+- The simulated client had **no `GameTooltip` at all**, so `tooltip.Install()`
+  returned early on its own guard and every hook in the file was untested —
+  which is how this shipped. It has one now, including the ability to refuse an
+  argument the way the real client does, plus a suite covering the hook layer:
+  that the hooks install, that return values survive, and that a refusal is
+  contained.
+
+---
+
+## [1.52.1]
+
+Second of four pieces of ROADMAP 2h.
+
+### Added
+- **"Inventory" on the tooltip — how many you own, and where.** A block at the
+  bottom of the tooltip, per character, split across bags, bank, auctions and
+  mail, with the account total on the right and each name in its **class
+  colour**.
+  - **This release covers the character you are on**, with bags and bank. Your
+    auctions, your mail, and your other characters follow in the next one.
+  - **Only your bags are live.** The bank answers only while you are standing
+    at it, so it is a snapshot taken when you open it — and the block says so
+    in one line rather than putting a date on every row. It only says it when
+    something in the block really is a memory; an item you hold only in your
+    bags carries no caveat.
+  - **Realm-scoped**, which is the opposite of vendor prices and deliberately
+    so. A vendor's price is a fact about the game; twenty Silk Cloth on a
+    character you cannot reach from here is not stock you have.
+  - Empty places are not printed, and a character holding none of the item is
+    left out entirely.
+  - Its own switch on the Aegis tab: **How many I own, and where**.
+
+### Internal
+- Bag counts are rebuilt only when the bags actually change. `BAG_UPDATE`
+  storms — the stock `MAIL_SHOW` handler calls `OpenBackpack()`, so a mailbox
+  with unseen attachments sets it off — and a bag walk inside that handler is
+  the shape that hard-froze another addon in the suite. The handler sets a
+  flag; the walk happens when something asks.
+
+---
+
+## [1.52.0]
+
+First of four pieces of ROADMAP 2h. The others — the account-wide inventory
+block on the tooltip, and the Crafting tab rebuilt as three panels — follow.
+
+### Added
+- **"Purchased N this session" on the Buy tab.** When your results are about
+  one item and you have bought some of it this session, the status line says
+  so: `13 match(es) • unit low to high • purchased 12 Silk Cloth this session`.
+  - **It counts items, not auctions.** Buying a stack of twenty is twenty.
+  - **It only names an item when there is one to name.** A search for *cloth*
+    returns Linen, Wool and Silk; putting one of their tallies beside all three
+    would be a true number attached to the wrong thing.
+  - **It lives from login to logout** and is never saved. Buying out a crafting
+    run takes several trips to the auctioneer, so it deliberately does *not*
+    reset when the auction house closes — a counter that cleared on the way out
+    would clear in the middle of the thing it counts.
+  - It is booked at the two points an auction is actually bought, in the buy
+    engine rather than in the window, so a single buyout and a multi-buyout
+    batch cannot disagree about what happened.
+
 ---
 
 ## [1.51.1]
@@ -3881,6 +4945,41 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.51.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.50.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -257,6 +257,223 @@ function sell.ScanMerchant()
     return learned
 end
 
+-- ---------------------------------------------------------------------------
+-- Inventory sweeps: what is in the bags, and what is in the bank
+-- ---------------------------------------------------------------------------
+
+-- The bank's containers. BANK_CONTAINER is -1 (the bank's own slots) and the
+-- purchased bank bags are 5..10. NONE of them answer unless the bank frame is
+-- open -- which is the whole reason the bank is a snapshot rather than a read.
+sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }
+sell.BAG_CONTAINERS  = { 0, 1, 2, 3, 4 }
+
+-- Count every item across a list of containers. Returns { [itemId] = n }.
+--
+-- ONE walker for bags and bank, because they are the same walk over different
+-- container numbers, and two copies would drift the moment one of them learned
+-- something the other did not.
+function sell.CountContainers(bags)
+    local out = {}
+    local bi = 1
+    while bi <= table.getn(bags or {}) do
+        local bag = bags[bi]
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            local id = link and util.ItemIdFromLink(link)
+            if id then
+                local _, count = GetContainerItemInfo(bag, slot)
+                out[id] = (out[id] or 0) + (count or 1)
+            end
+            slot = slot + 1
+        end
+        bi = bi + 1
+    end
+    return out
+end
+
+-- Bag counts for the character you are on, rebuilt only when the bags have
+-- actually changed.
+--
+-- HARD RULE 16 IS THE WHOLE DESIGN HERE. BAG_UPDATE storms: the client fires
+-- it repeatedly while item data resolves, and the stock MAIL_SHOW handler
+-- calls OpenBackpack(), so a mailbox with unseen attachments sets it off. A
+-- bag walk inside that handler is the exact shape that froze other addons in
+-- the suite. So the handler sets a boolean and does nothing else; the walk
+-- happens here, at most once per actual change, driven by whoever asks.
+sell.bagsDirty = true
+sell.bagCounts = nil
+
+function sell.BagCounts(force)
+    if force or sell.bagsDirty or not sell.bagCounts then
+        sell.bagCounts = sell.CountContainers(sell.BAG_CONTAINERS)
+        sell.bagsDirty = false
+    end
+    return sell.bagCounts
+end
+
+-- Read the bank and remember it. Only meaningful while the bank frame is open,
+-- so it is called from BANKFRAME_OPENED -- the one moment the client answers.
+-- The player's class TOKEN ("MAGE"), or nil.
+--
+-- Its own function because of a Lua trap that cost this file two nil classes:
+-- `local _, class = UnitClass and UnitClass("player")` yields ONE value, not
+-- two -- an `and` expression truncates a multiple return to its first result,
+-- so `class` is always nil. Written out, it works.
+function sell.PlayerClass()
+    if not UnitClass then return nil end
+    local _, token = UnitClass("player")
+    if token == "" then return nil end
+    return token
+end
+
+function sell.SnapshotBank()
+    local counts = sell.CountContainers(sell.BANK_CONTAINERS)
+    if A.db and A.db.SetInventoryBucket then
+        A.db.SetInventoryBucket("bank", counts, sell.PlayerClass())
+    end
+    return counts
+end
+
+-- Write the bag snapshot as well, so the OTHER characters can see what this
+-- one is carrying. The live read above is what this character's own row uses;
+-- this is the copy that has to outlive the session.
+function sell.SnapshotBags()
+    -- FORCED, not the cached answer. This copy is what other characters read,
+    -- possibly for days, so it is worth one walk to be certain -- and the
+    -- cache is only as good as the BAG_UPDATE that should have invalidated it.
+    local counts = sell.BagCounts(true)
+    if A.db and A.db.SetInventoryBucket then
+        A.db.SetInventoryBucket("bags", counts, sell.PlayerClass())
+    end
+    return counts
+end
+
+-- ---------------------------------------------------------------------------
+-- Inventory: what is at auction, and what is in the post
+-- ---------------------------------------------------------------------------
+
+-- Pages the owner sweep will walk before giving up. Turtle's cap is 120 and a
+-- page is 50, so three clears a full book; the rest is slack against a server
+-- reporting a total it cannot actually deliver. Without a bound the sweep's
+-- exit condition is "we reached the last page", and a total that never shrinks
+-- would walk for ever.
+sell.OWNER_SWEEP_MAX_PAGES = 6
+
+-- Counting your own auctions needs every PAGE, and the client holds one at a
+-- time -- the same constraint the Auctions tab lives with. So this is a walk
+-- driven by AUCTION_OWNED_LIST_UPDATE: request a page, count what arrives,
+-- ask for the next.
+--
+-- IT YIELDS TO THE PLAYER. If someone presses Next on the Auctions tab while
+-- this is running, the sweep is cancelled rather than fighting them for the
+-- page the client is holding -- their click is a real intent and ours is
+-- bookkeeping. It restarts on the next visit.
+sell.ownerSweep = nil
+
+function sell.StartOwnerSweep()
+    if not GetNumAuctionItems then return nil end
+    local _, pages, total = sell.OwnerPageInfo()
+    if (total or 0) < 1 then
+        -- No auctions at all is a real answer, and it has to be RECORDED --
+        -- otherwise cancelling your last auction leaves the old count on the
+        -- tooltip until you post something again.
+        sell.FinishOwnerSweep({})
+        return nil
+    end
+    if pages > sell.OWNER_SWEEP_MAX_PAGES then
+        pages = sell.OWNER_SWEEP_MAX_PAGES
+    end
+    sell.ownerSweep = { page = 0, pages = pages, counts = {} }
+    sell.RequestOwnerAuctions(0)
+    return sell.ownerSweep
+end
+
+function sell.CancelOwnerSweep()
+    sell.ownerSweep = nil
+end
+
+-- One page has arrived. Count it, then ask for the next or finish.
+-- Returns true while the sweep is still running.
+function sell.OwnerSweepStep()
+    local sw = sell.ownerSweep
+    if not sw then return false end
+    local rows = sell.OwnerAuctions()
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        if r.itemId then
+            sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + (r.count or 1)
+        end
+        i = i + 1
+    end
+    sw.page = sw.page + 1
+    if sw.page < sw.pages then
+        sell.RequestOwnerAuctions(sw.page)
+        return true
+    end
+    sell.FinishOwnerSweep(sw.counts)
+    -- Put the client back on page 0, which is where the Auctions tab expects
+    -- to find it and where the player left it.
+    sell.RequestOwnerAuctions(0)
+    return false
+end
+
+function sell.FinishOwnerSweep(counts)
+    sell.ownerSweep = nil
+    if A.db and A.db.SetInventoryBucket then
+        A.db.SetInventoryBucket("ah", counts or {}, sell.PlayerClass())
+    end
+    return counts
+end
+
+-- What is sitting in the mailbox.
+--
+-- 1.12 has NO GetInboxItemLink, so an attachment can only be named, not
+-- identified -- the id comes from the scan-fed name map, the same route
+-- ui/tooltip.lua's inbox resolver takes. An item that map has never seen is
+-- skipped rather than guessed at, which means mail counts cover what you trade
+-- in and quietly miss the rest. That is the honest limit of the API.
+--
+-- HARD RULE 16: this is a per-item read, and MAIL_INBOX_UPDATE is THE storm
+-- event -- the client fires it dozens of times in a few frames while
+-- attachments resolve, which is what hard-froze Courier. It never runs inside
+-- the handler. The handler sets a flag; sell.FlushInventory does the work once,
+-- from an OnUpdate.
+sell.mailDirty = false
+
+function sell.MailCounts()
+    local out = {}
+    if not GetInboxNumItems or not GetInboxItem then return out end
+    local n = GetInboxNumItems() or 0
+    local i = 1
+    while i <= n do
+        local name, _, count = GetInboxItem(i)
+        local id = name and A.db and A.db.IdFromName and A.db.IdFromName(name)
+        if id then out[id] = (out[id] or 0) + (count or 1) end
+        i = i + 1
+    end
+    return out
+end
+
+function sell.SnapshotMail()
+    local counts = sell.MailCounts()
+    if A.db and A.db.SetInventoryBucket then
+        A.db.SetInventoryBucket("mail", counts, sell.PlayerClass())
+    end
+    return counts
+end
+
+-- The once-per-frame flush behind the mail dirty flag. Returns whether it did
+-- anything, so the driver knows when to stop running.
+function sell.FlushInventory()
+    if not sell.mailDirty then return false end
+    sell.mailDirty = false
+    sell.SnapshotMail()
+    return true
+end
+
 -- Your current number of active auctions (second return of GetNumAuctionItems).
 function sell.OwnerCount()
     local _, total = GetNumAuctionItems("owner")
@@ -1615,7 +1832,56 @@ end
 -- Events
 -- ---------------------------------------------------------------------------
 
+-- The once-per-frame flush the mail snapshot hangs off.
+--
+-- A DRIVER FRAME, not the handler, and not a hover. MAIL_INBOX_UPDATE storms
+-- and the work is a read per attachment, so it cannot run inline. It cannot
+-- wait for a hover either -- the mailbox only answers while you are standing
+-- at it, and by the time anyone hovers an item they have usually walked away.
+-- One frame, shown while there is something to do and hidden the moment there
+-- is not, so it costs nothing for the rest of the session.
+sell.invDriver = CreateFrame("Frame", "AegisExchangeInventory")
+sell.invDriver:Hide()
+sell.invDriver:SetScript("OnUpdate", function()
+    -- Flush, then stop in the SAME frame if there is nothing left. Testing the
+    -- flush's return instead would leave the driver running one extra frame
+    -- after every flush, for no work.
+    sell.FlushInventory()
+    if not sell.mailDirty then sell.invDriver:Hide() end
+end)
+
 if A.RegisterEvent then
+    -- The mailbox changed. O(1): a flag and a Show, nothing else. See
+    -- sell.MailCounts for why the read itself must not happen here.
+    A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+        sell.mailDirty = true
+        sell.invDriver:Show()
+    end)
+    -- Walking away from the mailbox: take one last look, so what is recorded
+    -- is the state you left rather than the state you arrived in.
+    A.RegisterEvent("MAIL_CLOSED", function()
+        sell.mailDirty = true
+        sell.invDriver:Show()
+    end)
+    -- The auction house is open, which is the only moment your own auctions
+    -- can be counted. Walks every page; see sell.StartOwnerSweep.
+    A.RegisterEvent("AUCTION_HOUSE_SHOW", function() sell.StartOwnerSweep() end)
+    A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
+        sell.OwnerSweepStep()
+    end)
+    A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() sell.CancelOwnerSweep() end)
+    -- Bags changed. O(1) BY DESIGN -- see sell.BagCounts. This event storms,
+    -- and the walk it invites is the shape that hard-froze Courier.
+    A.RegisterEvent("BAG_UPDATE", function() sell.bagsDirty = true end)
+    -- The bank is open, which is the only moment the client will tell us what
+    -- is in it. Fires once per visit.
+    A.RegisterEvent("BANKFRAME_OPENED", function()
+        sell.SnapshotBank()
+        sell.SnapshotBags()
+    end)
+    -- Leaving the world: keep what this character is carrying, so the others
+    -- can see it. PLAYER_LEAVING_WORLD covers logout, exit and a zone change.
+    A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)
     -- At a merchant: learn what it charges. Bounded, one fire per merchant.
     A.RegisterEvent("MERCHANT_SHOW", function() sell.ScanMerchant() end)
     -- Money moved. O(1): a subtraction against an armed watch, and an

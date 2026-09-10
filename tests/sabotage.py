@@ -146,6 +146,134 @@ SABOTAGES = [
     # `sortbykey-nil-guards-direction-aware` below. One bug, one sabotage.
 
     # Treating a missing unit price as zero -- the other tempting shortcut.
+    # ---- the Crafting tab's shopping tree (v1.52.21) ---------------------
+    #
+    # Two sections of one flat list. Every entry below is a way for that
+    # flattening to be wrong that nothing outside this suite would notice.
+
+    # The BREAKDOWN under an expanded recipe multiplies by CRAFTS, not by items
+    # wanted. Wanting five of something made in twos is three crafts; getting
+    # this wrong makes the breakdown and the aggregate disagree about the same
+    # recipe, side by side, on screen.
+    ("craft-breakdown-skips-the-ceil", "ui/frame.lua",
+     "                if opts.craftsFor then crafts = opts.craftsFor(m.want, p.made) end",
+     "                if opts.craftsFor then crafts = m.want end",
+     "crafttree"),
+
+    # `open` is keyed by NAME. Removing a recipe shifts every index after it,
+    # and a set keyed by index would leave whichever recipe slid into the hole
+    # expanded instead.
+    ("craft-open-keyed-by-index", "ui/frame.lua",
+     "            local isOpen = (m.name and open[m.name]) and true or nil",
+     "            local isOpen = (m.index and open[m.index]) and true or nil",
+     "crafttree"),
+
+    # `kind` is stamped on the shopping rows WHETHER OR NOT the section is
+    # collapsed: ui.UpdateCraftNeed looks the reagent up by it, and a lookup
+    # that works only while a section happens to be unfolded is worse than one
+    # that never works.
+    ("craft-kind-only-when-open", "ui/frame.lua",
+     '        r.kind = "reagent"',
+     '        r.kindLater = "reagent"',
+     "crafttree"),
+
+    # ...and the shopping rows are LISTED, never copied. The paint reads
+    # `source`, `unit`, `from` and `craftable` straight off the engine's row.
+    ("craft-copies-shopping-rows", "ui/frame.lua",
+     "            table.insert(rows, shop[k])",
+     "            table.insert(rows, { name = shop[k].name, kind = shop[k].kind })",
+     "crafttree"),
+
+    # Something you are going to CRAFT is not shopping -- its own reagents are
+    # already on the list, so counting it too says buy the bolt AND the cloth.
+    ("craft-short-counts-craftables", "ui/frame.lua",
+     "        if (r.short or 0) > 0 and not r.craftable then short = short + 1 end",
+     "        if (r.short or 0) > 0 then short = short + 1 end",
+     "crafttree"),
+
+    # A collapsed section is stored as nil, not false: the closed state is
+    # nearly all of them, and `false` would put a key in the saved variables
+    # for every one.
+    ("craft-toggle-stores-false", "ui/frame.lua",
+     "        st[e.key] = (not st[e.key]) or nil",
+     "        st[e.key] = not st[e.key]",
+     "crafttree"),
+
+    # Finding the aggregated line for a reagent is a lookup BY NAME, not "the
+    # first row" -- which would shop for whatever happens to sort first.
+    ("craft-shoppingrowfor-takes-the-first", "ui/frame.lua",
+     "        if rows[i].name == name then return rows[i] end",
+     "        if rows[i] then return rows[i] end",
+     "crafttree"),
+
+    # ---- what this session has spent on the list (v1.52.22) --------------
+
+    # A line already covered still counts. The money left the bags whether or
+    # not the shortfall is now zero -- skipping covered lines makes the total
+    # FALL as the shopping is finished, which is the direction that reads as
+    # working.
+    ("craft-spend-skips-covered-lines", "ui/frame.lua",
+     """        if r.itemId then
+            local _, copper = spentOf(r.itemId)
+            spent = spent + (copper or 0)
+        end""",
+     """        if r.itemId and (r.short or 0) > 0 then
+            local _, copper = spentOf(r.itemId)
+            spent = spent + (copper or 0)
+        end""",
+     "crafttree"),
+
+    # ...and it reads the COPPER, not the unit count. Both come back from
+    # buy.SessionBought and taking the wrong one gives a number of items where
+    # a price should be -- formatted as money, so it renders perfectly.
+    ("craft-spend-adds-the-unit-count", "ui/frame.lua",
+     "            local _, copper = spentOf(r.itemId)",
+     "            local copper = spentOf(r.itemId)",
+     "crafttree"),
+
+    # An average of nothing is NIL, never zero: "0c each" for something never
+    # bought is a price, and a wrong one.
+    ("craft-unit-spent-zero-not-nil", "ui/frame.lua",
+     """    if n <= 0 then return nil end
+    return math.floor((tonumber(spent) or 0) / n)""",
+     """    if n <= 0 then return 0 end
+    return math.floor((tonumber(spent) or 0) / n)""",
+     "crafttree"),
+
+    # ---- the Crafting tab's two-panel geometry (v1.52.21) -----------------
+
+    # N things across a row need N-1 gutters between them. Forget them and four
+    # buttons overflow their panel -- and a button's plate draws BTN_EDGE
+    # outside itself, so it lands under the box border.
+    ("craft-btnw-forgets-the-gutters", "ui/frame.lua",
+     """    local room = left - CRAFTL.row_l - CRAFTL.row_r
+        - (CRAFTL.btn_gap * (n - 1))""",
+     """    local room = left - CRAFTL.row_l - CRAFTL.row_r""",
+     "geometry"),
+
+    # Two panels have ONE gutter between them. Dropping it makes the middle
+    # panel WIDER, so every fit check still passes and the panels overlap.
+    ("craft-widths-forget-the-gutter", "ui/frame.lua",
+     """    local avail = ui.PanelWidthAt(w or 0)
+        - (CRAFTL.edge * 2) - CRAFTL.gap""",
+     """    local avail = ui.PanelWidthAt(w or 0)
+        - (CRAFTL.edge * 2)""",
+     "geometry"),
+
+    # THE MINIMUM COMES FIRST AND THE FLOOR COMES LAST. Applying the shopping
+    # panel's minimum after the budget lets it push straight past what the
+    # results table has to have, which is the table running under the panel
+    # beside it.
+    ("craft-widths-minimum-outranks-the-floor", "ui/frame.lua",
+     """    if left < CRAFTL.left_min then left = CRAFTL.left_min end
+
+    local budget = avail - ui.CraftMidFloor()
+    if left > budget then left = budget end""",
+     """    local budget = avail - ui.CraftMidFloor()
+    if left > budget then left = budget end
+    if left < CRAFTL.left_min then left = CRAFTL.left_min end""",
+     "geometry"),
+
     ("sort-missing-unit-as-zero", "ui/frame.lua",
      """        return r.unit
     end""",
@@ -2007,6 +2135,1280 @@ end
      "        rec[meanKey] = value",
      "vendorbuy"),
 
+    # A drag past MAX_W laid out and saved as-is. SetMaxResize does not hold
+    # on this client, so the grip is the only thing standing between a 1467px
+    # window and every width-derived layout running outside its asserted range.
+    ("window-grip-does-not-clamp", "ui/frame.lua",
+     "        ui.ApplyClampedSize()",
+     "",
+     "window.point"),
+
+    # ...and the clamp present but toothless.
+    ("window-clamp-does-not-apply", "ui/frame.lua",
+     "    if cw ~= w then f:SetWidth(cw) end",
+     "",
+     "window.point"),
+
+    # The outer rows back to a captured WIDTH instead of two anchors, which is
+    # what let them keep a stale number and draw past their own box.
+    ("craft-side-rows-sized-not-anchored", "ui/frame.lua",
+     "            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,\n                CRAFTL.row_l, CRAFTL.row_r)",
+     "            row:SetWidth(ui.CraftSideRowW(ui.WindowW()))",
+     "geometry"),
+
+    # ---- row creation is spread over frames --------------------------------
+    # The cap removed, so a big resize builds every missing row in the frame
+    # the drag ended on -- nine lists, up to thirty rows each, hundreds of
+    # widgets. That is the 8.66s one-time stall.
+    ("rowbudget-does-not-cap", "ui/frame.lua",
+     """    local cap = have + ui.ROW_BUILD_BUDGET
+    if want > cap then""",
+     """    local cap = have + 9999
+    if want > cap then""",
+     "rowbudget"),
+
+    # ...or capped but never flagged, so the remaining rows are never built
+    # and a tall window is permanently short of rows.
+    ("rowbudget-forgets-the-remainder", "ui/frame.lua",
+     "        ui.rowsPending = true\n        if ui.rowDriver then ui.rowDriver:Show() end",
+     "        if ui.rowDriver then ui.rowDriver:Show() end",
+     "rowbudget"),
+
+    # An off-by-one that caps a growth already inside the budget, deferring
+    # every small drag by a frame for nothing.
+    ("rowbudget-caps-what-fits", "ui/frame.lua",
+     "    if want > cap then",
+     "    if want >= cap then",
+     "rowbudget"),
+
+    # ---- rows are placed flat, not chained ---------------------------------
+    # ui.PlaceRow anchoring to the row above instead of the scroll frame. That
+    # is the shape every pool had: a dependency chain up to 38 deep, resolved
+    # recursively by the client on every drag, resize and repaint, with
+    # nothing showing in Lua because none of the work is Lua's.
+    ("rows-anchored-to-the-row-above", "ui/frame.lua",
+     '    row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, y)',
+     '    row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, 0)',
+     "geometry"),
+
+    # The right pad dropped from the Crafting rows, so they stop stretching to
+    # their box and the clipping comes back.
+    ("craft-rows-lose-their-right-pad", "ui/frame.lua",
+     "            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,\n                CRAFTL.row_l, CRAFTL.row_r)",
+     "            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H, CRAFTL.row_l)",
+     "geometry"),
+
+    # ---- the item-fact sweep -----------------------------------------------
+    # The sweep back ON by default. It asks the SERVER about 120000 items the
+    # player has never seen; measured on a real client that is ~25
+    # GET_ITEM_INFO_RECEIVED a second, for ever, on a 32-bit process.
+    ("harvest-on-by-default", "core/db.lua",
+     "    harvest        = false,",
+     "    harvest        = true,",
+     "db"),
+
+    # A purge that reports a number and clears nothing -- the one action that
+    # actually gives the memory back, doing nothing.
+    ("harvest-purge-keeps-the-facts", "core/db.lua",
+     "    if db.account then db.account.facts = {} end",
+     "",
+     "db"),
+
+    # ...or the setting present but not consulted, which is the same thing
+    # with a switch that does nothing.
+    ("harvest-ignores-its-setting", "core/db.lua",
+     '    if not db.Setting("harvest") then return false end',
+     "",
+     "db"),
+
+    # The sweep back to a burst: 500 GetItemInfo calls every step. On 1.12 a
+    # cache miss puts an item query on the wire, so this is a thousand a second
+    # from login -- the reported freezes with nothing visible in Task Manager.
+    ("harvest-budget-is-a-burst", "core/db.lua",
+     "db.HARVEST_BUDGET = 50",
+     "db.HARVEST_BUDGET = 500",
+     "db"),
+
+    # ...and the sweep no longer yielding to the auction house, so it floods
+    # the same client a scan is paging through.
+    ("harvest-does-not-yield-to-the-ah", "core/db.lua",
+     'A.RegisterEvent("AUCTION_HOUSE_SHOW", function() db.StopHarvest() end)',
+     "",
+     "db"),
+
+    # ...or never coming back, so the facts are never gathered at all.
+    ("harvest-never-resumes", "core/db.lua",
+     'A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() db.StartHarvest() end)',
+     "",
+     "db"),
+
+    # A finished sweep restarted every time the auction house closes, which
+    # walks the whole 120000-id range again for nothing.
+    ("harvest-restarts-when-finished", "core/db.lua",
+     "    if not db.harvestAt then return false end",
+     "",
+     "db"),
+
+    # ---- shift-click an item into a search box -----------------------------
+    # The name read as the whole link, so the search box fills with
+    # "|cff1eff00|Hitem:2589..." and every search returns nothing.
+    ("link-name-is-the-whole-link", "core/util.lua",
+     '    local _, _, name = string.find(link, "|h%[(.-)%]|h")',
+     "    local name = link",
+     "util"),
+
+    # A greedy capture instead of a lazy one. Identical on one link, and wrong
+    # the moment a line holds two of them.
+    ("link-name-greedy", "core/util.lua",
+     '    local _, _, name = string.find(link, "|h%[(.-)%]|h")',
+     '    local _, _, name = string.find(link, "|h%[(.*)%]|h")',
+     "util"),
+
+    # A bare itemstring answered with an empty name instead of nil, so the
+    # caller never falls back to the client and the box is cleared.
+    ("link-name-empty-is-a-name", "core/util.lua",
+     '    if name and name ~= "" then return name end',
+     "    if name then return name end",
+     "util"),
+
+    # Focus ignored, so the name always lands in whichever box is registered
+    # first -- the Buy tab's -- however deliberately the player clicked into
+    # another one.
+    ("link-target-ignores-focus", "ui/frame.lua",
+     "    if focus and focus:IsVisible() then return focus end",
+     "",
+     "shiftclick"),
+
+    # ...and the visibility test dropped, so a hidden box takes the name and
+    # it lands where nobody can see it.
+    ("link-target-takes-hidden-boxes", "ui/frame.lua",
+     "        if b and b:IsVisible() then return b end",
+     "        if b then return b end",
+     "shiftclick"),
+
+    # The link stolen from a message the player is typing.
+    ("link-steals-from-chat", "ui/frame.lua",
+     "    if ChatFrameEditBox and ChatFrameEditBox:IsShown() then return false end",
+     "",
+     "shiftclick"),
+
+    # BLIZZARD'S DEFAULT IS SHIFT+LEFT. Taking the right button instead is the
+    # bug this feature shipped with once already -- and on 1.12 right-click on
+    # a bag slot is the sell-to-merchant path.
+    ("link-takes-the-right-button", "ui/frame.lua",
+     '    if button ~= "LeftButton" then return false end',
+     '    if button ~= "RightButton" then return false end',
+     "shiftclick"),
+
+    # ...and taking EVERY left click, so picking an item up stops working.
+    ("link-takes-unmodified-clicks", "ui/frame.lua",
+     "    if not IsShiftKeyDown or not IsShiftKeyDown() then return false end",
+     "",
+     "shiftclick"),
+
+    # The client re-enters its own handler with ignoreModifiers to run the
+    # unmodified path; taking that makes one click do two things.
+    ("link-ignores-the-reentry-flag", "ui/frame.lua",
+     "    if ignoreModifiers then return false end",
+     "",
+     "shiftclick"),
+
+    # We decline the click and then swallow it instead of passing it on, so
+    # picking up, splitting and Ctrl-dressing all stop working.
+    ("link-declined-is-dropped", "ui/frame.lua",
+     "        return ui.origContainerClick(button, ignoreModifiers)",
+     "        return",
+     "shiftclick"),
+
+    # ---- the three guarantees that used to assert nothing -------------------
+    # Every one of these passed silently before v1.52.6, because nothing
+    # extracted the function that was written to catch them.
+
+    # The control strip widened past the window. Fixed widths on both sides of
+    # an empty middle, so the left cluster reaches the right-hand buttons.
+    ("strip-name-box-too-wide", "ui/frame.lua",
+     "local BUY_NAME_W   = 200",
+     "local BUY_NAME_W   = 560",
+     "geometry"),
+
+    # ...and the gap between the two clusters given away entirely.
+    ("strip-has-no-middle", "ui/frame.lua",
+     "    local MIN_GAP = 24        -- the mockup's empty middle, at its narrowest",
+     "    local MIN_GAP = -400      -- the mockup's empty middle, at its narrowest",
+     "geometry"),
+
+    # The strip's width read off its FIRST LINE ONLY -- 300 instead of 538.
+    # This is the shape that made the check worth writing: it compiles, it is
+    # a plausible number, and a fit test against a strip 238px too narrow
+    # passes at every width. The suite reads the continuation now.
+    ("strip-width-loses-its-second-line", "ui/frame.lua",
+     """                    + 16 + BUY_QUAL_W + 10 + 20 + 2 + 74""",
+     """local BUY_STRIP_UNUSED = 16 + BUY_QUAL_W + 10 + 20 + 2 + 74""",
+     "geometry"),
+
+    # A category list that cannot show its own eleven categories at the
+    # smallest allowed window -- a hidden minimum nobody wrote down.
+    ("categories-do-not-fit", "ui/frame.lua",
+     "    side_bot    = 40,   -- the tree runs nearly to the action bar",
+     "    side_bot    = 120,  -- the tree runs nearly to the action bar",
+     "geometry"),
+
+    # ...and the plated row height raised without checking what holds them.
+    ("category-rows-too-tall", "ui/frame.lua",
+     "local SIDE_ROWS, SIDE_ROW_H = 13, 22   -- SIDE_ROW_H is the PLATED height",
+     "local SIDE_ROWS, SIDE_ROW_H = 13, 30   -- SIDE_ROW_H is the PLATED height",
+     "geometry"),
+
+    # The Buy table run down over the pager and rule beneath it.
+    ("buy-table-overruns-its-pager", "ui/frame.lua",
+     "    table_bot   = 82,",
+     "    table_bot   = 60,",
+     "geometry"),
+
+    # ---- the panel is one scope now (v1.52.29) ---------------------------
+
+    # The run's value taken at ITEMS WANTED rather than at crafts. Ask for five
+    # of something made in twos and you buy for three crafts and hold six --
+    # valuing five while paying for six flatters every recipe with a yield
+    # above one, which is every recipe anyone runs at volume.
+    ("craft-value-ignores-the-yield", "ui/frame.lua",
+     """            local crafts = want
+            if opts.craftsFor then crafts = opts.craftsFor(want, p.made) end
+            total = total + per * crafts""",
+     "            total = total + per * want",
+     "crafttree"),
+
+    # ...and one unpriced recipe quietly dropped, so the total is a smaller
+    # number that still looks like an answer -- smaller in the direction that
+    # reads as "this run is not worth doing".
+    ("craft-value-hides-an-unpriced-recipe", "ui/frame.lua",
+     """        else
+            known = false
+        end
+        i = i + 1
+    end
+    return total, known""",
+     """        end
+        i = i + 1
+    end
+    return total, known""",
+     "crafttree"),
+
+    # The cut taken off the PROFIT instead of off the sale. 5% of what the
+    # buyer pays leaves before you ever see it; off the difference it makes
+    # every thin margin look wider -- and thin margins are the only ones where
+    # the answer changes what you do.
+    ("craft-cut-comes-off-the-profit", "ui/frame.lua",
+     "    return math.floor((value or 0) * (1 - (cut or 0)) - (cost or 0))",
+     "    return math.floor(((value or 0) - (cost or 0)) * (1 - (cut or 0)))",
+     "crafttree"),
+
+    # The widened caption cell left on the next row the pool hands out -- the
+    # same one-pool trap as the font, one line further down.
+    ("craft-caption-width-not-restored", "ui/frame.lua",
+     '    if e.kind ~= "section" then row.ct:SetWidth(CRAFTL.count_w) end',
+     "    local _ = e.kind",
+     "crafttree"),
+
+    # ...and the caption back in a count-sized cell, where "MADE/WANT" wraps
+    # into two lines drawn over the row below it.
+    ("craft-caption-in-a-count-cell", "ui/frame.lua",
+     "        row.ct:SetWidth(CRAFTL.count_w + CRAFTL.step_w)",
+     "        row.ct:SetWidth(CRAFTL.count_w)",
+     "crafttree"),
+
+    # ---- concept parity (v1.52.27) ---------------------------------------
+
+    # "1 RECIPES". A heading is the one line on a panel nobody can miss, which
+    # makes it the one place a plural nobody bothered with is loudest.
+    ("craft-headline-plural-always", "ui/frame.lua",
+     '    local s = recipes .. (recipes == 1 and " RECIPE" or " RECIPES")',
+     '    local s = recipes .. " RECIPES"',
+     "crafttree"),
+
+    # ...and "0 TO BUY" on a finished list. A zero here is the finished state
+    # and it should look finished, not be reported.
+    ("craft-headline-reports-zero", "ui/frame.lua",
+     "    if short > 0 then",
+     "    if short >= 0 then",
+     "crafttree"),
+
+    # The section rows losing their column caption, which is the only thing
+    # saying that `1/5` is made-over-wanted and `18/40` is have-over-need --
+    # two fractions in one list, meaning different things.
+    ("craft-section-caption-dropped", "ui/frame.lua",
+     '        caption = "MADE/WANT",',
+     "",
+     "crafttree"),
+
+    # The stepper back AFTER the count. The five in `1/5` is what the pair
+    # moves, so `1/5 [-] [+]` reads as two more buttons rather than as a
+    # control on that number.
+    ("craft-stepper-after-the-count", "ui/frame.lua",
+     """    row.ct:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.step:ClearAllPoints()
+    row.step:SetPoint("RIGHT", row, "RIGHT", -(CRAFTL.count_w + 4), 0)""",
+     """    row.ct:SetPoint("RIGHT", row, "RIGHT", -(CRAFTL.step_w + 4), 0)
+    row.step:ClearAllPoints()
+    row.step:SetPoint("RIGHT", row, "RIGHT", 0, 0)""",
+     "crafttree"),
+
+    # A breakdown line drawn as a plain name, so it reads as another entry in
+    # the list rather than as a component of the row above it.
+    ("craft-breakdown-reads-as-a-line", "ui/frame.lua",
+     """            "\\194\\183 " .. (e.name or "") .. " \\195\\151" .. (e.per or 1),""",
+     """            (e.name or ""),""",
+     "crafttree"),
+
+    # ...and the controls left on a row that no longer wants them, which is
+    # the same one-pool trap from the other side.
+    ("craft-stepper-left-on-a-reagent", "ui/frame.lua",
+     "    if showStep then row.step:Show()  else row.step:Hide()  end",
+     "    if showStep then row.step:Show() end",
+     "crafttree"),
+
+    # A reused row left in the SECTION font. The pool hands the same widget a
+    # reagent line on the next repaint, and a font set on a FontString stays
+    # set -- so the list reads correctly until you scroll it.
+    ("craft-row-font-not-restored", "ui/frame.lua",
+     "    ui.CraftRowFont(row)\n\n    local indent, tail",
+     "    local indent, tail",
+     "crafttree"),
+
+    # ---- quality colours in the shopping panel (v1.52.26) ----------------
+
+    # GetItemInfo per PAINT rather than per rebuild. That is a per-item client
+    # query inside a repaint driven by a BAG_UPDATE flag, which storms --
+    # exactly the shape HARD RULE 16 exists to keep out.
+    ("craft-quality-not-memoised", "ui/frame.lua",
+     """    local q = ui.craftQuality[itemId]
+    if q then return q end""",
+     "    local q = nil",
+     "crafttree"),
+
+    # ...and the opposite mistake: caching the MISS, so an item the client had
+    # not loaded yet stays uncoloured until logout.
+    #
+    # Caching `quality` itself would be a no-op -- assigning nil to a table key
+    # REMOVES it, so the miss would not be cached and the sabotage would prove
+    # nothing. It has to cache a real value to be the bug it claims to be.
+    ("craft-quality-caches-the-miss", "ui/frame.lua",
+     """    if ok and quality then
+        ui.craftQuality[itemId] = quality
+        return quality
+    end
+    return nil""",
+     """    ui.craftQuality[itemId] = quality or 1
+    return ui.craftQuality[itemId]""",
+     "crafttree"),
+
+    # An unknown quality reading as black rather than as body text. The row
+    # still has to draw while the client catches up.
+    ("craft-quality-unknown-is-black", "ui/frame.lua",
+     "        r, g, b = C.text[1], C.text[2], C.text[3]",
+     "        r, g, b = 0, 0, 0",
+     "crafttree"),
+
+    # Dimming replaced by a flat grey, which throws the quality away to say
+    # "set aside" -- two facts in one cell, and the one dropped is the one you
+    # can see from across the panel.
+    ("craft-dim-discards-the-quality", "ui/frame.lua",
+     "    if dim then return r * dim, g * dim, b * dim end",
+     "    if dim then return dim, dim, dim end",
+     "crafttree"),
+
+    # ---- the input colour, fourth attempt (v1.52.34) ---------------------
+
+    # The registry never filled, so there is nothing to re-colour after pfUI's
+    # pass -- which is the only pass that was ever the problem.
+    ("input-boxes-not-registered", "ui/frame.lua",
+     """    if not e.aegisInputBox then
+        e.aegisInputBox = true
+        table.insert(ui.inputBoxes, e)
+    end""",
+     "    local _ = e",
+     "rowchrome"),
+
+    # THE BOUND ON ui.ReapplyInputText HAS NO SABOTAGE, deliberately. Removing
+    # it is only wrong when the dedupe ALSO fails, and forging that turns the
+    # unbounded walk into a HANG rather than a failure -- it hung this runner
+    # when it was first written, which is what a player would have got. A
+    # sabotage that hangs the harness is worse than none, so the bound is
+    # covered by a test that forges a single dedupe failure and asserts the
+    # list does not run away, and by the comment on the loop.
+
+    # The deferred pass never armed. Re-applying inline has been in skin.lua
+    # since v1.52.32 and the box was still dull under pfUI, so inline alone is
+    # known-insufficient -- that is the whole reason the tick exists.
+    ("input-deferred-pass-not-armed", "ui/skin.lua",
+     "        if A.ui and A.ui.DeferInputText then A.ui.DeferInputText() end",
+     "        local _ = f",
+     "rowchrome"),
+
+    # ---- the input colour, third attempt (v1.52.33) ----------------------
+
+    # The font object left attached. InputBoxTemplate backs its box with
+    # ChatFontNormal, and a FontInstance backed by an OBJECT takes that
+    # object's colour -- SetTextColor on it does not survive the next redraw.
+    # This is the mechanism two earlier fixes missed while re-arranging WHEN
+    # the colour was set.
+    ("input-font-object-not-detached", "ui/frame.lua",
+     """        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end""",
+     "        local _ = e",
+     "rowchrome"),
+
+    # ...and the colour set BEFORE the font, which re-attaches the object and
+    # throws the colour away again. Same two calls, wrong order, no error.
+    ("input-colour-set-before-the-font", "ui/frame.lua",
+     """    if e.GetFont and e.SetFont then
+        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end
+    end
+    e:SetTextColor(C.input[1], C.input[2], C.input[3])""",
+     """    e:SetTextColor(C.input[1], C.input[2], C.input[3])
+    if e.GetFont and e.SetFont then
+        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end
+    end""",
+     "rowchrome"),
+
+    # ---- one table look, one input colour (v1.52.32) ---------------------
+
+    # The shared result row back to being plated by pfUI. ui/skin.lua's note
+    # said result rows were safe "because those are Frames" -- true until
+    # BuildResultRow became a Button, after which every results table in the
+    # window was boxed for releases while the comment said it could not happen.
+    #
+    # The find string has to remove the CODE. The first version of this entry
+    # flipped the COMMENT above it from "MUST NOT" to "MAY" and left the line
+    # in place -- a sabotage that changes nothing proves nothing, and it went
+    # through green.
+    ("result-rows-plated-by-pfui", "ui/frame.lua",
+     "\n    row.aegisNoSkin = true\n",
+     "\n",
+     "rowskin"),
+
+    # ...and a row anchored to the row above it. rowchain.py has guarded this
+    # since v1.52.16 and had never once been watched fail -- which is how it
+    # spent that whole time unable to see two of the pools it was written for.
+    ("shopping-rows-chained-again", "ui/frame.lua",
+     """            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,
+                CRAFTL.row_l, CRAFTL.row_r)""",
+     """            row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1],
+                "BOTTOMLEFT", 0, 0)""",
+     "rowchain"),
+
+    # ...and the skin no longer putting our text colour back after restyling an
+    # edit box, which is what made the flat-undercut amount dull under pfUI and
+    # only under pfUI.
+    ("skin-drops-the-input-colour", "ui/skin.lua",
+     "        if A.ui and A.ui.InputText then A.ui.InputText(f) end",
+     "        local _ = f",
+     "rowchrome"),
+
+    # ---- one casing, one place (v1.52.31) --------------------------------
+
+    # The header cell no longer uppercases, so every table is back to whatever
+    # its own definition table happened to say -- which is how the Crafting tab
+    # spent four releases in caps beside five in sentence case.
+    ("header-cell-does-not-uppercase", "ui/frame.lua",
+     '    if string.upper then fs:SetText(string.upper(text or "")) end',
+     "    local _ = text",
+     "rowchrome"),
+
+    # ...and the sort arrow undoing it. PaintSortHeaders rewrites the label, so
+    # a caption capitalised only at creation comes back in sentence case the
+    # first time you sort by that column -- one column out of seven, which
+    # reads as a rendering glitch rather than as a missed call.
+    ("sort-arrow-drops-the-caps", "ui/frame.lua",
+     '        local t = string.upper(hb.baseText or "")',
+     "        local t = hb.baseText",
+     "rowchrome"),
+
+    # ---- the chosen option in a segmented row (v1.52.28) -----------------
+
+    # The chosen option back to the plate's own text colour, so a value you
+    # have SET reads dimmer than the figure it governs in the box beside it.
+    ("segmented-chosen-not-brightened", "ui/frame.lua",
+     "            b.aegisTextColor = on and C.input or nil",
+     "            b.aegisTextColor = nil",
+     "rowchrome"),
+
+    # ...and the override left ON when the choice moves, so every option a row
+    # has ever held reads as chosen.
+    ("segmented-override-never-cleared", "ui/frame.lua",
+     "            b.aegisTextColor = on and C.input or nil",
+     "            if on then b.aegisTextColor = C.input end",
+     "rowchrome"),
+
+    # ---- the Crafting tab's clipping (v1.52.25) --------------------------
+
+    # The shopping rows plated by pfUI again: SkinWidget gives every Button its
+    # generic plate, and on a list row that border is drawn THROUGH the row's
+    # own first and last pixels -- a name and a count clipped at both ends
+    # under pfUI and correct without it.
+    #
+    # The find string carries the line AFTER it, because `row.aegisNoSkin =
+    # true` on its own is not unique -- the Buy tab's category rows set it at
+    # the same indentation and appear FIRST in the file, so a bare match
+    # sabotaged the wrong list and the Crafting check passed honestly.
+    ("craft-rows-plated-by-pfui", "ui/frame.lua",
+     """            row.aegisNoSkin = true
+            -- ANCHORED ON BOTH SIDES, never SetWidth.""",
+     """            row.aegisPlateMe = true
+            -- ANCHORED ON BOTH SIDES, never SetWidth.""",
+     "geometry"),
+
+    # ...and the expander over them, which is an invisible click target: a
+    # plate on it is a box drawn around a triangle.
+    ("craft-expander-plated-by-pfui", "ui/frame.lua",
+     "            exBtn.aegisNoSkin = true",
+     "            exBtn.aegisPlateMe = true",
+     "geometry"),
+
+    # A width back on a chrome FontString. It WRAPS, and the second line draws
+    # over the box border and the first row inside it -- which is what put
+    # "Net need prices" across "Price recipe" on the footer.
+    ("craft-footer-fontstring-has-a-width", "ui/frame.lua",
+     """    ui.craftMadeFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)""",
+     """    ui.craftMadeFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
+    ui.craftMadeFS:SetWidth(80)""",
+     "geometry"),
+
+    # The footer's middle third measured from the wrong end, so the centre
+    # figure sits on top of one of its neighbours.
+    ("craft-foot-mid-forgets-a-third", "ui/frame.lua",
+     """    return CRAFTL.edge + CRAFTL.row_l + third + CRAFTL.btn_gap
+        + math.floor(third / 2)""",
+     """    return CRAFTL.edge + CRAFTL.row_l + math.floor(third / 2)""",
+     "geometry"),
+
+    # ui.FitString cutting a coloured string. The cut is by byte index and
+    # every money figure is wrapped in |cffRRGGBB...|r, so landing inside one
+    # leaves the escape half-written -- the client draws the raw bytes and then
+    # colours the whole rest of the line with what it read.
+    ("fitstring-cuts-a-colour-escape", "ui/frame.lua",
+     '    if string.find(s, "|", 1, true) then return s end',
+     "    local _ = s",
+     "craft.plan"),
+
+    # ---- what you type (v1.52.24) ----------------------------------------
+
+    # The colour back to inherited, which is the bug: InputBoxTemplate's chat
+    # font on a near-black backdrop, never chosen and therefore dim.
+    ("input-text-not-coloured", "ui/frame.lua",
+     "    e:SetTextColor(C.input[1], C.input[2], C.input[3])",
+     "    local _ = C.input",
+     "rowchrome"),
+
+    # ...and the flattened boxes left out of it, so the three that keep the
+    # stock art read differently from the ones beside them on the same row.
+    ("input-flatten-skips-the-colour", "ui/frame.lua",
+     "    return ui.InputText(e)",
+     "    return e",
+     "rowchrome"),
+
+    # Input text the same shade as body copy -- which is what "just use C.text"
+    # gives, and it is the shade that was reported as hard to read.
+    ("input-colour-no-brighter-than-body", "ui/frame.lua",
+     "    input   = { 1.00, 1.00, 1.00 },",
+     "    input   = { 0.87, 0.82, 0.69 },",
+     "rowchrome"),
+
+    # The coin boxes back to right-aligned, digit jammed against the coin.
+    ("money-boxes-right-aligned", "ui/frame.lua",
+     """        e:SetJustifyH("CENTER")""",
+     """        e:SetJustifyH("RIGHT")""",
+     "rowchrome"),
+
+    # ---- the Crafting tab's two panels ------------------------------------
+    # The shopping panel given a share big enough to starve the middle table.
+    # Before v1.52.10 this was a fixed width; the guarantee is the same.
+    ("craft-panels-do-not-fit", "ui/frame.lua",
+     "    left_frac  = 0.385,  -- the shopping list",
+     "    left_frac  = 0.70,   -- the shopping list",
+     "geometry"),
+
+    # THE ORDER OF THE TWO CLAMPS lives in craft-widths-minimum-outranks-the-
+    # floor, up with the rest of the two-panel geometry. The pair that scaled
+    # two outer panels TOGETHER went with the third panel in v1.52.21 -- there
+    # is only one outer panel to scale now.
+
+    # The shopping panel back to FIXED, which is what v1.52.10 changed: the
+    # middle would take every surplus pixel and the column beside it stay at
+    # the width it needs at the minimum however wide the window gets.
+    ("craft-outer-panels-do-not-grow", "ui/frame.lua",
+     "    local left = math.floor(avail * CRAFTL.left_frac)",
+     "    local left = CRAFTL.left_min",
+     "geometry"),
+
+    # The middle panel's floor forgetting the scrollbar lane, so the shares are
+    # allowed to squeeze the table until its bar is over the right panel.
+    ("craft-floor-forgets-the-lane", "ui/frame.lua",
+     """    return CRAFT_COLS_END + ROWPAD.l + ROWPAD.r + CRAFTL.bar_lane
+        + CRAFTL.mid_cushion""",
+     "    return CRAFT_COLS_END + ROWPAD.l + ROWPAD.r + CRAFTL.mid_cushion",
+     "geometry"),
+
+    # The middle panel measured against the PANEL rather than the ROW, so it
+    # promises a fit at a width where the last column is under the border --
+    # the same mistake ColumnsFitAt was making until v1.50.3.
+    ("craft-fit-ignores-the-row-pad", "ui/frame.lua",
+     "    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r",
+     "    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane",
+     "geometry"),
+
+    # ...and the other term of the same subtraction: no lane for the scrollbar,
+    # so the bar draws through the RIGHT panel's border. Both directions,
+    # because either one alone makes the check more permissive and a check that
+    # only knows "does it fit" cannot tell which term went missing.
+    ("craft-fit-ignores-the-scrollbar", "ui/frame.lua",
+     "    return ui.CraftMidWidthAt(w) - CRAFTL.bar_lane - ROWPAD.l - ROWPAD.r",
+     "    return ui.CraftMidWidthAt(w) - ROWPAD.l - ROWPAD.r",
+     "geometry"),
+
+    # The lane trimmed to the bar's own width, forgetting that the bar is
+    # pushed OUT past the rows and that the box's border needs a bleed after
+    # it -- so the bar draws through the middle table's own right border.
+    ("craft-bar-lane-too-narrow", "ui/frame.lua",
+     "    bar_lane = 30,   -- the MIDDLE table's scrollbar, inside its own panel",
+     "    bar_lane = 16,   -- the MIDDLE table's scrollbar, inside its own panel",
+     "geometry"),
+
+    # The last column back on the row's right edge, 6px from the box border,
+    # which is the border's own half-width and reads as touching it.
+    ("buy-last-column-has-no-tail", "ui/frame.lua",
+     "local BUY_COL_TAIL = 8",
+     "local BUY_COL_TAIL = 0",
+     "geometry"),
+
+    # ...and the tail applied by the LAYOUT but not counted by the fit check,
+    # so it holds at every width except the minimum -- where it is worst.
+    ("buy-tail-not-counted-by-the-fit", "ui/frame.lua",
+     "    return BUY_COLS_END + BUY_COL_TAIL <= rowW",
+     "    return BUY_COLS_END <= rowW",
+     "geometry"),
+
+    # The outer panels' rows back to ROWPAD, whose left pad of 2 is INSIDE the
+    # 6px a border reaches inward -- names drawn under their own box edge.
+    ("craft-outer-rows-under-the-border", "ui/frame.lua",
+     "    row_l   = 8,  row_r   = 16,",
+     "    row_l   = 2,  row_r   = 12,",
+     "geometry"),
+
+    # ...and the right pad trimmed to the border alone, forgetting that the
+    # [+] button's plate is drawn outside the button.
+    ("craft-plus-button-plate-clipped", "ui/frame.lua",
+     "    row_l   = 8,  row_r   = 16,",
+     "    row_l   = 8,  row_r   = 6,",
+     "geometry"),
+
+    # The Bid button's width and the row's end disagreeing, which is how a
+    # column edit silently pushes a table under the scrollbar.
+    ("craft-cols-end-stale-button-width", "ui/frame.lua",
+     "local CRAFT_COLS_END = 484 + 38",
+     "local CRAFT_COLS_END = 484 + 50",
+     "geometry"),
+
+    # The OUTER panels charged for a scrollbar lane they do not draw, so every
+    # recipe name loses a quarter of its column to nothing.
+    ("craft-side-row-pays-for-a-hidden-bar", "ui/frame.lua",
+     "    return left - CRAFTL.row_l - CRAFTL.row_r",
+     "    return left - CRAFTL.row_l - CRAFTL.row_r - CRAFTL.bar_lane",
+     "geometry"),
+
+    # The box edge measured at ONE bleed instead of two, so every heading on
+    # the tab has its own top border drawn through it. Nothing throws; the
+    # text is simply crossed out.
+    ("craft-box-clear-counts-one-bleed", "ui/frame.lua",
+     "    return ui.CraftBoxEdge(band) - WELL_BLEED",
+     "    return ui.CraftBoxEdge(band)",
+     "geometry"),
+
+    # The left panel's list pushed down so it no longer fills its box.
+    ("craft-side-list-loses-a-row", "ui/frame.lua",
+     "    side_top = 70, side_bot = 30,",
+     "    side_top = 80, side_bot = 30,",
+     "geometry"),
+
+    # The middle table pushed down, so it loses a row at the smallest window.
+    ("craft-mid-table-loses-a-row", "ui/frame.lua",
+     "    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "    mid_top  = 104, mid_bot  = 30,  -- side_top + CRAFT_HDR_BAND",
+     "geometry"),
+
+    # The footer bar run up under the boxes' bottom border.
+    ("craft-footer-under-the-border", "ui/frame.lua",
+     "    foot_y = 4,  foot_h = 12,",
+     "    foot_y = 22, foot_h = 12,",
+     "geometry"),
+
+    # The two boxes back to two different tops -- the exact thing the aligned
+    # layout fixed, and the thing a screenshot showed before the suite could.
+    # The middle box reaches CRAFT_HDR_BAND further down INSIDE itself for its
+    # column headers, so its band is the outlier by exactly that and no more.
+    ("craft-boxes-not-aligned-at-the-top", "ui/frame.lua",
+     "    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "    mid_top  = 70, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "geometry"),
+
+    # ...and to three different bottoms.
+    ("craft-boxes-not-aligned-at-the-bottom", "ui/frame.lua",
+     "    side_top = 70, side_bot = 30,",
+     "    side_top = 70, side_bot = 120,",
+     "geometry"),
+
+    # The middle box's own header band forgotten, so its box edge sits
+    # CRAFT_HDR_BAND below the other two instead of level with them.
+    ("craft-mid-box-not-level", "ui/frame.lua",
+     "    mid_top  = 94, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "    mid_top  = 70, mid_bot  = 30,   -- side_top + CRAFT_HDR_BAND",
+     "geometry"),
+
+    # ONE ROW HEIGHT across the tab. Two lists side by side at two heights
+    # read as two unrelated tables; nothing lines up.
+    ("craft-side-rows-own-height", "ui/frame.lua",
+     "local CSIDE_ROW_H  = CRAFT_ROW_H",
+     "local CSIDE_ROW_H  = 20",
+     "geometry"),
+
+    # The left panel's buttons run down through the top of its own box.
+    ("craft-buttons-through-the-box", "ui/frame.lua",
+     "    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Reset",
+     "    btn_y   = 56, btn_h   = 18,    -- Price | Price all | Remove | Reset",
+     "geometry"),
+
+    # A name measured against the whole row, ignoring what the row ENDS with --
+    # so a recipe name runs under its own stepper, or wraps onto the row below.
+    ("craft-label-ignores-the-tail", "ui/frame.lua",
+     "    local w = (rowW or 0) - (indent or 0) - (tail or 0)",
+     "    local w = (rowW or 0) - (indent or 0)",
+     "geometry"),
+
+    # ...and the floor removed, so a tail wider than the row hands ui.FitString
+    # a zero and every name on that panel becomes an ellipsis.
+    ("craft-label-has-no-floor", "ui/frame.lua",
+     "    if w < 1 then w = 1 end\n    return w",
+     "    return w",
+     "geometry"),
+
+    # CRAFT_COLS_END measured to the last TEXT column, so the panel is sized
+    # without the Buy and Bid buttons and cuts them off.
+    ("craft-cols-end-misses-the-buttons", "ui/frame.lua",
+     "local CRAFT_COLS_END = 484 + 38",
+     "local CRAFT_COLS_END = 390 + 40",
+     "geometry"),
+
+    # The gutter counted TWICE, from when there were two of them, so the
+    # panels no longer account for the whole width and a strip of nothing runs
+    # down the tab. (Dropping it entirely is craft-widths-forget-the-gutter.)
+    ("craft-mid-width-counts-a-gutter-twice", "ui/frame.lua",
+     "        - (CRAFTL.edge * 2) - CRAFTL.gap",
+     "        - (CRAFTL.edge * 2) - (CRAFTL.gap * 2)",
+     "geometry"),
+
+    # ---- crafting: how many to make ---------------------------------------
+    # THE CEIL. Wanting five of something made in twos is 2.5 crafts; a
+    # truncated 2 shops you one item short every time, with every number on
+    # screen looking entirely reasonable.
+    ("craft-crafts-truncates", "core/buy.lua",
+     "    return math.ceil(wanted / made)",
+     "    return math.floor(wanted / made)",
+     "craft.plan"),
+
+    # The yield ignored, so a recipe making two costs twice the reagents it
+    # should -- and the shopping list is double all the way down.
+    ("craft-ignores-the-yield", "core/buy.lua",
+     "    return math.ceil(wanted / made)",
+     "    return wanted",
+     "craft.plan"),
+
+    # Reagent totals multiplied by the ITEMS wanted rather than the CRAFTS.
+    # Identical for every one-yield recipe, which is most of them.
+    ("craft-need-uses-wanted-not-crafts", "core/buy.lua",
+     "        local need = per * crafts",
+     "        local need = per * (wanted or 1)",
+     "craft.plan"),
+
+    # A surplus recorded as a negative shortfall, which then subtracts from the
+    # rest of the shopping list.
+    ("craft-surplus-goes-negative", "core/buy.lua",
+     "        if short < 0 then short = 0 end",
+     "",
+     "craft.plan"),
+
+    # The quantity unclamped at the bottom: zero or negative wanted.
+    ("craft-want-not-clamped-low", "core/buy.lua",
+     """    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end""",
+     "    n = math.floor(tonumber(n) or 1)",
+     "craft.plan"),
+
+    # ...and at the top.
+    ("craft-want-not-capped", "core/buy.lua",
+     "    if n > craft.WANT_MAX then n = craft.WANT_MAX end\n    p.want = n",
+     "    p.want = n",
+     "craft.plan"),
+
+    # An unresolvable reagent dropped from the list, which silently shortens
+    # the shopping list by exactly the things you have never bought before.
+    ("craft-drops-unknown-reagents", "core/buy.lua",
+     """        table.insert(rows, {
+            name = r.name, itemId = id, per = per,""",
+     """        if id then table.insert(rows, {
+            name = r.name, itemId = id, per = per,""",
+     "craft.plan"),
+
+    # ---- the shopping list -------------------------------------------------
+    # The aggregation dropped: a reagent two recipes want gets the SECOND
+    # recipe's figure instead of the sum, so the list quietly under-buys.
+    ("shop-does-not-aggregate", "core/buy.lua",
+     "        need[id] = need[id] + n",
+     "        need[id] = n",
+     "craft.plan"),
+
+    # ...and the quantity stepper ignored, so the list is for one of each
+    # however many you asked for.
+    ("shop-ignores-the-quantity", "core/buy.lua",
+     "        addReagents(p, craft.CraftsFor(want, p.made), p.name)",
+     "        addReagents(p, 1, p.name)",
+     "craft.plan"),
+
+    # What you own not taken off, so the list tells you to buy what is in
+    # your bags.
+    ("shop-ignores-what-you-own", "core/buy.lua",
+     "        local short = need[id] - have",
+     "        local short = need[id]",
+     "craft.plan"),
+
+    # A surplus recorded as a negative shortfall.
+    ("shop-surplus-goes-negative", "core/buy.lua",
+     "        if short < 0 then short = 0 end\n        -- A thing you are going to CRAFT is not a thing you are short OF --",
+     "        -- A thing you are going to CRAFT is not a thing you are short OF --",
+     "craft.plan"),
+
+    # An intermediate counted as BOTH something to craft and something to buy,
+    # so you are told to buy the bolt and the cloth to make it.
+    ("shop-double-counts-the-intermediate", "core/buy.lua",
+     "        if short > 0 and not crafted[id] then shortCount = shortCount + 1 end",
+     "        if short > 0 then shortCount = shortCount + 1 end",
+     "craft.plan"),
+
+    # The WHOLE need expanded rather than the shortfall, so owning half the
+    # bolts still buys cloth for all of them.
+    ("shop-expands-the-whole-need", "core/buy.lua",
+     "                        addReagents(sub, craft.CraftsFor(short, sub.made),",
+     "                        addReagents(sub, craft.CraftsFor(need[id], sub.made),",
+     "craft.plan"),
+
+    # Expansion on by default, turning a recipe list into raw materials with
+    # nobody asking for it.
+    ("shop-expands-unasked", "core/buy.lua",
+     "    local recipeFor = opts.expand and opts.recipeFor or nil",
+     "    local recipeFor = opts.recipeFor",
+     "craft.plan"),
+
+    # THE CYCLE GUARD. Two recipes that make each other, and the walk never
+    # ends -- which on this client is a hung game, not a wrong number.
+    ("shop-cycle-hangs", "core/buy.lua",
+     "        local n = table.getn(order)\n        local k = 1",
+     "        local n = 999999\n        local k = 1",
+     "craft.plan"),
+
+    # A tie sent to the auction house. A vendor's price is fixed and always in
+    # stock; an auction at the same money may be gone when you get there.
+    ("shop-tie-goes-to-the-ah", "core/buy.lua",
+     "        if vendor <= market then return \"vendor\", vendor end",
+     "        if vendor < market then return \"vendor\", vendor end",
+     "craft.plan"),
+
+    # The Buy-all figure counting what you already own, so it quotes the cost
+    # of the whole recipe rather than of the shopping still to do.
+    ("shoptotal-prices-the-need-not-the-short", "ui/frame.lua",
+     "                total = total + r.unit * r.short",
+     "                total = total + r.unit * (r.need or r.short)",
+     "craft.plan"),
+
+    # ...and counting the intermediates, whose own reagents are already priced
+    # further down the list -- the bolt AND the cloth to make it.
+    ("shoptotal-double-counts-the-intermediate", "ui/frame.lua",
+     "        if r.short > 0 and not r.craftable then",
+     "        if r.short > 0 then",
+     "craft.plan"),
+
+    # An unpriced line silently omitted AND the total still claimed complete,
+    # which is a number that is wrong with no way to tell.
+    ("shoptotal-hides-what-it-cannot-price", "ui/frame.lua",
+     "                complete = false",
+     "",
+     "craft.plan"),
+
+    # The shopping panel back to something like its old 174px, which is the
+    # width that cut a recipe name to about ten characters and the whole reason
+    # the third panel was deleted.
+    ("craft-shopping-panel-back-to-a-sliver", "ui/frame.lua",
+     "    left_frac  = 0.385,  -- the shopping list",
+     "    left_frac  = 0.19,   -- the shopping list",
+     "geometry"),
+
+    # Price all searching things you already have enough of -- every one a
+    # wasted trip through the query gate, which is the slow part.
+    ("shopqueue-searches-covered-lines", "ui/frame.lua",
+     "        if r.name and r.short and r.short > 0 and not r.craftable then",
+     "        if r.name and r.short and not r.craftable then",
+     "craft.plan"),
+
+    # ...and searching the intermediates, whose own reagents are already on the
+    # list -- looking for something you were never going to buy.
+    ("shopqueue-searches-intermediates", "ui/frame.lua",
+     "        if r.name and r.short and r.short > 0 and not r.craftable then",
+     "        if r.name and r.short and r.short > 0 then",
+     "craft.plan"),
+
+    # THE STALE-REPLY GUARD. A search that lands after the player pressed Stop
+    # chains off the queue it belonged to and restarts a walk they cancelled.
+    ("craftqueue-chains-after-cancel", "ui/frame.lua",
+     "            if ui.craftQueue ~= q then return end",
+     "",
+     "craftqueue"),
+
+    # A queue left armed when the client refuses, so it fires against whatever
+    # session comes next -- possibly a different trip to a different auctioneer.
+    ("craftqueue-armed-after-refusal", "ui/frame.lua",
+     "        ui.craftQueue = nil\n        ui.RefreshCraftButtons()\n        if ui.craftStatus then",
+     "        if ui.craftStatus then",
+     "craftqueue"),
+
+    # The whole list fired at once instead of one search per reply, which is
+    # the pacing the query gate exists to impose (HARD RULE 10).
+    # A walk that leaves `Remove` live lets you delete the recipe whose
+    # reagents it is still searching for -- the queue then spends the query
+    # gate on names nothing on the list wants.
+    ("craftqueue-remove-live-mid-walk", "ui/frame.lua",
+     """    gate(ui.craftPriceBtn)
+    gate(ui.craftDelBtn)
+    gate(ui.craftResetBtn)""",
+     "    gate(ui.craftPriceBtn)",
+     "craftqueue"),
+
+    # ...and one that leaves the gate inverted, so the buttons are dead when
+    # nothing is running and live when something is.
+    ("craftqueue-button-gate-inverted", "ui/frame.lua",
+     "        if running then b:Disable() else b:Enable() end",
+     "        if running then b:Enable() else b:Disable() end",
+     "craftqueue"),
+
+    ("craftqueue-does-not-wait", "ui/frame.lua",
+     "            ui.RunCraftQueue()\n        end,\n        onState = function() ui.RefreshCraftStatus() end,",
+     "        end,\n        onState = function() ui.RefreshCraftStatus() end,",
+     "craftqueue"),
+
+    # ---- crafting: the three panels' own arithmetic ------------------------
+    # What you own read as the ACCOUNT total rather than what is in your hands.
+    # Every bucket added makes the answer bigger, which reads as "you need
+    # less" and never as an error -- so each one gets its own sabotage.
+    ("craft-owned-counts-the-auction-house", "ui/frame.lua",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) end",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) + (r.ah or 0) end",
+     "craft.plan"),
+
+    ("craft-owned-counts-the-mailbox", "ui/frame.lua",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) end",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) + (r.mail or 0) end",
+     "craft.plan"),
+
+    # ...and the `you` test dropped, so an alt's bank answers for yours. The
+    # rows are sorted with you first, so this is right until it is not.
+    ("craft-owned-takes-the-first-row", "ui/frame.lua",
+     "        if r.you then return (r.bags or 0) + (r.bank or 0) end",
+     "        return (r.bags or 0) + (r.bank or 0)",
+     "craft.plan"),
+
+    # Overshooting a target counted as negative work left, which drags the
+    # footer's to-go total DOWN every time you overshoot one recipe -- a total
+    # that gets more wrong the more you craft.
+    ("craft-made-goes-negative", "ui/frame.lua",
+     "        local left = want - n\n        if left < 0 then left = 0 end",
+     "        local left = want - n",
+     "craft.plan"),
+
+    # The two footer totals swapped for the same sum, so "made" and "to go"
+    # both count the same thing.
+    ("craft-made-totals-the-wrong-number", "ui/frame.lua",
+     "        made = made + n\n        toGo = toGo + left",
+     "        made = made + n\n        toGo = toGo + n",
+     "craft.plan"),
+
+    # A name cut without room for the ellipsis it then has appended, so the
+    # "fits" answer is three dots too wide and the column overruns anyway.
+    ("craft-fit-forgets-the-ellipsis", "ui/frame.lua",
+     """        local cut = string.sub(s, 1, n) .. dots
+        if measure(cut) <= maxW then return cut end""",
+     """        local cut = string.sub(s, 1, n)
+        if measure(cut) <= maxW then return cut .. dots end""",
+     "craft.plan"),
+
+    # The UI never told that something was made, so the right panel sits at
+    # 0 / 5 through a whole crafting run.
+    ("craft-made-does-not-notify", "core/buy.lua",
+     "        if craft.onMade then craft.onMade(id, n) end",
+     "",
+     "craft.plan"),
+
+    # Ordinary loot counted as a craft. This runs on every item anyone in the
+    # party picks up, so the made-count climbs while you stand still.
+    ("craft-counts-loot-as-made", "core/buy.lua",
+     "    if string.find(msg, head, 1, true) ~= 1 then return nil end",
+     "",
+     "craft.plan"),
+
+    # The multiple form losing its count: "You create: [Item]x12" books one.
+    ("craft-multiple-create-counts-one", "core/buy.lua",
+     '    local _, _, n = string.find(msg, "x(%d+)[%.%s]*$")',
+     "    local n = nil",
+     "craft.plan"),
+
+    # The locale prefix escaped as a PATTERN while matching PLAIN, so every
+    # locale silently falls back to English and non-English clients count
+    # nothing at all.
+    ("craft-prefix-escaped-as-pattern", "core/buy.lua",
+     '    local at = string.find(fmt, "%s", 1, true)',
+     '    local at = string.find(fmt, "%%s", 1, true)',
+     "craft.plan"),
+
+    # The made-count cleared when the auction house closes -- mid-run, since a
+    # crafting run spans several trips.
+    ("craft-made-resets-at-the-ah", "core/buy.lua",
+     "-- Walking away from the auctioneer ends any in-flight browse.\n"
+     "A.RegisterEvent(\"AUCTION_HOUSE_CLOSED\", function()\n",
+     "A.RegisterEvent(\"AUCTION_HOUSE_CLOSED\", function()\n"
+     "    A.craft.ClearMade()\n",
+     "craft.plan"),
+
+    # ---- the tooltip hook --------------------------------------------------
+    # The guard removed, which is the bug as reported: the client refuses a
+    # link and the error carries OUR file name for a link we never touched.
+    ("tooltip-hook-rethrows-client-refusal", "ui/tooltip.lua",
+     """        local ok, r1, r2 = pcall(tooltip.orig[name], self, a1, a2)
+        if not ok then
+            tooltip.failures = (tooltip.failures or 0) + 1
+            tooltip.lastFailure = { method = name, err = r1 }
+            return
+        end""",
+     "        local r1, r2 = tooltip.orig[name](self, a1, a2)",
+     "tooltip.hook"),
+
+    # Guarded but silent: the refusal never reaches /aex diag, so a link storm
+    # is invisible and a real fault of ours hides behind the same guard.
+    ("tooltip-hook-swallows-silently", "ui/tooltip.lua",
+     "            tooltip.failures = (tooltip.failures or 0) + 1",
+     "            tooltip.failures = 0",
+     "tooltip.hook"),
+
+    # Our lines appended to a tooltip that failed to build -- price lines on
+    # whatever happened to be on screen from the last hover.
+    ("tooltip-hook-extends-after-failure", "ui/tooltip.lua",
+     """            tooltip.lastFailure = { method = name, err = r1 }
+            return
+        end""",
+     """            tooltip.lastFailure = { method = name, err = r1 }
+        end""",
+     "tooltip.hook"),
+
+    # The client's return values eaten. SetBagItem hands back hasCooldown and
+    # repairCost on 1.12 and the stock UI reads them.
+    ("tooltip-hook-eats-return-values", "ui/tooltip.lua",
+     "        return r1, r2\n    end\nend",
+     "        return\n    end\nend",
+     "tooltip.hook"),
+
+    # ---- inventory --------------------------------------------------------
+    # The bank walked as if it were bags. Every bank reads empty, which looks
+    # exactly like "you have none there" -- and sends the player to the bank
+    # for something they do have.
+    ("inventory-bank-walks-bags", "core/sell.lua",
+     "sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }",
+     "sell.BANK_CONTAINERS = { 0, 1, 2, 3, 4 }",
+     "inventory"),
+
+    # BANK_CONTAINER (-1) dropped. The bank BAGS are counted and the bank's own
+    # slots are not, so the number is plausible and short.
+    ("inventory-bank-misses-container-minus-one", "core/sell.lua",
+     "sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }",
+     "sell.BANK_CONTAINERS = { 5, 6, 7, 8, 9, 10 }",
+     "inventory"),
+
+    # Stacks counted as one item each.
+    ("inventory-counts-slots-not-items", "core/sell.lua",
+     "                out[id] = (out[id] or 0) + (count or 1)",
+     "                out[id] = (out[id] or 0) + 1",
+     "inventory"),
+
+    # The bag cache never invalidated: the count freezes at whatever it was the
+    # first time anything asked, and nothing about it looks wrong.
+    ("inventory-bag-cache-never-dirties", "core/sell.lua",
+     "    if force or sell.bagsDirty or not sell.bagCounts then",
+     "    if not sell.bagCounts then",
+     "inventory"),
+
+    # BAG_UPDATE doing the walk inline instead of setting a flag -- the HARD
+    # RULE 16 violation this design exists to avoid.
+    ("inventory-bag-update-walks-inline", "core/sell.lua",
+     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = true end)",
+     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = false end)",
+     "inventory"),
+
+    # The durable bag snapshot taking the CACHED answer, so what other
+    # characters see is whatever this one happened to have cached.
+    ("inventory-durable-snapshot-uses-cache", "core/sell.lua",
+     "    local counts = sell.BagCounts(true)",
+     "    local counts = sell.BagCounts()",
+     "inventory"),
+
+    # The class token lost to the Lua truncation trap that actually happened:
+    # `local _, c = UnitClass and UnitClass("player")` yields ONE value.
+    ("inventory-class-token-truncated", "core/sell.lua",
+     """    local _, token = UnitClass("player")
+    if token == "" then return nil end
+    return token""",
+     """    local _, token = UnitClass and UnitClass("player")
+    return token""",
+     "inventory"),
+
+    # The current character's row not seeded when nothing is stored for them.
+    # A fresh install has no record until a bank is opened, so the block never
+    # appears at all -- which is how this shipped the first time.
+    ("inventory-fresh-character-has-no-row", "core/db.lua",
+     "    if me and liveBags and (liveBags[itemId] or 0) > 0 and not inv[me] then",
+     "    if false then",
+     "inventory"),
+
+    # Live bags ignored in favour of the stored snapshot -- a stale number
+    # where an exact one was available.
+    ("inventory-ignores-live-bags", "core/db.lua",
+     "            if b == \"bags\" and who == me and liveBags then",
+     "            if false then",
+     "inventory"),
+
+    # Characters holding none of the item listed anyway, so every tooltip grows
+    # a row per alt saying zero.
+    ("inventory-lists-empty-characters", "core/db.lua",
+     "        if row.total > 0 then",
+     "        if true then",
+     "inventory"),
+
+    # Inventory pooled across realms: stock you cannot reach counted as stock
+    # you have.
+    ("inventory-not-realm-scoped", "core/db.lua",
+     """    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.inventory then bucket.inventory = {} end
+    return bucket.inventory""",
+     """    if not db.account.inventoryAll then db.account.inventoryAll = {} end
+    return db.account.inventoryAll""",
+     "inventory"),
+
+    # ---- auctions and mail ------------------------------------------------
+    # The sweep reads only the page the client happens to hold, so a book
+    # bigger than fifty is silently short -- and it is short by exactly the
+    # auctions you forgot about, which is what the column is for.
+    ("inventory-ah-reads-one-page", "core/sell.lua",
+     "    if sw.page < sw.pages then",
+     "    if false then",
+     "inventory"),
+
+    # Auctions counted rather than items: fifty stacks of two reads as fifty.
+    ("inventory-ah-counts-auctions", "core/sell.lua",
+     "            sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + (r.count or 1)",
+     "            sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + 1",
+     "inventory"),
+
+    # An empty book not recorded, so cancelling your last auction leaves the
+    # old count on the tooltip until you post again.
+    ("inventory-ah-empty-book-not-recorded", "core/sell.lua",
+     "        sell.FinishOwnerSweep({})\n        return nil",
+     "        return nil",
+     "inventory"),
+
+    # The sweep does not yield, so it fights the player for the one page the
+    # client holds every time they press Next.
+    ("inventory-sweep-ignores-the-player", "core/sell.lua",
+     "function sell.CancelOwnerSweep()\n    sell.ownerSweep = nil\nend",
+     "function sell.CancelOwnerSweep()\nend",
+     "inventory"),
+
+    # The mail read done INSIDE the storm handler -- the HARD RULE 16
+    # violation this whole shape exists to avoid.
+    ("inventory-mail-reads-in-the-handler", "core/sell.lua",
+     """    A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+        sell.mailDirty = true
+        sell.invDriver:Show()
+    end)""",
+     """    A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+        sell.SnapshotMail()
+    end)""",
+     "inventory"),
+
+    # Mail stacks counted as one letter each.
+    ("inventory-mail-counts-letters", "core/sell.lua",
+     "        if id then out[id] = (out[id] or 0) + (count or 1) end",
+     "        if id then out[id] = (out[id] or 0) + 1 end",
+     "inventory"),
+
+    # The driver never stops, so an OnUpdate runs for the rest of the session
+    # doing nothing.
+    ("inventory-driver-never-stops", "core/sell.lua",
+     "    if not sell.mailDirty then sell.invDriver:Hide() end",
+     "",
+     "inventory"),
+
+    # Rows no longer ordered with YOU first, so the row you are acting on is
+    # wherever the alphabet put it.
+    ("inventory-you-not-first", "core/db.lua",
+     "        if a.you ~= b.you then return a.you end",
+     "",
+     "inventory"),
+
+    # ---- purchased this session -------------------------------------------
+    # Counting AUCTIONS instead of units. The number stays plausible and is
+    # wrong by the stack size on every row -- "purchased 2" after buying two
+    # stacks of twenty.
+    ("session-counts-auctions-not-units", "core/buy.lua",
+     "    rec.n     = rec.n + stack",
+     "    rec.n     = rec.n + 1",
+     "session.buys"),
+
+    # The single-buyout path stops booking. The batch path still does, so the
+    # tally works right up until someone buys one thing at a time.
+    ("session-single-buyout-not-booked", "core/buy.lua",
+     "    buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)\n",
+     "",
+     "session.buys"),
+
+    # The batch path stops booking -- the other half.
+    ("session-batch-not-booked", "core/buy.lua",
+     "    buy.RecordPurchase(info.itemId, info.name, info.stack, info.price)\n",
+     "",
+     "session.buys"),
+
+    # The owed bucket loses the stack size, so every batch purchase books one
+    # item however big the stack was.
+    ("session-batch-loses-stack", "core/buy.lua",
+     "                             itemId = r.itemId, stack = r.count or 1 }",
+     "                             itemId = r.itemId }",
+     "session.buys"),
+
+    # SoleItemId answers for a mixed result set, so the line names one item
+    # and reports it beside three.
+    ("session-sole-item-ignores-mismatch", "core/buy.lua",
+     "            if id and r.itemId ~= id then return nil end",
+     "",
+     "session.buys"),
+
     # ---- the scan callback leak (the multi-second freeze) -----------------
     # The gate removed, which is the bug exactly as it shipped: every page
     # anyone looks at is handed to whichever scan callback was installed last,
@@ -2217,7 +3619,14 @@ end
      "external.buttons"),
 ]
 
+# A "suite" here is anything that returns non-zero when the code is wrong.
+# THE LINTS BELONG IN IT. rowchain.py sat green through the whole freeze
+# investigation it was written for, because nothing had ever planted a chained
+# row and watched it fail -- and rowskin.py guards the same class of bug from
+# the other side. A lint nobody has watched fail is a lint nobody has tested.
 SUITES = {
+    "rowchain":    "tests/lint/rowchain.py",
+    "rowskin":     "tests/lint/rowskin.py",
     "util":        "tests/units/util_test.lua",
     "db":          "tests/units/db_test.lua",
     "buy.batch":   "tests/units/buy_batch_test.lua",
@@ -2238,7 +3647,15 @@ SUITES = {
     "clientdata": "tests/units/clientdata_test.lua",
     "vendorbuy": "tests/units/vendorbuy_test.lua",
     "scan.leak": "tests/units/scan_leak_test.lua",
+    "session.buys": "tests/units/session_buys_test.lua",
+    "inventory": "tests/units/inventory_test.lua",
+    "tooltip.hook": "tests/units/tooltip_hook_test.lua",
+    "craft.plan": "tests/units/craft_plan_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
+    "shiftclick": "tests/units/shiftclick_test.lua",
+    "rowbudget": "tests/units/rowbudget_test.lua",
+    "craftqueue": "tests/units/craftqueue_test.lua",
+    "crafttree": "tests/units/crafttree_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
