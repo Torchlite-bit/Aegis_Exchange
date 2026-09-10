@@ -23,11 +23,72 @@ import glob
 import re
 import sys
 
-# `SetPoint("TOPLEFT", ui.someRows[i - 1], ...)` / `store[i - 1]`
-CHAIN = re.compile(r'SetPoint\(\s*"[A-Z]+"\s*,\s*[\w.]*\[\s*i\s*-\s*1\s*\]')
+# `SetPoint("TOPLEFT", ui.someRows[i - 1], ...)` / `store[n - 1]`
+#
+# ANY index variable, not just `i`. The first version of this pattern spelled
+# the subscript `i` literally, and the Sell tab's bag list -- the last chained
+# pool in the file, and one of the deepest -- counts with `bi`. It sat green
+# through the entire freeze investigation that this lint was written for.
+CHAIN = re.compile(
+    r'SetPoint\(\s*"[A-Z]+"\s*,\s*[\w.]*\[\s*\w+\s*-\s*1\s*\]')
+
+
+# The shapes the pattern MUST see, and the ones it must leave alone.
+#
+# THIS EXISTS BECAUSE THE LINT WAS GREEN AND WRONG. It spelled the subscript
+# `i` literally, so it never looked at the two pools that count with `bi` and
+# `li` -- and those two are on the Sell tab, go 34 deep, and are both repainted
+# by a post. A lint nobody has watched fail is a lint nobody has tested.
+MUST_TRIP = [
+    ("the plain case",
+     'row:SetPoint("TOPLEFT", ui.someRows[i - 1], "BOTTOMLEFT", 0, 0)'),
+    ("a different index variable",
+     'row:SetPoint("TOPLEFT", ui.bagRows[bi - 1], "BOTTOMLEFT", 0, 0)'),
+    ("...and another",
+     'row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)'),
+    ("a bare store, no ui prefix",
+     'r:SetPoint("TOPLEFT", store[n - 1], "BOTTOMLEFT", 0, 0)'),
+    ("spaces inside the subscript",
+     'row:SetPoint( "TOPLEFT" , rows[ k - 1 ] , "BOTTOMLEFT", 0, 0)'),
+]
+
+MUST_NOT_TRIP = [
+    ("ui.PlaceRow is the whole point",
+     "ui.PlaceRow(row, scroll, i, rowH, padL, padR)"),
+    ("anchored to the scroll frame",
+     'row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, y)'),
+    ("anchored to its own parent",
+     'row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -padR, y)'),
+    ("reading the row above without anchoring to it",
+     "local prev = ui.someRows[i - 1]"),
+    ("a subscript that is not n-1",
+     'row:SetPoint("TOPLEFT", rows[i + 1], "BOTTOMLEFT", 0, 0)'),
+    ("a cell anchored inside its own row",
+     'lbl:SetPoint("LEFT", row, "LEFT", 0, 0)'),
+]
+
+
+def selftest():
+    failures = 0
+    for name, line in MUST_TRIP:
+        if not CHAIN.search(line):
+            failures += 1
+            print("  MISSED %s: %s" % (name, line))
+    for name, line in MUST_NOT_TRIP:
+        if CHAIN.search(line):
+            failures += 1
+            print("  FALSE POSITIVE %s: %s" % (name, line))
+    if failures:
+        print("rowchain selftest: %d FAILED" % failures)
+        return 1
+    print("rowchain selftest: ALL PASS (%d cases)"
+          % (len(MUST_TRIP) + len(MUST_NOT_TRIP)))
+    return 0
 
 
 def main(argv):
+    if argv[1:2] == ["--selftest"]:
+        return selftest()
     paths = argv[1:] or sorted(glob.glob("ui/*.lua"))
     failed = False
     for path in paths:

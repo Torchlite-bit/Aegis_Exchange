@@ -11363,13 +11363,17 @@ ui.GrowBagRows = function(n)
         while bi <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(BAG_ROW_H)
-            if bi == 1 then
-                row:SetPoint("TOPLEFT", bagScroll, "TOPLEFT", ROWPAD.l, 0)
-                row:SetPoint("TOPRIGHT", bagScroll, "TOPRIGHT", -ROWPAD.r, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.bagRows[bi - 1], "BOTTOMLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", ui.bagRows[bi - 1], "BOTTOMRIGHT", 0, 0)
-            end
+            -- FLAT, NOT CHAINED -- see ui.PlaceRow. This pool and the listings
+            -- pool below it were the LAST two in the file still anchoring row
+            -- n to row n-1, and they sat green through the whole freeze
+            -- investigation that ui.PlaceRow was written for: tests/lint/
+            -- rowchain.py spelled the subscript `i` literally, and these two
+            -- count with `bi` and `li`.
+            --
+            -- Both are on the SELL TAB, both go 34 deep, and posting an item
+            -- repaints both. Which is the freeze that was reported on that tab
+            -- and never fully accounted for.
+            ui.PlaceRow(row, bagScroll, bi, BAG_ROW_H, ROWPAD.l, ROWPAD.r)
             -- The same chrome every other table wears, on the same terms:
             -- created before any cell, no selection tint (clicking a bag row
             -- places the item, it does not leave the row in a chosen state).
@@ -11529,13 +11533,9 @@ ui.GrowListRows = function(n)
             -- price into the buyout box -- one-click "match this seller".
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(LIST_ROW_H)
-            if li == 1 then
-                row:SetPoint("TOPLEFT", listScroll, "TOPLEFT", ROWPAD.l, 0)
-                row:SetPoint("TOPRIGHT", listScroll, "TOPRIGHT", -ROWPAD.r, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.listRows[li - 1], "BOTTOMLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", ui.listRows[li - 1], "BOTTOMRIGHT", 0, 0)
-            end
+            -- FLAT, NOT CHAINED -- see the note in ui.GrowBagRows, and
+            -- ui.PlaceRow for why a chain is a freeze rather than a style.
+            ui.PlaceRow(row, listScroll, li, LIST_ROW_H, ROWPAD.l, ROWPAD.r)
             -- Chrome without a selection tint: these rows are pressed to
             -- copy a price, never left in a chosen state. The HOVER highlight
             -- -- which is a different thing from selection -- used to be set

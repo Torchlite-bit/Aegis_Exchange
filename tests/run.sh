@@ -88,7 +88,10 @@ step "No two widgets hang off the same anchor"
 # is what 1.20.0 shipped in the settings panel.
 python3 tests/lint/anchorchain.py || fail=1
 
-section "No row is anchored to the row above it"
+step "No row is anchored to the row above it"
+python3 tests/lint/rowchain.py --selftest >/dev/null || { \
+    echo "rowchain selftest FAILED"; python3 tests/lint/rowchain.py --selftest; \
+    fail=1; }
 python3 tests/lint/rowchain.py || fail=1
 
 step "Every colour the UI reads exists in the palette"

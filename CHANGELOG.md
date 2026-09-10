@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.30]
+
+### Fixed
+- **The Sell tab had two row pools still anchored row-to-row** — the bag list
+  and the listings table. That is the chain that made dragging and resizing the
+  window stall: the client resolves those recursively, so placing the last row
+  walks every row above it, and nothing in Lua does that work, which is why the
+  addon's own trace showed silence through the freeze. Both go 34 deep, both
+  are on the same tab, and **posting an item repaints both** — which is the Sell
+  tab freeze that was reported repeatedly and never fully accounted for. They
+  are flat-anchored now, like every other pool since v1.52.16.
+- **The lint that exists to catch exactly that was green and wrong.**
+  `tests/lint/rowchain.py` spelled the subscript `i` literally; these two pools
+  count with `bi` and `li`, so it never looked at them. It sat green through the
+  entire freeze investigation it was written for. The pattern takes any index
+  variable now, and the lint has a **self-test** — eleven cases, five shapes it
+  must catch and six it must leave alone — wired into `run.sh`. A lint nobody
+  has watched fail is a lint nobody has tested.
+- `run.sh` called `section` for one heading, a function that does not exist
+  (it is `step`). Harmless, and it had been printing an error to stderr on every
+  run.
+
+---
+
 ## [1.52.29]
 
 ### Changed
@@ -4789,6 +4813,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
