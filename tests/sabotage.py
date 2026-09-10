@@ -2365,6 +2365,35 @@ end
      "    table_bot   = 60,",
      "geometry"),
 
+    # ---- what you type (v1.52.24) ----------------------------------------
+
+    # The colour back to inherited, which is the bug: InputBoxTemplate's chat
+    # font on a near-black backdrop, never chosen and therefore dim.
+    ("input-text-not-coloured", "ui/frame.lua",
+     "    e:SetTextColor(C.input[1], C.input[2], C.input[3])",
+     "    local _ = C.input",
+     "rowchrome"),
+
+    # ...and the flattened boxes left out of it, so the three that keep the
+    # stock art read differently from the ones beside them on the same row.
+    ("input-flatten-skips-the-colour", "ui/frame.lua",
+     "    return ui.InputText(e)",
+     "    return e",
+     "rowchrome"),
+
+    # Input text the same shade as body copy -- which is what "just use C.text"
+    # gives, and it is the shade that was reported as hard to read.
+    ("input-colour-no-brighter-than-body", "ui/frame.lua",
+     "    input   = { 1.00, 0.97, 0.90 },",
+     "    input   = { 0.87, 0.82, 0.69 },",
+     "rowchrome"),
+
+    # The coin boxes back to right-aligned, digit jammed against the coin.
+    ("money-boxes-right-aligned", "ui/frame.lua",
+     """        e:SetJustifyH("CENTER")""",
+     """        e:SetJustifyH("RIGHT")""",
+     "rowchrome"),
+
     # ---- the Crafting tab's two panels ------------------------------------
     # The shopping panel given a share big enough to starve the middle table.
     # Before v1.52.10 this was a fixed width; the guarantee is the same.

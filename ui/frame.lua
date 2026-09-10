@@ -45,6 +45,12 @@ local C = {
     -- Sell tab spent a release with its bag headings a different shade from
     -- the listings headings two inches to the right.
     header  = { 0.85, 0.72, 0.42 },
+    -- What you TYPE, and deliberately brighter than `text`. Body copy is read
+    -- in bulk and wants to sit back; a figure you are entering is one or two
+    -- characters on a near-black backdrop and wants to come forward. It was
+    -- inherited from InputBoxTemplate until v1.52.24, which is why it was dim
+    -- -- the client's chat font, coloured for a chat frame over the world.
+    input   = { 1.00, 0.97, 0.90 },
 }
 
 -- Last scan older than this is "stale" and rendered amber.
@@ -615,6 +621,24 @@ end
 -- it DRAWS. The textures are found through GetRegions() rather than by
 -- $parentLeft/$parentMiddle/$parentRight, because most of these boxes are
 -- created without a name and getglobal has nothing to look up.
+-- Every edit box in this window reads the SAME colour, set explicitly.
+--
+-- IT WAS INHERITED, and inherited is why it was dim: InputBoxTemplate's font
+-- is the client's chat font, coloured for a chat frame over the world, and we
+-- then sit it on a near-black backdrop. Nothing was wrong with it -- it had
+-- simply never been chosen.
+--
+-- A FUNCTION OF ITS OWN, not a line inside ui.FlattenEditBox, because three of
+-- this window's edit boxes keep the stock art and never go through it: the two
+-- search boxes and the settings percent field. That last one is the exact case
+-- this was reported on -- a percent box sitting next to three coin boxes on
+-- one row, reading dimmer than nothing at all.
+function ui.InputText(e)
+    if not e or not e.SetTextColor then return e end
+    e:SetTextColor(C.input[1], C.input[2], C.input[3])
+    return e
+end
+
 function ui.FlattenEditBox(e)
     if not e then return e end
     local regions = { e:GetRegions() }
@@ -633,7 +657,7 @@ function ui.FlattenEditBox(e)
     })
     e:SetBackdropColor(0.06, 0.05, 0.04, 1)
     e:SetBackdropBorderColor(0.42, 0.35, 0.20)
-    return e
+    return ui.InputText(e)
 end
 
 -- A square check box, at any size, in either skin.
@@ -1773,6 +1797,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local uc = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     uc:SetWidth(34); uc:SetHeight(18)
     uc:SetAutoFocus(false); uc:SetNumeric(true); uc:SetJustifyH("CENTER")
+    ui.InputText(uc)
     uc:SetPoint("LEFT", flatMode, "RIGHT", 12, 0)
     uc:SetScript("OnEnterPressed", function() ui.CommitUndercut(); uc:ClearFocus() end)
     uc:SetScript("OnEscapePressed", function() uc:ClearFocus() end)
@@ -2460,7 +2485,13 @@ MakeMoneyGSC = function(parent, onChange)
         e:SetHeight(18)
         e:SetAutoFocus(false)
         e:SetNumeric(true)
-        e:SetJustifyH("RIGHT")
+        -- CENTRED, not RIGHT. Right-aligned put the digit hard against the
+        -- box edge and therefore against the coin two pixels past it, so
+        -- `[    1]c` read as one glued blob rather than a figure and its
+        -- denomination. The three boxes are one denomination each and hold
+        -- one or two digits, so there is nothing to line a units column up
+        -- with -- which is the only thing right-alignment buys.
+        e:SetJustifyH("CENTER")
         e:SetScript("OnEnterPressed", function() e:ClearFocus() end)
         e:SetScript("OnEscapePressed", function() e:ClearFocus() end)
         e:SetScript("OnTextChanged", function()
@@ -5093,6 +5124,7 @@ function ui.BuildBuyTab()
     -- to know about each other. Anchoring to the widget cannot drift.
     ui.buyQueryBox:SetPoint("TOPLEFT", backBtn, "TOPRIGHT", 12, -1)
     ui.buyQueryBox:SetPoint("RIGHT", searchBtn, "LEFT", -ADVL.strip_gap, 0)
+    ui.InputText(ui.buyQueryBox)
     ui.buyQueryBox:SetAutoFocus(false)
     ui.buyQueryBox:SetScript("OnEnterPressed", function() ui.DoBuySearch() end)
     ui.buyQueryBox:SetScript("OnEscapePressed", function()
@@ -7975,6 +8007,7 @@ ui.GrowCraftSideRows = function(n)
     box:SetWidth(180); box:SetHeight(CRAFTL.strip_h)
     box:SetPoint("TOPLEFT", panel, "TOPLEFT", midX + 6, -CRAFTL.strip_y)
     box:SetAutoFocus(false)
+    ui.InputText(box)
     box:SetScript("OnEnterPressed", function() ui.DoCraftSearch() end)
     box:SetScript("OnEscapePressed", function() box:ClearFocus() end)
     -- Shift-click an item anywhere in the game and its name lands here.

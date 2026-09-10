@@ -44,10 +44,30 @@ local function extract(signature)
 end
 
 ui = {}
+-- ui.InputText reads the palette, so the palette has to exist here. Only the
+-- two entries this file asserts about are needed; palette.py is what checks
+-- every colour the UI reads resolves.
+C = {}
 do
-    local fn, err = loadstring(extract("function ui.AddRowChrome("),
-                               "AddRowChrome")
-    if not fn then error("will not compile: " .. tostring(err)) end
+    local src = Source()
+    for _, key in ipairs({ "input", "text" }) do
+        local _, _, body = string.find(src,
+            "\n    " .. key .. "%s*=%s*{([^}]*)}")
+        assert(body, "no C." .. key .. " in the palette")
+        local t = {}
+        for num in string.gfind(body, "([%d%.%-]+)") do
+            table.insert(t, tonumber(num))
+        end
+        C[key] = t
+    end
+end
+for _, sig in ipairs({
+    "function ui.AddRowChrome(",
+    "function ui.InputText(",
+    "function ui.FlattenEditBox(",
+}) do
+    local fn, err = loadstring(extract(sig), sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
     fn()
 end
 
@@ -225,5 +245,98 @@ H.eq("exactly one selection tint colour",
 local calls = occurrences("ui%.AddRowChrome%(")
 H.check("every results table wears the chrome", calls >= 6,
         "found " .. calls .. " mentions (want 1 definition + 5 call sites)")
+
+-- ---------------------------------------------------------------------------
+H.section("what you type is a chosen colour, not an inherited one")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS IS TESTABLE. "Is it legible" needs a client and a person. What does
+-- not is the rule underneath: an edit box sits on a near-black backdrop, so its
+-- text must be BRIGHTER than the body copy around it -- and it was dimmer,
+-- because it was never set at all and InputBoxTemplate's chat font came
+-- through. That is a comparison, and a comparison can be asserted.
+
+local function StubBox(noColor)
+    local b = { colored = nil, backdrop = nil }
+    b.GetRegions = function() return end
+    b.SetBackdrop = function(s, t) s.backdrop = t end
+    b.SetBackdropColor = function() end
+    b.SetBackdropBorderColor = function() end
+    if not noColor then
+        b.SetTextColor = function(s, r, g, bl) s.colored = { r, g, bl } end
+    end
+    return b
+end
+
+local box = ui.InputText(StubBox())
+H.check("an edit box is given a colour", box.colored ~= nil,
+        "nothing set it, so it inherits the chat font's")
+H.listEq("...and it is the palette's input colour", box.colored, C.input)
+
+-- THE ONE THAT MATTERS. Body copy is read in bulk and can sit back; a figure
+-- you are entering is a character or two on near-black and has to come
+-- forward. Equal is not good enough -- equal is what "just use C.text" gives,
+-- and it is the shade that was reported as hard to read.
+local brighter = true
+local strictly = false
+for i = 1, 3 do
+    if C.input[i] < C.text[i] then brighter = false end
+    if C.input[i] > C.text[i] then strictly = true end
+end
+H.check("input text is no darker than body text anywhere", brighter,
+        "a channel of C.input is below C.text")
+H.check("...and brighter in at least one channel", strictly,
+        "C.input is the same shade as C.text")
+
+-- THE FLATTENED BOXES AND THE STOCK-ART ONES READ THE SAME. Three of this
+-- window's edit boxes keep InputBoxTemplate's art and never go through
+-- ui.FlattenEditBox -- and one of them sits on the same ROW as three that do.
+-- That row is what this was reported on.
+local flat = ui.FlattenEditBox(StubBox())
+H.check("a flattened box is coloured too", flat.colored ~= nil,
+        "ui.FlattenEditBox does not go through ui.InputText")
+H.listEq("...to exactly the same colour", flat.colored, C.input)
+H.check("...and still gets its backdrop", flat.backdrop ~= nil,
+        "flattening stopped doing its own job")
+
+-- Defensive, not permissive: this runs over widgets the client builds, and a
+-- missing method must be nothing rather than an error.
+H.survives("nil is not a crash", function() ui.InputText(nil) end)
+H.survives("a widget with no SetTextColor is not a crash", function()
+    ui.InputText(StubBox(true))
+end)
+
+-- ---- EVERY edit box goes through it -------------------------------------
+
+-- One definition, one call inside ui.FlattenEditBox, and one at each of the
+-- three boxes that keep the stock art. Miss one and it is dim next to the
+-- others -- which is the whole bug, not a tidy-up.
+local inputs = occurrences("ui%.InputText%(")
+H.check("every edit box in the window is coloured", inputs >= 5,
+        "found " .. inputs .. " mentions (want 1 definition, 1 in "
+            .. "FlattenEditBox, 3 stock-art boxes)")
+
+-- ...and the coin boxes are CENTRED. Right-aligned put the digit hard against
+-- the box edge and so against the coin two pixels past it. Each box holds one
+-- denomination, so there is no units column to line up -- which is the only
+-- thing right-alignment buys here.
+--
+-- Scoped to MakeMoneyGSC's own body rather than counted across the file: plenty
+-- of other things in this window are justified, and a count over all of them
+-- would pass or fail for reasons that have nothing to do with the coin boxes.
+local money
+do
+    local from = string.find(src, "MakeMoneyGSC = function(", 1, true)
+    assert(from, "no MakeMoneyGSC in the source")
+    local to = string.find(src, "\nend\n", from, true)
+    assert(to, "MakeMoneyGSC never ends")
+    money = string.sub(src, from, to)
+end
+H.check("the money boxes are centred",
+        string.find(money, 'SetJustifyH("CENTER")', 1, true) ~= nil,
+        "the coin boxes do not centre their digits")
+H.check("...and none of the three is right-aligned",
+        string.find(money, 'SetJustifyH("RIGHT")', 1, true) == nil,
+        "a digit is still jammed against its coin")
 
 os.exit(H.report("rowchrome"))

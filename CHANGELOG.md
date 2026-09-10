@@ -18,6 +18,35 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.24]
+
+### Fixed
+- **What you type is now a colour we chose.** Every edit box in the window
+  inherited `InputBoxTemplate`'s font — the client's chat font, coloured for a
+  chat frame over the world — and we then sat it on a near-black backdrop.
+  Nothing was *wrong* with it; it had simply never been picked. It is brighter
+  than the body copy around it now, which is the rule that matters: text you
+  read in bulk can sit back, a figure you are entering is one or two characters
+  and has to come forward.
+  - It reaches the three boxes that keep the **stock art** as well as the ones
+    we restyle — the two search fields and the settings percent box. That last
+    one shares a row with three coin boxes, which is where this was spotted.
+- **The gold / silver / copper boxes centre their digits.** Right-aligned put
+  the figure hard against the box edge, and so against the coin two pixels past
+  it — `[    1]` and its coin read as one glued blob. Each box holds a single
+  denomination, so there is no units column to line up, which is the only thing
+  right-alignment was buying.
+
+### Internal
+- New palette entry `C.input`, and `ui.InputText` as the one place that applies
+  it. `rowchrome_test.lua` asserts the comparison rather than the shade —
+  input text must be no darker than `C.text` in any channel and brighter in at
+  least one — so "just use C.text" fails, which is the shade that was reported.
+  Four sabotages: an uncoloured box, a flattened box left out, a colour no
+  brighter than body copy, and the coin boxes back to right-aligned.
+
+---
+
 ## [1.52.23]
 
 ### Fixed
@@ -4575,6 +4604,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
