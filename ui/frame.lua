@@ -3459,13 +3459,7 @@ function ui.FillResultRow(row, r)
     -- so the greens and blues match the rest of the game exactly rather than
     -- being re-guessed here. Same treatment the Auctions tab already gives its
     -- rows.
-    local q = r.quality
-    if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
-        local c = ITEM_QUALITY_COLORS[q]
-        row.name:SetTextColor(c.r, c.g, c.b)
-    else
-        row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    row.name:SetTextColor(ui.QualityColor(r.quality))
     -- "You can't use this" used to be the name turning red, which quality
     -- colouring now owns. It moves to a red tint on the ICON so the warning
     -- survives -- the two cues were always fighting for the same pixels, and
@@ -3673,16 +3667,16 @@ end
 -- `cols` maps key -> x offset, `widths` key -> column width. Returns the
 -- key -> button table for ui.PaintSortHeaders.
 -- Crafting's five columns. The Buy tab passes its own eight.
--- UPPERCASE, and short. The concept's captions are small caps, which this
--- client cannot do -- so they are caps, and the words are cut to what a caps
--- caption can carry without running into the column beside it: "Unit price"
--- and "Stack buyout" are twice as wide in caps as they are in sentence case.
+-- SHORT, and written in sentence case. ui.MakeHeaderCell uppercases every
+-- heading in the window, so the casing is decided in one place and these read
+-- as words in the source; what these defs own is the WORDING, and it is cut to
+-- what a column can carry -- "Unit price" and "Stack buyout" did not fit.
 local CRAFT_HEADER_DEFS = {
-    { key = "name",  text = "ITEM" },
-    { key = "ct",    text = "CT" },
-    { key = "unit",  text = "UNIT" },
-    { key = "stack", text = "STACK" },
-    { key = "pct",   text = "%MKT" },
+    { key = "name",  text = "Item" },
+    { key = "ct",    text = "Ct" },
+    { key = "unit",  text = "Unit" },
+    { key = "stack", text = "Stack" },
+    { key = "pct",   text = "% mkt" },
 }
 
 -- ONE way a table heading is built, sortable or not.
@@ -3703,6 +3697,10 @@ local CRAFT_HEADER_DEFS = {
 -- So both go through here now and the difference cannot come back.
 -- `clickable` is the only thing that varies: a sortable heading needs a
 -- Button, a fixed one only needs a Frame, and both are child frames.
+-- ...and EVERY table's column captions go through it, because they are all
+-- made here. Six tables each uppercasing their own headings is six places to
+-- forget one, which is how the Crafting tab spent four releases in caps while
+-- the five beside it were in sentence case.
 function ui.MakeHeaderCell(parent, clickable, text, just, width)
     local b = CreateFrame(clickable and "Button" or "Frame", nil, parent)
     b:SetHeight(16)
@@ -3710,6 +3708,11 @@ function ui.MakeHeaderCell(parent, clickable, text, just, width)
     local fs = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     fs:SetText(text)
     fs:SetTextColor(C.header[1], C.header[2], C.header[3])
+    -- UPPERCASED HERE, not at each definition table. string.upper is applied
+    -- to whatever was passed, so the six defs stay readable in the source and
+    -- there is exactly one place that decides how a heading looks.
+    if string.upper then fs:SetText(string.upper(text or "")) end
+    ui.LabelFont(fs, 10)
     b.label = fs
     b.baseText = text
     if just == "RIGHT" then
@@ -3763,7 +3766,12 @@ end
 function ui.PaintSortHeaders(headers, sortKey, dir)
     if not headers then return end
     for hk, hb in pairs(headers) do
-        local t = hb.baseText
+        -- UPPERCASED HERE TOO. This rewrites the label to hang an arrow off
+        -- it, so a heading that was capitalised only at creation would come
+        -- back in sentence case the first time you sorted by it -- and only
+        -- that one column, which reads as a rendering glitch rather than as a
+        -- missed call.
+        local t = string.upper(hb.baseText or "")
         if hk == sortKey then
             t = t .. (dir == "asc" and " \226\134\145" or " \226\134\147")
         end
@@ -7798,18 +7806,18 @@ local CRAFT_HDR_BAND = 24
 -- statement -- "this is here, and it is not for you right now".
 local CRAFT_DIM = 0.55
 
--- A small-caps LABEL: the panel headings, the section rows, the column
--- captions. UPPERCASE in a narrow face, which is as close as this client gets
--- to the concept's letterspaced small caps -- 1.12 FrameXML has no
+-- A small-caps LABEL: every panel heading, section row and column caption in
+-- the window. UPPERCASE in a narrow face, which is as close as this client
+-- gets to the concept's letterspaced small caps -- 1.12 FrameXML has no
 -- letter-spacing and no font-variant, so the caps and the narrower face ARE
 -- the whole effect. Saying that plainly is better than a run of inserted
--- spaces, which would break every width measurement on the tab.
+-- spaces, which would break every width measurement in the file.
 --
 -- ARIALN is the face the stock UI sets its own numbers in, so it is on every
 -- client. pcall'd because a font path that fails leaves a FontString drawing
 -- nothing at all, and a heading that vanishes is worse than one in the wrong
 -- face.
-function ui.CraftLabelFont(fs, size)
+function ui.LabelFont(fs, size)
     if not fs then return fs end
     if fs.SetFont then
         pcall(function() fs:SetFont("Fonts\\ARIALN.TTF", size or 10) end)
@@ -7876,7 +7884,7 @@ function ui.BuildCraftTab()
         -CRAFTL.hdr_y)
     sideHdr:SetText("SHOPPING")
     sideHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-    ui.CraftLabelFont(sideHdr, 11)
+    ui.LabelFont(sideHdr, 11)
 
     -- How many reagents you are short of, across every tracked recipe. The
     -- one number that says whether there is shopping left to do, and it is
@@ -7894,7 +7902,7 @@ function ui.BuildCraftTab()
     ui.craftShortFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftShortFS:SetPoint("TOPRIGHT", panel, "TOPLEFT",
         CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.hdr_y)
-    ui.CraftLabelFont(ui.craftShortFS, 10)
+    ui.LabelFont(ui.craftShortFS, 10)
 
     -- ---- ABOVE the box: what the WHOLE RUN costs and is worth -------------
     --
@@ -8122,7 +8130,7 @@ ui.GrowCraftSideRows = function(n)
         -CRAFTL.hdr_y)
     ui.craftTitle:SetText("SEARCH")
     ui.craftTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-    ui.CraftLabelFont(ui.craftTitle, 11)
+    ui.LabelFont(ui.craftTitle, 11)
 
     local box = CreateFrame("EditBox", "AegisExchangeCraftSearchBox", panel,
         "InputBoxTemplate")
@@ -8791,10 +8799,10 @@ function ui.PaintCraftRow(row, e, rowW)
         row.ex:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         ui.FitText(row.label, e.name, ui.CraftLabelW(rowW, indent, tail))
         row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-        ui.CraftLabelFont(row.label, 10)
+        ui.LabelFont(row.label, 10)
         row.ct:SetText(e.caption or "")
         row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        ui.CraftLabelFont(row.ct, 9)
+        ui.LabelFont(row.ct, 9)
         -- THE CAPTION GETS THE STEPPER'S LANE AS WELL. `ct` is 44px, which is
         -- what a count needs; "MADE/WANT" is wider than that and a FontString
         -- with a width WRAPS -- it came out as two lines drawn over the row
@@ -10215,13 +10223,7 @@ function ui.FillAuctionRow(row, r)
         end
     end
     row.name:SetText(r.name)
-    local q = r.quality
-    if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
-        local c = ITEM_QUALITY_COLORS[q]
-        row.name:SetTextColor(c.r, c.g, c.b)
-    else
-        row.name:SetTextColor(C.text[1], C.text[2], C.text[3])
-    end
+    row.name:SetTextColor(ui.QualityColor(r.quality))
     row.qty:SetText("x" .. r.count)
     row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
     if r.buyout and r.buyout > 0 then
@@ -11679,12 +11681,7 @@ function ui.UpdateBagList()
                 -- is. nil quality means a cold item cache, not "common", so
                 -- it falls back to plain text rather than painting it white.
                 local q = it.quality
-                if q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q] then
-                    local qc = ITEM_QUALITY_COLORS[q]
-                    row.label:SetTextColor(qc.r, qc.g, qc.b)
-                else
-                    row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-                end
+                row.label:SetTextColor(ui.QualityColor(q))
             end
             row:Show()
         else

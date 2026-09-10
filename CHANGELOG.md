@@ -18,6 +18,44 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.31]
+
+### Changed
+- **Every table's column headings read the same way** — caps in the narrow face
+  the Crafting tab got in v1.52.27. Buy, Auctions, History, Sell listings and
+  the bag list all followed their own definition tables; the Crafting tab spent
+  four releases in caps beside five in sentence case.
+  - Uppercased in `ui.MakeHeaderCell`, which is the one place a heading is
+    built. Six tables each remembering to do it themselves is six places to
+    forget one.
+  - The sort arrow no longer undoes it. `ui.PaintSortHeaders` rewrites the label
+    to hang the arrow off it, so a caption capitalised only at creation came
+    back in sentence case the first time you sorted by that column — one column
+    out of seven, which reads as a rendering glitch rather than a missed call.
+  - The Crafting tab's captions go back to sentence case *in the source*. What a
+    definition table owns is the wording; the casing is decided once.
+
+### Internal
+- **Four hand-rolled copies of the quality-colour lookup collapsed into
+  `ui.QualityColor`** — the results rows, the Auctions rows and the bag list all
+  had their own `if ITEM_QUALITY_COLORS[q] then … else C.text`. One place decides
+  now, and it is the one that already has tests and a dimming factor. The two
+  remaining mentions are a different question (naming all six qualities in a
+  dropdown, and building a `|cff…|r` string for chat) and stay as they are.
+- `ui.CraftLabelFont` is `ui.LabelFont`: it was never Crafting-only in
+  principle, and every table's headings go through it now.
+
+### Note
+- **History still does not quality-colour its item column, deliberately.** The
+  ledger stores a name and an id, never a quality, so colouring there means a
+  `GetItemInfo` per row inside a repaint `ui.ScanMailSales` can trigger while the
+  client is storming `MAIL_INBOX_UPDATE` — HARD RULE 16, and the shape that
+  froze Courier. The Type column carries the colour that matters there.
+- **The Sell listings table has no item column at all** — every row is the same
+  item, the one in the sell slot — so there is nothing for an icon to sit beside.
+
+---
+
 ## [1.52.30]
 
 ### Fixed
@@ -4813,6 +4851,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

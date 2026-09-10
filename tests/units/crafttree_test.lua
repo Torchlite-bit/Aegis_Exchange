@@ -73,7 +73,7 @@ for _, sig in ipairs({
     "function ui.FitString(",
     "function ui.FitText(",
     "function ui.CraftLabelW(",
-    "function ui.CraftLabelFont(",
+    "function ui.LabelFont(",
     "function ui.CraftRowFont(",
     "function ui.PaintCraftRow(",
     "function ui.ListValue(",

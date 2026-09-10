@@ -98,6 +98,11 @@ REMOVED_ON_PURPOSE = {
     "ui.ShopAll": "v1.52.25 -- renamed ui.CraftPriceAll with the button, "
         "because it prices the list rather than buying it",
 
+    # It was never Crafting-only in principle and is not in practice any
+    # more: ui.MakeHeaderCell applies it to every column caption in the window.
+    "ui.CraftLabelFont": "v1.52.31 -- renamed ui.LabelFont; every table's "
+        "headings go through it now, not just the Crafting tab's",
+
     # ONE SCOPE ON THE SHOPPING PANEL, and it is the list's. The per-recipe
     # Cost/Sells/Net moved to the recipe row's own tooltip, where it is
     # attached to the recipe it describes rather than to whichever row was

@@ -2517,6 +2517,25 @@ end
      "    if dim then return dim, dim, dim end",
      "crafttree"),
 
+    # ---- one casing, one place (v1.52.31) --------------------------------
+
+    # The header cell no longer uppercases, so every table is back to whatever
+    # its own definition table happened to say -- which is how the Crafting tab
+    # spent four releases in caps beside five in sentence case.
+    ("header-cell-does-not-uppercase", "ui/frame.lua",
+     '    if string.upper then fs:SetText(string.upper(text or "")) end',
+     "    local _ = text",
+     "rowchrome"),
+
+    # ...and the sort arrow undoing it. PaintSortHeaders rewrites the label, so
+    # a caption capitalised only at creation comes back in sentence case the
+    # first time you sort by that column -- one column out of seven, which
+    # reads as a rendering glitch rather than as a missed call.
+    ("sort-arrow-drops-the-caps", "ui/frame.lua",
+     '        local t = string.upper(hb.baseText or "")',
+     "        local t = hb.baseText",
+     "rowchrome"),
+
     # ---- the chosen option in a segmented row (v1.52.28) -----------------
 
     # The chosen option back to the plate's own text colour, so a value you

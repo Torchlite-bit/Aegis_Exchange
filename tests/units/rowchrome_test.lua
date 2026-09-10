@@ -67,6 +67,7 @@ for _, sig in ipairs({
     "function ui.FlattenEditBox(",
     "function ui.SetButtonKind(",
     "function ui.MarkChosen(",
+    "function ui.PaintSortHeaders(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -396,6 +397,64 @@ H.survives("an empty row is not a crash", function()
 end)
 H.survives("...nor a nil one", function()
     ui.MarkChosen(nil, function() return true end)
+end)
+
+-- ---------------------------------------------------------------------------
+H.section("column captions are uppercased in ONE place")
+-- ---------------------------------------------------------------------------
+
+-- Six tables each uppercasing their own headings is six places to forget one,
+-- which is how the Crafting tab spent four releases in caps while the five
+-- beside it were in sentence case. ui.MakeHeaderCell does it for all of them.
+local hdr
+do
+    local from = string.find(src, "function ui.MakeHeaderCell(", 1, true)
+    assert(from, "no ui.MakeHeaderCell in the source")
+    local to = string.find(src, "\nend\n", from, true)
+    assert(to, "ui.MakeHeaderCell never ends")
+    hdr = string.sub(src, from, to)
+end
+-- ANCHORED ON THE CALL, NOT THE NAME. The first version of this looked for
+-- "string.upper" and matched the COMMENT above the call explaining what
+-- string.upper is for -- so it passed with the call deleted. That is the third
+-- time a check in this repo has been satisfied by its own documentation; the
+-- rule is to search for something prose cannot contain.
+H.check("the header cell uppercases what it is given",
+        string.find(hdr, "fs:SetText(string.upper(", 1, true) ~= nil,
+        "every table would have to remember to do it itself")
+
+-- ...AND THE SORT ARROW MUST NOT UNDO IT. PaintSortHeaders rewrites the label
+-- to hang an arrow off it, so a caption capitalised only at creation comes back
+-- in sentence case the first time you sort by that column -- one column out of
+-- seven, which reads as a rendering glitch rather than as a missed call.
+local UP, DOWN = "\226\134\145", "\226\134\147"
+
+local function Header(base)
+    return { baseText = base, label = { text = nil,
+             SetText = function(self, t) self.text = t end } }
+end
+
+local h = { unit = Header("Unit price"), pct = Header("% mkt") }
+ui.PaintSortHeaders(h, "unit", "asc")
+H.eq("the sorted column keeps its caps", h.unit.label.text, "UNIT PRICE " .. UP)
+H.eq("...and so does every other one", h.pct.label.text, "% MKT")
+
+ui.PaintSortHeaders(h, "unit", "desc")
+H.eq("descending flips the arrow, not the case",
+     h.unit.label.text, "UNIT PRICE " .. DOWN)
+
+ui.PaintSortHeaders(h, "pct", "asc")
+H.eq("the arrow moves with the sort", h.pct.label.text, "% MKT " .. UP)
+H.eq("...and comes off the one it left", h.unit.label.text, "UNIT PRICE")
+
+-- The base text is what it was GIVEN, never what was last drawn -- otherwise
+-- sorting twice would append two arrows.
+ui.PaintSortHeaders(h, "pct", "asc")
+H.eq("sorting the same column twice does not stack arrows",
+     h.pct.label.text, "% MKT " .. UP)
+
+H.survives("no headers is not a crash", function()
+    ui.PaintSortHeaders(nil, "unit", "asc")
 end)
 
 os.exit(H.report("rowchrome"))
