@@ -2028,6 +2028,31 @@ end
      "            row:SetWidth(ui.CraftSideRowW(ui.WindowW()))",
      "geometry"),
 
+    # ---- row creation is spread over frames --------------------------------
+    # The cap removed, so a big resize builds every missing row in the frame
+    # the drag ended on -- nine lists, up to thirty rows each, hundreds of
+    # widgets. That is the 8.66s one-time stall.
+    ("rowbudget-does-not-cap", "ui/frame.lua",
+     """    local cap = have + ui.ROW_BUILD_BUDGET
+    if want > cap then""",
+     """    local cap = have + 9999
+    if want > cap then""",
+     "rowbudget"),
+
+    # ...or capped but never flagged, so the remaining rows are never built
+    # and a tall window is permanently short of rows.
+    ("rowbudget-forgets-the-remainder", "ui/frame.lua",
+     "        ui.rowsPending = true\n        if ui.rowDriver then ui.rowDriver:Show() end",
+     "        if ui.rowDriver then ui.rowDriver:Show() end",
+     "rowbudget"),
+
+    # An off-by-one that caps a growth already inside the budget, deferring
+    # every small drag by a frame for nothing.
+    ("rowbudget-caps-what-fits", "ui/frame.lua",
+     "    if want > cap then",
+     "    if want >= cap then",
+     "rowbudget"),
+
     # ---- rows are placed flat, not chained ---------------------------------
     # ui.PlaceRow anchoring to the row above instead of the scroll frame. That
     # is the shape every pool had: a dependency chain up to 38 deep, resolved
@@ -3021,6 +3046,7 @@ SUITES = {
     "craft.plan": "tests/units/craft_plan_test.lua",
     "external.buttons": "tests/units/external_buttons_test.lua",
     "shiftclick": "tests/units/shiftclick_test.lua",
+    "rowbudget": "tests/units/rowbudget_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

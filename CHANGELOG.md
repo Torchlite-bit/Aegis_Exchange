@@ -18,6 +18,25 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.17]
+
+### Fixed
+- **No list creates more than six rows in one frame.** This is the remaining
+  resize stall — the one that happens *once*, on the first big resize, and
+  never again afterwards.
+  - The row pools are built on demand, so dragging from the minimum size to a
+    large one asked **nine lists for up to thirty new rows each, all in the
+    frame the drag ended on**. A single Crafting recipe row is a Button, three
+    FontStrings, a Frame and two more Buttons with backdrops — each of which
+    pfUI then skins. Hundreds of widget creations, in one frame.
+  - **"After that stall I can resize all I want" is what identified it.** A
+    one-time cost that never recurs is creation, not layout: by the second
+    resize the rows already existed. And the recovering frame held 43 events at
+    5/s — *below* the ambient rate, mostly the player's own mouse — so nothing
+    was flooding in. The main thread was simply busy building widgets.
+  - The work now spreads over a handful of frames. A list is briefly a few rows
+    short and fills on the next paint.
+
 ## [1.52.16]
 
 ### Fixed
@@ -4331,6 +4350,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1065,6 +1065,54 @@ end
 -- Skin any rows in `pool` that were grown after the skin's one-shot pass.
 -- Flagged per row so this stays cheap on the paint path -- it runs on every
 -- list update, but only ever does work the first time a row appears.
+-- How many rows any ONE list may CREATE in a single frame.
+--
+-- WHY THIS EXISTS. The row pools are built on demand: drag the window taller
+-- and each list creates the extra rows it now needs. Dragging from the minimum
+-- size to a large one asks NINE lists for up to thirty new rows each, all in
+-- the frame the drag ended on -- and a Crafting recipe row alone is a Button,
+-- three FontStrings, a Frame and two more Buttons with backdrops, each of
+-- which pfUI then skins. Hundreds of widget creations, in one frame.
+--
+-- It is a ONE-TIME cost, and that is the signature that identified it: the
+-- first big resize stalled for 8.66 seconds and every resize afterwards was
+-- instant, because by then the rows existed. The recovering frame held 43
+-- events at 5/s -- BELOW the ambient rate, mostly the player's own mouse --
+-- so nothing was flooding in. The main thread was simply busy.
+--
+-- Bounded, the work spreads over a handful of frames instead of landing in
+-- one. The list is briefly a few rows short, then fills; ui.rowDriver comes
+-- back the next frame for the rest.
+ui.ROW_BUILD_BUDGET = 6
+
+-- Cap what a builder is about to create, and remember if we capped it.
+--
+-- Every ui.GrowXRows passes its target through here after its own MAX clamp.
+-- Returning a smaller number is all it takes to bound the burst; the flag and
+-- the driver are what make the rest arrive.
+function ui.RowBudget(pool, want)
+    local have = table.getn(pool or {})
+    if want <= have then return want end
+    local cap = have + ui.ROW_BUILD_BUDGET
+    if want > cap then
+        ui.rowsPending = true
+        if ui.rowDriver then ui.rowDriver:Show() end
+        return cap
+    end
+    return want
+end
+
+-- One frame later, paint again -- which re-asks every list for its rows and
+-- builds the next batch. Self-terminating: ui.RowBudget only re-shows this
+-- while a list is still short.
+ui.rowDriver = CreateFrame("Frame", "AegisExchangeRowBuilder")
+ui.rowDriver:Hide()
+ui.rowDriver:SetScript("OnUpdate", function()
+    ui.rowsPending = false
+    ui.rowDriver:Hide()
+    if ui.RefreshCurrentTab then ui.RefreshCurrentTab() end
+end)
+
 function ui.SkinNewRows(pool)
     if not pool or not A.skin or not A.skin.SkinNew then return end
     local i = 1
@@ -4790,6 +4838,7 @@ function ui.BuildBuyTab()
     ui.buyCatExpanded = {}
     ui.GrowCatRows = function(n)
         if n > SIDE_ROWS_MAX then n = SIDE_ROWS_MAX end
+        n = ui.RowBudget(ui.buyCatRows, n)
         local i = table.getn(ui.buyCatRows) + 1
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
@@ -5228,6 +5277,7 @@ function ui.BuildBuyTab()
     ui.buyRows = {}
 ui.GrowBuyRows = function(n)
         if n > BUY_ROWS_MAX then n = BUY_ROWS_MAX end
+        n = ui.RowBudget(ui.buyRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.buyRows) + 1
@@ -7757,6 +7807,7 @@ function ui.BuildCraftTab()
     ui.craftSideRows = {}
 ui.GrowCraftSideRows = function(n)
         if n > CSIDE_ROWS_MAX then n = CSIDE_ROWS_MAX end
+        n = ui.RowBudget(ui.craftSideRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.craftSideRows) + 1
@@ -7947,6 +7998,7 @@ ui.GrowCraftSideRows = function(n)
     ui.craftRows = {}
 ui.GrowCraftRows = function(n)
         if n > CRAFT_ROWS_MAX then n = CRAFT_ROWS_MAX end
+        n = ui.RowBudget(ui.craftRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.craftRows) + 1
@@ -8017,6 +8069,7 @@ ui.GrowCraftRows = function(n)
     ui.craftMadeRows = {}
 ui.GrowCraftMadeRows = function(n)
         if n > MADE_ROWS_MAX then n = MADE_ROWS_MAX end
+        n = ui.RowBudget(ui.craftMadeRows, n)
         local i = table.getn(ui.craftMadeRows) + 1
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
@@ -9030,6 +9083,7 @@ function ui.BuildAuctionsTab()
     ui.aucRows = {}
 ui.GrowAucRows = function(n)
         if n > AUC_ROWS_MAX then n = AUC_ROWS_MAX end
+        n = ui.RowBudget(ui.aucRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.aucRows) + 1
@@ -9640,6 +9694,7 @@ function ui.BuildHistoryTab()
     ui.histRows = {}
 ui.GrowHistRows = function(n)
         if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
+        n = ui.RowBudget(ui.histRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local i = table.getn(ui.histRows) + 1
@@ -10420,6 +10475,7 @@ function ui.BuildSellTab()
     ui.bagRows = {}
 ui.GrowBagRows = function(n)
         if n > BAG_ROWS_MAX then n = BAG_ROWS_MAX end
+        n = ui.RowBudget(ui.bagRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local bi = table.getn(ui.bagRows) + 1
@@ -10583,6 +10639,7 @@ ui.GrowBagRows = function(n)
     ui.listRows = {}
 ui.GrowListRows = function(n)
         if n > LIST_ROWS_MAX then n = LIST_ROWS_MAX end
+        n = ui.RowBudget(ui.listRows, n)
         -- Built on demand: a minimum-size window costs exactly what it
         -- did before, and dragging taller adds only the rows needed.
         local li = table.getn(ui.listRows) + 1
