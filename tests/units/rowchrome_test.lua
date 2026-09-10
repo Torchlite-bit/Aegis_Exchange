@@ -309,6 +309,31 @@ H.survives("a widget with no SetTextColor is not a crash", function()
     ui.InputText(StubBox(true))
 end)
 
+-- ---- ...AND IT SURVIVES THE SKIN ----------------------------------------
+
+-- ui.InputText runs when a box is BUILT. A.skin.Apply() runs LAST, after every
+-- widget exists, so anything pfUI does to an edit box happens afterwards and
+-- wins -- which is why the flat-undercut amount read dull under pfUI and only
+-- under pfUI. skin.lua re-asserts the colour, exactly as its button branch
+-- already re-asserts ui.SetButtonKind.
+--
+-- Anchored on the CALL, not the name: a check that searches for "InputText"
+-- matches the comment above the call explaining what InputText is for, and
+-- would pass with the call deleted. That has happened three times here.
+do
+    local f = assert(io.open("ui/skin.lua", "r"), "run this from the repo root")
+    local sk = f:read("*a")
+    f:close()
+    local from = string.find(sk, 'elseif otype == "EditBox" then', 1, true)
+    assert(from, "no EditBox branch in ui/skin.lua")
+    local to = string.find(sk, "\n    elseif ", from + 10, true)
+        or string.find(sk, "\n    end", from, true)
+    local branch = string.sub(sk, from, to)
+    H.check("the skin puts our input colour back on an edit box",
+            string.find(branch, "A.ui.InputText(f)", 1, true) ~= nil,
+            "pfUI restyles the box after we colour it, so the colour is lost")
+end
+
 -- ---- EVERY edit box goes through it -------------------------------------
 
 -- One definition, one call inside ui.FlattenEditBox, and one at each of the

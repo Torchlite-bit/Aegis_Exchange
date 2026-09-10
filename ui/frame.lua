@@ -50,7 +50,12 @@ local C = {
     -- characters on a near-black backdrop and wants to come forward. It was
     -- inherited from InputBoxTemplate until v1.52.24, which is why it was dim
     -- -- the client's chat font, coloured for a chat frame over the world.
-    input   = { 1.00, 0.97, 0.90 },
+    --
+    -- FLAT WHITE, not the warm off-white it started as. Everything else in
+    -- this window is warm, which is exactly why the one thing you are editing
+    -- should not be: on a pfUI backdrop the warm version sat close enough to
+    -- the surrounding tan to be hard to pick out, which was the report.
+    input   = { 1.00, 1.00, 1.00 },
 }
 
 -- Last scan older than this is "stale" and rendered amber.
@@ -3303,6 +3308,14 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     -- take anything away from them.
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(rowH)
+    -- ...AND THEREFORE pfUI MUST NOT PLATE IT. SkinWidget gives every Button
+    -- its generic plate, and on a list row that border is drawn through the
+    -- row's own first and last pixels. ui/skin.lua's note said result rows
+    -- were safe "because those are Frames" -- which stopped being true the
+    -- day this became a Button, six lines above. Every results table in the
+    -- window has been boxed under pfUI since, which is why the one panel that
+    -- opted out in v1.52.25 was the only clean-looking list on screen.
+    row.aegisNoSkin = true
     ui.PlaceRow(row, scroll, i, rowH, ROWPAD.l, ROWPAD.r)
     -- Before any cell, so the stripe, the hairline and the selection tint are
     -- created in that order and nothing else is between them.
@@ -9981,6 +9994,12 @@ ui.GrowAucRows = function(n)
             -- Cancel button is a child and still takes its own clicks.
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(AUC_ROW_H)
+            -- A LIST ROW, so pfUI must not plate it. SkinWidget gives
+            -- every Button its generic plate, and on a row that border is
+            -- drawn through the row's own first and last pixels -- the
+            -- clipping the Crafting tab had until v1.52.25. See the note
+            -- there; tests/lint/rowskin.py enforces it everywhere.
+            row.aegisNoSkin = true
             ui.PlaceRow(row, scroll, i, AUC_ROW_H, ROWPAD.l, ROWPAD.r)
             -- Before the cells: the chrome is BACKGROUND and creation order
             -- is draw order within a layer. No selection tint -- an auction
@@ -10588,6 +10607,12 @@ ui.GrowHistRows = function(n)
             -- under the cursor like every other row in the window.
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(HIST_ROW_H)
+            -- A LIST ROW, so pfUI must not plate it. SkinWidget gives
+            -- every Button its generic plate, and on a row that border is
+            -- drawn through the row's own first and last pixels -- the
+            -- clipping the Crafting tab had until v1.52.25. See the note
+            -- there; tests/lint/rowskin.py enforces it everywhere.
+            row.aegisNoSkin = true
             ui.PlaceRow(row, scroll, i, HIST_ROW_H, ROWPAD.l, ROWPAD.r)
             -- No selection tint and no tick column: a ledger line is a
             -- record, and there is nothing to select one FOR.
@@ -11365,6 +11390,12 @@ ui.GrowBagRows = function(n)
         while bi <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(BAG_ROW_H)
+            -- A LIST ROW, so pfUI must not plate it. SkinWidget gives
+            -- every Button its generic plate, and on a row that border is
+            -- drawn through the row's own first and last pixels -- the
+            -- clipping the Crafting tab had until v1.52.25. See the note
+            -- there; tests/lint/rowskin.py enforces it everywhere.
+            row.aegisNoSkin = true
             -- FLAT, NOT CHAINED -- see ui.PlaceRow. This pool and the listings
             -- pool below it were the LAST two in the file still anchoring row
             -- n to row n-1, and they sat green through the whole freeze
@@ -11535,6 +11566,12 @@ ui.GrowListRows = function(n)
             -- price into the buyout box -- one-click "match this seller".
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(LIST_ROW_H)
+            -- A LIST ROW, so pfUI must not plate it. SkinWidget gives
+            -- every Button its generic plate, and on a row that border is
+            -- drawn through the row's own first and last pixels -- the
+            -- clipping the Crafting tab had until v1.52.25. See the note
+            -- there; tests/lint/rowskin.py enforces it everywhere.
+            row.aegisNoSkin = true
             -- FLAT, NOT CHAINED -- see the note in ui.GrowBagRows, and
             -- ui.PlaceRow for why a chain is a freeze rather than a style.
             ui.PlaceRow(row, listScroll, li, LIST_ROW_H, ROWPAD.l, ROWPAD.r)

@@ -2517,6 +2517,40 @@ end
      "    if dim then return dim, dim, dim end",
      "crafttree"),
 
+    # ---- one table look, one input colour (v1.52.32) ---------------------
+
+    # The shared result row back to being plated by pfUI. ui/skin.lua's note
+    # said result rows were safe "because those are Frames" -- true until
+    # BuildResultRow became a Button, after which every results table in the
+    # window was boxed for releases while the comment said it could not happen.
+    #
+    # The find string has to remove the CODE. The first version of this entry
+    # flipped the COMMENT above it from "MUST NOT" to "MAY" and left the line
+    # in place -- a sabotage that changes nothing proves nothing, and it went
+    # through green.
+    ("result-rows-plated-by-pfui", "ui/frame.lua",
+     "\n    row.aegisNoSkin = true\n",
+     "\n",
+     "rowskin"),
+
+    # ...and a row anchored to the row above it. rowchain.py has guarded this
+    # since v1.52.16 and had never once been watched fail -- which is how it
+    # spent that whole time unable to see two of the pools it was written for.
+    ("shopping-rows-chained-again", "ui/frame.lua",
+     """            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,
+                CRAFTL.row_l, CRAFTL.row_r)""",
+     """            row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1],
+                "BOTTOMLEFT", 0, 0)""",
+     "rowchain"),
+
+    # ...and the skin no longer putting our text colour back after restyling an
+    # edit box, which is what made the flat-undercut amount dull under pfUI and
+    # only under pfUI.
+    ("skin-drops-the-input-colour", "ui/skin.lua",
+     "        if A.ui and A.ui.InputText then A.ui.InputText(f) end",
+     "        local _ = f",
+     "rowchrome"),
+
     # ---- one casing, one place (v1.52.31) --------------------------------
 
     # The header cell no longer uppercases, so every table is back to whatever
@@ -2624,7 +2658,7 @@ end
     # Input text the same shade as body copy -- which is what "just use C.text"
     # gives, and it is the shade that was reported as hard to read.
     ("input-colour-no-brighter-than-body", "ui/frame.lua",
-     "    input   = { 1.00, 0.97, 0.90 },",
+     "    input   = { 1.00, 1.00, 1.00 },",
      "    input   = { 0.87, 0.82, 0.69 },",
      "rowchrome"),
 
@@ -3529,7 +3563,14 @@ end
      "external.buttons"),
 ]
 
+# A "suite" here is anything that returns non-zero when the code is wrong.
+# THE LINTS BELONG IN IT. rowchain.py sat green through the whole freeze
+# investigation it was written for, because nothing had ever planted a chained
+# row and watched it fail -- and rowskin.py guards the same class of bug from
+# the other side. A lint nobody has watched fail is a lint nobody has tested.
 SUITES = {
+    "rowchain":    "tests/lint/rowchain.py",
+    "rowskin":     "tests/lint/rowskin.py",
     "util":        "tests/units/util_test.lua",
     "db":          "tests/units/db_test.lua",
     "buy.batch":   "tests/units/buy_batch_test.lua",

@@ -18,6 +18,46 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.32]
+
+### Fixed
+- **Every results table in the window was being plated by pfUI.** Buy, Crafting
+  search results, Auctions, History, the Sell listings and the Sell bag list —
+  all six. pfUI's `SkinButton` gives every Button its generic plate, and on a
+  list row that border is drawn *through* the row's own first and last pixels,
+  which is where the clipping came from. The Crafting tab's Shopping panel
+  opted out in v1.52.25 and has been the only clean list on screen since; that
+  is the whole difference the redesign was being judged against.
+  - **`ui/skin.lua` carried a comment saying this could not happen** — "result
+    rows were never affected: those are Frames, so the Button branch never
+    reached them". They were Frames. Then `BuildResultRow` became a Button so a
+    row could take a click and a highlight, six lines above where that note
+    still sat. A claim in a comment is not a check.
+  - New `tests/lint/rowskin.py` checks it instead: a Button that gets
+    `ui.AddRowChrome` is a list row, and a list row must set `aegisNoSkin`.
+    Four self-test cases, including an opt-out set on the wrong widget.
+- **The input colour did not survive the skin.** `ui.InputText` runs when a box
+  is built; `A.skin.Apply()` runs last, after every widget exists — so anything
+  pfUI does to an edit box happens afterwards and wins. That is why the
+  flat-undercut amount read dull under pfUI and only under pfUI. `skin.lua`
+  re-asserts it now, exactly as its button branch already re-asserts
+  `ui.SetButtonKind`.
+- **`C.input` is flat white.** Everything else in this window is warm, which is
+  precisely why the one thing you are editing should not be: against a pfUI
+  backdrop the warm off-white sat close enough to the surrounding tan to be
+  hard to pick out.
+
+### Internal
+- **The lints are sabotage targets now.** `rowchain.py` has guarded the
+  row-anchor freeze since v1.52.16 and had never once been watched fail — which
+  is how it spent that whole time unable to see two of the pools it was written
+  for. It and `rowskin.py` are in `SUITES`, each with a planted bug that must
+  trip them.
+- Two of this release's own sabotages were wrong first: one flipped a comment
+  from "MUST NOT" to "MAY" and left the code in place, which proves nothing.
+
+---
+
 ## [1.52.31]
 
 ### Changed
@@ -4851,6 +4891,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
