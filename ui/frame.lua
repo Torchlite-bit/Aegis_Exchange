@@ -3141,6 +3141,50 @@ function ui.AddRowChrome(row, i, selectable)
     return row
 end
 
+-- Place row `i` of a list DIRECTLY on its scroll frame.
+--
+-- FLAT, NOT CHAINED, and this is a performance fix rather than a tidy-up.
+--
+-- Every row pool in this window used to anchor row i to row i-1: nine pools,
+-- up to 38 rows deep. That makes each row's position a DEPENDENCY CHAIN back
+-- to the scroll frame, and the client's layout engine resolves those
+-- recursively -- so placing the last row means walking every row above it.
+--
+-- Nothing in Lua does that work, which is exactly why it was invisible: the
+-- addon's own trace showed silence through a ten-second freeze because the
+-- time was being spent in the C layout resolver, not in us. It fired whenever
+-- the tree was invalidated -- DRAGGING the window, resizing it, or a repaint
+-- after a post -- which is precisely the set of things that stalled. And the
+-- deeper the chain the worse it got, so a bigger window meant more rows meant
+-- a longer walk, which is the reported "resize too big and it crashes".
+--
+-- Anchored to the scroll frame with a computed offset, every row is one hop
+-- from its parent. Same pixels, same frame count, depth n -> depth 1.
+--
+-- `padR` nil anchors the left edge only; the lists that stretch pass both.
+function ui.PlaceRow(row, scroll, i, rowH, padL, padR)
+    if not row or not scroll then return row end
+    local y = -((i - 1) * (rowH or 0))
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, y)
+    if padR then
+        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -padR, y)
+    end
+    return row
+end
+
+-- ...and the same for a list whose rows are NOT all the same height, where the
+-- offset has to be accumulated by the caller rather than multiplied.
+function ui.PlaceRowAt(row, scroll, y, padL, padR)
+    if not row or not scroll then return row end
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, -y)
+    if padR then
+        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -padR, -y)
+    end
+    return row
+end
+
 local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     -- A BUTTON, not a Frame. It was a Frame, which is why these rows needed
     -- EnableMouse to get a tooltip at all, why selecting one goes through
@@ -3153,13 +3197,7 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     -- take anything away from them.
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(rowH)
-    if i == 1 then
-        row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
-        row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
-    else
-        row:SetPoint("TOPLEFT", store[i - 1], "BOTTOMLEFT", 0, 0)
-        row:SetPoint("TOPRIGHT", store[i - 1], "BOTTOMRIGHT", 0, 0)
-    end
+    ui.PlaceRow(row, scroll, i, rowH, ROWPAD.l, ROWPAD.r)
     -- Before any cell, so the stripe, the hairline and the selection tint are
     -- created in that order and nothing else is between them.
     ui.AddRowChrome(row, i, selectable)
@@ -6992,6 +7030,8 @@ function ui.UpdateCatTree()
     ui.GrowCatRows(vis)
     ui.SkinNewRows(ui.buyCatRows)
     FauxScrollFrame_Update(ui.buyCatScroll, table.getn(flat), vis, SIDE_ROW_H)
+    -- Running y for the rows below, which are not all the same height.
+    local catY = 0
     local i = 1
     while i <= table.getn(ui.buyCatRows) do
         local row = ui.buyCatRows[i]
@@ -7027,13 +7067,14 @@ function ui.UpdateCatTree()
 
             -- Height and position, both decided here because both depend on
             -- what kind of row this is and what is above it.
+            --
+            -- The offset is ACCUMULATED rather than chained off the row above.
+            -- These rows are not all the same height -- a plated class row is
+            -- taller than a leaf -- so ui.PlaceRow's multiply does not apply,
+            -- but the reason for not chaining does: see ui.PlaceRow.
             row:SetHeight(HeightOf(e))
-            row:ClearAllPoints()
-            if i == 1 then
-                row:SetPoint("TOPLEFT", ui.buyCatScroll, "TOPLEFT", 0, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.buyCatRows[i - 1], "BOTTOMLEFT", 0, 0)
-            end
+            ui.PlaceRowAt(row, ui.buyCatScroll, catY, 0)
+            catY = catY + HeightOf(e)
 
             ui.SetTextClipped(row.label, text, SIDE_W - 14)
 
@@ -7731,14 +7772,8 @@ ui.GrowCraftSideRows = function(n)
             -- any pool the relayout did not reach, kept the old number and
             -- drew past its own box. This is what BuildResultRow does for the
             -- middle table, which is the one table that never clipped.
-            if i == 1 then
-                row:SetPoint("TOPLEFT", sideScroll, "TOPLEFT", CRAFTL.row_l, 0)
-                row:SetPoint("TOPRIGHT", sideScroll, "TOPRIGHT",
-                    -CRAFTL.row_r, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.craftSideRows[i - 1], "BOTTOMLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", ui.craftSideRows[i - 1], "BOTTOMRIGHT", 0, 0)
-            end
+            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,
+                CRAFTL.row_l, CRAFTL.row_r)
             -- The SAME chrome the middle table's rows get: zebra stripe,
             -- hairline, hover. Three lists side by side with only one of them
             -- striped is what made the outer two read as loose text rather
@@ -7986,14 +8021,8 @@ ui.GrowCraftMadeRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(MADE_ROW_H)
-            if i == 1 then
-                row:SetPoint("TOPLEFT", madeScroll, "TOPLEFT", CRAFTL.row_l, 0)
-                row:SetPoint("TOPRIGHT", madeScroll, "TOPRIGHT",
-                    -CRAFTL.row_r, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.craftMadeRows[i - 1], "BOTTOMLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", ui.craftMadeRows[i - 1], "BOTTOMRIGHT", 0, 0)
-            end
+            ui.PlaceRow(row, madeScroll, i, MADE_ROW_H,
+                CRAFTL.row_l, CRAFTL.row_r)
             ui.AddRowChrome(row, i)
             local lbl = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             lbl:SetPoint("LEFT", row, "LEFT", 0, 0)
@@ -9009,13 +9038,7 @@ ui.GrowAucRows = function(n)
             -- Cancel button is a child and still takes its own clicks.
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(AUC_ROW_H)
-            if i == 1 then
-                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
-                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.aucRows[i - 1], "BOTTOMLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", ui.aucRows[i - 1], "BOTTOMRIGHT", 0, 0)
-            end
+            ui.PlaceRow(row, scroll, i, AUC_ROW_H, ROWPAD.l, ROWPAD.r)
             -- Before the cells: the chrome is BACKGROUND and creation order
             -- is draw order within a layer. No selection tint -- an auction
             -- row is acted on by its own Cancel button, not by being picked.
@@ -9627,13 +9650,7 @@ ui.GrowHistRows = function(n)
             -- under the cursor like every other row in the window.
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(HIST_ROW_H)
-            if i == 1 then
-                row:SetPoint("TOPLEFT", scroll, "TOPLEFT", ROWPAD.l, 0)
-                row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", -ROWPAD.r, 0)
-            else
-                row:SetPoint("TOPLEFT", ui.histRows[i - 1], "BOTTOMLEFT", 0, 0)
-                row:SetPoint("TOPRIGHT", ui.histRows[i - 1], "BOTTOMRIGHT", 0, 0)
-            end
+            ui.PlaceRow(row, scroll, i, HIST_ROW_H, ROWPAD.l, ROWPAD.r)
             -- No selection tint and no tick column: a ledger line is a
             -- record, and there is nothing to select one FOR.
             ui.AddRowChrome(row, i)
@@ -11296,13 +11313,7 @@ function ui.BuildVendorList()
     while i <= VEND_ROWS do
         local row = CreateFrame("Frame", nil, f)
         row:SetHeight(VEND_ROW_H)
-        if i == 1 then
-            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
-        else
-            row:SetPoint("TOPLEFT", ui.vendRows[i - 1], "BOTTOMLEFT", 0, 0)
-            row:SetPoint("TOPRIGHT", ui.vendRows[i - 1], "BOTTOMRIGHT", 0, 0)
-        end
+        ui.PlaceRow(row, scroll, i, VEND_ROW_H, 0, 0)
         local mk = function(cx, w, just)
             local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
             fs:SetPoint("LEFT", row, "LEFT", cx, 0)
@@ -11921,13 +11932,7 @@ function ui.BuildCategoryPicker()
     while i <= CAT_ROWS do
         local row = CreateFrame("Button", "AegisExchangePickerRow" .. i, picker)
         row:SetHeight(CAT_ROW_H)
-        if i == 1 then
-            row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, 0)
-            row:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, 0)
-        else
-            row:SetPoint("TOPLEFT", ui.catRows[i - 1], "BOTTOMLEFT", 0, 0)
-            row:SetPoint("TOPRIGHT", ui.catRows[i - 1], "BOTTOMRIGHT", 0, 0)
-        end
+        ui.PlaceRow(row, scroll, i, CAT_ROW_H, 0, 0)
 
         local expand = CreateFrame("Button", nil, row)
         expand:SetWidth(16)

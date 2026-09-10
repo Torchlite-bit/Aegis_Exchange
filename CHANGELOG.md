@@ -18,6 +18,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.16]
+
+### Fixed
+- **Every list's rows are placed directly on their scroll frame instead of
+  being chained to the row above.** This is the likeliest cause of the stalls
+  on **dragging**, on **resizing**, and on the **repaint after a post** — and
+  of the crash when the window is dragged very large.
+  - All **nine** row pools anchored row *i* to row *i-1*, up to **38 deep**.
+    That makes a row's position a *dependency chain* back to the scroll frame,
+    and the client resolves those **recursively** — placing the last row means
+    walking every row above it.
+  - **None of that work is Lua**, which is exactly why it stayed invisible:
+    `/aex debug` showed silence through a ten-second freeze because the time
+    was going to the client's layout resolver, not to us. It fires whenever the
+    frame tree is invalidated — which is *dragging the window*, resizing it, or
+    repainting after a post. Precisely the set of things that stalled.
+  - Deeper chain, longer walk. A bigger window means more rows means a longer
+    walk, which fits "resize too big and it crashes to desktop".
+  - Same pixels, same frame count. Depth **n → 1**.
+- `tests/lint/rowchain.py` fails the build if any pool goes back to chaining.
+
 ## [1.52.15]
 
 ### Added
@@ -4310,6 +4331,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

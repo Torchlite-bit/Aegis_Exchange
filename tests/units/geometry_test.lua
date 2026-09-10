@@ -1395,14 +1395,31 @@ do
     H.check("no made-this-session row is given a width",
             not string.find(src, "row:SetWidth(ui.CraftMadeRowW", 1, true),
             "a row sized by a number can hold a stale one")
-    H.check("...the recipe rows are anchored to both edges instead",
-            string.find(src, 'row:SetPoint("TOPRIGHT", sideScroll, "TOPRIGHT"',
-                        1, true) ~= nil,
-            "the first recipe row has no right anchor")
+    -- Both go through ui.PlaceRow WITH BOTH PADS, which anchors left AND
+    -- right to the scroll frame. Passing only padL would leave the rows
+    -- unstretched and the clipping back.
+    H.check("...the recipe rows are placed on their scroll frame, both edges",
+            string.find(src,
+                "ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,", 1, true) ~= nil
+            and string.find(src,
+                "CSIDE_ROW_H,\n                CRAFTL.row_l, CRAFTL.row_r)",
+                1, true) ~= nil,
+            "the recipe rows are not placed with both pads")
     H.check("...and so are the made-this-session rows",
-            string.find(src, 'row:SetPoint("TOPRIGHT", madeScroll, "TOPRIGHT"',
+            string.find(src,
+                "ui.PlaceRow(row, madeScroll, i, MADE_ROW_H,", 1, true) ~= nil,
+            "the made rows are not placed on their scroll frame")
+
+    -- FLAT, NOT CHAINED. ui.PlaceRow computes an offset from the scroll frame
+    -- so every row is ONE hop from its parent. Chaining row i to row i-1 makes
+    -- each row a dependency walk back through every row above it, resolved
+    -- recursively by the client -- invisible to Lua, and what stalled the
+    -- window on every drag. tests/lint/rowchain.py enforces it everywhere;
+    -- this asserts the helper it enforces people use is actually doing it.
+    H.check("ui.PlaceRow anchors to the SCROLL FRAME, not to a sibling row",
+            string.find(src, 'row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, y)',
                         1, true) ~= nil,
-            "the first made row has no right anchor")
+            "rows are placed relative to something other than their scroll frame")
 end
 
 -- ONE ROW HEIGHT. Three lists side by side at three row heights read as three

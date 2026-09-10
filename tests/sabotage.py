@@ -2024,9 +2024,25 @@ end
     # The outer rows back to a captured WIDTH instead of two anchors, which is
     # what let them keep a stale number and draw past their own box.
     ("craft-side-rows-sized-not-anchored", "ui/frame.lua",
-     """                row:SetPoint("TOPRIGHT", sideScroll, "TOPRIGHT",
-                    -CRAFTL.row_r, 0)""",
-     "                row:SetWidth(ui.CraftSideRowW(ui.WindowW()))",
+     "            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,\n                CRAFTL.row_l, CRAFTL.row_r)",
+     "            row:SetWidth(ui.CraftSideRowW(ui.WindowW()))",
+     "geometry"),
+
+    # ---- rows are placed flat, not chained ---------------------------------
+    # ui.PlaceRow anchoring to the row above instead of the scroll frame. That
+    # is the shape every pool had: a dependency chain up to 38 deep, resolved
+    # recursively by the client on every drag, resize and repaint, with
+    # nothing showing in Lua because none of the work is Lua's.
+    ("rows-anchored-to-the-row-above", "ui/frame.lua",
+     '    row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, y)',
+     '    row:SetPoint("TOPLEFT", scroll, "TOPLEFT", padL or 0, 0)',
+     "geometry"),
+
+    # The right pad dropped from the Crafting rows, so they stop stretching to
+    # their box and the clipping comes back.
+    ("craft-rows-lose-their-right-pad", "ui/frame.lua",
+     "            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H,\n                CRAFTL.row_l, CRAFTL.row_r)",
+     "            ui.PlaceRow(row, sideScroll, i, CSIDE_ROW_H, CRAFTL.row_l)",
      "geometry"),
 
     # ---- the item-fact sweep -----------------------------------------------
