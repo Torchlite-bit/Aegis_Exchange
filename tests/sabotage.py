@@ -2465,6 +2465,22 @@ end
      "    if dim then return dim, dim, dim end",
      "crafttree"),
 
+    # ---- the chosen option in a segmented row (v1.52.28) -----------------
+
+    # The chosen option back to the plate's own text colour, so a value you
+    # have SET reads dimmer than the figure it governs in the box beside it.
+    ("segmented-chosen-not-brightened", "ui/frame.lua",
+     "            b.aegisTextColor = on and C.input or nil",
+     "            b.aegisTextColor = nil",
+     "rowchrome"),
+
+    # ...and the override left ON when the choice moves, so every option a row
+    # has ever held reads as chosen.
+    ("segmented-override-never-cleared", "ui/frame.lua",
+     "            b.aegisTextColor = on and C.input or nil",
+     "            if on then b.aegisTextColor = C.input end",
+     "rowchrome"),
+
     # ---- the Crafting tab's clipping (v1.52.25) --------------------------
 
     # The shopping rows plated by pfUI again: SkinWidget gives every Button its

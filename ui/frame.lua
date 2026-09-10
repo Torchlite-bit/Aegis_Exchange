@@ -350,7 +350,24 @@ function ui.MarkChosen(btns, match)
             if not b.aegisBaseKind then
                 b.aegisBaseKind = b.aegisKind or "quiet"
             end
-            ui.SetButtonKind(b, match(b) and "primary" or b.aegisBaseKind)
+            local on = match(b) and true or nil
+            -- THE CHOSEN ONE READS IN THE INPUT COLOUR, the same near-white
+            -- the edit boxes got in v1.52.24 -- because it IS an input. A
+            -- segmented row is a value you have set, exactly like the number
+            -- in the box beside it, and the two were saying so in two
+            -- different colours: the figure bright and the mode that governs
+            -- it dim. The unchosen ones keep the plate's own text colour,
+            -- which is what makes the difference read as chosen rather than
+            -- as decoration.
+            --
+            -- Set through `aegisTextColor` rather than on the label, because
+            -- RepaintButton runs on every hover, press and enable and would
+            -- wipe anything written from outside. It reads this back each
+            -- time; see the note there. Cleared to NIL, not to the kind's
+            -- colour, so the kind stays the one thing that decides the
+            -- default.
+            b.aegisTextColor = on and C.input or nil
+            ui.SetButtonKind(b, on and "primary" or b.aegisBaseKind)
         end
         i = i + 1
     end

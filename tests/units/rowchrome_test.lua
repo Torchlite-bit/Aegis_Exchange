@@ -65,6 +65,8 @@ for _, sig in ipairs({
     "function ui.AddRowChrome(",
     "function ui.InputText(",
     "function ui.FlattenEditBox(",
+    "function ui.SetButtonKind(",
+    "function ui.MarkChosen(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -338,5 +340,62 @@ H.check("the money boxes are centred",
 H.check("...and none of the three is right-aligned",
         string.find(money, 'SetJustifyH("RIGHT")', 1, true) == nil,
         "a digit is still jammed against its coin")
+
+-- ---------------------------------------------------------------------------
+H.section("the chosen option in a segmented row")
+-- ---------------------------------------------------------------------------
+
+-- A segmented row -- % / Flat, 6h / 24h / 72h, Undercut / Market / None -- is a
+-- VALUE YOU HAVE SET, exactly like the number in the box beside it. The two
+-- were saying so in two different colours: the figure bright and the mode that
+-- governs it dim.
+
+-- ui.SetButtonKind reaches for these; neither decides anything here.
+BTN_KIND = { quiet = {}, primary = {}, accent = {} }
+local repaints
+RepaintButton = function() repaints = repaints + 1 end
+
+local function Btn(kind)
+    return { aegisButton = true, aegisKind = kind or "quiet" }
+end
+
+local pct, flat = Btn(), Btn()
+repaints = 0
+ui.MarkChosen({ pct, flat }, function(b) return b == flat end)
+
+H.listEq("the chosen one reads in the input colour", flat.aegisTextColor,
+         C.input)
+H.eq("...and the others are left to their plate's own colour",
+     pct.aegisTextColor, nil)
+H.eq("the chosen one is promoted", flat.aegisKind, "primary")
+H.eq("...and the others go back to what they were", pct.aegisKind, "quiet")
+H.eq("both were repainted", repaints, 2)
+
+-- IT HAS TO COME BACK OFF. Choose the other one and the first must lose the
+-- colour, or every option a row has ever had reads as chosen.
+ui.MarkChosen({ pct, flat }, function(b) return b == pct end)
+H.listEq("choosing the other moves the colour", pct.aegisTextColor, C.input)
+H.eq("...and takes it off the first", flat.aegisTextColor, nil)
+
+-- CLEARED TO NIL, NOT TO A COLOUR. `aegisTextColor` is an OVERRIDE that
+-- RepaintButton reads back on every hover and press; writing a colour into it
+-- for the unchosen ones would make the kind stop deciding the default, and a
+-- row of accent buttons would come back wrong.
+H.eq("the override is removed, not overwritten", flat.aegisTextColor, nil)
+
+-- ...and the base kind is still remembered from BEFORE anything was chosen, so
+-- a row that was never "quiet" is not made quiet by being deselected.
+local acc = Btn("accent")
+ui.MarkChosen({ acc }, function() return true end)
+ui.MarkChosen({ acc }, function() return false end)
+H.eq("a deselected accent button goes back to accent", acc.aegisKind, "accent")
+H.eq("...with no leftover text override", acc.aegisTextColor, nil)
+
+H.survives("an empty row is not a crash", function()
+    ui.MarkChosen({}, function() return true end)
+end)
+H.survives("...nor a nil one", function()
+    ui.MarkChosen(nil, function() return true end)
+end)
 
 os.exit(H.report("rowchrome"))

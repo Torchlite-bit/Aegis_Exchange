@@ -18,6 +18,29 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.28]
+
+### Changed
+- **The chosen option in a segmented row reads in the input colour** — the same
+  near-white the edit boxes got in v1.52.24. `%` / `Flat`, `6h` / `24h` / `72h`,
+  `Undercut` / `Market` / `None`: every one of those is a *value you have set*,
+  exactly like the number in the box beside it, and the two were saying so in
+  two different shades — the figure bright and the mode governing it dim.
+  Unchosen options keep their plate's own colour, which is what makes the
+  difference read as chosen rather than as decoration.
+  - It goes through `aegisTextColor`, the existing per-button override
+    `RepaintButton` re-reads on every hover and press, so a mouseover cannot
+    wipe it — and it is cleared to **nil**, not to a colour, so the button's
+    kind stays the one thing deciding the default.
+
+### Internal
+- `rowchrome_test.lua` runs the real `ui.MarkChosen` against stub buttons: that
+  the colour lands on the chosen one, that it *comes off* when the choice moves
+  (or every option a row ever held reads as chosen), and that a deselected
+  accent button goes back to accent rather than to quiet. Two sabotages.
+
+---
+
 ## [1.52.27]
 
 ### Changed
@@ -4724,6 +4747,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
