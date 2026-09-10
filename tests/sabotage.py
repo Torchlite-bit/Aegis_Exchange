@@ -206,6 +206,40 @@ SABOTAGES = [
      "        if rows[i] then return rows[i] end",
      "crafttree"),
 
+    # ---- what this session has spent on the list (v1.52.22) --------------
+
+    # A line already covered still counts. The money left the bags whether or
+    # not the shortfall is now zero -- skipping covered lines makes the total
+    # FALL as the shopping is finished, which is the direction that reads as
+    # working.
+    ("craft-spend-skips-covered-lines", "ui/frame.lua",
+     """        if r.itemId then
+            local _, copper = spentOf(r.itemId)
+            spent = spent + (copper or 0)
+        end""",
+     """        if r.itemId and (r.short or 0) > 0 then
+            local _, copper = spentOf(r.itemId)
+            spent = spent + (copper or 0)
+        end""",
+     "crafttree"),
+
+    # ...and it reads the COPPER, not the unit count. Both come back from
+    # buy.SessionBought and taking the wrong one gives a number of items where
+    # a price should be -- formatted as money, so it renders perfectly.
+    ("craft-spend-adds-the-unit-count", "ui/frame.lua",
+     "            local _, copper = spentOf(r.itemId)",
+     "            local copper = spentOf(r.itemId)",
+     "crafttree"),
+
+    # An average of nothing is NIL, never zero: "0c each" for something never
+    # bought is a price, and a wrong one.
+    ("craft-unit-spent-zero-not-nil", "ui/frame.lua",
+     """    if n <= 0 then return nil end
+    return math.floor((tonumber(spent) or 0) / n)""",
+     """    if n <= 0 then return 0 end
+    return math.floor((tonumber(spent) or 0) / n)""",
+     "crafttree"),
+
     # ---- the Crafting tab's two-panel geometry (v1.52.21) -----------------
 
     # N things across a row need N-1 gutters between them. Forget them and four

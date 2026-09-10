@@ -3250,9 +3250,30 @@ and thrown. Which is also why `kind` is stamped whether or not the section is
 folded: a lookup that works only while something happens to be unfolded is
 worse than one that never works.
 
-**Deferred, not dropped:** per-item session spend. `buy.session` already keeps
-units and copper per item id, so the footer line and a reagent-row tooltip are
-a small piece of work on top of this one.
+#### §5 What this session has spent — v1.52.22
+
+The half of the three-panel candidate that was worth keeping. `buy.session`
+already held units and copper per item id, so this is a money line and a
+tooltip, not a panel.
+
+**The denominator was the only real decision.** Spend over the REMAINING cost
+reads "spent 30g of 24g" once you are past halfway -- the bigger number on top,
+presented as progress. The budget a shopping list is measured against is what
+has gone PLUS what is left, which also means the line degrades correctly: with
+nothing bought yet it is exactly what the list costs, which is what it said
+when it was labelled "Buy all".
+
+**Two owners, one sum.** `ui.ShoppingTotal` keeps "what is still to buy" and
+`ui.ShoppingSpend` takes "what has gone"; the line adds them. A single walk
+computing both is where a numerator and a denominator drift apart, and the
+drift is invisible -- both halves stay plausible.
+
+**A covered line still counts**, and it has a sabotage, because dropping it
+makes the total FALL as the shopping is finished. That is the direction that
+reads as working.
+
+**No new event handler.** Buying changes the bags, and the tab's `BAG_UPDATE`
+flag already repaints once a frame behind rule 16's flush.
 
 ### 2h — original scope
 

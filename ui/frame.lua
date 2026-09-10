@@ -7767,9 +7767,10 @@ function ui.BuildCraftTab()
 
     -- ---- ABOVE the box: what the whole list costs ------------------------
     --
-    -- A shopping list's headline number is what it costs to fill, so that is
-    -- what sits above it. The SELECTED RECIPE's economics are on the bottom
-    -- bar instead -- a conclusion belongs there, and putting the two scopes on
+    -- A shopping list's headline number is what it costs to fill and how far
+    -- through that you are, so that is what sits above it -- painted by
+    -- ui.UpdateCraftSpend. The SELECTED RECIPE's economics are on the bottom
+    -- bar instead: a conclusion belongs there, and putting the two scopes on
     -- one line over one list is what would make them read as one figure.
     local halfW = ui.CraftBtnW(ui.WindowW(), 2)
 
@@ -7777,7 +7778,6 @@ function ui.BuildCraftTab()
     ui.craftBuyLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
         -CRAFTL.est_y)
     ui.craftBuyLbl:SetWidth(halfW); ui.craftBuyLbl:SetJustifyH("LEFT")
-    ui.craftBuyLbl:SetText("Buy all")
     ui.craftBuyLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     ui.craftBuyAllFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -7924,6 +7924,10 @@ ui.GrowCraftSideRows = function(n)
             row.ct = ct
 
             row:SetScript("OnClick", function() ui.OnCraftRowClick(row) end)
+            row:SetScript("OnEnter", function()
+                ui.ShowCraftRowTooltip(row, row.entry)
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
             row:Hide()
             ui.craftSideRows[i] = row
             i = i + 1
@@ -8601,6 +8605,46 @@ function ui.PaintCraftRow(row, e, rowW)
     if showStep then row.step:Show()  else row.step:Hide()  end
 end
 
+
+-- What this session has already SPENT on the things on this list.
+--
+-- THE OTHER HALF OF ui.ShoppingTotal, and deliberately not a second copy of
+-- it: that one owns "what is still to buy", this one owns "what has gone", and
+-- the caller adds them. Two walks that each computed both is exactly how a
+-- fraction ends up with a numerator and a denominator that disagree.
+--
+-- WHY THE SUM IS THE DENOMINATOR. "Spent 41g of 63g" against the REMAINING
+-- cost puts the smaller number underneath and calls it progress; the budget a
+-- shopping list is measured against is what has gone PLUS what is left.
+--
+-- Counts intermediates too. Money spent on a bolt you also could have crafted
+-- is still money spent on this list, and craft.ShoppingList aggregates by
+-- resolved item id, so no id is on the list twice to be counted twice.
+function ui.ShoppingSpend(rows, spentOf)
+    local spent = 0
+    if not spentOf then return spent end
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.itemId then
+            local _, copper = spentOf(r.itemId)
+            spent = spent + (copper or 0)
+        end
+        i = i + 1
+    end
+    return spent
+end
+
+-- What one unit averaged this session, or NIL when none were bought.
+--
+-- NIL, NOT ZERO. "0c each" for something you have never bought is a price, and
+-- a wrong one; a tooltip has to be able to say nothing instead of quoting it.
+function ui.UnitSpent(n, spent)
+    n = tonumber(n) or 0
+    if n <= 0 then return nil end
+    return math.floor((tonumber(spent) or 0) / n)
+end
+
 -- The aggregated shopping line for one reagent NAME, or nil.
 --
 -- BY NAME, because that is what the caller has: a breakdown line under an
@@ -8617,6 +8661,108 @@ function ui.ShoppingRowFor(rows, name)
         i = i + 1
     end
     return nil
+end
+
+-- The money line above the box: what has gone, and what the whole run costs.
+--
+-- ONE SCOPE, THE LIST'S. The panel's bottom bar carries the SELECTED recipe's
+-- economics; this line is about the shopping, and the two never share a row.
+--
+-- The right half is spent + still-to-buy, so the fraction reads honestly from
+-- the first purchase to the last -- see ui.ShoppingSpend. Before anything is
+-- bought it is exactly what the list costs, which is what this line said when
+-- it was labelled "Buy all", so nothing was lost by making it a fraction.
+function ui.UpdateCraftSpend()
+    if not ui.craftBuyAllFS or not ui.craftBuyLbl then return end
+    local DASH = "\226\128\148"
+    local left, complete = ui.ShoppingTotal(ui.craftFlat)
+    local spent = ui.ShoppingSpend(ui.craftFlat,
+        A.buy and A.buy.SessionBought or nil)
+    local budget = spent + left
+
+    if spent > 0 then
+        ui.craftBuyLbl:SetText("Spent " .. util.FormatMoney(spent, true))
+        ui.craftBuyLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        ui.craftBuyLbl:SetText("Spent " .. DASH)
+        ui.craftBuyLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    if budget > 0 then
+        -- The "+" is ui.ShoppingTotal's `complete`: a line still to buy that
+        -- has no price at all. Money already SPENT never makes the budget
+        -- incomplete -- it is a fact, not an estimate.
+        ui.craftBuyAllFS:SetText("of " .. util.FormatMoney(budget, true)
+            .. (complete and "" or "+"))
+        ui.craftBuyAllFS:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        ui.craftBuyAllFS:SetText(DASH)
+        ui.craftBuyAllFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+end
+
+-- Hover tooltip for a shopping-tree row.
+--
+-- THE ITEM'S OWN TOOLTIP FIRST, then our lines under it: what the list wants,
+-- and what this session has already paid for it. The item is what a player
+-- expects to see on a hover; the numbers are why they are hovering.
+--
+-- GameTooltip, deliberately. ui/tooltip.lua hooks the GameTooltip OBJECT, so
+-- these Set* calls DO run our price lines -- which is right for a tooltip a
+-- player asked for by pointing at something. The scanning tooltips are
+-- separate frames for the opposite reason; see HARD RULE 16's corollary.
+function ui.ShowCraftRowTooltip(owner, e)
+    if not e or (e.kind ~= "reagent" and e.kind ~= "sub") then
+        GameTooltip:Hide()
+        return
+    end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    local shown = false
+    if e.itemId and GameTooltip.SetHyperlink then
+        shown = pcall(function()
+            GameTooltip:SetHyperlink("item:" .. e.itemId .. ":0:0:0")
+        end)
+    end
+    if not shown then GameTooltip:SetText(e.name or "") end
+
+    if e.kind == "sub" then
+        -- A breakdown line: what THIS recipe asks for, and the reminder that
+        -- the line you buy from is the aggregated one below it.
+        GameTooltip:AddLine("Needs " .. (e.per or 1) .. " per craft \226\128\148 "
+            .. (e.need or 0) .. " for this recipe", 0.8, 0.75, 0.6)
+        GameTooltip:AddLine("Buy it from the Reagents list below.",
+            0.55, 0.52, 0.45)
+    else
+        local need, have = e.need or 0, e.have or 0
+        if (e.short or 0) > 0 then
+            GameTooltip:AddLine("Need " .. need .. ", have " .. have
+                .. " \226\128\148 " .. e.short .. " to buy", 0.90, 0.30, 0.30)
+        else
+            GameTooltip:AddLine("Need " .. need .. ", have " .. have
+                .. " \226\128\148 covered", 0.30, 0.85, 0.30)
+        end
+        if e.craftable then
+            GameTooltip:AddLine("You are crafting this one \226\128\148 its own "
+                .. "reagents are on the list.", 0.55, 0.52, 0.45)
+        end
+    end
+
+    -- WHAT THIS SESSION HAS PAID, which is the one thing no row can show and
+    -- the reason the third panel was not worth 184px of the tab.
+    local bought, spent = 0, 0
+    if e.itemId and A.buy and A.buy.SessionBought then
+        bought, spent = A.buy.SessionBought(e.itemId)
+    end
+    if bought > 0 then
+        local each = ui.UnitSpent(bought, spent)
+        local line = "Bought " .. bought .. " this session for "
+            .. util.FormatMoney(spent, true)
+        if each then
+            line = line .. " (" .. util.FormatMoney(each, true) .. " each)"
+        end
+        GameTooltip:AddLine(line, C.gold[1], C.gold[2], C.gold[3])
+    end
+    GameTooltip:Show()
 end
 
 function ui.RefreshCraftTree()
@@ -8664,18 +8810,8 @@ function ui.UpdateCraftTree()
     end
     ui.UpdateCraftShort()
 
-    -- ...and what the whole list costs to fill, above the box.
-    if ui.craftBuyAllFS then
-        local total, complete = ui.ShoppingTotal(ui.craftFlat)
-        if total > 0 then
-            ui.craftBuyAllFS:SetText(util.FormatMoney(total, true)
-                .. (complete and "" or "+"))
-            ui.craftBuyAllFS:SetTextColor(C.text[1], C.text[2], C.text[3])
-        else
-            ui.craftBuyAllFS:SetText("\226\128\148")
-            ui.craftBuyAllFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        end
-    end
+    -- ...and the money line above the box.
+    ui.UpdateCraftSpend()
 end
 
 -- The header's shopping-left line.

@@ -63,6 +63,9 @@ for _, sig in ipairs({
     "function ui.CraftTreeRows(",
     "function ui.ShoppingRowFor(",
     "function ui.ToggleCraftRow(",
+    "function ui.ShoppingTotal(",
+    "function ui.ShoppingSpend(",
+    "function ui.UnitSpent(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -308,5 +311,89 @@ ui.ToggleCraftRow({ kind = "section" })         -- no key
 ui.ToggleCraftRow(nil)
 H.eq("nothing else folds", painted, before)
 H.eq("...and nothing was written for them", STATE.open["Dreamfoil"], nil)
+
+-- ---------------------------------------------------------------------------
+H.section("what this session has spent on the list")
+-- ---------------------------------------------------------------------------
+
+-- The shopping list, with money against two of its three lines.
+local SPENDROWS = {
+    { name = "Dreamfoil",   itemId = 13463, need = 40, have = 18, short = 22,
+      unit = 20000 },
+    { name = "Crystal Vial", itemId = 8925, need = 5,  have = 5,  short = 0,
+      unit = 500 },
+    { name = "Black Lotus", itemId = 13468, need = 2,  have = 0,  short = 2,
+      unit = 900000 },
+}
+local PAID = {
+    [13463] = { 18, 300000 },   -- 18 Dreamfoil for 30g
+    [8925]  = {  5,   2500 },   -- 5 vials for 25s
+}
+local function spentOf(id)
+    local r = PAID[id]
+    if not r then return 0, 0 end
+    return r[1], r[2]
+end
+
+H.eq("what has gone is every line's spend added up",
+     ui.ShoppingSpend(SPENDROWS, spentOf), 302500)
+
+-- A LINE ALREADY COVERED STILL COUNTS. The vials are bought -- `short` is
+-- zero -- and the money for them left the bags all the same. Skipping covered
+-- lines would make the total fall as you finished the shopping.
+H.check("...including lines that are now covered",
+        ui.ShoppingSpend({ SPENDROWS[2] }, spentOf) == 2500,
+        "a covered line's money went missing")
+
+H.eq("nothing bought is nothing spent",
+     ui.ShoppingSpend(SPENDROWS, function() return 0, 0 end), 0)
+H.eq("no injection is zero, not a crash",
+     ui.ShoppingSpend(SPENDROWS, nil), 0)
+H.eq("an empty list is zero", ui.ShoppingSpend({}, spentOf), 0)
+H.eq("...and a nil one too", ui.ShoppingSpend(nil, spentOf), 0)
+
+-- A row with no resolved id cannot be looked up, and must not be guessed at.
+H.eq("a row with no item id contributes nothing",
+     ui.ShoppingSpend({ { name = "Mystery Herb", need = 4, short = 4 } },
+                      spentOf), 0)
+
+-- ---- the fraction the money line draws ----------------------------------
+
+-- THE DENOMINATOR IS SPENT PLUS STILL-TO-BUY. Against the REMAINING cost
+-- alone, "spent 30g of 24g" puts the bigger number on top and calls it
+-- progress. ui.ShoppingTotal owns one half and ui.ShoppingSpend the other;
+-- the line adds them, which is the only place they meet.
+local left, complete = ui.ShoppingTotal(SPENDROWS)
+H.eq("what is left is the shortfalls at their unit prices",
+     left, 22 * 20000 + 2 * 900000)
+H.check("...and it is a complete answer here", complete,
+        "every line has a price")
+H.eq("the budget is what has gone plus what is left",
+     ui.ShoppingSpend(SPENDROWS, spentOf) + left, 302500 + 2240000)
+
+-- MONEY ALREADY SPENT NEVER MAKES THE BUDGET INCOMPLETE. `complete` is about
+-- a line still TO BUY having no price; what you paid is a fact.
+local NOPRICE = {
+    { name = "Dreamfoil", itemId = 13463, need = 40, have = 18, short = 22 },
+}
+local nleft, ncomplete = ui.ShoppingTotal(NOPRICE)
+H.eq("an unpriced shortfall adds nothing to what is left", nleft, 0)
+H.check("...and says so", not ncomplete, "it claimed to be complete")
+H.eq("...but its spend still counts",
+     ui.ShoppingSpend(NOPRICE, spentOf), 300000)
+
+-- ---- what a unit averaged ------------------------------------------------
+
+H.eq("the average is the money over the units",
+     ui.UnitSpent(18, 300000), 16666)
+
+-- NIL, NOT ZERO. "0c each" for something never bought is a price, and a wrong
+-- one -- the tooltip has to be able to say nothing instead.
+H.eq("nothing bought has no average", ui.UnitSpent(0, 0), nil)
+H.eq("...and neither does a nil count", ui.UnitSpent(nil, 500), nil)
+H.eq("a negative count has no average either", ui.UnitSpent(-3, 500), nil)
+H.eq("one unit averages what it cost", ui.UnitSpent(1, 4200), 4200)
+H.eq("no money over some units is zero, which IS a price",
+     ui.UnitSpent(4, 0), 0)
 
 os.exit(H.report("crafttree"))

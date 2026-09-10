@@ -18,6 +18,46 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.22]
+
+### Added
+- **The Crafting tab says what this session has spent.** The line above the
+  shopping list reads `Spent 41g 20s` / `of 104g 30s` — what has already gone
+  on reagents from this list, over what the whole run costs.
+  - **The denominator is spent + still-to-buy.** Putting the spend over the
+    *remaining* cost gives you "spent 30g of 24g" — the bigger number on top,
+    called progress. Before you buy anything the right-hand figure is exactly
+    what the list costs, which is what this line used to say as "Buy all", so
+    nothing was lost by making it a fraction.
+  - A line you have already **covered still counts**. The money left the bags
+    whether or not the shortfall is now zero; skipping covered lines would make
+    the total *fall* as you finished the shopping.
+  - Money already spent never carries the `+` — that suffix means a line still
+    to buy has no price at all. What you paid is a fact, not an estimate.
+- **Hover a reagent for what it has cost you.** The item's own tooltip, then
+  what the list wants (`Need 40, have 18 — 22 to buy`), then
+  `Bought 18 this session for 30g (1g 66s each)`.
+  - This is the one figure the deleted third panel could have shown that no row
+    can, and it costs a hover instead of 184px of the tab.
+  - The per-unit average is **nil, not zero**, for something never bought:
+    "0c each" is a price, and a wrong one.
+  - Hovering a **breakdown line** under an expanded recipe says what that recipe
+    needs per craft and points at the aggregated line below it, which is the one
+    you buy from.
+
+### Internal
+- `ui.ShoppingSpend` owns "what has gone" and `ui.ShoppingTotal` keeps owning
+  "what is still to buy"; the money line adds them. One walk computing both is
+  how a fraction ends up with a numerator and a denominator that disagree.
+- The line follows purchases with no new event handler: buying changes the bags,
+  and the Crafting tab's `BAG_UPDATE` flag already repaints once a frame behind
+  HARD RULE 16's flush.
+- `crafttree_test.lua` grows to 70 checks; three more sabotages — a spend that
+  skips covered lines, one that adds the unit count instead of the copper, and
+  an average that returns zero where it must return nil.
+
+---
+
 ## [1.52.21]
 
 ### Changed
@@ -4506,6 +4546,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
