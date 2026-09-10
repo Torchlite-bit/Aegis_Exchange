@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.33]
+
+### Fixed
+- **The input colour was being set and then lost, and the reason was the font
+  object.** `InputBoxTemplate` backs its edit box with a font *object*
+  (`ChatFontNormal`) rather than a font of its own, and a FontInstance backed by
+  an object takes that object's colour — `SetTextColor` on it does not survive
+  the next redraw. So the call ran, and the colour went.
+  `ui.InputText` now calls `SetFont` with the box's **own current font** first,
+  which gives it a private font instance; after that the colour sticks. Nothing
+  about the typeface or size changes — only who owns it.
+  - The two earlier attempts (v1.52.24, v1.52.32) both re-arranged *when* the
+    colour was set — at build, then again after skinning — and neither touched
+    the mechanism, which is why neither worked.
+  - The settings panel also re-asserts it from `ui.RefreshSettings`, which runs
+    after every build and skin path that panel has.
+
+### Internal
+- Two sabotages for the mechanism itself: the detach removed, and the two calls
+  in the wrong order — which re-attaches the object and throws the colour away
+  again, with no error and no visible difference in the source.
+
+---
+
 ## [1.52.32]
 
 ### Fixed
@@ -4891,6 +4915,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -260,13 +260,23 @@ H.section("what you type is a chosen colour, not an inherited one")
 -- through. That is a comparison, and a comparison can be asserted.
 
 local function StubBox(noColor)
-    local b = { colored = nil, backdrop = nil }
+    -- `order` records the calls in sequence, because the ORDER is the fix:
+    -- SetFont has to come first.
+    local b = { colored = nil, backdrop = nil, font = nil, order = {} }
     b.GetRegions = function() return end
     b.SetBackdrop = function(s, t) s.backdrop = t end
     b.SetBackdropColor = function() end
     b.SetBackdropBorderColor = function() end
+    b.GetFont = function() return "Fonts\\ARIALN.TTF", 12, "" end
+    b.SetFont = function(s, path, size, flags)
+        s.font = { path, size, flags }
+        table.insert(s.order, "font")
+    end
     if not noColor then
-        b.SetTextColor = function(s, r, g, bl) s.colored = { r, g, bl } end
+        b.SetTextColor = function(s, r, g, bl)
+            s.colored = { r, g, bl }
+            table.insert(s.order, "colour")
+        end
     end
     return b
 end
@@ -275,6 +285,20 @@ local box = ui.InputText(StubBox())
 H.check("an edit box is given a colour", box.colored ~= nil,
         "nothing set it, so it inherits the chat font's")
 H.listEq("...and it is the palette's input colour", box.colored, C.input)
+
+-- THE FONT OBJECT IS DETACHED FIRST, and this is the part that was missing
+-- through three attempts at this bug. InputBoxTemplate backs its box with a
+-- font OBJECT (ChatFontNormal), and a FontInstance backed by an object takes
+-- that object's colour -- SetTextColor on it does not reliably survive the
+-- next redraw. SetFont with the box's OWN current font gives it a private
+-- instance, after which the colour sticks.
+H.check("the box is given its own font", box.font ~= nil,
+        "a box backed by a font OBJECT loses SetTextColor on the next redraw")
+H.eq("...which is the font it already had, not a new one",
+     box.font[1], "Fonts\\ARIALN.TTF")
+H.eq("...at the size it already had", box.font[2], 12)
+H.listEq("the font comes BEFORE the colour", box.order,
+         { "font", "colour" })
 
 -- THE ONE THAT MATTERS. Body copy is read in bulk and can sit back; a figure
 -- you are entering is a character or two on near-black and has to come
@@ -308,6 +332,19 @@ H.survives("nil is not a crash", function() ui.InputText(nil) end)
 H.survives("a widget with no SetTextColor is not a crash", function()
     ui.InputText(StubBox(true))
 end)
+-- A widget with no font of its own to read back must still get the colour.
+H.survives("a widget with no GetFont is not a crash", function()
+    local b = StubBox()
+    b.GetFont = nil
+    ui.InputText(b)
+end)
+do
+    local b = StubBox()
+    b.GetFont = function() return nil end
+    ui.InputText(b)
+    H.listEq("...and is still coloured", b.colored, C.input)
+    H.eq("...without being given a nil font", b.font, nil)
+end
 
 -- ---- ...AND IT SURVIVES THE SKIN ----------------------------------------
 

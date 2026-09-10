@@ -2517,6 +2517,34 @@ end
      "    if dim then return dim, dim, dim end",
      "crafttree"),
 
+    # ---- the input colour, third attempt (v1.52.33) ----------------------
+
+    # The font object left attached. InputBoxTemplate backs its box with
+    # ChatFontNormal, and a FontInstance backed by an OBJECT takes that
+    # object's colour -- SetTextColor on it does not survive the next redraw.
+    # This is the mechanism two earlier fixes missed while re-arranging WHEN
+    # the colour was set.
+    ("input-font-object-not-detached", "ui/frame.lua",
+     """        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end""",
+     "        local _ = e",
+     "rowchrome"),
+
+    # ...and the colour set BEFORE the font, which re-attaches the object and
+    # throws the colour away again. Same two calls, wrong order, no error.
+    ("input-colour-set-before-the-font", "ui/frame.lua",
+     """    if e.GetFont and e.SetFont then
+        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end
+    end
+    e:SetTextColor(C.input[1], C.input[2], C.input[3])""",
+     """    e:SetTextColor(C.input[1], C.input[2], C.input[3])
+    if e.GetFont and e.SetFont then
+        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end
+    end""",
+     "rowchrome"),
+
     # ---- one table look, one input colour (v1.52.32) ---------------------
 
     # The shared result row back to being plated by pfUI. ui/skin.lua's note

@@ -667,6 +667,21 @@ end
 -- one row, reading dimmer than nothing at all.
 function ui.InputText(e)
     if not e or not e.SetTextColor then return e end
+    -- DETACH THE FONT OBJECT FIRST, and this is the part that was missing.
+    --
+    -- InputBoxTemplate gives its box a font OBJECT (ChatFontNormal), not a
+    -- font of its own. A FontInstance backed by an object takes that object's
+    -- colour, and SetTextColor on it does not reliably survive the next
+    -- redraw -- so the colour was being set, and then quietly lost. Calling
+    -- SetFont with the box's OWN current font gives it a private font
+    -- instance, after which SetTextColor sticks.
+    --
+    -- The typeface and size come from GetFont, so nothing about how the text
+    -- LOOKS changes here; the only thing that changes is who owns it.
+    if e.GetFont and e.SetFont then
+        local path, size, flags = e:GetFont()
+        if path then pcall(function() e:SetFont(path, size, flags) end) end
+    end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])
     return e
 end
@@ -2130,6 +2145,16 @@ function ui.RefreshSettings()
     end
     if ui.setUndercutFlat then
         ui.setUndercutFlat:SetText(util.FormatMoney(A.db.Setting("undercutAmount"), false))
+    end
+    -- RE-ASSERT THE INPUT COLOUR HERE TOO. This panel is built lazily and then
+    -- skinned -- by Apply, by ApplyOverlay, or not at all -- and this runs
+    -- after every one of those. Belt and braces on a thing that has now been
+    -- reported three times: ui.InputText is idempotent and costs four calls.
+    ui.InputText(ui.setUndercut)
+    if ui.setUndercutFlat then
+        ui.InputText(ui.setUndercutFlat.g)
+        ui.InputText(ui.setUndercutFlat.s)
+        ui.InputText(ui.setUndercutFlat.c)
     end
     if ui.setScaleText then
         ui.setScaleText:SetText(math.floor(ui.WindowScale() * 100 + 0.5) .. "%")
