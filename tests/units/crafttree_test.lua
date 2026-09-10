@@ -69,6 +69,13 @@ for _, sig in ipairs({
     "function ui.QualityColor(",
     "function ui.CraftQualityOf(",
     "function ui.StampCraftQuality(",
+    "function ui.CraftHeadline(",
+    "function ui.FitString(",
+    "function ui.FitText(",
+    "function ui.CraftLabelW(",
+    "function ui.CraftLabelFont(",
+    "function ui.CraftRowFont(",
+    "function ui.PaintCraftRow(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -90,6 +97,15 @@ H.eq("nothing tracked is still two headers", table.getn(empty), 2)
 H.eq("...in that order", kinds(empty), "section,section")
 H.eq("the first is Recipes", empty[1].key, "recipes")
 H.eq("...and the second Reagents", empty[2].key, "reagents")
+
+-- THE SECTION ROW'S RIGHT-HAND CELL IS A COLUMN CAPTION. `1/5` is made over
+-- wanted and `18/40` is have over need, and nothing else on either row says
+-- which -- two fractions in one list, meaning different things, with no label
+-- between them.
+H.eq("the Recipes caption names its columns", empty[1].caption, "MADE/WANT")
+H.eq("...and the Reagents caption names its own", empty[2].caption, "HAVE/NEED")
+H.eq("the headers are caps, as the concept draws them", empty[1].name, "RECIPES")
+H.eq("...both of them", empty[2].name, "REAGENTS")
 H.eq("an empty Recipes section counts zero", empty[1].count, 0)
 H.eq("...and so does an empty Reagents section", empty[2].count, 0)
 
@@ -411,7 +427,9 @@ ITEM_QUALITY_COLORS = {
     [3] = { r = 0.00, g = 0.44, b = 0.87 },   -- rare
     [4] = { r = 0.64, g = 0.21, b = 0.93 },   -- epic
 }
-C = { text = { 0.87, 0.82, 0.69 } }
+C = { text    = { 0.87, 0.82, 0.69 },
+      gold    = { 1.00, 0.82, 0.00 },
+      goldDim = { 0.72, 0.58, 0.32 } }
 
 local function rgb(...)
     local r, g, b = ...
@@ -503,5 +521,177 @@ H.eq("a second pass asks the client nothing", asked, 0)
 H.survives("nil lists are not a crash", function()
     ui.StampCraftQuality(nil, nil)
 end)
+
+-- ---------------------------------------------------------------------------
+H.section("the panel's headline")
+-- ---------------------------------------------------------------------------
+
+local DOT = " \194\183 "
+
+H.eq("recipes and things to buy", ui.CraftHeadline(4, 9),
+     "4 RECIPES" .. DOT .. "9 TO BUY")
+
+-- ONE recipe is not "1 RECIPES". A heading is the one line on a panel nobody
+-- can miss, so it is the one place a plural nobody bothered with is loudest.
+H.eq("one recipe is singular", ui.CraftHeadline(1, 3),
+     "1 RECIPE" .. DOT .. "3 TO BUY")
+H.eq("...and two are not", ui.CraftHeadline(2, 3),
+     "2 RECIPES" .. DOT .. "3 TO BUY")
+
+-- NOTHING TO BUY DROPS THE HALF ENTIRELY rather than reading "0 TO BUY". A
+-- zero here is the finished state and it should look finished, not reported.
+H.eq("a covered list says nothing about buying",
+     ui.CraftHeadline(4, 0), "4 RECIPES")
+H.eq("...and an empty tab is honest about it",
+     ui.CraftHeadline(0, 0), "0 RECIPES")
+
+H.eq("nil counts as nothing", ui.CraftHeadline(nil, nil), "0 RECIPES")
+H.eq("a negative recipe count floors at zero",
+     ui.CraftHeadline(-2, 0), "0 RECIPES")
+
+-- ---------------------------------------------------------------------------
+H.section("painting a row: four kinds through one widget set")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS IS TESTABLE. "Does the row look right" needs a client. What does
+-- not is the rule underneath: ONE pool of widgets serves sections, recipes,
+-- breakdown lines and shopping lines, so every cell a kind does not use has to
+-- be put back before the next kind lands on that same widget. A row that drew
+-- a section header is in ARIALN caps; hand it a reagent line and it stays
+-- there -- the list reads correctly until you scroll it.
+
+-- CRAFTL's column widths, read from the source rather than restated: this file
+-- asserts about the ORDER of the cells, and the geometry suite owns the
+-- numbers. Two copies is how the two suites come to disagree.
+CRAFTL = {}
+do
+    local src = Source("ui/frame.lua")
+    for _, key in ipairs({ "ex_w", "count_w", "step_w", "src_w",
+                           "sub_indent" }) do
+        local _, _, v = string.find(src, "\n    " .. key .. "%s*=%s*(%d+)")
+        assert(v, "no CRAFTL." .. key .. " in the source")
+        CRAFTL[key] = tonumber(v)
+    end
+end
+
+GameFontHighlightSmall = "GameFontHighlightSmall"
+
+local function Cell()
+    local c = { text = nil, font = nil, point = nil, x = nil }
+    c.SetText = function(self, t) self.text = t end
+    c.GetStringWidth = function(self) return string.len(self.text or "") * 6 end
+    c.SetTextColor = function(self, r, g, b) self.rgb = { r, g, b } end
+    c.ClearAllPoints = function(self) self.point = nil end
+    c.SetPoint = function(self, pt, _, _, x) self.point, self.x = pt, x end
+    c.SetFontObject = function(self, o) self.font = o end
+    c.SetFont = function(self, path) self.font = path end
+    return c
+end
+
+local function StubRow()
+    local row = {}
+    row.label, row.ct, row.ex, row.src = Cell(), Cell(), Cell(), Cell()
+    for _, k in ipairs({ "step", "exBtn" }) do
+        row[k] = { shown = false,
+                   Show = function(self) self.shown = true end,
+                   Hide = function(self) self.shown = false end,
+                   ClearAllPoints = function(self) self.point = nil end,
+                   SetPoint = function(self, pt, _, _, x)
+                       self.point, self.x = pt, x
+                   end }
+    end
+    return row
+end
+
+local ROWW = 334        -- what a shopping row gets at the smallest window
+
+local function paint(e, row)
+    row = row or StubRow()
+    ui.PaintCraftRow(row, e, ROWW)
+    return row
+end
+
+-- ---- which cells each kind uses -----------------------------------------
+
+local sec = paint({ kind = "section", key = "reagents", name = "REAGENTS",
+                    caption = "HAVE/NEED", count = 6, short = 2 })
+H.eq("a section shows its caption, not a count", sec.ct.text, "HAVE/NEED")
+H.check("a section has an expander", sec.exBtn.shown, "no expander")
+H.check("...and no stepper", not sec.step.shown, "a section got a stepper")
+H.eq("an open section reads minus", sec.ex.text, "\226\136\146")
+H.eq("a folded one reads plus",
+     paint({ kind = "section", key = "recipes", name = "RECIPES",
+             collapsed = true }).ex.text, "+")
+
+local rec = paint({ kind = "recipe", index = 2, name = "Greater Arcane Elixir",
+                    made = 1, want = 5 })
+H.eq("a recipe shows made over wanted", rec.ct.text, "1/5")
+H.check("a recipe has a stepper", rec.step.shown, "no stepper")
+H.check("...and an expander", rec.exBtn.shown, "no expander")
+H.eq("a closed recipe reads as a right triangle", rec.ex.text, "\226\150\184")
+H.eq("an open one points down",
+     paint({ kind = "recipe", index = 1, name = "X", made = 0, want = 1,
+             expanded = true }).ex.text, "\226\150\190")
+H.eq("the row remembers which recipe it is", rec.index, 2)
+
+-- THE COUNT IS THE LAST CELL AND THE STEPPER SITS IN FRONT OF IT. The five in
+-- `1/5` is what the pair moves, so the pair reads as a control ON that number
+-- rather than as two more buttons after it.
+H.eq("the count is flush right", rec.ct.x, 0)
+H.check("...and the stepper is in front of it",
+        rec.step.x == -(CRAFTL.count_w + 4),
+        "the stepper is at " .. tostring(rec.step.x))
+H.check("the stepper really is to the LEFT of the count",
+        rec.step.x < rec.ct.x, "the pair is drawn after the number")
+
+local sub_ = paint({ kind = "sub", parent = 1, name = "Dreamfoil",
+                     per = 3, need = 12 })
+H.eq("a breakdown line reads as a component", sub_.label.text,
+     "\194\183 Dreamfoil \195\1513")
+H.eq("...and its count is what this recipe needs", sub_.ct.text, "12")
+H.check("a breakdown is indented past a reagent",
+        sub_.label.x > CRAFTL.ex_w,
+        "it sits at " .. tostring(sub_.label.x))
+H.check("...and has no expander of its own", not sub_.exBtn.shown,
+        "a breakdown line got an expander")
+
+local rg = paint({ kind = "reagent", name = "Dreamfoil", itemId = 13463,
+                   need = 40, have = 18, short = 22, source = "vendor" })
+H.eq("a reagent shows have over need", rg.ct.text, "18/40")
+H.eq("...and marks a cheaper vendor", rg.src.text, "v")
+H.check("...with no stepper and no expander",
+        not rg.step.shown and not rg.exBtn.shown, "a reagent got a control")
+H.eq("a reagent with no vendor has a blank mark",
+     paint({ kind = "reagent", name = "X", need = 1, have = 0,
+             short = 1 }).src.text, "")
+
+-- ---- ONE POOL, so every cell has to be put back -------------------------
+
+-- THE ROW-POOL BUG, directly. Paint a section header, then hand the SAME
+-- widget a reagent line -- which is what scrolling does. A font set on a
+-- FontString stays set until something unsets it.
+local reused = StubRow()
+paint({ kind = "section", key = "recipes", name = "RECIPES",
+        caption = "MADE/WANT" }, reused)
+H.check("a section header is set in the label font",
+        reused.label.font ~= GameFontHighlightSmall,
+        "the caps face was never applied")
+
+paint({ kind = "reagent", name = "Dreamfoil", need = 40, have = 18,
+        short = 22 }, reused)
+H.eq("...and the next kind on that widget gets the list font back",
+     reused.label.font, GameFontHighlightSmall)
+H.eq("...its count cell too", reused.ct.font, GameFontHighlightSmall)
+H.eq("...and it is a reagent now, not a caption", reused.ct.text, "18/40")
+
+-- The controls come back too, in both directions.
+local ctl = StubRow()
+paint({ kind = "recipe", index = 1, name = "X", made = 0, want = 1 }, ctl)
+H.check("a recipe row shows its stepper", ctl.step.shown, "no stepper")
+paint({ kind = "reagent", name = "Y", need = 1, have = 1, short = 0 }, ctl)
+H.check("...and a reagent on the same widget hides it again",
+        not ctl.step.shown, "the stepper was left on a reagent line")
+H.check("...and the expander with it", not ctl.exBtn.shown,
+        "the expander was left on a reagent line")
 
 os.exit(H.report("crafttree"))

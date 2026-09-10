@@ -3656,12 +3656,16 @@ end
 -- `cols` maps key -> x offset, `widths` key -> column width. Returns the
 -- key -> button table for ui.PaintSortHeaders.
 -- Crafting's five columns. The Buy tab passes its own eight.
+-- UPPERCASE, and short. The concept's captions are small caps, which this
+-- client cannot do -- so they are caps, and the words are cut to what a caps
+-- caption can carry without running into the column beside it: "Unit price"
+-- and "Stack buyout" are twice as wide in caps as they are in sentence case.
 local CRAFT_HEADER_DEFS = {
-    { key = "name",  text = "Item" },
-    { key = "ct",    text = "Ct" },
-    { key = "unit",  text = "Unit price" },
-    { key = "stack", text = "Stack buyout" },
-    { key = "pct",   text = "% mkt" },
+    { key = "name",  text = "ITEM" },
+    { key = "ct",    text = "CT" },
+    { key = "unit",  text = "UNIT" },
+    { key = "stack", text = "STACK" },
+    { key = "pct",   text = "%MKT" },
 }
 
 -- ONE way a table heading is built, sortable or not.
@@ -7777,6 +7781,46 @@ local CRAFT_HDR_BAND = 24
 -- statement -- "this is here, and it is not for you right now".
 local CRAFT_DIM = 0.55
 
+-- A small-caps LABEL: the panel headings, the section rows, the column
+-- captions. UPPERCASE in a narrow face, which is as close as this client gets
+-- to the concept's letterspaced small caps -- 1.12 FrameXML has no
+-- letter-spacing and no font-variant, so the caps and the narrower face ARE
+-- the whole effect. Saying that plainly is better than a run of inserted
+-- spaces, which would break every width measurement on the tab.
+--
+-- ARIALN is the face the stock UI sets its own numbers in, so it is on every
+-- client. pcall'd because a font path that fails leaves a FontString drawing
+-- nothing at all, and a heading that vanishes is worse than one in the wrong
+-- face.
+function ui.CraftLabelFont(fs, size)
+    if not fs then return fs end
+    if fs.SetFont then
+        pcall(function() fs:SetFont("Fonts\\ARIALN.TTF", size or 10) end)
+    end
+    return fs
+end
+
+-- The shopping panel's headline: how many recipes are tracked, and how many
+-- lines you still have to buy.
+--
+-- ONE STRING, so the two halves cannot be laid out separately and drift apart
+-- -- and so a suite can check the wording, which is the only part of a heading
+-- that is not "look at it and see".
+--
+-- The "to buy" half is DROPPED when there is nothing to buy, rather than
+-- reading "0 TO BUY". A zero here is the finished state and it deserves to
+-- look finished, not to be reported.
+function ui.CraftHeadline(recipes, short)
+    recipes = math.floor(tonumber(recipes) or 0)
+    short = math.floor(tonumber(short) or 0)
+    if recipes < 0 then recipes = 0 end
+    local s = recipes .. (recipes == 1 and " RECIPE" or " RECIPES")
+    if short > 0 then
+        s = s .. " \194\183 " .. short .. " TO BUY"
+    end
+    return s
+end
+
 -- A box for one panel: fixed width on the left, fixed width on the right, or
 -- two-corner anchored in the middle. ui.MakeWell wraps a frame it is handed;
 -- these are positioned from the tab panel instead, so they take their anchors
@@ -7813,8 +7857,9 @@ function ui.BuildCraftTab()
     ui.craftSideHdr = sideHdr
     sideHdr:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
         -CRAFTL.hdr_y)
-    sideHdr:SetText("Shopping")
+    sideHdr:SetText("SHOPPING")
     sideHdr:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.CraftLabelFont(sideHdr, 11)
 
     -- How many reagents you are short of, across every tracked recipe. The
     -- one number that says whether there is shopping left to do, and it is
@@ -7832,6 +7877,7 @@ function ui.BuildCraftTab()
     ui.craftShortFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftShortFS:SetPoint("TOPRIGHT", panel, "TOPLEFT",
         CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.hdr_y)
+    ui.CraftLabelFont(ui.craftShortFS, 10)
 
     -- ---- ABOVE the box: what the whole list costs ------------------------
     --
@@ -8056,8 +8102,9 @@ ui.GrowCraftSideRows = function(n)
     ui.craftTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     ui.craftTitle:SetPoint("TOPLEFT", panel, "TOPLEFT", midX + ROWPAD.l,
         -CRAFTL.hdr_y)
-    ui.craftTitle:SetText("Crafting")
+    ui.craftTitle:SetText("SEARCH")
     ui.craftTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.CraftLabelFont(ui.craftTitle, 11)
 
     local box = CreateFrame("EditBox", "AegisExchangeCraftSearchBox", panel,
         "InputBoxTemplate")
@@ -8478,7 +8525,12 @@ function ui.CraftTreeRows(projects, shop, opts)
 
     local mrows, made, toGo = ui.MadeSummary(projects, opts.madeOf, opts.wantOf)
 
-    table.insert(rows, { kind = "section", key = "recipes", name = "Recipes",
+    -- THE SECTION ROW'S RIGHT-HAND CELL IS A COLUMN CAPTION, not a count.
+    -- It says what the figures under it MEAN -- `1/5` is made over wanted, and
+    -- `18/40` is have over need, and nothing else on the row says which. The
+    -- counts moved to the panel heading, where one line covers both sections.
+    table.insert(rows, { kind = "section", key = "recipes", name = "RECIPES",
+        caption = "MADE/WANT",
         collapsed = state.recipes and true or nil,
         count = table.getn(mrows) })
 
@@ -8536,7 +8588,8 @@ function ui.CraftTreeRows(projects, shop, opts)
         j = j + 1
     end
 
-    table.insert(rows, { kind = "section", key = "reagents", name = "Reagents",
+    table.insert(rows, { kind = "section", key = "reagents", name = "REAGENTS",
+        caption = "HAVE/NEED",
         collapsed = state.reagents and true or nil,
         count = table.getn(shop or {}), short = short })
 
@@ -8685,9 +8738,28 @@ end
 -- sits -- are re-anchored here rather than at build time. A row is reused
 -- across kinds as the list scrolls, so an anchor set once at build time is an
 -- anchor that is right for whichever kind happened to land on it first.
+-- Put a reused row's cells back to the list font -- see ui.PaintCraftRow,
+-- which calls this before it decides what the row is this time.
+function ui.CraftRowFont(row)
+    if not row then return row end
+    if row.label and row.label.SetFontObject then
+        row.label:SetFontObject(GameFontHighlightSmall)
+    end
+    if row.ct and row.ct.SetFontObject then
+        row.ct:SetFontObject(GameFontHighlightSmall)
+    end
+    return row
+end
+
 function ui.PaintCraftRow(row, e, rowW)
     row.entry = e
     row.index = (e.kind == "recipe") and e.index or nil
+    -- FIRST, PUT THE ROW BACK. A row that drew a SECTION header is left in
+    -- ARIALN caps, and the next repaint may hand that same widget a reagent
+    -- line -- a font set on a FontString stays set until something unsets it.
+    -- Restoring here costs two calls a row and removes a whole class of
+    -- "it looked right until you scrolled".
+    ui.CraftRowFont(row)
 
     local indent, tail = CRAFTL.ex_w, CRAFTL.count_w + 6
     local showEx, showStep = false, false
@@ -8695,22 +8767,23 @@ function ui.PaintCraftRow(row, e, rowW)
 
     if e.kind == "section" then
         showEx = true
-        row.ex:SetText(e.collapsed and "+" or "-")
+        -- MINUS AND PLUS on a section, TRIANGLES on a recipe. Two different
+        -- gestures: a section folds a whole block away, a recipe opens a
+        -- breakdown inside one. The concept draws them differently and it is
+        -- right to -- the same mark for both said they did the same thing.
+        row.ex:SetText(e.collapsed and "+" or "\226\136\146")
         row.ex:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         ui.FitText(row.label, e.name, ui.CraftLabelW(rowW, indent, tail))
         row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
-        if e.key == "reagents" and (e.short or 0) > 0 then
-            row.ct:SetText(e.short .. " short")
-            row.ct:SetTextColor(0.90, 0.30, 0.30)
-        else
-            row.ct:SetText(tostring(e.count or 0))
-            row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        end
+        ui.CraftLabelFont(row.label, 10)
+        row.ct:SetText(e.caption or "")
+        row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.CraftLabelFont(row.ct, 9)
 
     elseif e.kind == "recipe" then
         showEx, showStep = true, true
         tail = CRAFTL.count_w + CRAFTL.step_w + 8
-        row.ex:SetText(e.expanded and "-" or "+")
+        row.ex:SetText(e.expanded and "\226\150\190" or "\226\150\184")
         row.ex:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         ui.FitText(row.label, e.name, ui.CraftLabelW(rowW, indent, tail))
         -- SELECTION WINS OVER QUALITY. Exactly one row is the selected one and
@@ -8732,11 +8805,18 @@ function ui.PaintCraftRow(row, e, rowW)
     elseif e.kind == "sub" then
         -- What THIS recipe asks for, dimmed: a breakdown, not shopping. The
         -- line you buy from is the aggregated one in the section below.
+        --
+        -- A MIDDOT AND A MULTIPLICATION SIGN, so the line reads as a component
+        -- of the row above it rather than as another entry in the list. That
+        -- is the only thing separating it from a reagent line otherwise, and
+        -- indentation alone was not enough on a real client.
         indent = CRAFTL.ex_w + CRAFTL.sub_indent
         row.ex:SetText("")
-        ui.FitText(row.label, e.name, ui.CraftLabelW(rowW, indent, tail))
+        ui.FitText(row.label,
+            "\194\183 " .. (e.name or "") .. " \195\151" .. (e.per or 1),
+            ui.CraftLabelW(rowW, indent, tail))
         row.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        row.ct:SetText("x" .. (e.need or 0))
+        row.ct:SetText(tostring(e.need or 0))
         row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     else
@@ -8772,12 +8852,15 @@ function ui.PaintCraftRow(row, e, rowW)
 
     row.label:ClearAllPoints()
     row.label:SetPoint("LEFT", row, "LEFT", indent, 0)
+    -- THE COUNT IS ALWAYS THE LAST CELL, and on a recipe row the stepper sits
+    -- in FRONT of it: `[-] [+]  1/5`. The five is what the pair moves, so the
+    -- pair reads as a control ON that number rather than as two more buttons
+    -- after it -- which is what `1/5 [-] [+]` looked like, and is why the
+    -- concept puts them in this order.
     row.ct:ClearAllPoints()
-    if showStep then
-        row.ct:SetPoint("RIGHT", row, "RIGHT", -(CRAFTL.step_w + 4), 0)
-    else
-        row.ct:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    end
+    row.ct:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.step:ClearAllPoints()
+    row.step:SetPoint("RIGHT", row, "RIGHT", -(CRAFTL.count_w + 4), 0)
     if showEx   then row.exBtn:Show() else row.exBtn:Hide() end
     if showStep then row.step:Show()  else row.step:Hide()  end
 end
@@ -8995,11 +9078,12 @@ end
 function ui.UpdateCraftShort()
     if not ui.craftShortFS then return end
     local n = ui.craftShort or 0
+    local recipes = A.craft and table.getn(A.craft.Projects()) or 0
+    ui.craftShortFS:SetText(ui.CraftHeadline(recipes, n))
     if n > 0 then
-        ui.craftShortFS:SetText(n .. " short")
-        ui.craftShortFS:SetTextColor(0.90, 0.30, 0.30)
+        ui.craftShortFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     else
-        ui.craftShortFS:SetText("")
+        ui.craftShortFS:SetTextColor(0.30, 0.85, 0.30)
     end
 end
 

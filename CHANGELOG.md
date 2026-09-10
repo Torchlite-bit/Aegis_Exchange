@@ -18,6 +18,49 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.27]
+
+### Changed
+- **The Crafting tab's headings and rows follow the concept.**
+  - Headings and column captions are **caps in a narrow face** —
+    `SHOPPING`, `SEARCH`, `RECIPES`, `REAGENTS`, `ITEM / CT / UNIT / STACK /
+    %MKT`. 1.12 has no letter-spacing and no font-variant, so the caps and the
+    narrower face *are* small caps here; pretending otherwise with inserted
+    spaces would break every width measurement on the tab.
+  - **Section rows carry a column caption**, `MADE/WANT` and `HAVE/NEED`. `1/5`
+    and `18/40` are two fractions in one list meaning different things, and
+    nothing was saying which.
+  - **The panel heading counts both sections**: `4 RECIPES · 9 TO BUY`, with
+    the second half dropped entirely when there is nothing left to buy — a zero
+    there is the finished state and should look finished, not be reported.
+  - **Sections fold with `−`/`+`, recipes open with `▸`/`▾`.** Two different
+    gestures: a section folds a block away, a recipe opens a breakdown inside
+    one. The same mark for both said they did the same thing.
+  - **The stepper sits in front of the count**: `[-] [+]  1/5`. The five is
+    what the pair moves, so the pair reads as a control *on* that number rather
+    than as two more buttons after it.
+  - **Breakdown lines read `· Dreamfoil ×3`.** Indentation alone was not enough
+    to separate a component of the row above from another entry in the list.
+
+### Fixed
+- **A reused row kept the previous kind's font.** One widget pool serves
+  sections, recipes, breakdown lines and shopping lines; a row that drew a
+  section header is left in caps, and a font set on a FontString stays set — so
+  the list read correctly until you scrolled it. Every cell is restored at the
+  top of the paint now.
+
+### Internal
+- `ui.PaintCraftRow` gets a suite. It has four branches and one widget pool,
+  which is exactly where a "looks right until you scroll" bug hides, and the
+  font one was already in there. 29 checks against a stub row that records what
+  it was asked to draw, plus six sabotages including the stepper order and the
+  controls left behind on the wrong kind.
+- The suite reads `CRAFTL`'s column widths out of the source rather than
+  restating them: it asserts the ORDER of the cells, the geometry suite owns
+  the numbers, and two copies is how two suites come to disagree.
+
+---
+
 ## [1.52.26]
 
 ### Added
@@ -4681,6 +4724,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

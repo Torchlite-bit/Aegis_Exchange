@@ -2365,6 +2365,64 @@ end
      "    table_bot   = 60,",
      "geometry"),
 
+    # ---- concept parity (v1.52.27) ---------------------------------------
+
+    # "1 RECIPES". A heading is the one line on a panel nobody can miss, which
+    # makes it the one place a plural nobody bothered with is loudest.
+    ("craft-headline-plural-always", "ui/frame.lua",
+     '    local s = recipes .. (recipes == 1 and " RECIPE" or " RECIPES")',
+     '    local s = recipes .. " RECIPES"',
+     "crafttree"),
+
+    # ...and "0 TO BUY" on a finished list. A zero here is the finished state
+    # and it should look finished, not be reported.
+    ("craft-headline-reports-zero", "ui/frame.lua",
+     "    if short > 0 then",
+     "    if short >= 0 then",
+     "crafttree"),
+
+    # The section rows losing their column caption, which is the only thing
+    # saying that `1/5` is made-over-wanted and `18/40` is have-over-need --
+    # two fractions in one list, meaning different things.
+    ("craft-section-caption-dropped", "ui/frame.lua",
+     '        caption = "MADE/WANT",',
+     "",
+     "crafttree"),
+
+    # The stepper back AFTER the count. The five in `1/5` is what the pair
+    # moves, so `1/5 [-] [+]` reads as two more buttons rather than as a
+    # control on that number.
+    ("craft-stepper-after-the-count", "ui/frame.lua",
+     """    row.ct:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.step:ClearAllPoints()
+    row.step:SetPoint("RIGHT", row, "RIGHT", -(CRAFTL.count_w + 4), 0)""",
+     """    row.ct:SetPoint("RIGHT", row, "RIGHT", -(CRAFTL.step_w + 4), 0)
+    row.step:ClearAllPoints()
+    row.step:SetPoint("RIGHT", row, "RIGHT", 0, 0)""",
+     "crafttree"),
+
+    # A breakdown line drawn as a plain name, so it reads as another entry in
+    # the list rather than as a component of the row above it.
+    ("craft-breakdown-reads-as-a-line", "ui/frame.lua",
+     """            "\\194\\183 " .. (e.name or "") .. " \\195\\151" .. (e.per or 1),""",
+     """            (e.name or ""),""",
+     "crafttree"),
+
+    # ...and the controls left on a row that no longer wants them, which is
+    # the same one-pool trap from the other side.
+    ("craft-stepper-left-on-a-reagent", "ui/frame.lua",
+     "    if showStep then row.step:Show()  else row.step:Hide()  end",
+     "    if showStep then row.step:Show() end",
+     "crafttree"),
+
+    # A reused row left in the SECTION font. The pool hands the same widget a
+    # reagent line on the next repaint, and a font set on a FontString stays
+    # set -- so the list reads correctly until you scroll it.
+    ("craft-row-font-not-restored", "ui/frame.lua",
+     "    ui.CraftRowFont(row)\n\n    local indent, tail",
+     "    local indent, tail",
+     "crafttree"),
+
     # ---- quality colours in the shopping panel (v1.52.26) ----------------
 
     # GetItemInfo per PAINT rather than per rebuild. That is a per-item client
