@@ -2365,6 +2365,48 @@ end
      "    table_bot   = 60,",
      "geometry"),
 
+    # ---- quality colours in the shopping panel (v1.52.26) ----------------
+
+    # GetItemInfo per PAINT rather than per rebuild. That is a per-item client
+    # query inside a repaint driven by a BAG_UPDATE flag, which storms --
+    # exactly the shape HARD RULE 16 exists to keep out.
+    ("craft-quality-not-memoised", "ui/frame.lua",
+     """    local q = ui.craftQuality[itemId]
+    if q then return q end""",
+     "    local q = nil",
+     "crafttree"),
+
+    # ...and the opposite mistake: caching the MISS, so an item the client had
+    # not loaded yet stays uncoloured until logout.
+    #
+    # Caching `quality` itself would be a no-op -- assigning nil to a table key
+    # REMOVES it, so the miss would not be cached and the sabotage would prove
+    # nothing. It has to cache a real value to be the bug it claims to be.
+    ("craft-quality-caches-the-miss", "ui/frame.lua",
+     """    if ok and quality then
+        ui.craftQuality[itemId] = quality
+        return quality
+    end
+    return nil""",
+     """    ui.craftQuality[itemId] = quality or 1
+    return ui.craftQuality[itemId]""",
+     "crafttree"),
+
+    # An unknown quality reading as black rather than as body text. The row
+    # still has to draw while the client catches up.
+    ("craft-quality-unknown-is-black", "ui/frame.lua",
+     "        r, g, b = C.text[1], C.text[2], C.text[3]",
+     "        r, g, b = 0, 0, 0",
+     "crafttree"),
+
+    # Dimming replaced by a flat grey, which throws the quality away to say
+    # "set aside" -- two facts in one cell, and the one dropped is the one you
+    # can see from across the panel.
+    ("craft-dim-discards-the-quality", "ui/frame.lua",
+     "    if dim then return r * dim, g * dim, b * dim end",
+     "    if dim then return dim, dim, dim end",
+     "crafttree"),
+
     # ---- the Crafting tab's clipping (v1.52.25) --------------------------
 
     # The shopping rows plated by pfUI again: SkinWidget gives every Button its

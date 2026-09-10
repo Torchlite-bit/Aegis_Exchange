@@ -18,6 +18,39 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.26]
+
+### Added
+- **Item names in the shopping panel read in their quality colour** — a rare is
+  blue, an epic purple — from FrameXML's own `ITEM_QUALITY_COLORS`, so they
+  match the rest of the game exactly. The results table has done this since
+  v1.24.0; the panel beside it had not, which was most of what made the two
+  halves of the tab look like different addons.
+  - **The name carries quality, the count carries state.** Both were carrying
+    state, so a rare reagent and a common one looked identical and the only
+    thing either name told you was something the count next to it already said.
+  - A reagent you are going to **craft** is *dimmed* rather than greyed. Set
+    aside is one fact and quality is another; swapping the name for a flat grey
+    threw away the one you can see from across the panel.
+  - Selection still wins over quality on a recipe row — exactly one row is
+    selected and its economics are on the footer bar, so that has to be findable
+    at a glance.
+
+### Internal
+- **Quality is asked for once per list rebuild, never per repaint.**
+  `GetItemInfo` is a per-item client query and this tab repaints from a
+  `BAG_UPDATE` flag, which storms — HARD RULE 16. `ui.StampCraftQuality` runs
+  in `ui.FlattenCraft` and `ui.CraftQualityOf` memoises, so once an id resolves
+  it is a table read for the rest of the session.
+  - An id that does **not** resolve is deliberately not cached: "the client has
+    not loaded that item yet" is temporary, and remembering it would leave the
+    name uncoloured until logout.
+- Four sabotages, including both directions of that memo. The one that caches
+  the miss had to be written twice — assigning `nil` to a table key *removes*
+  it, so the first version was a no-op that proved nothing.
+
+---
+
 ## [1.52.25]
 
 ### Fixed
@@ -4648,6 +4681,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

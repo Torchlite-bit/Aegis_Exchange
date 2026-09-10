@@ -7772,6 +7772,11 @@ local CSIDE_ROW_H  = CRAFT_ROW_H
 -- their well_top and their rows_top less the bleed.
 local CRAFT_HDR_BAND = 24
 
+-- How far a set-aside line is dimmed: a reagent you are going to CRAFT rather
+-- than buy. The SAME factor the disabled buttons use, because it is the same
+-- statement -- "this is here, and it is not for you right now".
+local CRAFT_DIM = 0.55
+
 -- A box for one panel: fixed width on the left, fixed width on the right, or
 -- two-corner anchored in the middle. ui.MakeWell wraps a frame it is handed;
 -- these are positioned from the tab panel instead, so they take their anchors
@@ -8337,6 +8342,81 @@ function ui.CraftHaveOf(itemId, live)
     return ui.OwnedFromRows(A.db.InventoryRows(itemId, live))
 end
 
+
+-- The colour an item's NAME reads in, by quality.
+--
+-- ITEM_QUALITY_COLORS is FrameXML's own table, so greens and blues match the
+-- rest of the game exactly rather than being re-guessed here. The results
+-- table has coloured its names this way since v1.24.0; the shopping panel did
+-- not, which is the whole difference between the two halves of the tab.
+--
+-- `dim` is a factor, not a different colour. A reagent you are going to CRAFT
+-- rather than buy has to read as set-aside, and swapping its name for a flat
+-- grey threw the quality away to say so -- two facts, one cell, and the one
+-- that got dropped was the one you can see from across the panel. Dimming the
+-- quality colour keeps both.
+--
+-- Falls back to `C.text` for an unknown quality, which is what a client that
+-- has not cached the item yet gives us. That is a real state, not an error:
+-- the next rebuild asks again -- see ui.CraftQualityOf.
+function ui.QualityColor(q, dim)
+    local c = q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q]
+    local r, g, b
+    if c then
+        r, g, b = c.r, c.g, c.b
+    else
+        r, g, b = C.text[1], C.text[2], C.text[3]
+    end
+    if dim then return r * dim, g * dim, b * dim end
+    return r, g, b
+end
+
+-- One item's quality, memoised.
+--
+-- HARD RULE 16. GetItemInfo is a per-item CLIENT QUERY, so it may not run per
+-- row per paint -- and this tab repaints from a BAG_UPDATE flag, which storms.
+-- It runs once per LIST REBUILD instead (ui.FlattenCraft), and the answer is
+-- kept: once an id resolves it is a table read for the rest of the session.
+--
+-- An id that does NOT resolve is not cached, because "the client has not
+-- loaded that item yet" is a temporary answer and caching it would make the
+-- name stay uncoloured until logout. It is asked again on the next rebuild,
+-- which is cheap precisely because everything else is already memoised.
+ui.craftQuality = {}
+
+function ui.CraftQualityOf(itemId)
+    if not itemId then return nil end
+    local q = ui.craftQuality[itemId]
+    if q then return q end
+    if not GetItemInfo then return nil end
+    local ok, _, _, quality = pcall(GetItemInfo, itemId)
+    if ok and quality then
+        ui.craftQuality[itemId] = quality
+        return quality
+    end
+    return nil
+end
+
+-- Stamp `quality` on everything the shopping tree is about to draw.
+--
+-- ONE PASS, at rebuild time, over the projects and the shopping rows -- which
+-- is bounded by the size of the list rather than by how often the list is
+-- repainted. Sub-rows read the reagent's own row, so they need nothing here.
+function ui.StampCraftQuality(projects, rows)
+    local i = 1
+    while i <= table.getn(projects or {}) do
+        local p = projects[i]
+        p.quality = ui.CraftQualityOf(p.itemId)
+        i = i + 1
+    end
+    local k = 1
+    while k <= table.getn(rows or {}) do
+        local r = rows[k]
+        r.quality = ui.CraftQualityOf(r.itemId)
+        k = k + 1
+    end
+end
+
 -- Rows for the made-this-session panel, plus the two totals under it.
 --
 -- `madeOf` and `wantOf` are INJECTED for the same reason craft.NeedFor takes
@@ -8509,6 +8589,10 @@ function ui.FlattenCraft()
     })
     ui.craftFlat = rows
     ui.craftShort = short
+    -- ONE pass for the quality colours, here rather than in the paint: this
+    -- runs once per REBUILD, the paint runs per visible row per repaint, and
+    -- the repaint is driven by a BAG_UPDATE flag that storms. HARD RULE 16.
+    ui.StampCraftQuality(projects, rows)
 end
 
 -- What the whole list costs to fill: every shortfall at its cheaper source.
@@ -8629,10 +8713,14 @@ function ui.PaintCraftRow(row, e, rowW)
         row.ex:SetText(e.expanded and "-" or "+")
         row.ex:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         ui.FitText(row.label, e.name, ui.CraftLabelW(rowW, indent, tail))
+        -- SELECTION WINS OVER QUALITY. Exactly one row is the selected one and
+        -- its economics are on the footer bar; that has to be findable at a
+        -- glance, and a purple name reading as "selected" on a tab where
+        -- purple already means epic would be two meanings on one cell.
         if ui.craftSel == e.index then
             row.label:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         else
-            row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
+            row.label:SetTextColor(ui.QualityColor(e.quality))
         end
         row.ct:SetText((e.made or 0) .. "/" .. (e.want or 0))
         if e.done then
@@ -8661,18 +8749,24 @@ function ui.PaintCraftRow(row, e, rowW)
             row.src:SetText("v")
             row.src:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
         end
+        -- THE NAME CARRIES QUALITY, THE COUNT CARRIES STATE. They were both
+        -- carrying state, so a rare reagent and a common one looked identical
+        -- and the only thing either name told you was something the count next
+        -- to it already said.
         if e.craftable then
             -- Something you are going to MAKE, not buy. Its own reagents are
             -- already further down this list, so it is dimmed rather than
-            -- flagged red -- it is not shopping.
-            row.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            -- flagged red -- it is not shopping. DIMMED, not greyed: the
+            -- quality is still worth seeing, it is just set aside.
+            row.label:SetTextColor(ui.QualityColor(e.quality, CRAFT_DIM))
             row.ct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-        elseif (e.short or 0) > 0 then
-            row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-            row.ct:SetTextColor(0.90, 0.30, 0.30)
         else
-            row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
-            row.ct:SetTextColor(0.30, 0.85, 0.30)
+            row.label:SetTextColor(ui.QualityColor(e.quality))
+            if (e.short or 0) > 0 then
+                row.ct:SetTextColor(0.90, 0.30, 0.30)
+            else
+                row.ct:SetTextColor(0.30, 0.85, 0.30)
+            end
         end
     end
 

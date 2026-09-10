@@ -66,6 +66,9 @@ for _, sig in ipairs({
     "function ui.ShoppingTotal(",
     "function ui.ShoppingSpend(",
     "function ui.UnitSpent(",
+    "function ui.QualityColor(",
+    "function ui.CraftQualityOf(",
+    "function ui.StampCraftQuality(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -395,5 +398,110 @@ H.eq("a negative count has no average either", ui.UnitSpent(-3, 500), nil)
 H.eq("one unit averages what it cost", ui.UnitSpent(1, 4200), 4200)
 H.eq("no money over some units is zero, which IS a price",
      ui.UnitSpent(4, 0), 0)
+
+-- ---------------------------------------------------------------------------
+H.section("names read in their item's quality colour")
+-- ---------------------------------------------------------------------------
+
+-- FrameXML's own table, so the greens and blues match the rest of the game.
+ITEM_QUALITY_COLORS = {
+    [0] = { r = 0.62, g = 0.62, b = 0.62 },   -- poor
+    [1] = { r = 1.00, g = 1.00, b = 1.00 },   -- common
+    [2] = { r = 0.12, g = 1.00, b = 0.00 },   -- uncommon
+    [3] = { r = 0.00, g = 0.44, b = 0.87 },   -- rare
+    [4] = { r = 0.64, g = 0.21, b = 0.93 },   -- epic
+}
+C = { text = { 0.87, 0.82, 0.69 } }
+
+local function rgb(...)
+    local r, g, b = ...
+    return string.format("%.2f/%.2f/%.2f", r, g, b)
+end
+
+H.eq("an epic reads purple", rgb(ui.QualityColor(4)), "0.64/0.21/0.93")
+H.eq("a rare reads blue", rgb(ui.QualityColor(3)), "0.00/0.44/0.87")
+H.eq("a common reads white", rgb(ui.QualityColor(1)), "1.00/1.00/1.00")
+
+-- AN UNKNOWN QUALITY IS BODY TEXT, not black and not an error. It is what a
+-- client that has not cached the item yet gives us, and the row still has to
+-- draw -- the next rebuild asks again.
+H.eq("an unknown quality falls back to body text",
+     rgb(ui.QualityColor(nil)), rgb(C.text[1], C.text[2], C.text[3]))
+H.eq("...and so does a quality the table does not have",
+     rgb(ui.QualityColor(99)), rgb(C.text[1], C.text[2], C.text[3]))
+
+-- DIMMED IS A FACTOR, NOT A DIFFERENT COLOUR. A reagent you are going to craft
+-- has to read as set-aside, and swapping its name for a flat grey threw the
+-- quality away to say so: two facts in one cell, and the one dropped was the
+-- one you can see from across the panel.
+H.eq("dimming scales the quality colour", rgb(ui.QualityColor(4, 0.5)),
+     "0.32/0.10/0.47")
+H.check("...and a dimmed epic is still recognisably purple",
+        ({ ui.QualityColor(4, 0.55) })[3] > ({ ui.QualityColor(4, 0.55) })[2],
+        "dimming flattened the hue")
+H.eq("no factor means no dimming", rgb(ui.QualityColor(2)),
+     rgb(ui.QualityColor(2, nil)))
+
+-- ---------------------------------------------------------------------------
+H.section("quality is asked for ONCE, not once per repaint")
+-- ---------------------------------------------------------------------------
+
+-- HARD RULE 16. GetItemInfo is a per-item CLIENT QUERY, and this tab repaints
+-- from a BAG_UPDATE flag, which storms. So it runs once per LIST REBUILD and
+-- the answer is kept -- and that memo is the difference between bounded and
+-- unbounded, which is a thing a suite can actually check.
+local asked
+GetItemInfo = function(id)
+    asked = asked + 1
+    if id == 13468 then return "Black Lotus", nil, 4 end
+    if id == 13463 then return "Dreamfoil", nil, 1 end
+    return nil                              -- not in the client's cache yet
+end
+
+ui.craftQuality = {}
+asked = 0
+H.eq("it resolves", ui.CraftQualityOf(13468), 4)
+H.eq("...having asked the client once", asked, 1)
+H.eq("the second time is a table read", ui.CraftQualityOf(13468), 4)
+H.eq("...and asks nothing", asked, 1)
+
+-- AN UNRESOLVED ID IS NOT CACHED. "The client has not loaded that item yet" is
+-- a temporary answer; remembering it would leave the name uncoloured until
+-- logout. It costs a query per rebuild until it resolves, which is cheap
+-- exactly because everything that HAS resolved is already memoised.
+asked = 0
+H.eq("an item the client has not cached yet is nil",
+     ui.CraftQualityOf(99999), nil)
+H.eq("...and it is asked again next time", ui.CraftQualityOf(99999), nil)
+H.eq("...which is two queries, not one", asked, 2)
+
+H.eq("no item id asks nothing", ui.CraftQualityOf(nil), nil)
+
+-- ---- the one pass over the list ----------------------------------------
+
+ui.craftQuality = {}
+asked = 0
+local PROJ = { { name = "Flask", itemId = 13468 }, { name = "Nameless" } }
+local ROWS = { { name = "Dreamfoil", itemId = 13463 },
+               { name = "Black Lotus", itemId = 13468 } }
+ui.StampCraftQuality(PROJ, ROWS)
+H.eq("a project is stamped", PROJ[1].quality, 4)
+H.eq("...and a reagent row too", ROWS[1].quality, 1)
+H.eq("a row for the same item agrees with the project", ROWS[2].quality, 4)
+H.eq("a project with no item id is left nil", PROJ[2].quality, nil)
+-- TWO, not three. Four calls go in -- 13468, a project with no id, 13463 and
+-- 13468 again -- and only two reach the client: the nil id returns before it
+-- asks anything, and the repeat is the memo.
+H.eq("four items, two queries", asked, 2)
+
+-- ...and stamping the SAME list again costs nothing, which is what makes it
+-- safe on a tab whose repaint is driven by a stormable event.
+asked = 0
+ui.StampCraftQuality(PROJ, ROWS)
+H.eq("a second pass asks the client nothing", asked, 0)
+
+H.survives("nil lists are not a crash", function()
+    ui.StampCraftQuality(nil, nil)
+end)
 
 os.exit(H.report("crafttree"))
