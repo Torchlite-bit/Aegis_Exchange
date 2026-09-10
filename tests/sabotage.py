@@ -2530,10 +2530,12 @@ end
      "rowchrome"),
 
     # THE BOUND ON ui.ReapplyInputText HAS NO SABOTAGE, deliberately. Removing
-    # it is only wrong when the dedupe ALSO fails, and forging that turns the
-    # unbounded walk into a HANG rather than a failure -- it hung this runner
-    # when it was first written, which is what a player would have got. A
-    # sabotage that hangs the harness is worse than none, so the bound is
+    # it is only wrong when the dedupe ALSO fails, and forging that would turn
+    # the unbounded walk into a HANG rather than a failure. (An earlier version
+    # of this note claimed it HAD hung the runner. It had not -- that run went
+    # past a timeout and then finished, sabotage caught. The hazard is real;
+    # the anecdote was not.) A sabotage that hangs the harness is worse than
+    # none, so the bound is
     # covered by a test that forges a single dedupe failure and asserts the
     # list does not run away, and by the comment on the loop.
 

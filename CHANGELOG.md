@@ -39,12 +39,18 @@ printed in the window title bar — quote it in bug reports.
   `table.getn` each time round is a loop whose end moves away as fast as the
   cursor reaches it. The dedupe flag stops that today; the bound is what makes
   it terminate if the flag ever fails, and a hung client is not a bug you get to
-  debug. Found by a sabotage that hung the test runner outright.
-  - That sabotage is **not** in the suite, and there is a note saying why:
-    proving the bound needs a permanently failing dedupe, which turns the
-    unbounded walk into a hang rather than a failure. A sabotage that hangs the
-    harness is worse than none. A test forges a single failure instead and
-    asserts the list does not run away.
+  debug.
+  - **Correction to how this was first written up.** The entry above originally
+    said the hazard was "found by a sabotage that hung the test runner
+    outright". It was not: that run exceeded a 120-second timeout on my side and
+    finished normally afterwards, with the sabotage caught. The unbounded walk
+    is a real termination hazard and the bound is worth keeping, but no hang was
+    ever observed and the claim should not have been made.
+  - The bound has **no sabotage**, and there is a note saying why: proving it
+    needs a permanently failing dedupe, which would turn the unbounded walk into
+    a genuine hang rather than a failure, and a sabotage that hangs the harness
+    is worse than none. A test forges a single failure instead and asserts the
+    list does not run away.
 
 ---
 

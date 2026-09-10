@@ -709,7 +709,8 @@ function ui.ReapplyInputText()
     -- each time round is a loop whose end moves away as fast as the cursor
     -- reaches it. The dedupe flag stops that today, so the bound looks
     -- redundant; it is what makes the walk terminate if the flag ever fails,
-    -- and a hung client is not a bug you get to debug.
+    -- and a hung client is not a bug you get to debug. (Kept as a guard against
+    -- a hazard that is real on inspection -- not against one ever observed.)
     --
     -- Same reasoning as craft.ShoppingList measuring `order` before each pass.
     local n = table.getn(ui.inputBoxes)
