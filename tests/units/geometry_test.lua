@@ -1246,6 +1246,9 @@ do
     fn = assert(loadstring(extract("function ui.CraftBtnW("),
                            "CraftBtnW"))
     fn()
+    fn = assert(loadstring(extract("function ui.CraftFootMid("),
+                           "CraftFootMid"))
+    fn()
     fn = assert(loadstring(extract("function ui.CraftLabelW("),
                            "CraftLabelW"))
     fn()
@@ -1282,6 +1285,22 @@ for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
                 (each + 1) * n + CRAFTL.btn_gap * (n - 1) > room,
                 "one more pixel each would still have fitted")
     end
+end
+
+-- THE FOOTER'S MIDDLE THIRD, as a midpoint rather than an edge -- the one
+-- anchor on this tab that is, and therefore the one expression that would get
+-- typed out twice and drift by a gutter. It has to land inside its own third:
+-- past where the first third ends, and short of where the last one starts.
+CRAFTL.edge = field("CRAFTL", "edge")
+for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
+    local third = ui.CraftBtnW(w, 3)
+    local mid   = ui.CraftFootMid(w)
+    local first = CRAFTL.edge + CRAFTL.row_l + third
+    local last  = CRAFTL.edge + CRAFTL.row_l + (third + CRAFTL.btn_gap) * 2
+    H.check("at " .. w .. " the footer's centre is past the first third",
+            mid > first, "centre " .. mid .. ", first third ends " .. first)
+    H.check("...and short of the last", mid < last,
+            "centre " .. mid .. ", last third starts " .. last)
 end
 
 -- ...and it never returns a width a Button would ignore. A zero or negative
@@ -1443,6 +1462,55 @@ do
     H.check("no shopping row is given a width",
             not string.find(src, "row:SetWidth(ui.CraftSideRowW", 1, true),
             "a row sized by a number can hold a stale one")
+
+    -- ...AND NEITHER DOES ANY OF THE CHROME AROUND THEM. A width makes a
+    -- FontString WRAP, and the second line draws over whatever is under it --
+    -- the box border, or the first row inside it. The rows never had one; the
+    -- chrome did, and "Net |cff808080need prices -- Price recipe|r" at 107px
+    -- wrapped into two lines drawn on top of each other. Alignment on this tab
+    -- comes from the ANCHOR instead.
+    --
+    -- Listed by name rather than matched by pattern, because the list IS the
+    -- claim: these are the widgets the rule governs, and a new one added
+    -- without being added here is a new one nobody checked.
+    for _, w in ipairs({ "craftShortFS", "craftBuyLbl", "craftBuyAllFS",
+                         "craftCostFS", "craftValueFS", "craftNetFS",
+                         "craftStatus", "craftNeedFS", "craftPageText" }) do
+        H.check("ui." .. w .. " is not given a width",
+                not string.find(src, "ui." .. w .. ":SetWidth(", 1, true),
+                "a FontString with a width wraps, and the second line draws "
+                    .. "over the row below it")
+    end
+
+    -- THE SHOPPING ROWS OPT OUT OF pfUI. ui/skin.lua's SkinWidget gives every
+    -- Button its generic plate, and on a list row that is a border drawn
+    -- THROUGH the row's own first and last pixels -- a name and a count
+    -- clipped at both ends under pfUI and correct without it. Every other
+    -- clickable list row in this window already sets it; these never did.
+    --
+    -- The results table was never affected because those rows are FRAMES, so
+    -- SkinWidget's Button branch never reached them. That is exactly why only
+    -- one of the two panels showed it, and why "it looks fine here" was never
+    -- evidence.
+    --
+    -- SCOPED TO THE SHOPPING ROW BUILDER, not searched across the file. Five
+    -- other row pools in here already set aegisNoSkin, so a whole-file search
+    -- passes whatever the Crafting tab does -- which it did, and the sabotage
+    -- that plates these rows walked straight through it.
+    local grow
+    do
+        local from = string.find(src, "ui.GrowCraftSideRows = function(n)", 1, true)
+        assert(from, "no ui.GrowCraftSideRows in the source")
+        local to = string.find(src, "\n    end\n", from, true)
+        assert(to, "ui.GrowCraftSideRows never ends")
+        grow = string.sub(src, from, to)
+    end
+    H.check("the shopping rows are not plated by pfUI",
+            string.find(grow, "row.aegisNoSkin = true", 1, true) ~= nil,
+            "a list row built as a Button without aegisNoSkin gets a plate")
+    H.check("...and neither is the expander over them",
+            string.find(grow, "exBtn.aegisNoSkin = true", 1, true) ~= nil,
+            "an invisible click target with a plate is a box around a triangle")
     -- They go through ui.PlaceRow WITH BOTH PADS, which anchors left AND
     -- right to the scroll frame. Passing only padL would leave the rows
     -- unstretched and the clipping back.

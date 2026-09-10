@@ -86,11 +86,17 @@ REMOVED_ON_PURPOSE = {
     # line searches that reagent. There is no tree left to click.
     "ui.OnCraftTreeClick": "v1.52.19 -- renamed ui.OnShoppingClick when the "
                            "left panel became the shopping list",
-    # v1.52.20. "Price recipe" and "Shop all" are the same walk over different
+    # v1.52.20. "Price recipe" and "Price all" are the same walk over different
     # lists, so there is ONE runner (ui.RunCraftQueue) and both call it with a
     # verb -- rather than a second copy that drifts.
     "ui.CraftRunPriceQueue": "v1.52.20 -- folded into ui.RunCraftQueue, the "
                              "one sequential-search runner",
+
+    # It never bought anything -- it SEARCHES, so the prices fill in and the
+    # list's estimate resolves. "Shop all" read as "spend my gold", which is an
+    # alarming thing to press to find out what something costs.
+    "ui.ShopAll": "v1.52.25 -- renamed ui.CraftPriceAll with the button, "
+        "because it prices the list rather than buying it",
 
     # THE THIRD PANEL. The Crafting tab held tracked recipes and a made-this-
     # session count in a panel of its own; both are on the recipe ROWS now

@@ -2365,6 +2365,59 @@ end
      "    table_bot   = 60,",
      "geometry"),
 
+    # ---- the Crafting tab's clipping (v1.52.25) --------------------------
+
+    # The shopping rows plated by pfUI again: SkinWidget gives every Button its
+    # generic plate, and on a list row that border is drawn THROUGH the row's
+    # own first and last pixels -- a name and a count clipped at both ends
+    # under pfUI and correct without it.
+    #
+    # The find string carries the line AFTER it, because `row.aegisNoSkin =
+    # true` on its own is not unique -- the Buy tab's category rows set it at
+    # the same indentation and appear FIRST in the file, so a bare match
+    # sabotaged the wrong list and the Crafting check passed honestly.
+    ("craft-rows-plated-by-pfui", "ui/frame.lua",
+     """            row.aegisNoSkin = true
+            -- ANCHORED ON BOTH SIDES, never SetWidth.""",
+     """            row.aegisPlateMe = true
+            -- ANCHORED ON BOTH SIDES, never SetWidth.""",
+     "geometry"),
+
+    # ...and the expander over them, which is an invisible click target: a
+    # plate on it is a box drawn around a triangle.
+    ("craft-expander-plated-by-pfui", "ui/frame.lua",
+     "            exBtn.aegisNoSkin = true",
+     "            exBtn.aegisPlateMe = true",
+     "geometry"),
+
+    # A width back on a chrome FontString. It WRAPS, and the second line draws
+    # over the box border and the first row inside it -- which is what put
+    # "Net need prices" across "Price recipe" on the footer.
+    ("craft-footer-fontstring-has-a-width", "ui/frame.lua",
+     """    ui.craftNetFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)""",
+     """    ui.craftNetFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
+    ui.craftNetFS:SetWidth(80)""",
+     "geometry"),
+
+    # The footer's middle third measured from the wrong end, so the centre
+    # figure sits on top of one of its neighbours.
+    ("craft-foot-mid-forgets-a-third", "ui/frame.lua",
+     """    return CRAFTL.edge + CRAFTL.row_l + third + CRAFTL.btn_gap
+        + math.floor(third / 2)""",
+     """    return CRAFTL.edge + CRAFTL.row_l + math.floor(third / 2)""",
+     "geometry"),
+
+    # ui.FitString cutting a coloured string. The cut is by byte index and
+    # every money figure is wrapped in |cffRRGGBB...|r, so landing inside one
+    # leaves the escape half-written -- the client draws the raw bytes and then
+    # colours the whole rest of the line with what it read.
+    ("fitstring-cuts-a-colour-escape", "ui/frame.lua",
+     '    if string.find(s, "|", 1, true) then return s end',
+     "    local _ = s",
+     "craft.plan"),
+
     # ---- what you type (v1.52.24) ----------------------------------------
 
     # The colour back to inherited, which is the bug: InputBoxTemplate's chat
@@ -2547,8 +2600,8 @@ end
 
     # The left panel's buttons run down through the top of its own box.
     ("craft-buttons-through-the-box", "ui/frame.lua",
-     "    btn_y   = 38, btn_h   = 18,    -- Price | Shop all | Remove | Reset",
-     "    btn_y   = 56, btn_h   = 18,    -- Price | Shop all | Remove | Reset",
+     "    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Reset",
+     "    btn_y   = 56, btn_h   = 18,    -- Price | Price all | Remove | Reset",
      "geometry"),
 
     # A name measured against the whole row, ignoring what the row ENDS with --
@@ -2724,7 +2777,7 @@ end
      "    left_frac  = 0.19,   -- the shopping list",
      "geometry"),
 
-    # Shop all searching things you already have enough of -- every one a
+    # Price all searching things you already have enough of -- every one a
     # wasted trip through the query gate, which is the slow part.
     ("shopqueue-searches-covered-lines", "ui/frame.lua",
      "        if r.name and r.short and r.short > 0 and not r.craftable then",

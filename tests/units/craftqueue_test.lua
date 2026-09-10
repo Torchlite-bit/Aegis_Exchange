@@ -1,6 +1,6 @@
 -- Aegis: Exchange -- tests/units/craftqueue_test.lua
 --
--- The sequential-search runner behind "Price" and "Shop all".
+-- The sequential-search runner behind "Price" and "Price all".
 --
 -- ONE runner for both, because two copies of "search these names in turn"
 -- drift: one grows a cancel and the other does not, one clears its queue when
@@ -185,7 +185,7 @@ end
 local function ArmButtons()
     Reset()
     ui.RefreshCraftButtons = REAL_REFRESH
-    ui.craftShopBtn  = FakeBtn()
+    ui.craftPriceAllBtn = FakeBtn()
     ui.craftPriceBtn = FakeBtn()
     ui.craftDelBtn   = FakeBtn()
     ui.craftResetBtn = FakeBtn()
@@ -193,7 +193,8 @@ end
 
 ArmButtons()
 ui.RefreshCraftButtons()
-H.eq("idle, the button offers to shop", ui.craftShopBtn.text, "Shop all")
+H.eq("idle, the button offers to price the list",
+     ui.craftPriceAllBtn.text, "Price all")
 H.check("...and the other three are live",
         ui.craftPriceBtn.on and ui.craftDelBtn.on and ui.craftResetBtn.on,
         "something was disabled with no walk running")
@@ -201,7 +202,7 @@ H.check("...and the other three are live",
 ui.StartCraftQueue({ "Dreamfoil", "Gromsblood" }, "Shopping")
 -- ONE BUTTON THAT BOTH STARTS AND STOPS, painted FROM the queue so the two
 -- cannot get out of step.
-H.eq("a running walk turns it into Stop", ui.craftShopBtn.text, "Stop")
+H.eq("a running walk turns it into Stop", ui.craftPriceAllBtn.text, "Stop")
 
 -- ALL THREE OTHERS GO. `Price` would start a second walk over the first;
 -- `Remove` would delete the recipe whose reagents the walk is still searching
@@ -217,7 +218,8 @@ H.check("Reset is gated while it runs", not ui.craftResetBtn.on,
         "the made counts the walk is filling could be cleared")
 
 ui.CancelCraftQueue()
-H.eq("stopping gives the button back", ui.craftShopBtn.text, "Shop all")
+H.eq("stopping gives the button back",
+     ui.craftPriceAllBtn.text, "Price all")
 H.check("...and all three come back with it",
         ui.craftPriceBtn.on and ui.craftDelBtn.on and ui.craftResetBtn.on,
         "a button stayed disabled after the walk stopped")
@@ -226,7 +228,7 @@ H.check("...and all three come back with it",
 -- it while it is still creating them, and ui.CancelCraftQueue can be reached
 -- without a Crafting tab having been built at all.
 ArmButtons()
-ui.craftShopBtn, ui.craftPriceBtn = nil, nil
+ui.craftPriceAllBtn, ui.craftPriceBtn = nil, nil
 ui.craftDelBtn, ui.craftResetBtn = nil, nil
 H.survives("no buttons yet is not a crash", function()
     ui.RefreshCraftButtons()

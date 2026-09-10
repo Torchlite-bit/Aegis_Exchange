@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.52.24)
+# Aegis: Exchange (v1.52.25)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -302,8 +302,9 @@ means a **vendor sells it cheaper** than the auction house does.
 
 - **Click a reagent** to search for it — a real auction query, not a filter over
   what's already on screen.
-- **Shop all** walks the whole list for you, searching each thing you're still
-  short of. Press it again to stop.
+- **Price all** walks the whole list for you, searching each thing you're still
+  short of, so the prices and the run's total fill in. It buys nothing. Press it
+  again to stop.
 - **Expand a recipe** to see what *it* needs, at the quantity you asked for.
   Wanting five of something made in twos is three crafts, so it says six
   Dreamfoil — not ten.
@@ -533,7 +534,7 @@ and the reasons behind them, most of which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.52.24`) — quote it.
+1. Check the **version** in the window's title bar (`v1.52.25`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.

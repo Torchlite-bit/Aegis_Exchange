@@ -335,6 +335,32 @@ H.eq("a zero width means no cutting",
      ui.FitString("Green Woolen Bag", 0, six), "Green Woolen Bag")
 H.eq("nil text is empty text", ui.FitString(nil, 60, six), "")
 
+-- NEVER CUT A COLOURED STRING. The cut is by BYTE INDEX, and every money
+-- figure this addon prints is wrapped in |cffRRGGBB...|r. Landing inside one
+-- of those leaves the escape half-written -- the client then draws the raw
+-- bytes AND colours the rest of the line with whatever it read, so one clipped
+-- price corrupts everything after it on that FontString.
+--
+-- Overflowing by a few pixels is the lesser failure, and it puts the job back
+-- where it belongs: the caller keeps such strings short. That is why the
+-- Crafting footer says "Net ?" and not "Net need prices -- Price recipe".
+local COLOURED = "Cost |cffffd700 12g|r |cffc7c7cf 40s|r"
+H.eq("a coloured string is returned whole rather than corrupted",
+     ui.FitString(COLOURED, 20, six), COLOURED)
+H.check("...even though it plainly does not fit",
+        six(COLOURED) > 20, "the test string is too short to prove anything")
+
+-- The guard is on the ESCAPE character, not on length: a short coloured string
+-- that fits was never going to be cut anyway, and must come back untouched by
+-- the same path.
+H.eq("a coloured string that fits is untouched",
+     ui.FitString("|cffffd700 1g|r", 600, six), "|cffffd700 1g|r")
+
+-- ...and a plain string is still cut. The guard must not have turned the
+-- whole function off.
+H.eq("a plain string is still cut", ui.FitString("Green Woolen Bag", 60, six),
+     "Green W...")
+
 -- ---------------------------------------------------------------------------
 H.section("the shopping list: one line per reagent, not one per recipe")
 -- ---------------------------------------------------------------------------
@@ -522,7 +548,7 @@ H.eq("an empty list costs nothing", ui.ShoppingTotal({}), 0)
 H.eq("...and a nil one too", ui.ShoppingTotal(nil), 0)
 
 -- ---------------------------------------------------------------------------
-H.section("what Shop all actually searches for")
+H.section("what Price all actually searches for")
 -- ---------------------------------------------------------------------------
 
 -- Two exclusions, and every search costs a trip through the query gate, so

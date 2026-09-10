@@ -18,6 +18,50 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.25]
+
+### Fixed
+- **The Crafting tab's shopping rows were being plated by pfUI**, and that plate
+  was drawn straight through the row's own first and last pixels — every name
+  and every count clipped at both ends, and correct without the skin.
+  `ui/skin.lua` has had an opt-out for exactly this since v1.23.0 and every
+  other clickable list row in the window sets it; these never did, from the day
+  they were built. The results table beside them was never affected because
+  those rows are Frames, so the skinner's Button branch never reached them —
+  which is why only one of the two panels showed it.
+- **The footer economics wrapped onto each other.** `Cost` / `Sells` / `Net`
+  were FontStrings with a width, and a width makes a FontString *wrap* — so
+  "Net need prices — Price recipe" became two lines drawn on top of one
+  another. Nothing on this tab's chrome carries a width now; alignment comes
+  from the anchor, which cannot wrap. The `Net` cell reads `Net ?` to match
+  `Cost ?` and `Sells ?` beside it, and the instruction moved to the middle
+  panel's status line, which is a whole panel wide.
+- **`ui.FitString` will no longer cut a coloured string.** The cut is by byte
+  index and every money figure is wrapped in `|cffRRGGBB…|r`; landing inside one
+  leaves the escape half-written, so the client draws the raw bytes *and*
+  colours the rest of the line with whatever it read. One clipped price would
+  corrupt everything after it.
+
+### Changed
+- **"Shop all" is now "Price all".** It buys nothing — it searches, so the unit
+  prices, the `%Mkt` column and the list's own estimate fill in (the `+` on that
+  estimate means "some lines still have no price"). The old name read as "spend
+  my gold", which is an alarming thing to press to find out what something
+  costs. It is the same operation as `Price` at a different scope, and the two
+  now say so.
+
+### Internal
+- The geometry suite names the nine Crafting chrome FontStrings and asserts none
+  of them is given a width — the list *is* the claim, so a new one added without
+  being added there is a new one nobody checked. The pfUI opt-out is asserted
+  against `ui.GrowCraftSideRows`'s own body: five other row pools set the same
+  flag, so a whole-file search passes whatever the Crafting tab does.
+- Six sabotages. One of them found a bug in itself first: `row.aegisNoSkin` is
+  not unique at that indentation, and the mutation was landing on the Buy tab's
+  category rows instead.
+
+---
+
 ## [1.52.24]
 
 ### Fixed
@@ -4604,6 +4648,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

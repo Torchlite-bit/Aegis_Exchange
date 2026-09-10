@@ -552,6 +552,16 @@ function ui.FitString(s, maxW, measure)
     s = s or ""
     if not measure or not maxW or maxW <= 0 then return s end
     if measure(s) <= maxW then return s end
+    -- NEVER CUT A COLOURED STRING. The cut is by byte index, and every money
+    -- figure this addon prints is wrapped in |cffRRGGBB...|r -- landing inside
+    -- one of those leaves the escape half-written, which the client renders as
+    -- the raw bytes and then colours the entire rest of the line. Better to
+    -- overflow by a few pixels than to print `ff9d9d9d0g 40s` across the panel.
+    --
+    -- The caller's job, then, is to keep such strings SHORT rather than to
+    -- rely on this cutting them. That is why the Crafting footer says "Net ?"
+    -- and not "Net need prices -- Price recipe".
+    if string.find(s, "|", 1, true) then return s end
     local dots = "..."
     local n = string.len(s)
     while n > 0 do
@@ -4434,7 +4444,7 @@ local CRAFTL = {
     mid_cushion = 6,
 
     est_y   = 22, est_h   = 12,    -- Cost / Sells, above the recipe list
-    btn_y   = 38, btn_h   = 18,    -- Price | Shop all | Remove | Reset
+    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Reset
     -- The search box, the Search button and the pager are all 20 now and all
     -- start on the same line as the left panel's two buttons, so the whole
     -- band under the headings has ONE top and ONE bottom instead of four
@@ -4536,6 +4546,19 @@ end
 -- Just the margin now: there is no panel on that side any more.
 function ui.CraftMidR()
     return CRAFTL.edge
+end
+
+-- The x of the CENTRE of the footer bar's middle third, measured from the tab
+-- panel's left edge.
+--
+-- A FUNCTION because the builder and the layout both need it and they must not
+-- compute it two ways: it is the only anchor on this tab that is a midpoint
+-- rather than an edge, which is exactly the kind of expression that gets typed
+-- out twice and then drifts by a gutter.
+function ui.CraftFootMid(w)
+    local third = ui.CraftBtnW(w, 3)
+    return CRAFTL.edge + CRAFTL.row_l + third + CRAFTL.btn_gap
+        + math.floor(third / 2)
 end
 
 -- One of N things sharing a row across the shopping panel, with a gutter
@@ -7791,11 +7814,19 @@ function ui.BuildCraftTab()
     -- How many reagents you are short of, across every tracked recipe. The
     -- one number that says whether there is shopping left to do, and it is
     -- worth having whatever is collapsed.
+    -- NO WIDTH ON ANY OF THIS TAB'S CHROME. A width makes a FontString WRAP,
+    -- and the second line draws over whatever is under it -- which here is the
+    -- box border and the first row inside it. The ROWS have never had one (see
+    -- ui.GrowCraftSideRows, which says so); the chrome around them did, and
+    -- that is what drew "Net need prices" across "Price recipe" on the footer.
+    --
+    -- Alignment comes from the ANCHOR instead: anchor a left edge and the text
+    -- grows right, a right edge and it grows left, a bottom-centre and it
+    -- grows both ways. SetJustifyH does nothing without a width, so it is not
+    -- called -- a no-op that reads like an instruction is worse than nothing.
     ui.craftShortFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftShortFS:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        CRAFTL.edge + leftW - CRAFTL.row_r - 70, -CRAFTL.hdr_y)
-    ui.craftShortFS:SetWidth(70)
-    ui.craftShortFS:SetJustifyH("RIGHT")
+    ui.craftShortFS:SetPoint("TOPRIGHT", panel, "TOPLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.hdr_y)
 
     -- ---- ABOVE the box: what the whole list costs ------------------------
     --
@@ -7809,18 +7840,16 @@ function ui.BuildCraftTab()
     ui.craftBuyLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftBuyLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge + CRAFTL.row_l,
         -CRAFTL.est_y)
-    ui.craftBuyLbl:SetWidth(halfW); ui.craftBuyLbl:SetJustifyH("LEFT")
     ui.craftBuyLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     ui.craftBuyAllFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftBuyAllFS:SetPoint("TOPLEFT", panel, "TOPLEFT",
-        CRAFTL.edge + leftW - CRAFTL.row_r - halfW, -CRAFTL.est_y)
-    ui.craftBuyAllFS:SetWidth(halfW); ui.craftBuyAllFS:SetJustifyH("RIGHT")
+    ui.craftBuyAllFS:SetPoint("TOPRIGHT", panel, "TOPLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.est_y)
 
     -- ---- the action row --------------------------------------------------
     --
     -- FOUR BUTTONS ACROSS THE PANEL, and they are on three different scopes:
-    -- Price and Remove act on the SELECTED recipe, Shop all on the whole list,
+    -- Price and Remove act on the SELECTED recipe, Price all on the whole list,
     -- Reset on the made-this-session counts. Each says what it acts on rather
     -- than sharing a verb, because the row cannot show the scope any other
     -- way. They fit here at all because the panel is 358px and not 174 --
@@ -7838,8 +7867,13 @@ function ui.BuildCraftTab()
     end
     ui.craftPriceBtn = ActionBtn("quiet", "AegisExchangeCraftPriceButton",
         "Price", 0, function() ui.CraftPriceRecipe() end)
-    ui.craftShopBtn = ActionBtn("primary", "AegisExchangeCraftShopButton",
-        "Shop all", 1, function() ui.ShopAll() end)
+    -- "PRICE ALL", NOT "SHOP ALL". It buys nothing -- it SEARCHES, so the
+    -- prices fill in and the list's cost estimate resolves. The old name read
+    -- as "spend my gold", which is an alarming thing to press to find out what
+    -- something costs. It is the same operation as `Price` at a different
+    -- scope, and the two now say so.
+    ui.craftPriceAllBtn = ActionBtn("primary", "AegisExchangeCraftShopButton",
+        "Price all", 1, function() ui.CraftPriceAll() end)
     ui.craftDelBtn = ActionBtn("quiet", "AegisExchangeCraftDelButton",
         "Remove", 2, function() ui.CraftDeleteProject() end)
     ui.craftResetBtn = ActionBtn("quiet", "AegisExchangeCraftResetButton",
@@ -7875,6 +7909,21 @@ ui.GrowCraftSideRows = function(n)
         while i <= n do
             local row = CreateFrame("Button", nil, panel)
             row:SetHeight(CSIDE_ROW_H)
+            -- A LIST ROW THAT HAPPENS TO BE A BUTTON, and pfUI must not plate
+            -- it. ui/skin.lua's SkinWidget gives every Button its generic
+            -- plate; on a row that is a border drawn THROUGH the row's own
+            -- first and last few pixels, which is a name and a count clipped
+            -- at both ends under pfUI and correct without it. `aegisNoSkin`
+            -- is the existing opt-out and every other clickable list row in
+            -- this window already sets it -- the Buy tab's category tree, the
+            -- Sell bag list, the saved-search rows. These never did, from the
+            -- day they were built.
+            --
+            -- The results table beside it was never affected because those
+            -- rows are FRAMES, so SkinWidget's Button branch never reached
+            -- them. That is the whole reason only one of the two panels
+            -- showed it.
+            row.aegisNoSkin = true
             -- ANCHORED ON BOTH SIDES, never SetWidth.
             --
             -- A width is a number captured at build time; two anchors are a
@@ -7905,6 +7954,9 @@ ui.GrowCraftSideRows = function(n)
             -- row's click does something else: on a recipe row it selects the
             -- recipe, and only this opens the breakdown under it.
             local exBtn = CreateFrame("Button", nil, row)
+            -- ...and neither is the expander: it is an invisible click target
+            -- over a FontString, so a plate on it is a box around a triangle.
+            exBtn.aegisNoSkin = true
             exBtn:SetPoint("LEFT", row, "LEFT", 0, 0)
             exBtn:SetWidth(CRAFTL.ex_w); exBtn:SetHeight(CSIDE_ROW_H)
             exBtn:SetScript("OnClick", function() ui.ToggleCraftRow(row.entry) end)
@@ -7975,20 +8027,20 @@ ui.GrowCraftSideRows = function(n)
     ui.craftCostFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.craftCostFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
         CRAFTL.edge + CRAFTL.row_l, CRAFTL.foot_y)
-    ui.craftCostFS:SetWidth(thirdW); ui.craftCostFS:SetJustifyH("LEFT")
 
+    -- Centred by anchoring its BOTTOM -- a FontString's bottom-centre -- to
+    -- the middle of the second third.
     ui.craftValueFS = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.craftValueFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        CRAFTL.edge + CRAFTL.row_l + thirdW + CRAFTL.btn_gap, CRAFTL.foot_y)
-    ui.craftValueFS:SetWidth(thirdW); ui.craftValueFS:SetJustifyH("CENTER")
+    ui.craftValueFS:SetPoint("BOTTOM", panel, "BOTTOMLEFT",
+        ui.CraftFootMid(ui.WindowW()), CRAFTL.foot_y)
 
     -- Anchored from the panel's LEFT like everything else in this column.
-    -- BOTTOMRIGHT here is the WINDOW's right edge, not the shopping panel's,
-    -- which would put the Net figure over the results table's footer.
+    -- BOTTOMRIGHT relative to the PANEL's bottom-right would be the WINDOW's
+    -- right edge, not the shopping panel's, and would put the Net figure over
+    -- the results table's footer.
     ui.craftNetFS = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.craftNetFS:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT",
-        CRAFTL.edge + leftW - CRAFTL.row_r - thirdW, CRAFTL.foot_y)
-    ui.craftNetFS:SetWidth(thirdW); ui.craftNetFS:SetJustifyH("RIGHT")
+    ui.craftNetFS:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT",
+        CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
 
 
     -- ===== Middle: reagent search + result list =========================
@@ -8169,12 +8221,12 @@ function ui.LayoutCraftPanels()
     local w = ui.WindowW()
     local leftW = ui.CraftWidthsAt(w)
     local midX, midR = ui.CraftMidX(w), ui.CraftMidR()
-    -- The three divisions of the shopping panel's width: halves for the
-    -- Buy-all line, quarters for the action row, thirds for the footer bar.
+    -- The divisions of the shopping panel's width: halves for the money line,
+    -- quarters for the action row. The footer's thirds are inside
+    -- ui.CraftFootMid, which is the only one that needs a midpoint.
     -- ONE function of n rather than three constants -- see ui.CraftBtnW.
-    local halfW  = ui.CraftBtnW(w, 2)
-    local btnW   = ui.CraftBtnW(w, 4)
-    local thirdW = ui.CraftBtnW(w, 3)
+    local halfW = ui.CraftBtnW(w, 2)
+    local btnW  = ui.CraftBtnW(w, 4)
 
     local function place(f, point, rel, relPoint, x, y)
         if not f then return end
@@ -8185,21 +8237,21 @@ function ui.LayoutCraftPanels()
     -- ---- shopping panel -------------------------------------------------
     place(ui.craftSideHdr, "TOPLEFT", panel, "TOPLEFT",
           CRAFTL.edge + CRAFTL.row_l, -CRAFTL.hdr_y)
-    place(ui.craftShortFS, "TOPLEFT", panel, "TOPLEFT",
-          CRAFTL.edge + leftW - CRAFTL.row_r - 70, -CRAFTL.hdr_y)
+    -- NONE of these is given a width; see the note in ui.BuildCraftTab. The
+    -- anchor is the alignment.
+    place(ui.craftShortFS, "TOPRIGHT", panel, "TOPLEFT",
+          CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.hdr_y)
     place(ui.craftBuyLbl, "TOPLEFT", panel, "TOPLEFT",
           CRAFTL.edge + CRAFTL.row_l, -CRAFTL.est_y)
-    place(ui.craftBuyAllFS, "TOPLEFT", panel, "TOPLEFT",
-          CRAFTL.edge + leftW - CRAFTL.row_r - halfW, -CRAFTL.est_y)
-    if ui.craftBuyLbl   then ui.craftBuyLbl:SetWidth(halfW)   end
-    if ui.craftBuyAllFS then ui.craftBuyAllFS:SetWidth(halfW) end
+    place(ui.craftBuyAllFS, "TOPRIGHT", panel, "TOPLEFT",
+          CRAFTL.edge + leftW - CRAFTL.row_r, -CRAFTL.est_y)
 
     -- The action row: four buttons on one pitch. Placed from the SAME
     -- expression the builder uses, because a button whose x is recomputed one
     -- way and whose width another is a button that overlaps its neighbour at
     -- exactly one window size.
     local slot = 0
-    for _, b in ipairs({ ui.craftPriceBtn, ui.craftShopBtn,
+    for _, b in ipairs({ ui.craftPriceBtn, ui.craftPriceAllBtn,
                          ui.craftDelBtn, ui.craftResetBtn }) do
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", panel, "TOPLEFT",
@@ -8217,16 +8269,14 @@ function ui.LayoutCraftPanels()
     -- ...and the footer bar's three figures.
     place(ui.craftCostFS, "BOTTOMLEFT", panel, "BOTTOMLEFT",
           CRAFTL.edge + CRAFTL.row_l, CRAFTL.foot_y)
-    place(ui.craftValueFS, "BOTTOMLEFT", panel, "BOTTOMLEFT",
-          CRAFTL.edge + CRAFTL.row_l + thirdW + CRAFTL.btn_gap, CRAFTL.foot_y)
+    place(ui.craftValueFS, "BOTTOM", panel, "BOTTOMLEFT",
+          ui.CraftFootMid(w), CRAFTL.foot_y)
     -- ...anchored from the panel's LEFT like everything else in this column.
-    -- BOTTOMRIGHT here is the WINDOW's right edge, not the shopping panel's,
-    -- which would have put the Net figure over the results table's footer.
-    place(ui.craftNetFS, "BOTTOMLEFT", panel, "BOTTOMLEFT",
-          CRAFTL.edge + leftW - CRAFTL.row_r - thirdW, CRAFTL.foot_y)
-    if ui.craftCostFS  then ui.craftCostFS:SetWidth(thirdW)  end
-    if ui.craftValueFS then ui.craftValueFS:SetWidth(thirdW) end
-    if ui.craftNetFS   then ui.craftNetFS:SetWidth(thirdW)   end
+    -- BOTTOMRIGHT relative to the PANEL's bottom-right would be the WINDOW's
+    -- right edge, not the shopping panel's, and would have put the Net figure
+    -- over the results table's footer.
+    place(ui.craftNetFS, "BOTTOMRIGHT", panel, "BOTTOMLEFT",
+          CRAFTL.edge + leftW - CRAFTL.row_r, CRAFTL.foot_y)
 
     -- ---- middle panel ---------------------------------------------------
     place(ui.craftTitle, "TOPLEFT", panel, "TOPLEFT",
@@ -9046,7 +9096,7 @@ function ui.ShoppingQueue(rows)
     return names
 end
 
--- ONE sequential-search runner, for BOTH "Price" and "Shop all".
+-- ONE sequential-search runner, for BOTH "Price" and "Price all".
 --
 -- Two copies of "search these names in turn" is how they drift: one grows a
 -- cancel and the other does not, one clears its queue when the auction house
@@ -9129,8 +9179,8 @@ end
 -- two that lose something.
 function ui.RefreshCraftButtons()
     local running = ui.CraftQueueRunning()
-    if ui.craftShopBtn then
-        ui.craftShopBtn:SetText(running and "Stop" or "Shop all")
+    if ui.craftPriceAllBtn then
+        ui.craftPriceAllBtn:SetText(running and "Stop" or "Price all")
     end
     -- Nil-safe, because this is called from the builder before the last of
     -- them exists and from ui.CancelCraftQueue, which the queue can reach
@@ -9175,13 +9225,19 @@ function ui.CraftPriceRecipe()
     end)
 end
 
--- Walk the shopping list, searching each thing you still have to buy.
+-- Walk the shopping list, SEARCHING each thing you still have to buy.
+--
+-- It buys nothing. Every reagent needs an auction query before we know what it
+-- costs, which is what fills the unit price, the %Mkt column and the list's
+-- own estimate -- the `+` on that estimate means "some lines still have no
+-- price". Doing it by hand is a click and a ~5s wait through the query gate
+-- per line; this is one press for the whole list.
 --
 -- Paced entirely by the query gate -- A.buy.Search refuses while the client
 -- is shut, and the next search only starts when the previous one's results
 -- land -- so a ten-line list takes as long as ten searches and not a moment
 -- less. That is the client's rule, not ours; see HARD RULE 10.
-function ui.ShopAll()
+function ui.CraftPriceAll()
     if ui.CraftQueueRunning() then return ui.CancelCraftQueue() end
     local names = ui.ShoppingQueue(ui.craftFlat)
     if table.getn(names) == 0 then
@@ -9268,8 +9324,17 @@ function ui.UpdateCraftSummary()
             ui.craftNetFS:SetTextColor(0.90, 0.30, 0.30)
         end
     else
-        ui.craftNetFS:SetText("Net |cff808080need prices \226\128\148 Price recipe|r")
+        -- "Net ?", to match "Cost ?" and "Sells ?" beside it. It used to
+        -- read "Net need prices -- Price recipe", which is an instruction in a
+        -- cell a third of a panel wide: it wrapped, and its second line drew
+        -- across the first. The instruction now goes on the middle panel's
+        -- status line, which is a whole panel wide and is where this tab puts
+        -- its "here is what to do next" text already.
+        ui.craftNetFS:SetText("Net |cff808080?|r")
         ui.craftNetFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        if ui.craftStatus and not ui.CraftQueueRunning() then
+            ui.craftStatus:SetText("Press Price all to fill in the prices.")
+        end
     end
 end
 
