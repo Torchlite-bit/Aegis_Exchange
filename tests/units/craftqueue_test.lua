@@ -47,11 +47,16 @@ for _, sig in ipairs({
     "function ui.CancelCraftQueue(",
     "function ui.StartCraftQueue(",
     "function ui.RunCraftQueue(",
+    "function ui.RefreshCraftButtons(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
     fn()
 end
+
+-- The real one, kept before Reset() stubs it over -- the section at the foot
+-- of this file puts it back to test which buttons it gates.
+REAL_REFRESH = ui.RefreshCraftButtons
 
 -- The surface the runner touches, stubbed. Every one of these is a widget or
 -- a repaint in the real thing and none of them decides anything.
@@ -162,5 +167,69 @@ H.check("an empty list does not start a queue",
         not ui.StartCraftQueue({}, "Shopping"), "it started on nothing")
 H.check("...and nil too", not ui.StartCraftQueue(nil, "Shopping"),
         "it started on nil")
+
+-- ---------------------------------------------------------------------------
+H.section("the buttons a running walk takes away")
+-- ---------------------------------------------------------------------------
+
+-- ui.RefreshCraftButtons is the REAL one here, not the stub the runner tests
+-- use: what is under test is which buttons it gates, and the buttons are four
+-- tables with the three methods it calls.
+local function FakeBtn()
+    return { on = true, text = nil,
+             SetText = function(self, t) self.text = t end,
+             Enable  = function(self) self.on = true end,
+             Disable = function(self) self.on = false end }
+end
+
+local function ArmButtons()
+    Reset()
+    ui.RefreshCraftButtons = REAL_REFRESH
+    ui.craftShopBtn  = FakeBtn()
+    ui.craftPriceBtn = FakeBtn()
+    ui.craftDelBtn   = FakeBtn()
+    ui.craftResetBtn = FakeBtn()
+end
+
+ArmButtons()
+ui.RefreshCraftButtons()
+H.eq("idle, the button offers to shop", ui.craftShopBtn.text, "Shop all")
+H.check("...and the other three are live",
+        ui.craftPriceBtn.on and ui.craftDelBtn.on and ui.craftResetBtn.on,
+        "something was disabled with no walk running")
+
+ui.StartCraftQueue({ "Dreamfoil", "Gromsblood" }, "Shopping")
+-- ONE BUTTON THAT BOTH STARTS AND STOPS, painted FROM the queue so the two
+-- cannot get out of step.
+H.eq("a running walk turns it into Stop", ui.craftShopBtn.text, "Stop")
+
+-- ALL THREE OTHERS GO. `Price` would start a second walk over the first;
+-- `Remove` would delete the recipe whose reagents the walk is still searching
+-- for, leaving a queue of names nothing wants -- each one a trip through the
+-- query gate spent on nothing; `Reset` clears the counts the walk is filling.
+-- Only `Price` was gated before v1.52.23, and it is the one of the three that
+-- loses nothing.
+H.check("Price is gated while it runs", not ui.craftPriceBtn.on,
+        "a second walk could be started over the first")
+H.check("Remove is gated while it runs", not ui.craftDelBtn.on,
+        "the recipe being shopped for could be deleted mid-walk")
+H.check("Reset is gated while it runs", not ui.craftResetBtn.on,
+        "the made counts the walk is filling could be cleared")
+
+ui.CancelCraftQueue()
+H.eq("stopping gives the button back", ui.craftShopBtn.text, "Shop all")
+H.check("...and all three come back with it",
+        ui.craftPriceBtn.on and ui.craftDelBtn.on and ui.craftResetBtn.on,
+        "a button stayed disabled after the walk stopped")
+
+-- ...and it survives being called before the widgets exist. The builder calls
+-- it while it is still creating them, and ui.CancelCraftQueue can be reached
+-- without a Crafting tab having been built at all.
+ArmButtons()
+ui.craftShopBtn, ui.craftPriceBtn = nil, nil
+ui.craftDelBtn, ui.craftResetBtn = nil, nil
+H.survives("no buttons yet is not a crash", function()
+    ui.RefreshCraftButtons()
+end)
 
 os.exit(H.report("craftqueue"))

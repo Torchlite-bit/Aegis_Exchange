@@ -18,6 +18,35 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.52.23]
+
+### Fixed
+- **A running "Shop all" no longer lets you pull the list out from under it.**
+  `Remove` and `Reset` stayed live during a walk: `Remove` would delete the
+  recipe whose reagents the walk was still searching for — leaving a queue of
+  names nothing on the list wants any more, each one a trip through the query
+  gate spent on nothing — and `Reset` cleared the made counts the walk exists to
+  fill. Only `Price` was gated. All three are now.
+- **"Select a recipe on the right first."** There has been no right-hand panel
+  since 1.52.21. Both of the tab's select-a-recipe messages now name the
+  Shopping list, and say it in the same words.
+
+### Docs
+- **The README's Crafting section described the tab as it was five releases
+  ago** — "lists every reagent, click one to shop for it". It now covers what
+  actually ships: one aggregated shopping list across every tracked recipe, the
+  `[-] 5 [+]` quantity, have/need counts against your bags and bank, the vendor
+  mark, `Shop all`, expanding a recipe for its own breakdown, why an
+  intermediate goes dim instead of red, and the session spend line.
+
+### Internal
+- `craftqueue_test.lua` runs the REAL `ui.RefreshCraftButtons` against four fake
+  buttons rather than the stub the runner tests use, so which buttons a walk
+  gates is asserted rather than assumed. Two sabotages: one that leaves `Remove`
+  and `Reset` live, one that inverts the gate.
+
+---
+
 ## [1.52.22]
 
 ### Added
@@ -4546,6 +4575,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.52.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

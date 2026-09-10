@@ -2725,6 +2725,23 @@ end
 
     # The whole list fired at once instead of one search per reply, which is
     # the pacing the query gate exists to impose (HARD RULE 10).
+    # A walk that leaves `Remove` live lets you delete the recipe whose
+    # reagents it is still searching for -- the queue then spends the query
+    # gate on names nothing on the list wants.
+    ("craftqueue-remove-live-mid-walk", "ui/frame.lua",
+     """    gate(ui.craftPriceBtn)
+    gate(ui.craftDelBtn)
+    gate(ui.craftResetBtn)""",
+     "    gate(ui.craftPriceBtn)",
+     "craftqueue"),
+
+    # ...and one that leaves the gate inverted, so the buttons are dead when
+    # nothing is running and live when something is.
+    ("craftqueue-button-gate-inverted", "ui/frame.lua",
+     "        if running then b:Disable() else b:Enable() end",
+     "        if running then b:Enable() else b:Disable() end",
+     "craftqueue"),
+
     ("craftqueue-does-not-wait", "ui/frame.lua",
      "            ui.RunCraftQueue()\n        end,\n        onState = function() ui.RefreshCraftStatus() end,",
      "        end,\n        onState = function() ui.RefreshCraftStatus() end,",

@@ -8947,7 +8947,7 @@ end
 
 function ui.CraftDeleteProject()
     if not A.craft or not ui.craftSel then
-        ChatMsg("Aegis: select a recipe first.")
+        ChatMsg("Aegis: select a recipe in the Shopping list first.")
         return
     end
     A.craft.DeleteProject(ui.craftSel)
@@ -9081,17 +9081,34 @@ function ui.RunCraftQueue()
     end
 end
 
--- A running queue turns its button into the way to stop it. One button that
--- both starts and stops is the whole control, and it cannot get out of step
--- with the queue because it is painted from the queue.
+-- A running queue turns its button into the way to stop it, and takes the
+-- other three away.
+--
+-- ONE BUTTON THAT BOTH STARTS AND STOPS is the whole control, and it cannot
+-- get out of step with the queue because it is painted FROM the queue.
+--
+-- ALL THREE OTHERS ARE DISABLED, and that is not tidiness. `Price` would start
+-- a second walk over the first. `Remove` would delete the recipe whose
+-- reagents the walk is still searching for, leaving a queue of names nothing
+-- on the list wants any more -- every one of them a trip through the query
+-- gate, spent on nothing. `Reset` clears the made counts the walk exists to
+-- fill. Only `Price` was gated until v1.52.23; the two that were not are the
+-- two that lose something.
 function ui.RefreshCraftButtons()
     local running = ui.CraftQueueRunning()
     if ui.craftShopBtn then
         ui.craftShopBtn:SetText(running and "Stop" or "Shop all")
     end
-    if ui.craftPriceBtn then
-        if running then ui.craftPriceBtn:Disable() else ui.craftPriceBtn:Enable() end
+    -- Nil-safe, because this is called from the builder before the last of
+    -- them exists and from ui.CancelCraftQueue, which the queue can reach
+    -- without a Crafting tab ever having been built.
+    local function gate(b)
+        if not b then return end
+        if running then b:Disable() else b:Enable() end
     end
+    gate(ui.craftPriceBtn)
+    gate(ui.craftDelBtn)
+    gate(ui.craftResetBtn)
 end
 
 -- Price every part of the selected recipe: the crafted item (when it is one)
@@ -9103,7 +9120,7 @@ function ui.CraftPriceRecipe()
     if ui.CraftQueueRunning() then return ui.CancelCraftQueue() end
     local p = ui.craftSel and A.craft.Projects()[ui.craftSel]
     if not p then
-        ChatMsg("Aegis: select a recipe on the right first.")
+        ChatMsg("Aegis: select a recipe in the Shopping list first.")
         return
     end
     local q = {}
