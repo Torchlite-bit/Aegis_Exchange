@@ -3495,6 +3495,64 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
     return row
 end
 
+
+-- The Buy table's grouped view as ONE FLAT LIST of mixed rows.
+--
+-- Same shape as ui.CraftTreeRows and for the same reasons: a flat array the
+-- row pool indexes into, no tree walked at paint time, no nested widgets. Two
+-- kinds here --
+--
+--   group    one item: its name, how many listings, and the lowest unit
+--            buyout anyone is actually selling it at
+--   listing  the individual auctions under an expanded group, which are the
+--            engine's OWN rows, listed rather than copied
+--
+-- `open` is keyed by the group's KEY, which is its item id where there is one.
+-- Not by index: a re-sort or a fresh page renumbers every row, and an
+-- index-keyed set then expands whichever item slid into that slot. That
+-- mistake has a sabotage on the Crafting side and it is the same mistake here.
+--
+-- A group of ONE never expands and never shows an expander. There is nothing
+-- under it but the row you are already looking at, and a triangle that reveals
+-- a copy of its own parent reads as a bug.
+function ui.BuyTreeRows(groups, open)
+    open = open or {}
+    local rows = {}
+    local i = 1
+    while i <= table.getn(groups or {}) do
+        local g = groups[i]
+        local many = g.listings and g.listings > 1
+        local isOpen = (many and open[g.key]) and true or nil
+        table.insert(rows, { kind = "group", key = g.key, name = g.name,
+            itemId = g.itemId, texture = g.texture, quality = g.quality,
+            level = g.level, listings = g.listings, units = g.units,
+            low = g.low, expandable = many or nil, expanded = isOpen,
+            entry = g.rows[1] })
+        if isOpen then
+            local k = 1
+            while k <= table.getn(g.rows) do
+                local r = g.rows[k]
+                r.kind = "listing"
+                table.insert(rows, r)
+                k = k + 1
+            end
+        end
+        i = i + 1
+    end
+    return rows
+end
+
+-- Fold or unfold one group.
+--
+-- Stored as `true` and cleared to NIL, so the closed state -- nearly all of
+-- them -- costs nothing, and so the set stays small enough that keying it by
+-- item id is free.
+function ui.ToggleBuyGroup(open, key)
+    if not open or not key then return open end
+    open[key] = (not open[key]) or nil
+    return open
+end
+
 -- Tooltip for a browse ("list") listing row.
 --
 -- SetAuctionItem indexes into the CURRENTLY loaded page, and our rows are sorted

@@ -2575,6 +2575,77 @@ end
     end""",
      "rowchrome"),
 
+    # ---- grouped Buy results (v1.53.0) -----------------------------------
+
+    # Grouping by NAME. Two different items can share one on this client -- a
+    # recipe and the thing it teaches -- and merging them totals two separate
+    # markets into one price. The price it then reports is the LOWER of the
+    # two, which is the direction that reads as a bargain.
+    ("buy-group-keyed-by-name", "core/buy.lua",
+     """        local key = r.itemId and ("i" .. r.itemId) or ("n" .. (r.name or "?"))""",
+     """        local key = "n" .. (r.name or "?")""",
+     "buygroup"),
+
+    # A bid-only auction setting the lowest price. It is a listing you can see
+    # and not a price you can pay, so this quotes a number nobody can buy at.
+    ("buy-group-lowest-counts-bid-only", "core/buy.lua",
+     """        if r.unit and r.unit > 0 then
+            if not g.low or r.unit < g.low then g.low = r.unit end
+        end""",
+     """        local u = r.unit or r.buyout or 0
+        if not g.low or u < g.low then g.low = u end""",
+     "buygroup"),
+
+    # ...and the opposite: a bid-only auction dropped from the LISTING count,
+    # so the parent under-reports what is on the auction house.
+    ("buy-group-drops-bid-only-listings", "core/buy.lua",
+     "        g.listings = g.listings + 1",
+     "        if r.unit then g.listings = g.listings + 1 end",
+     "buygroup"),
+
+    # `units` counting auctions rather than items, so a page of stacks reads as
+    # a page of singles.
+    ("buy-group-units-counts-auctions", "core/buy.lua",
+     "        g.units = g.units + (r.count or 1)",
+     "        g.units = g.units + 1",
+     "buygroup"),
+
+    # The expansion set keyed by INDEX. A re-sort renumbers every row, and this
+    # then expands whichever item slid into the slot -- silently.
+    ("buy-open-keyed-by-index", "ui/frame.lua",
+     "        local isOpen = (many and open[g.key]) and true or nil",
+     "        local isOpen = (many and open[i]) and true or nil",
+     "buygroup"),
+
+    # A group of ONE offering a triangle, which reveals a copy of its own
+    # parent row.
+    ("buy-lone-group-expands", "ui/frame.lua",
+     "        local many = g.listings and g.listings > 1",
+     "        local many = true",
+     "buygroup"),
+
+    # The listings COPIED rather than listed, so the paint reads a second table
+    # that has to be kept in step with the engine's.
+    ("buy-tree-copies-listings", "ui/frame.lua",
+     """                r.kind = "listing"
+                table.insert(rows, r)""",
+     """                table.insert(rows, { kind = "listing", name = r.name })""",
+     "buygroup"),
+
+    # "[]" from an empty name, which parses as a search for a literal pair of
+    # brackets and matches nothing at all.
+    ("exact-term-brackets-nothing", "core/buy.lua",
+     '    if name == "" then return "" end',
+     '    local _ = name',
+     "buygroup"),
+
+    # An unclosed bracket treated as exact, so a typo silently becomes a search
+    # that can never match.
+    ("exact-bracket-unanchored", "core/buy.lua",
+     '        local _, _, bracketed = string.find(raw, "^%[(.+)%]$")',
+     '        local _, _, bracketed = string.find(raw, "%[(.+)")',
+     "buygroup"),
+
     # ---- one table look, one input colour (v1.52.32) ---------------------
 
     # The shared result row back to being plated by pfUI. ui/skin.lua's note
@@ -3658,6 +3729,7 @@ SUITES = {
     "rowbudget": "tests/units/rowbudget_test.lua",
     "craftqueue": "tests/units/craftqueue_test.lua",
     "crafttree": "tests/units/crafttree_test.lua",
+    "buygroup": "tests/units/buygroup_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

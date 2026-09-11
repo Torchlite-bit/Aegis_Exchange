@@ -711,7 +711,17 @@ function buy.ParseTerm(text)
     while i <= n do
         local raw = util.Trim(tokens[i])
         local tok = string.lower(raw)
-        if tok == "exact" then
+        -- [Bracketed] is the SAME THING as /exact, written the way a player
+        -- can read it back. `/exact` has always been in the query language;
+        -- brackets are what a right-click can put in the search box, and what
+        -- somebody can type from memory without knowing the language exists.
+        --
+        -- string.find with a capture, not string.match -- Lua 5.0.
+        local _, _, bracketed = string.find(raw, "^%[(.+)%]$")
+        if bracketed then
+            term.exact = true
+            appendWord(util.Trim(bracketed))
+        elseif tok == "exact" then
             term.exact = true
         elseif tok == "usable" then
             term.usable = true
@@ -1902,6 +1912,69 @@ function buy.BatchCost(rows)
 end
 
 -- Start a batch buyout of `rows`. Returns (true) or (false, reason).
+-- The search text that means "this item and nothing else".
+--
+-- BRACKETS, because the box has to show something a person can read and retype.
+-- `/exact/Greater Mana Potion` says the same to the parser and nothing at all
+-- to somebody who has not read the docs.
+--
+-- An empty name gives an empty term rather than "[]", which would parse as a
+-- name search for a literal pair of brackets and quietly match nothing -- the
+-- exact failure the exact-filter guard at buy.CompileTerm exists to avoid.
+function buy.ExactTerm(name)
+    name = util.Trim(name or "")
+    if name == "" then return "" end
+    return "[" .. name .. "]"
+end
+
+-- ---------------------------------------------------------------------------
+-- Grouping a page of listings into one row per item
+-- ---------------------------------------------------------------------------
+
+-- Aggregate listings into ONE ROW PER ITEM, each carrying the listings that
+-- make it up.
+--
+-- Returned in the order items were FIRST SEEN, not sorted: the caller sorts
+-- for display and the two jobs do not belong in one function -- ui.SortResults
+-- already owns the second one.
+--
+-- KEYED BY ITEM ID WHEN THERE IS ONE, and by name only when there is not.
+-- Different items can share a name on this client -- a recipe and the thing it
+-- teaches, most obviously -- and merging those totals two separate markets
+-- into one price. The id is authoritative; the name is the fallback for a row
+-- whose link has not resolved yet, which is a real state on 1.12 and not an
+-- error.
+--
+-- `low` is the lowest UNIT BUYOUT, which is the lowest price you can actually
+-- pay to take one home. A bid-only auction still counts as a LISTING -- it is
+-- on the auction house and the parent row says how many are -- but it cannot
+-- set the lowest available price, because there is no price at which you can
+-- have it. Counting it would quote a number nobody can buy at.
+function buy.GroupListings(rows)
+    local groups, byKey = {}, {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        local key = r.itemId and ("i" .. r.itemId) or ("n" .. (r.name or "?"))
+        local g = byKey[key]
+        if not g then
+            g = { key = key, name = r.name, itemId = r.itemId,
+                  texture = r.texture, quality = r.quality, level = r.level,
+                  listings = 0, units = 0, low = nil, rows = {} }
+            byKey[key] = g
+            table.insert(groups, g)
+        end
+        g.listings = g.listings + 1
+        g.units = g.units + (r.count or 1)
+        if r.unit and r.unit > 0 then
+            if not g.low or r.unit < g.low then g.low = r.unit end
+        end
+        table.insert(g.rows, r)
+        i = i + 1
+    end
+    return groups
+end
+
 -- ---------------------------------------------------------------------------
 -- What you have bought this session
 -- ---------------------------------------------------------------------------

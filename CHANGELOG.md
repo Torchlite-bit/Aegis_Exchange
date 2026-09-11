@@ -18,6 +18,46 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.0]
+
+The 1.52 line merged. This starts the next body of work: grouped Buy results,
+the Auctions split, and the History graph. **One push, one MINOR** — everything
+inside it is a `1.53.x` patch.
+
+### Added
+- **The arithmetic behind grouped Buy results**, split from the widgets the way
+  the shopping list was, because this half can be proven and the other half
+  cannot.
+  - `buy.GroupListings` turns a page of auctions into **one row per item**, each
+    carrying how many listings it has, how many units across them, the lowest
+    price you can actually pay, and the listings themselves.
+  - **Grouped by item id, not by name.** Two different items can share a name on
+    this client — a recipe and the thing it teaches — and merging them totals two
+    separate markets into one price. The name is the fallback for a row whose
+    link has not resolved yet, which is a real state on 1.12 and not an error.
+  - **A bid-only auction counts as a listing but sets no price.** It is on the
+    auction house and the parent row should say so; it just cannot set the
+    lowest *available* price, because there is no price at which you can take it
+    home. Counting it would quote a number nobody can buy at.
+  - `ui.BuyTreeRows` flattens groups and their listings into one mixed row list,
+    the same shape as the Crafting tab's shopping tree — and **keyed by item, not
+    by index**, because a re-sort renumbers every row and an index-keyed set then
+    expands whichever item slid into the slot.
+  - A **group of one never expands**. There is nothing under it but the row you
+    are already looking at.
+- **`[Item Name]` in the search box means exact match**, which is what a
+  right-click on a grouped row will put there. `/exact` has always meant the
+  same thing to the parser; brackets are the spelling a person can read back and
+  retype. An unclosed bracket stays a plain name — people mistype.
+
+### Internal
+- `tests/units/buygroup_test.lua`, 56 checks, with eleven sabotages: grouping by
+  name, a bid-only auction setting the price, one dropped from the count, units
+  counting auctions, an index-keyed expansion set, a lone group that expands,
+  copied listings, `[]` from an empty name, and an unanchored bracket pattern.
+
+---
+
 ## [1.52.34]
 
 ### Fixed
@@ -4951,6 +4991,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
