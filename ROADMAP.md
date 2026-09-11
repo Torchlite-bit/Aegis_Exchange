@@ -2390,6 +2390,621 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### A gradient out of a file, and a demo that shows its own feature — v1.53.14
+
+**The gradient is an IMAGE now, and the failure mode is visible.** v1.53.11's
+`SetGradientAlpha` succeeded and did nothing because there was no image behind
+the solid colour to modulate; v1.53.12 removed it. This one ships
+`art/gradient-fill.tga` -- 8x256, uncompressed 32-bit BGRA, top-origin, white
+with an alpha ramp -- and chooses the fallback on `SetTexture`'s **return
+value**, which says whether the file loaded. **An answer, rather than the
+absence of an error.** `/aex diag` reports which one was drawn, so a player
+seeing a flat wash can say so in one line instead of describing it.
+
+**The fade belongs to the PLOT, not to the column.** Hand every column the
+whole image and a five-pixel column runs the entire ramp in five pixels while
+a hundred-and-fifty-pixel one spreads it over all of them -- the wash then
+traces the line instead of sitting behind it. `ui.FillTexCoords` gives each
+column exactly the slice its own position earns, so the slices stack into one
+continuous gradient. It is pure arithmetic between a rectangle and a texture
+coordinate, which is the whole reason it is a separate function: eight
+sabotages point at it and a suite runs it without a client.
+
+**A demo that could not show the feature it was built for.** The four demo
+recipes were linen and mithril -- every item in the set was common quality, so
+the quality colouring the shopping panel had just gained had nothing to colour.
+A feature demonstrated by a demo in which it is invisible. The set is epic and
+rare now, and the suite pins the spread rather than the items: at least one
+epic and one rare among the products AND among the reagents, with every id's
+quality accounted for.
+
+**Every id was checked against a vanilla item dump rather than remembered, and
+that was not a formality.** Black Lotus is Uncommon. Arcanite Reaper is Rare,
+not Epic. The first draft of the set was picked from memory and would have been
+wrong about both -- which is a demo that ships the wrong colours to prove that
+the colours work. The expectation table lives in the SUITE, not in the addon:
+the addon has no business carrying a copy of a fact `GetItemInfo` already
+holds, and the test's copy is the record of what was verified.
+
+**A missing price is a dash, and a demo of dashes shows nothing.** Demo mode
+now supplies invented unit prices, and both readers go through one function.
+They did not before: the tab's totals asked `db.BestUnit` while the shopping
+list's injected `marketOf` had its own copy of "min buyout, else market value"
+-- two answers to one question, in the one place where the total has to agree
+with the lines above it.
+
+**Three sabotages that failed, and each one was a real gap.**
+
+**A sabotage a redundancy defeated.** "No epic recipe" removed one of the two
+epic products and the other went on proving the property -- the same shape as
+v1.53.13's `DEMO_HAVE` miss. Two epics is good demo design, so the sabotage
+moved to the RARE product, of which there is exactly one. **When a property is
+satisfied twice on purpose, the sabotage has to attack the one that is not.**
+
+**A check that passed for the wrong reason.** "Zero is not a price" planted its
+zero with `db.RecordAuction`, which refuses `unitBuyout <= 0` at its own door
+-- so nothing was stored, the answer was nil because the item had never been
+seen, and the guard the check was named for was never reached. The zero goes
+straight into the store now.
+
+**A fallback that was dead code as written.** `craft.MarketUnit` falls back
+from `MinBuyout` to `MarketValue`, and no test reached it -- because it cannot
+be reached the obvious way: both read the same `daily` table, so MinBuyout
+answers whenever MarketValue does. The case that **does** happen is the newest
+day recorded as a bogus zero over a run of real older days. Asking why a
+sabotage could not be caught found the answer.
+
+**And the icon read the wrong return value.** `pcall` puts `ok` in front of
+`GetItemInfo`'s ten, so the texture is the eleventh value back; the first draft
+counted eight discards and landed on `equipSlot`, which is nil for every
+reagent. Nothing errored -- a nil texture path is a legal thing to hand
+`SetTexture` -- and every icon was simply blank. The test that caught it was
+written before the code was run.
+
+### The cart, and demo recipes — v1.53.13
+
+**The cart chains off the sell button rather than the frame.** v1.51.0 learned
+that the merchant frame's TABS are the only anchor that tracks pfUI -- pfUI
+moves the window but the tabs move with it, and every frame-relative offset
+tried before drifted between the two skins. The cart inherits that by hanging
+off `ui.merchantBtn`, which is already anchored there, rather than re-deriving
+an offset that would drift again.
+
+**It is the only one of our external buttons that is an icon.** The other three
+say what they do because what they do is a sentence ("sell 6 marked"); this one
+is a toggle for a window, sits beside a button that already carries a sentence,
+and has a count to show. A second wide text button would not fit that row at
+pfUI's narrower merchant frame. It sets `aegisNoSkin` for the reason list rows
+do: SkinButton draws its plate through the icon's own edge pixels.
+
+**Counting the list is a walk**, so the badge is refreshed from the same
+once-per-frame flush the window uses and never from `BAG_UPDATE` directly --
+which storms hardest while a merchant is open and the player is buying.
+
+**Demo recipes are chosen to exercise the list, not to fill it.** One of the
+four is a REAGENT of another, which is the only way the sub-reagent expansion
+runs at all; two reagents are vendor-sold so the source choice has something to
+choose. `craft.DEMO_HAVE` part-gathers some of them, because a list where every
+line reads 0 / 12 has no progress on it and the "12 / 42" a reagent row exists
+to show has nothing to show.
+
+**Three findings about the tests themselves, and all three are the test's
+fault rather than the code's.**
+
+**A body extractor that ran away.** `bodyOf` stopped at `"\nend\n"`, which an
+event handler does not have -- it closes with `end)`. Against one it found no
+terminator and returned THE REST OF THE FILE, so every check written against
+that body passed on text from somewhere else entirely. One failed loudly, which
+is the only reason the rest were not quietly meaningless: **a check that reads
+the whole file will find almost anything you ask it for.** The terminator is a
+parameter now and each extraction is followed by a length assertion.
+
+**A sabotage testing something no source check can see.** Planting
+`if true then return end` above a call leaves the call in the file; a text
+check cannot tell that it has become unreachable. Rewritten as a deletion.
+
+**A sabotage narrower than the property it attacked.** "Nothing gathered"
+blanked one of five entries in `DEMO_HAVE`, and the other four went on proving
+the property -- so it went unnoticed. **Sabotage granularity has to match the
+property the check states.**
+
+### A pcall that succeeds is not a call that worked — v1.53.12
+
+**The gradient came out a solid block of green.** `SetGradientAlpha` was
+guarded by a `pcall` with the flat wash as its fallback, and the call
+SUCCEEDED and did nothing: on 1.12 a texture created by `SetTexture(r, g, b)`
+is a solid colour with no image behind it for a gradient to modulate. So the
+guard reported success, the flat alpha was taken back off on the strength of
+it, and the fill went opaque — the same colour as the line, so the line
+disappeared into it.
+
+**The lesson generalises past this call.** Wrapping an unverified API in a
+`pcall` tells you it did not throw. That is a different question from whether
+it did the thing, and the fallback here was wired to the wrong one of the two.
+Where there is no way to ask the client whether an effect took — and there is
+none for a 1.12 texture — the honest options are to verify it on a real client
+before shipping, or not to depend on it. It is not going back.
+
+**Demo mode, and why it substitutes rather than seeds.** The chart needs months
+of trading to look like anything and a new character has hours, so judging a
+layout against one vertical spike is not judging it. `db.demo` is a SESSION
+flag and `db.DemoSeries` / `db.DemoRows` are consulted INSTEAD of the store —
+there is no path by which generated gold reaches a real save. A seeded writer
+would have been half the code and permanently dangerous; four checks in the
+suite exist to hold that line.
+
+**Two sabotages that could not be caught, and both were the code's fault.**
+
+The floor under the random walk (`if held < 0 then held = 0 end`) was
+unreachable: every drop was a FRACTION of the balance, so it could not cross
+zero by construction. A guard nothing can reach cannot be tested and is worse
+than no guard — the generator now takes a flat cost for a big purchase, which
+can and does go below zero, and the floor is load-bearing.
+
+The LCG multiplier's overflow had no behavioural symptom worth testing. The
+obvious probe — "does any draw come back odd" — PASSED with the overflowing
+multiplier, because a float that has lost its low bits still lands on odd
+numbers after a modulo. `db.DEMO_MULT` is a named constant now and the suite
+asserts the product bound directly: `(DEMO_MOD - 1) * DEMO_MULT < 2^53`. When a
+property has no visible symptom, assert the property.
+
+**One format for the whole x axis.** A 24h chart read "Sep 10 · 18h 0m ago ·
+12h 0m ago · 6h 0m ago · now" because the leftmost mark is exactly a day old
+and crossed the date threshold while the four to its right did not. Deciding
+per mark is what mixes them; `ui.AxisTimeLabel` takes the SPAN and decides once.
+`util.FormatAgoShort` is the compact form — one unit, no "ago", because an axis
+that ends at "now" already implies it.
+
+**And a check fooled by its own documentation, again.** The assertion that no
+gradient is attempted matched the comment explaining why the gradient is gone.
+Anchored on `t:SetGradientAlpha(` now. That is the fifth time in this repo; the
+pattern is always a bare identifier as the needle.
+
+### The chart's own title bar, and a real gradient — v1.53.11
+
+**Two key spaces, one set.** The check boxes drew empty while the title said a
+character was selected. `ui.histWho` is keyed by NAME — that is what
+`db.MoneySeries` filters on — and the menu's entries are keyed `"char:Name"`,
+because that is what tells a character apart from "All Players". Handing the
+raw set to `dd:SetTicked` looked up a key that was never there.
+
+**The general shape, and it is the same one as v1.53.9's collision:** a lookup
+that misses returns nil rather than erroring, so a translation you forgot looks
+exactly like a selection nobody made. `ui.HistWhoTicks` is the translation, at
+the edge, in one place — the set stays name-keyed for the reader that wants
+names.
+
+**The period buttons belong to the chart.** They sat at the panel's top-left, a
+table's width away from what they change. Moved into the chart's own title bar
+beside a "Player Gold" heading, and built RIGHT TO LEFT because the row is
+anchored by its right edge — the chart's width moves with the window. The band
+they vacated dropped `LISTBOX.hist.top` from 100 to 70, which is a row back for
+the ledger table at every height.
+
+That makes the chart's minimum width a SUM rather than a taste: two side
+paddings, the heading, and every period button with its gaps. The geometry
+suite checks that sum, so adding a sixth period cannot quietly push the buttons
+off the edge. `HISTL.head_w` is a measurement written down — nothing in
+`tests/` can measure a FontString, so the fit check needs a number it can add
+up.
+
+**The gradient, and why it is per-column slices.** `SetGradientAlpha` exists on
+1.12 but applies per TEXTURE, and the fill is one texture per column. Handing
+every column the same endpoints makes a short column run the entire fade over
+five pixels and a tall one over a hundred and fifty — the wash traces the line
+instead of sitting behind it. `ui.FillAlphaAt` maps a height in the plot to an
+alpha, and each column gets its own bottom and top through it, so the slices
+stack into one continuous wash. Two details that would otherwise be invisible:
+the flat fallback alpha is set FIRST so a client that refuses the call keeps a
+fill rather than a solid block, and it comes back off when the call takes,
+because texture alpha MULTIPLIES the gradient's.
+
+**Still tabled, and still the right idea:** the chart taking the full tab with
+the ledger as a popover, which is the shape that would make room for the
+reference's SALES / EXPENSES / PROFIT blocks.
+
+### The shopping list, out on its own — v1.53.10
+
+**The main window only opens at an auction house.** `AuctionFrame` is what it
+replaces, and hiding that frame is what ends the session — so everything in the
+window is unreachable anywhere else. But a good part of any reagent list is
+sold by a vendor, and the moment you want to read it is while standing at one.
+
+So: a small independent frame holding the same rows, opened by `/aex shop` or
+automatically at a merchant. **It shares `ui.FlattenCraft` with the Crafting
+tab** rather than computing its own — two lists that can disagree about what
+you need is worse than no second list at all, and that is asserted rather than
+intended.
+
+**Three rules that make it a BUY list rather than a plan.** Craftable lines are
+off it (their own reagents are already on it, so listing them says buy
+something you do not need and counts its cost twice); covered lines are off it;
+and it is sorted by NAME, because a shopping list is read against a merchant's
+inventory or a search box and cost order re-shuffles it every time a price is
+learned.
+
+**HARD RULE 16, doubly.** The rebuild walks every tracked recipe's reagents, and
+the handler is `BAG_UPDATE` — which storms, and storms *hardest* while a
+merchant window is open and the player is buying. Flag, driver, one flush,
+driver hides itself.
+
+**Two sabotages aimed at `ui.ShoppingTotal` silently started landing somewhere
+else**, and that is the finding worth keeping. `ui.ShoppingShortRows` had
+costed its own rows with the same four lines, so `sabotage.py`'s text
+replacement hit the new copy — where nothing tested it — and the old entries
+went green while proving nothing. **Duplicated arithmetic does not only drift;
+it moves what a test is pointing at.** The filter delegates to
+`ui.ShoppingTotal` now, and the two duplicate sabotage entries were deleted
+rather than re-pointed.
+
+**A note on the recovery:** the first attempt to delete those entries produced a
+broken `sabotage.py`, and `git checkout tests/sabotage.py` then reverted the
+whole file — losing every sabotage added for this release. Both were re-applied
+from the scratch script. Reverting a whole file to fix one hunk is a wide tool
+for a narrow problem.
+
+**Check boxes in the multi-select menu.** `MakeCheckBox` is the same control
+the Aegis tab's settings use; the box has `EnableMouse(false)` so the ROW takes
+every click and there is no dead strip beside it that looks clickable. Both
+`Show` and `Hide` run on every pass because the rows are pooled — a row that
+carried a box would otherwise keep it on a single-select list.
+
+### One field, two features — v1.53.9
+
+**Reported as "when I change lengths of time I have to go back and select the
+player for the graph to update as well", which is a precise description of a
+name collision.**
+
+`ui.histView` has been the History table's filtered ROW LIST since the tab was
+built. When the chart gained a selection in v1.53.7 it took the same field.
+Pressing a period button calls `ui.RefreshHistory`, which rebuilds that list —
+so the chart's selection became an array, the next repaint handed a table to
+`string.find`, the painter threw, and the chart kept whatever it had drawn
+last. Reselecting a player put a string back and it worked again, which is why
+it looked like the dropdown was the fix.
+
+**Nothing in the suite could have caught this**, because both features are
+correct in isolation and the collision only exists in the name. It is a source
+check now: the table's refresh must not mention `ui.histWho`, and the chart's
+painter must not mention `ui.histView`.
+
+**That check then failed for the wrong reason** — `ui.histView` is a *prefix*
+of the dropdown's field name, so a plain substring search matched
+`ui.histViewDD`. Two fixes: the field is `ui.histWhoDD` now, and the check is a
+pattern (`ui%.histView[^%w_]`) so no future `histViewAnything` can fool it.
+Fourth time a check has been fooled by a near-miss in this repo.
+
+**Multi-select, and the two rules that make it coherent.** The set is a set of
+NAMES and **empty means everyone**, from which both behaviours fall out: "All
+Players" CLEARS the set rather than ticking alongside the names (a chart
+showing the account total and Torchlite at once is the account total twice,
+with his gold in both lines), and unticking the LAST name goes back to everyone
+rather than leaving an empty chart. There is no state between "one character"
+and "all of them" worth being stuck in.
+
+`MakeDropdown` gained a `multi` flag: a click toggles and the menu STAYS OPEN,
+because picking two of six is two clicks and a menu that shut after each would
+be four. The control does not own the set — `dd:SetTicked` is handed what to
+draw — because the rule for what a selection MEANS is the caller's, and a
+widget guessing it is a widget the caller has to fight.
+
+**Two strings that can both grow cannot share a line.** The stat strip was
+`histStatL` anchored BOTTOMLEFT and `histStatR` anchored BOTTOMRIGHT, and on a
+narrow window they overlapped into "LOWN0g 14s 6c". Stacking them on two rows
+removes the collision rather than making it less likely — the same reasoning
+that keeps a FontString's width off it, since nothing on 1.12 clips one.
+
+**Still to do toward the reference:** faint vertical gridlines at each x label,
+the title and period buttons moved to sit with the chart, and a real gradient
+under the fill rather than flat alpha.
+
+**Tabled at the owner's request, to revisit:** the chart taking the whole tab
+with the ledger as a popover over it, the way the Aegis tab's category picker
+works. That is the shape that would make room for the reference's SALES /
+EXPENSES / PROFIT blocks, and it is a bigger change than anything above.
+
+### The chart becomes gold-only — v1.53.8
+
+**The framing was wrong and one sentence from the owner settled it: "all gold
+is cumulative — the graph is simply tracking the toon's gold and the gold
+across the rest of your characters."** Income-and-spending, a ledger balance
+and a line per character were four answers to questions the TABLE beside the
+chart already answers exactly, line by line, with the item names attached.
+What a chart is good at and a table is not is a shape over time. So the
+dropdown picks WHOSE gold, not which question, and `HISTVIEWS`,
+`ui.CumulativeSeries`, `ui.CharSeries`, `ui.HistViewSeries` and
+`ui.PaintLegend` went with the views they served.
+
+**"The line needs to be much smoother", and the cause was not the columns.**
+`HISTL.buckets` was a fixed count per period. Thirty data points across a 300px
+plot is one every ten pixels, and `ui.SeriesAt` interpolating between points
+that far apart draws long straight runs however narrow the columns get.
+`ui.HistBucketCount` derives the count from the plot instead — a point every
+`HISTL.bucket_px` (3) at any window size — and `col_w` came down to 2. The
+suite now asserts `col_w <= bucket_px`, because a column wider than the gap
+between points throws one of them away.
+
+**Three months for the same SavedVariables, via two resolutions in one table.**
+Every sample starts hourly; `db.CompactMoney` thins anything outside a four-day
+window down to each day's **closing** figure — the right one to keep, because
+`db.MoneySeries` carries the last known value forward, so keeping the morning's
+would report it for the whole of the next day. 96 hourly + ~800 daily reaches
+back about two years. Hourly for two years is 17,000 numbers per character,
+written out as Lua source on every logout.
+
+Compaction is **amortised** — it runs only when the cap is exceeded, because
+the caller is a `PLAYER_MONEY` handler and a walk per write is exactly the
+shape HARD RULE 16 forbids. That has a testing consequence worth recording:
+between runs there is a tail of hourly samples that have aged out and not yet
+been thinned, so the suite compacts explicitly before asserting the rule and
+tests the amortisation separately. An assertion that demanded the invariant at
+every instant would have been demanding the bug.
+
+**The hover readout dates from the MIDDLE of a bucket**, not its leading edge —
+half a bucket of drift, invisible on a wide window and obvious on a narrow one.
+And `ui.HoverBucket` takes the cursor and the plot edge in the SAME coordinate
+space, which they are not to begin with: `GetCursorPosition` returns screen
+pixels and `GetLeft` returns UI units, so the caller divides by the effective
+scale. Getting that wrong reads as a crosshair tracking at the wrong speed,
+which does not show up in a screenshot.
+
+**A mock gap closed:** the harness had no `date`, so `ui.WhenLabel`'s
+past-a-day branch could only ever exercise its fallback. Sixth time a gap in
+the simulated client certified something.
+
+**Still to do toward the reference:** faint vertical gridlines at each x label,
+calendar dates along the x axis rather than "30d ago", the title and period
+buttons moved to sit with the chart, and a real gradient under the fill rather
+than flat alpha.
+
+### Account gold, and the chart's views — v1.53.7
+
+**What Bagshui does, since it was the reference.** `Components/Character.lua`
+registers a set of money events (`PLAYER_MONEY`, `PLAYER_TRADE_MONEY`,
+`SEND_MAIL_MONEY_CHANGED`, `SEND_MAIL_COD_CHANGED`, `TRADE_MONEY_CHANGED`) plus
+`PLAYER_ENTERING_WORLD`, and `Character:UpdateMoney` writes `GetMoney()` into
+that character's SavedVariables record. `Components/Catalog.lua` then totals it
+across characters by treating coin as **one more item** with a pseudo
+itemString, so the account total falls out of the same aggregation that totals
+Silk Cloth. Each character carries a `lastLogout` for ageing.
+
+That is the only shape available on this client — `GetMoney()` answers for you
+and nothing will tell you what an alt has — so an account total is necessarily
+a sum of REMEMBERED figures. We differ in two ways on purpose:
+
+- **Realm-scoped**, like `db.Inventories` and unlike Bagshui's catalog. Gold on
+  a character you cannot reach from here is not gold you can spend here; the
+  same argument already settled the inventory block.
+- **We keep a HISTORY.** Bagshui only needs "how much does this character
+  have". The chart needs "how much did the account have last Tuesday", which
+  cannot be recovered from one number per character. One sample per **hour**
+  per character — the resolution the 24h view wants, and coarse enough that a
+  day of trading is 24 numbers rather than one per transaction. A second change
+  inside the same hour overwrites it.
+
+**Two properties the series has to have, and each one draws a plausible line
+when it is wrong.** A character contributes **nothing** before its first
+sample — back-filling its earliest figure shows the account holding gold it had
+not earned yet. And it **carries its last figure forward** — an alt that has
+not played since Monday still has that gold, and a line dropping to zero draws
+it being spent.
+
+**The axis had to become signed.** `ui.SeriesMax` returned a maximum, which is
+enough while every series starts at zero; a cumulative balance crosses it.
+`ui.SeriesRange` returns lo and hi and **always keeps zero inside them**, and
+`ui.GridFractions` puts a rule ON zero rather than at the halfway point — on a
+range of -40g to +120g the midpoint marks 40g, which is nothing in particular.
+
+**A sabotage caught the same class of mistake in the rasteriser.** Every
+existing plot test ran from zero up, where "measure from lo" and "measure from
+zero" are the same arithmetic — so a version that ignored the bottom of the
+range passed all of them while flattening every signed chart onto the lower
+half of the plot. The suite now has one series that starts below zero, and that
+is the general lesson: a test whose inputs are all on one side of a boundary
+cannot see a rule about the boundary.
+
+**Two dead guards, found by sabotages that passed.** `seen` in
+`db.MoneySeries` was redundant because `held` already starts at zero — the flag
+was removed and the comment now names the zero as the anti-back-fill rule.
+That is the better fix than keeping a flag nothing can break.
+
+**Still not done, and the reference has it:** a gradient under the filled line
+rather than a flat alpha. `SetGradientAlpha` exists on 1.12 but applies per
+texture, and the fill is one texture per column — so each column would run the
+whole gradient over its own height rather than the plot's. It wants a real
+client and a look before it is worth doing.
+
+### Pressing Bid bought the item — v1.53.6
+
+Reported from a live client: *"clicking bid didn't put a bid in but rather
+bought out the items."* Three faults on one path, and any one of them alone
+spends a player's gold.
+
+**1. The engine escalated silently.** On 1.12, `PlaceAuctionBid` with an amount
+at or above the buyout is not a bid — the server sells. `buy.Bid` detected that
+and called `buy.Buyout`, which is *arithmetically* right and *interactively*
+indefensible: the dialog had already asked "Bid on X? bid 1g 99s 98c" and the
+player had answered that question, not this one. It refuses now, and
+`buy.BidIsBuyout` is a separate pure predicate **precisely so the UI can ask
+before a dialog goes up** — the fault was a dialog that asked one thing and did
+another, so the test has to be available earlier than the action.
+
+The trigger is ordinary: a listing whose start bid equals its buyout has
+`nextBid == buyout`, so the *minimum* bid is already a purchase. Our own Sell
+tab produces exactly that when both price fields are set the same, which means
+Aegis was creating the listings that broke Aegis.
+
+**2. The Bid box was write-only.** `SetMoneyBox` filled it on selection;
+nothing ever read it. `ui.DoBid` sent `row.nextBid` unconditionally. A control
+that ignores what you type is worse than no control, and it is invisible in
+review because both halves look correct on their own.
+
+**3. The ledger write lived in the wrong layer.** `ui.DoBuyout` called
+`db.RecordTxn`, so the second route into `buy.Buyout` — the escalation above —
+spent gold and logged nothing. Moved beside `buy.RecordPurchase`, which is the
+number it has to agree with. The batch path books its own per purchase and does
+not come through `buy.Buyout`, so there is no double count.
+
+**The general lesson, and it is not about auctions.** When a function can
+decide to do something *more* than it was asked, that decision belongs to
+whoever framed the question. An engine that upgrades a bid to a purchase, a
+save that silently overwrites, a retry that changes the request — the caller
+asked for one thing and the user was shown that thing.
+
+**A harness collision found while fixing it.** `W.bids` had been this file's
+log of every `PlaceAuctionBid` call since long before v1.53.4 added a bidder
+list under the same name. `W.SetBids` wiped the purchase log and
+`PlaceAuctionBid` appended into the bidder list. Nothing broke, because no
+suite used both — which is the whole hazard: the first suite that did would get
+a confident wrong answer. Renamed to `W.bidderRows` / `W.SetBidderRows`.
+
+### The History tab, split — with the charting spike — v1.53.5
+
+**Phase 3 asked for the design spike in writing before any of it was built.
+Here it is, and the answer it reached is in `HISTL`'s header comment so the
+next person to open that file finds it there rather than here.**
+
+1.12 has no charting primitive at all. Four candidates:
+
+| approach | cost | verdict |
+| --- | --- | --- |
+| one texture per plotted **pixel** | 340×150 = 51,000 textures | never |
+| one bar per **bucket** | ~30 per series | cheap, and it is a bar chart |
+| **rotated segments** (8-arg `SetTexCoord` shear) | ~30 per series | true diagonals, but nothing in `tests/` can see whether it came out straight |
+| **a thin vertical span per column** | ~125 per series at 500px | ships |
+
+`Texture:SetRotation` is 3.x, so the third option means the eight-argument
+`SetTexCoord` affine trick. It works on 1.12 and vanilla addons used it. It was
+rejected for being **untestable**, not for being impossible — and that is the
+reasoning to revisit if anyone ever wants real diagonals, with a real client
+and a person looking at it.
+
+**What ships is a polyline rasterised as vertical spans.** Every rectangle is
+axis-aligned, so it needs only `SetWidth` / `SetHeight` / `SetPoint`. A column
+four pixels wide takes the height the line actually has across those four
+pixels — `ui.SeriesAt` interpolates between buckets, which is the difference
+between a line and a staircase — so consecutive spans overlap in y and read as
+continuous. The suite asserts that: no gaps horizontally, none vertically, and
+every span inside the plot, because these are textures on the chart frame and
+nothing clips one that overruns.
+
+**`ui.PlotColumns` returns y measured UP from the baseline** and the painter
+anchors `BOTTOMLEFT`. That is the whole reason the rasteriser has no sign
+handling in it.
+
+**The drawing area is arithmetic.** `ui.HistPlotSizeAt(winW, winH)` computes
+it; the plot frame is anchored by two corners and `GetWidth` on one of those
+reports the size it was laid out at — the trap that has now taken the Buy
+table, the Advanced widths, the Saved Searches columns and all six list row
+counts. Six instances, and the seventh was avoided by writing the function
+before the bug.
+
+**Two things worth keeping in mind about the data.** An entry outside the
+window is **dropped, not clamped** into an end bucket — a month of trading
+piled onto day 1 of a 7-day chart is a spike that never happened. And the
+newest entry sits exactly on `now`, which divides into bucket n+1 of n; it
+belongs in the last one.
+
+**One nan trap, found by a sabotage that passed.** An empty period has a scale
+of zero, and `0/0` is nan. Every comparison against nan is false, so a nan
+rectangle passes "is it inside the plot", "is it tall enough" and "is it too
+wide" at once — the assertion had to ask whether the number equals itself. Any
+geometry check in this repo that can receive a zero scale wants the same line.
+
+**Still to do on this tab, and deliberately not done here:** the chart plots
+per-bucket totals, not a cumulative balance. "What did I take in and pay out
+each day" and "how has my gold moved" are different questions and the second
+wants its own series and its own toggle. Nobody has asked for it yet.
+
+### The Auctions tab, split — v1.53.4
+
+**A Bids tab or a split Auctions tab: the split, and the reason is that they
+are one question.** A bid is an outgoing commitment exactly the way a posted
+auction is an incoming one, and both are decided by the same clock. "What is my
+gold tied up in, and what resolves soon" is answered by seeing them together
+and answered badly by flipping between two tabs. A seventh sub-tab would also
+have been a seventh sub-tab.
+
+**Both new numbers are easy to state dishonestly, which is why both are
+functions with a suite rather than concatenation inside a painter.**
+
+`sell.BookValue(rows, cut)` returns gross, net, counted, **skipped**. The
+skipped count is not a footnote: a bid-only auction has no buyout, so there is
+nothing to add — it could fetch its minimum bid or ten times that. Averaging a
+guess in makes the total a guess, so they are counted separately and
+`ui.BookLine` names them. The cut comes off the sale, floored once, the same
+convention `ui.ListNet` uses.
+
+`sell.BidTotals(rows)` returns committed, winning, outbid, and **committed
+counts only the rows you are winning**. That is exact rather than cautious:
+1.12 takes the gold when you bid and mails it back the moment someone beats
+you, so an outbid row is money already in your purse. The subtlety underneath
+it is that `bidAmount` on a bidder row is **the auction's current bid, not
+yours** — while `highBidder` is set it is yours, and once it is not it belongs
+to whoever beat you and nothing in the 1.12 API will tell you what you bid. So
+an outbid row shows the price to beat, dimmed, and never a figure presented as
+yours.
+
+**The split itself is a ROW COUNT, taken once and handed to both painters.**
+List rows are not the scroll frame's scroll child, so nothing clips a row that
+hangs past the bottom of its half — it draws straight through the other table.
+`ui.AucSplitRows(h, bids)` is pure and returns both counts;
+`ui.LayoutAuctionsSplit` places both halves from them. Two properties worth
+keeping: **the bids half never takes more rows than you have bids**, and **no
+bids collapses it entirely** and hands every row back, which is the common case
+and the one where the split has to cost nothing.
+
+**Two anchoring traps, both of which compile and load.** The auctions scroll
+frame is now anchored by its two TOP corners with an explicit height, because a
+frame pinned top and bottom takes its height from its anchors and silently
+ignores `SetHeight` — every other list in this window is built the other way,
+which is exactly what makes it easy to "fix" back. And every widget the layout
+moves is `ClearAllPoints()`-ed first: `SetPoint` **adds** a point on 1.12, so
+re-anchoring without clearing stretches a widget rather than moving it, and
+only after the first resize. Both are asserted against the source in the
+geometry suite, because neither is reachable from a unit test.
+
+**Still open, and for the owner rather than the code:** `sell.TimeLeftText`
+prints the vanilla wordings ("< 30m", "< 2h", "< 12h", "> 12h") for the four
+time-left codes, and Turtle multiplies auction durations by three. If the
+server scales its bucket thresholds too, those four labels are wrong by 3x on
+both halves of this tab. It is pre-existing and unchanged here; it wants one
+measurement in game before anything is rewritten.
+
+### The bags bucket erased by its own writer — v1.53.3
+
+Reported as a tooltip showing **two** characters where another addon showed
+**four**. The two Aegis showed were the two holding the item in their **bank**;
+the two it missed were holding it in their **bags**.
+
+That asymmetry was the whole answer, and it pointed straight at the fix shipped
+one patch earlier. The bank bucket is only ever written from
+`BANKFRAME_OPENED` — a moment the client can always answer. The bags bucket had
+just gained a second writer in 1.53.1, `PLAYER_ENTERING_WORLD`, which fires at
+a moment it frequently cannot: containers are still arriving and the item data
+behind `GetContainerItemLink` resolves for seconds afterwards. That resolution
+is what makes `BAG_UPDATE` storm in the first place. A walk over containers
+reporting nothing yet returns the same `{}` a genuinely empty character does,
+and `{}` overwrote a real snapshot. The character then held none of anything,
+and `db.InventoryRows` leaves those out entirely — so the alt simply was not
+there.
+
+**The general shape is worth keeping.** A reader that cannot distinguish "no"
+from "I do not know" will eventually write one as the other. `sell.CountContainers`
+now returns the slots it saw alongside the counts, and `sell.SnapshotWritable`
+is the one place that turns that into a verdict: slots, not items, because a
+character really can be carrying nothing and that empty answer is worth
+storing.
+
+**And arrival arms rather than reads.** `sell.ArmBagSnapshot` stamps a clock;
+`sell.BagSettleVerdict` — pure, four numbers in, one of three words out — says
+whether the bags have been quiet for `BAG_SETTLE` (3s, pushed back by every
+`BAG_UPDATE`) or whether `BAG_SETTLE_MAX` (30s) has run out and an imperfect
+record beats none. It rides the existing `sell.invDriver` frame at one flag
+test and one clock comparison per tick, and hides it again the moment it is
+done. `PLAYER_LEAVING_WORLD` still snapshots outright: bags are certainly
+readable then, and there is no frame left to defer into.
+
 ### Wearing another addon's error — v1.52.2
 
 Reported as `ui\tooltip.lua:489: Unknown link type` while hovering. Line 489

@@ -711,7 +711,17 @@ function buy.ParseTerm(text)
     while i <= n do
         local raw = util.Trim(tokens[i])
         local tok = string.lower(raw)
-        if tok == "exact" then
+        -- [Bracketed] is the SAME THING as /exact, written the way a player
+        -- can read it back. `/exact` has always been in the query language;
+        -- brackets are what a right-click can put in the search box, and what
+        -- somebody can type from memory without knowing the language exists.
+        --
+        -- string.find with a capture, not string.match -- Lua 5.0.
+        local _, _, bracketed = string.find(raw, "^%[(.+)%]$")
+        if bracketed then
+            term.exact = true
+            appendWord(util.Trim(bracketed))
+        elseif tok == "exact" then
             term.exact = true
         elseif tok == "usable" then
             term.usable = true
@@ -1902,6 +1912,69 @@ function buy.BatchCost(rows)
 end
 
 -- Start a batch buyout of `rows`. Returns (true) or (false, reason).
+-- The search text that means "this item and nothing else".
+--
+-- BRACKETS, because the box has to show something a person can read and retype.
+-- `/exact/Greater Mana Potion` says the same to the parser and nothing at all
+-- to somebody who has not read the docs.
+--
+-- An empty name gives an empty term rather than "[]", which would parse as a
+-- name search for a literal pair of brackets and quietly match nothing -- the
+-- exact failure the exact-filter guard at buy.CompileTerm exists to avoid.
+function buy.ExactTerm(name)
+    name = util.Trim(name or "")
+    if name == "" then return "" end
+    return "[" .. name .. "]"
+end
+
+-- ---------------------------------------------------------------------------
+-- Grouping a page of listings into one row per item
+-- ---------------------------------------------------------------------------
+
+-- Aggregate listings into ONE ROW PER ITEM, each carrying the listings that
+-- make it up.
+--
+-- Returned in the order items were FIRST SEEN, not sorted: the caller sorts
+-- for display and the two jobs do not belong in one function -- ui.SortResults
+-- already owns the second one.
+--
+-- KEYED BY ITEM ID WHEN THERE IS ONE, and by name only when there is not.
+-- Different items can share a name on this client -- a recipe and the thing it
+-- teaches, most obviously -- and merging those totals two separate markets
+-- into one price. The id is authoritative; the name is the fallback for a row
+-- whose link has not resolved yet, which is a real state on 1.12 and not an
+-- error.
+--
+-- `low` is the lowest UNIT BUYOUT, which is the lowest price you can actually
+-- pay to take one home. A bid-only auction still counts as a LISTING -- it is
+-- on the auction house and the parent row says how many are -- but it cannot
+-- set the lowest available price, because there is no price at which you can
+-- have it. Counting it would quote a number nobody can buy at.
+function buy.GroupListings(rows)
+    local groups, byKey = {}, {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        local key = r.itemId and ("i" .. r.itemId) or ("n" .. (r.name or "?"))
+        local g = byKey[key]
+        if not g then
+            g = { key = key, name = r.name, itemId = r.itemId,
+                  texture = r.texture, quality = r.quality, level = r.level,
+                  listings = 0, units = 0, low = nil, rows = {} }
+            byKey[key] = g
+            table.insert(groups, g)
+        end
+        g.listings = g.listings + 1
+        g.units = g.units + (r.count or 1)
+        if r.unit and r.unit > 0 then
+            if not g.low or r.unit < g.low then g.low = r.unit end
+        end
+        table.insert(g.rows, r)
+        i = i + 1
+    end
+    return groups
+end
+
 -- ---------------------------------------------------------------------------
 -- What you have bought this session
 -- ---------------------------------------------------------------------------
@@ -2094,10 +2167,47 @@ function buy.Buyout(row)
     buy.driver:Show()
     PlaceAuctionBid("list", row.index, row.buyout)
     buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)
+    -- ...AND THE LEDGER, here rather than in the caller. ui.DoBuyout used to
+    -- own this line, so the OTHER way into this function -- a bid that the
+    -- server would treat as a buyout -- spent the gold and never appeared in
+    -- History at all. One writer beside the session tally it has to agree
+    -- with; the batch path books its own per purchase and never comes
+    -- through here.
+    if A.db and A.db.RecordTxn then
+        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)
+    end
     return true
 end
 
+-- Would a bid of `amount` on `row` actually BUY it?
+--
+-- Pure, and deliberately separate from buy.Bid, because the UI has to be able
+-- to ask this BEFORE it puts a dialog on screen. The whole fault this exists
+-- for was a dialog that asked one question and performed another.
+function buy.BidIsBuyout(row, amount)
+    if not row then return false end
+    local out = row.buyout or 0
+    if out <= 0 then return false end
+    amount = amount or row.nextBid or 0
+    return amount >= out
+end
+
 -- Place a bid of `amount` (defaults to the minimum next bid) on `row`.
+--
+-- IT REFUSES TO BUY. On 1.12, PlaceAuctionBid with an amount at or above the
+-- buyout is not a bid -- the server sells you the item. This function used to
+-- notice that and quietly call buy.Buyout, so the dialog said "Bid on Meat
+-- Cleaver? bid 1g 99s 98c", the player pressed Bid, and 1g 99s 98c left the
+-- bag as a purchase.
+--
+-- It is not a rare corner. An auction posted with its start bid equal to its
+-- buyout has nextBid == buyout, which is an ordinary posting and exactly what
+-- our own Sell tab produces when both prices are set the same -- so on those
+-- listings the Bid button was a second Buy button.
+--
+-- The engine now says no and names the reason; the CALLER decides whether to
+-- offer the buyout, and asks the question it is actually going to perform.
+-- See ui.ConfirmBid.
 function buy.Bid(row, amount)
     if not row then return false, "No auction selected." end
     if row.mine then return false, "That's your own auction." end
@@ -2105,8 +2215,9 @@ function buy.Bid(row, amount)
     if not amount or amount < row.nextBid then
         return false, "Bid is below the minimum."
     end
-    if row.buyout > 0 and amount >= row.buyout then
-        return buy.Buyout(row)      -- a bid at/above buyout IS a buyout
+    if buy.BidIsBuyout(row, amount) then
+        return false,
+            "That is at or above the buyout \226\128\148 it would buy it outright."
     end
     if not buy.Verify(row) then
         return false, "Listing changed \226\128\148 search again."
@@ -2158,7 +2269,157 @@ local function CStore()
     return A.db and A.db.account and A.db.account.crafting
 end
 
+-- Recipes for demo mode. See db.DemoSeries for the discipline: consulted
+-- INSTEAD of the store, never written to it, so nothing generated can reach a
+-- real save.
+--
+-- REAL ITEM IDS, so the client colours the names by quality and shows the
+-- icons it has cached -- a demo drawn from made-up ids is a demo of the "item
+-- not cached" path, which is not the path anyone wants to look at.
+--
+-- AND A REAL SPREAD OF QUALITIES, which is the point of this particular set.
+-- The first draft was four linen-and-mithril recipes and every single item in
+-- it was white, so the quality colouring the shopping panel had just gained
+-- had nothing to colour -- a feature demonstrated by a demo in which it is
+-- invisible. This set carries two EPIC recipes (Sulfuron Hammer, Black
+-- Dragonscale Boots), one RARE (Arcanite Reaper) and one UNCOMMON (Arcanite
+-- Bar), and among the reagents one EPIC (Sulfuron Ingot), two RARE (Lava
+-- Core, Fiery Core), four UNCOMMON and the rest common. Every id and every
+-- quality was checked against a vanilla item dump rather than remembered --
+-- several that FEEL rare are white on 1.12, Black Lotus among them.
+--
+-- CHOSEN TO EXERCISE THE LIST, not just to fill it. Arcanite Bar is both a
+-- project AND a reagent of two others, which is the sub-reagent expansion and
+-- the cross-recipe aggregation in one item; Rune Thread is vendor-sold, so
+-- the shopping list has to pick a source for that line; and the quantities
+-- run from 1 to 50, which is the range the money and count columns have to
+-- lay out without clipping.
+craft.DEMO_PROJECTS = {
+    { name = "Sulfuron Hammer", itemId = 17193, want = 1, reagents = {
+        { name = "Sulfuron Ingot",        itemId = 17203, count = 8 },
+        { name = "Lava Core",             itemId = 17011, count = 10 },
+        { name = "Fiery Core",            itemId = 17010, count = 10 },
+        { name = "Arcanite Bar",          itemId = 12360, count = 50 },
+        { name = "Essence of Fire",       itemId = 7078,  count = 25 },
+        { name = "Blood of the Mountain", itemId = 11382, count = 10 },
+        { name = "Dark Iron Bar",         itemId = 11371, count = 20 },
+    } },
+    { name = "Arcanite Reaper", itemId = 12784, want = 1, reagents = {
+        { name = "Arcanite Bar",        itemId = 12360, count = 20 },
+        { name = "Enchanted Leather",   itemId = 12810, count = 6 },
+        { name = "Dense Grinding Stone", itemId = 12644, count = 2 },
+    } },
+    { name = "Black Dragonscale Boots", itemId = 16984, want = 1, reagents = {
+        { name = "Black Dragonscale", itemId = 15416, count = 18 },
+        { name = "Fiery Core",        itemId = 17010, count = 3 },
+        { name = "Lava Core",         itemId = 17011, count = 3 },
+        { name = "Rune Thread",       itemId = 14341, count = 2 },
+    } },
+    { name = "Arcanite Bar", itemId = 12360, want = 2, reagents = {
+        { name = "Thorium Bar",    itemId = 12359, count = 1 },
+        { name = "Arcane Crystal", itemId = 12363, count = 1 },
+    } },
+}
+
+-- What demo mode pretends you are already carrying, by item id.
+--
+-- SOME OF EACH, NOT ALL AND NOT NONE. A list where every line reads 0 / 12 is
+-- a list with no progress on it, and the "12 / 42" a reagent row exists to
+-- show is the thing worth looking at. Two reagents are deliberately absent so
+-- there is always something left to buy, and two are fully covered so the
+-- "done" state appears as well.
+craft.DEMO_HAVE = {
+    [17203] = 2,     -- Sulfuron Ingot        (epic, part-gathered)
+    [17011] = 5,     -- Lava Core             (rare)
+    [17010] = 4,     -- Fiery Core            (rare)
+    [12360] = 18,    -- Arcanite Bar
+    [7078]  = 11,    -- Essence of Fire
+    [11371] = 20,    -- Dark Iron Bar         (covered)
+    [12359] = 40,    -- Thorium Bar
+    [12363] = 6,     -- Arcane Crystal
+    [12810] = 6,     -- Enchanted Leather     (covered)
+    [12644] = 1,     -- Dense Grinding Stone
+    [15416] = 18,    -- Black Dragonscale     (covered)
+}
+
+-- What demo mode pretends the auction house is asking, per unit, in copper.
+--
+-- INVENTED BUT PLAUSIBLE, and they have to exist at all: without them every
+-- money figure on the tab reads as a dash, and a demo whose entire purpose is
+-- to let a layout be judged cannot show the money columns empty. These sit
+-- beside the recipes rather than in the price DB for the same reason
+-- db.DemoSeries substitutes a reader -- there is no path by which an invented
+-- price reaches a player's SavedVariables.
+craft.DEMO_PRICE = {
+    [17193] = 9000000,   -- Sulfuron Hammer         900g
+    [12784] = 6500000,   -- Arcanite Reaper         650g
+    [16984] = 2800000,   -- Black Dragonscale Boots 280g
+    [17203] = 4500000,   -- Sulfuron Ingot          450g
+    [17011] = 180000,    -- Lava Core                18g
+    [17010] = 165000,    -- Fiery Core               16g 50s
+    [12360] = 280000,    -- Arcanite Bar             28g
+    [12363] = 240000,    -- Arcane Crystal           24g
+    [11382] = 95000,     -- Blood of the Mountain     9g 50s
+    [15416] = 45000,     -- Black Dragonscale         4g 50s
+    [7078]  = 22000,     -- Essence of Fire           2g 20s
+    [12359] = 21000,     -- Thorium Bar               2g 10s
+    [12810] = 18000,     -- Enchanted Leather         1g 80s
+    [11371] = 12000,     -- Dark Iron Bar             1g 20s
+    [12644] = 9000,      -- Dense Grinding Stone         90s
+    [14341] = 5200,      -- Rune Thread                  52s
+}
+
+-- ...and what a merchant charges, for the one reagent that has a merchant.
+--
+-- ONE ENTRY IS ENOUGH AND ONE ENTRY IS NECESSARY. The shopping list picks the
+-- cheaper of vendor and auction house per line (craft.CheaperSource), and a
+-- demo with no vendor price at all never reaches that branch -- every line
+-- would read "ah" and the source column would be a column of one value. Rune
+-- Thread is genuinely vendor-sold on 1.12 and its demo AH price above is set
+-- deliberately HIGHER than this, so the vendor is the answer.
+craft.DEMO_VENDOR = {
+    [14341] = 4830,      -- Rune Thread            48s 30c
+}
+
+-- The unit price the crafting tab and the shopping list should use.
+--
+-- ONE FUNCTION, because the tab costs reagents through craft.CostOf and the
+-- shopping list prices its own rows through an injected `marketOf`, and the
+-- two reading different sources is exactly how the panel's total stops
+-- agreeing with the lines above it.
+--
+-- Zero is NOT a price. An item recorded at nothing is an item we have not
+-- really seen, and letting a zero through makes a cost total that reads
+-- complete when it is not -- which is the direction that loses money.
+function craft.MarketUnit(itemId)
+    if not itemId or not A.db then return nil end
+    if A.db.demo then
+        local d = craft.DEMO_PRICE[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end
+    local m = A.db.MinBuyout and A.db.MinBuyout(itemId)
+    if m and m > 0 then return m end
+    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m and m > 0 then return m end
+    return nil
+end
+
+-- ...and what a merchant charges for it, on the same terms.
+function craft.VendorUnit(itemId)
+    if not itemId or not A.db then return nil end
+    if A.db.demo then
+        local d = craft.DEMO_VENDOR[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end
+    local v = A.db.GetVendorBuy and A.db.GetVendorBuy(itemId)
+    if v and v > 0 then return v end
+    return nil
+end
+
 function craft.Projects()
+    if A.db and A.db.demo then return craft.DEMO_PROJECTS end
     local s = CStore()
     return s and s.projects or {}
 end
@@ -2242,7 +2503,7 @@ function craft.CostOf(project)
     while i <= table.getn(project.reagents) do
         local r = project.reagents[i]
         local id = ResolveId(r.itemId, r.name)
-        local unit = id and A.db.BestUnit(id)
+        local unit = craft.MarketUnit(id)
         if unit then
             total = total + unit * (r.count or 1)
         else
@@ -2291,7 +2552,7 @@ end
 function craft.ValueOf(project)
     if not project then return nil, false end
     local id = ResolveId(project.itemId, project.name)
-    local unit = id and A.db.BestUnit(id)
+    local unit = craft.MarketUnit(id)
     if not unit then return nil, false end
     return unit * (project.made or 1), true
 end

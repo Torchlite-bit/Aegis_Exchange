@@ -2530,10 +2530,12 @@ end
      "rowchrome"),
 
     # THE BOUND ON ui.ReapplyInputText HAS NO SABOTAGE, deliberately. Removing
-    # it is only wrong when the dedupe ALSO fails, and forging that turns the
-    # unbounded walk into a HANG rather than a failure -- it hung this runner
-    # when it was first written, which is what a player would have got. A
-    # sabotage that hangs the harness is worse than none, so the bound is
+    # it is only wrong when the dedupe ALSO fails, and forging that would turn
+    # the unbounded walk into a HANG rather than a failure. (An earlier version
+    # of this note claimed it HAD hung the runner. It had not -- that run went
+    # past a timeout and then finished, sabotage caught. The hazard is real;
+    # the anecdote was not.) A sabotage that hangs the harness is worse than
+    # none, so the bound is
     # covered by a test that forges a single dedupe failure and asserts the
     # list does not run away, and by the comment on the loop.
 
@@ -2572,6 +2574,1278 @@ end
         if path then pcall(function() e:SetFont(path, size, flags) end) end
     end""",
      "rowchrome"),
+
+    # ---- the grouped Buy table's widgets (v1.53.2) -----------------------
+
+    # Grouping decided from the SEARCH BOX rather than from the term that ran.
+    # Type over the box while the previous results are on screen and the table
+    # changes shape under rows that did not come from what is now typed there.
+    ("buy-grouped-reads-the-box", "ui/frame.lua",
+     "    return not (ui.buyExactRan and true or false)",
+     "    local sb = ui.ActiveSearchBox()\n"
+     '    return not (sb and string.find(sb:GetText() or "", "[", 1, true))',
+     "buygroup"),
+
+    # ...and the flag pattern-matched for brackets instead of PARSED, so
+    # `/exact/Name` groups while `[Name]` flattens -- one request, two views,
+    # depending on how it was phrased.
+    ("buy-exact-flag-not-parsed", "ui/frame.lua",
+     "    local parsed = A.buy.ParseTerm and A.buy.ParseTerm(name) or nil\n"
+     "    ui.buyExactRan = (parsed and parsed.exact) and true or nil",
+     '    ui.buyExactRan = string.find(name, "[", 1, true) and true or nil',
+     "buygroup"),
+
+    # The paint always filling as a listing, so a parent gets a seller name and
+    # a bid belonging to whichever auction sorted first.
+    ("buy-group-painted-as-a-listing", "ui/frame.lua",
+     """            if r.kind == "group" then
+                ui.FillGroupRow(row, r)
+            else
+                ui.FillResultRow(row, r)
+            end""",
+     "            ui.FillResultRow(row, r)",
+     "buygroup"),
+
+    # Right-clicks never registered. A Button runs OnClick for the left button
+    # only until it is asked for more -- so exact-match would silently never
+    # fire, with no error and nothing on screen to see.
+    ("buy-rows-take-no-right-click", "ui/frame.lua",
+     '        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")',
+     "        local _ = row",
+     "buygroup"),
+
+    # The mouse button read as a handler ARGUMENT rather than the arg1 global.
+    # HARD RULE 6: on this client the script gets no arguments, so the test is
+    # always false and every click reads as a left-click.
+    ("buy-click-button-from-argument", "ui/frame.lua",
+     '    if e.kind == "group" then\n        if arg1 == "RightButton" then',
+     '    if e.kind == "group" then\n        if row.button == "RightButton" then',
+     "buygroup"),
+
+    # Expanding a group re-queries instead of repainting. The listings are
+    # already in hand -- that is what grouping them means -- and every search
+    # is a trip through the client's query gate.
+    ("buy-expand-researches", "ui/frame.lua",
+     "    ui.ToggleBuyGroup(ui.buyExpanded, e.key)\n    ui.UpdateBuyList()",
+     "    ui.ToggleBuyGroup(ui.buyExpanded, e.key)\n    ui.DoBuySearch()",
+     "buygroup"),
+
+    # A new search keeping the old expansion keys, so a fresh page springs open
+    # a row nobody touched.
+    ("buy-expansion-survives-a-search", "ui/frame.lua",
+     "    ui.buyExpanded = {}\n\n    ui.buyResults = nil",
+     "    ui.buyResults = nil",
+     "buygroup"),
+
+    # ---- the account-wide inventory block (v1.53.1) ----------------------
+
+    # Bags recorded only on the way OUT. An alt you have not banked or logged
+    # out cleanly on then has NO record, and a character with no record is
+    # omitted entirely -- so the account-wide block shows only the character
+    # you are on, which is exactly how it was reported. alt-F4 and a crash
+    # both skip the leaving event.
+    ("inventory-no-arrival-snapshot", "core/sell.lua",
+     "        sell.ArmBagSnapshot(GetTime and GetTime() or 0)",
+     "        local _ = sell",
+     "inventory"),
+
+    # ...and the departing one dropped, which loses everything picked up since
+    # you arrived.
+    ("inventory-no-departure-snapshot", "core/sell.lua",
+     '    A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)',
+     "    local _ = sell",
+     "inventory"),
+
+    # The lonely-block check answering true whenever there is one row, so an
+    # ALT holding some of the item gets told that other characters have not
+    # been seen -- while one is on screen saying otherwise.
+    ("inventory-lonely-ignores-whose-row", "core/db.lua",
+     "    return rows[1].you and true or false",
+     "    return true",
+     "inventory"),
+
+    # ...and answering true for an empty block, which draws nothing at all and
+    # would then be captioned.
+    ("inventory-lonely-counts-empty", "core/db.lua",
+     "    if n ~= 1 then return false end",
+     "    if n > 1 then return false end",
+     "inventory"),
+
+    # ---- the cart, and demo recipes (v1.53.13) ---------------------------
+
+    # The cart placed by a frame-relative offset instead of chained off the
+    # button that is anchored to the TABS. pfUI moves the merchant window but
+    # the tabs move with it -- every frame-relative offset tried before
+    # drifted between the two skins.
+    ('cart-anchored-to-the-frame-edge', 'ui/frame.lua',
+     '        ui.SetExternalPoint(b, "LEFT", ui.merchantBtn, "RIGHT", 4, 0)',
+     '        ui.SetExternalPoint(b, "TOPRIGHT", MerchantFrame, "TOPRIGHT", -40, -40)',
+     'shoplist'),
+
+    # ...or never attached at all, so the merchant frame has no cart on it.
+    ('cart-attached-before-the-sell-button', 'ui/frame.lua',
+     '        ui.merchantBtn = b\n        if A.skin then A.skin.ApplyExternal() end\n    end\n    ui.AttachShopCartButton()',
+     '        ui.merchantBtn = b\n        if A.skin then A.skin.ApplyExternal() end\n    end',
+     'shoplist'),
+
+    # The cart left to pfUI's SkinButton, which draws its plate through the
+    # icon's own edge pixels -- the same fault list rows opt out of.
+    ('cart-is-plated-by-pfui', 'ui/frame.lua',
+     '    b.aegisNoSkin = true\n\n    local icon = b:CreateTexture(nil, "ARTWORK")',
+     '    local icon = b:CreateTexture(nil, "ARTWORK")',
+     'shoplist'),
+
+    # The badge counted inside the BAG_UPDATE handler. Counting the list walks
+    # every tracked recipe's reagents, and that event storms hardest while a
+    # merchant window is open and the player is buying -- the shape HARD RULE
+    # 16 exists for.
+    ('cart-counts-inside-bag-update', 'ui/frame.lua',
+     '    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then\n        ui.shopDriver:Show()\n    end',
+     '    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then\n        ui.RefreshShopCartButton()\n    end',
+     'shoplist'),
+
+    # ...and the other way: the flush stops refreshing it, so the badge keeps
+    # whatever count it had when the merchant opened.
+    ('cart-badge-never-flushed', 'ui/frame.lua',
+     '        ui.RefreshShopCartButton()\n    end)',
+     '    end)',
+     'shoplist'),
+
+    # The cart left reading as pressed after the list is closed by its own X
+    # button, because only the cart's own click path told it.
+    # A DELETION, not an early return. The first version of this planted
+    # `if true then return end` above the call -- which leaves the line in the
+    # file, and a check that reads source text structurally cannot see that it
+    # has become unreachable. The sabotage was testing something no source
+    # check could catch, which is the sabotage's fault and not the suite's.
+    ('cart-does-not-follow-the-window', 'ui/frame.lua',
+     '    -- The cart reads as pressed while the list is up, so it has to be told\n    -- when the list goes down -- including by its own X button.\n    ui.RefreshShopCartButton()',
+     '    local _ = ui',
+     'shoplist'),
+
+    # Demo mode no longer substituting the recipe list, so the Crafting tab
+    # and the shopping list have nothing to draw -- which is half of what the
+    # mode exists for.
+    ('demo-recipes-written-to-the-store', 'core/buy.lua',
+     '    if A.db and A.db.demo then return craft.DEMO_PROJECTS end',
+     '    local _ = A',
+     'purse'),
+
+    # ...and the one recipe that is ALSO a reagent of another stripped, which
+    # takes the sub-reagent expansion out of the demo entirely -- the branch
+    # that turns "short of a Bolt" into "buy the Linen Cloth to make one".
+    ('demo-recipes-have-no-reagents', 'core/buy.lua',
+     '    { name = "Arcanite Bar", itemId = 12360, want = 2, reagents = {\n        { name = "Thorium Bar",    itemId = 12359, count = 1 },\n        { name = "Arcane Crystal", itemId = 12363, count = 1 },\n    } },',
+     '    { name = "Arcanite Bar", itemId = 12360, want = 2, reagents = {} },',
+     'purse'),
+
+    # Nothing part-gathered, so every reagent line reads 0 / n and the
+    # "12 / 42" progress a reagent row exists to show has nothing to show.
+    # THE WHOLE TABLE, not one entry. The property is "some progress exists",
+    # so blanking one of five leaves the other four proving it and the
+    # sabotage proves nothing -- it went unnoticed for exactly that reason.
+    # Sabotage granularity has to match the property the check states.
+    ('demo-has-nothing-gathered', 'core/buy.lua',
+     '''    [17203] = 2,     -- Sulfuron Ingot        (epic, part-gathered)
+    [17011] = 5,     -- Lava Core             (rare)
+    [17010] = 4,     -- Fiery Core            (rare)
+    [12360] = 18,    -- Arcanite Bar
+    [7078]  = 11,    -- Essence of Fire
+    [11371] = 20,    -- Dark Iron Bar         (covered)
+    [12359] = 40,    -- Thorium Bar
+    [12363] = 6,     -- Arcane Crystal
+    [12810] = 6,     -- Enchanted Leather     (covered)
+    [12644] = 1,     -- Dense Grinding Stone
+    [15416] = 18,    -- Black Dragonscale     (covered)''',
+     '    [999999] = 14,   -- nothing any recipe wants',
+     'purse'),
+
+    # ---- demo data, and the gradient that could not work (v1.53.12) ------
+
+    # The wash under the line drawn solid. It is the same colour as the line,
+    # so a solid fill IS a solid block with no line visible on it -- which is
+    # exactly what shipped in v1.53.11 when a pcall reported that a gradient
+    # had been applied and it had not.
+    ('fill-is-opaque', 'ui/frame.lua',
+     '            t:SetAlpha(HISTL.fill_flat)',
+     '            t:SetAlpha(1)',
+     'histgraph'),
+
+    # The x-axis format decided per MARK rather than for the whole axis. On a
+    # 24h chart the leftmost mark is exactly a day old and crosses the date
+    # threshold while the four to its right do not, so the axis reads
+    # "Sep 10 / 18h 0m ago / 12h 0m ago / 6h 0m ago / now".
+    ('axis-labels-decided-per-mark', 'ui/frame.lua',
+     '            fs:SetText(ui.AxisTimeLabel(m.t, now, now - from))',
+     '            fs:SetText(ui.WhenLabel(m.t, now))',
+     'histgraph'),
+
+    # ...and the same rule the wrong way round: dates on a one-day chart and
+    # relative times on a three-month one.
+    ('axis-label-threshold-inverted', 'ui/frame.lua',
+     '    if not span or span < 2 * 86400 then',
+     '    if not span or span > 2 * 86400 then',
+     'histgraph'),
+
+    # The axis label back to "18h 0m ago", which is three times the width for
+    # no more information -- five of those across a narrow plot run into each
+    # other.
+    ('agoshort-keeps-the-long-form', 'core/util.lua',
+     '    if sec < 86400 then return math.floor(sec / 3600) .. "h" end',
+     '    if sec < 86400 then return util.FormatAgo(sec) end',
+     'util'),
+
+    # Demo mode no longer substituting the reader. The whole safety of the
+    # mode is that generated gold is never anywhere the store can see it --
+    # not on logout, not on a crash, not if you forget it is on.
+    ('demo-data-is-written-to-the-store', 'core/db.lua',
+     '    if db.demo then return db.DemoRows() end',
+     '    local _ = db',
+     'purse'),
+
+    # ...and the same for the series, which is the half the chart draws.
+    ('demo-series-not-substituted', 'core/db.lua',
+     '    if db.demo then return db.DemoSeries(from, step, n, who) end',
+     '    local _ = who',
+     'purse'),
+
+    # Generated gold allowed below zero. A chart drawn from data its own
+    # reader could not have produced is testing the wrong thing.
+    ('demo-walk-can-go-negative', 'core/db.lua',
+     '            if held < 0 then held = 0 end',
+     '            local _ = held',
+     'purse'),
+
+    # Every demo character seeded the same, so the account view is one line
+    # multiplied by four rather than four lines summed.
+    ('demo-characters-all-alike', 'core/db.lua',
+     '        local seed = db.DemoSeed(names[ci])',
+     '        local seed = 12345',
+     'purse'),
+
+    # A seed that is just a sum of letters, so two names that are anagrams
+    # draw the same line.
+    ('demo-seed-ignores-position', 'core/db.lua',
+     '        seed = math.mod(seed * 31 + string.byte(name, i) * i, db.DEMO_MOD)',
+     '        seed = math.mod(seed + string.byte(name, i), db.DEMO_MOD)',
+     'purse'),
+
+    # The LCG multiplier raised past what a double holds exactly. Lua 5.0
+    # numbers are exact only to 2^53 and this product reaches ~2.4e18 -- it
+    # does not error, it quietly stops being random.
+    ('demo-generator-overflows', 'core/db.lua',
+     'db.DEMO_MULT = 16807',
+     'db.DEMO_MULT = 1103515245',
+     'purse'),
+
+    # ---- the chart's own title bar and a real gradient (v1.53.11) --------
+
+    # THE BUG ITSELF: the menu handed the NAME-keyed selection while its own
+    # entries are keyed "char:Name". Every box draws empty while the title
+    # says a character is selected -- and a set lookup that misses returns
+    # nil rather than erroring, so nothing says so.
+    ('ticks-handed-the-wrong-key-space', 'ui/frame.lua',
+     '        ui.histWhoDD:SetTicked(ui.HistWhoTicks(ui.histWho), title)',
+     '        ui.histWhoDD:SetTicked(ui.histWho, title)',
+     'histgraph'),
+
+    # ...and the same fault inside the translation, which is where it is now
+    # possible to write it.
+    ('ticks-keyed-by-bare-name', 'ui/frame.lua',
+     '    while i <= n do out["char:" .. names[i]] = true; i = i + 1 end',
+     '    while i <= n do out[names[i]] = true; i = i + 1 end',
+     'histgraph'),
+
+    # Nothing ticked when nothing is selected, which says the chart is
+    # showing nothing -- never the state it is actually in.
+    ('all-players-never-ticks', 'ui/frame.lua',
+     '    if n == 0 then out[HIST_ALL_PLAYERS] = true end',
+     '    local _ = n',
+     'histgraph'),
+
+    # ...and the opposite: All Players ticked next to a character, which says
+    # the chart is drawing both.
+    ('all-players-ticks-alongside-a-name', 'ui/frame.lua',
+     '    if n == 0 then out[HIST_ALL_PLAYERS] = true end',
+     '    out[HIST_ALL_PLAYERS] = true',
+     'histgraph'),
+
+    # X marks that never reach the right edge, so the last rule and its date
+    # sit short of the end of the window the chart covers.
+    ('xaxis-marks-miss-the-right-edge', 'ui/frame.lua',
+     '        local frac = (i - 1) / (count - 1)\n        table.insert(out, { frac = frac, t = from + span * frac })',
+     '        local frac = (i - 1) / count\n        table.insert(out, { frac = frac, t = from + span * frac })',
+     'histgraph'),
+
+
+
+
+
+
+    # The period row anchored by its LEFT edge. The chart's width moves with
+    # the window and the buttons have to stay against its far side; anchored
+    # left they run straight through the heading.
+    ('periods-left-on-the-tab', 'ui/frame.lua',
+     '            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)',
+     '            b:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -5)',
+     'histgraph'),
+
+    # The chart's floor dropped below what its own title bar needs, so the
+    # period buttons run off the edge of the box.
+    ('chart-too-narrow-for-its-title-bar', 'ui/frame.lua',
+     '    graph_min  = 300,',
+     '    graph_min  = 200,',
+     'histgraph'),
+
+    # ---- the shopping list, out on its own (v1.53.10) ---------------------
+
+    # A line you can CRAFT put on the buy list. Its own reagents are already
+    # on that list, so this tells you to purchase something you do not need
+    # and counts its cost on top of the cost of making it.
+    ('shop-lists-craftable-lines', 'ui/frame.lua',
+     '        if r.short and r.short > 0 and not r.craftable then',
+     '        if r.short and r.short > 0 then',
+     'shoplist'),
+
+    # ...and lines you already have enough of, which is most of a mature
+    # list -- the one thing the popout must not be full of.
+    ('shop-lists-things-you-have', 'ui/frame.lua',
+     '        if r.short and r.short > 0 and not r.craftable then',
+     '        if r.short and not r.craftable then',
+     'shoplist'),
+
+
+
+    # Sorted by cost rather than by name. A shopping list is read against
+    # what is in front of you, and cost order re-shuffles the whole list
+    # every time a price is learned.
+    ('shop-sorted-by-cost', 'ui/frame.lua',
+     '        return string.lower(a.name or "") < string.lower(b.name or "")',
+     '        return (a.unit or 0) > (b.unit or 0)',
+     'shoplist'),
+
+    # The source label ignoring what the engine chose, so a line bought from
+    # a vendor is labelled AH -- on a list you are reading AT that vendor.
+    ('shop-source-picks-again', 'ui/frame.lua',
+     '        local where = (r.source == "vendor") and "vendor" or "AH"',
+     '        local where = "AH"',
+     'shoplist'),
+
+    # An unpriced line quoting zero, which reads as free.
+    ('shop-unpriced-line-quotes-zero', 'ui/frame.lua',
+     '    return "no price yet", "unknown"',
+     '    return "vendor " .. util.FormatMoney(0, true), "vendor"',
+     'shoplist'),
+
+    # The rebuild back inside the BAG_UPDATE handler. It walks every tracked
+    # recipe's reagents, which is the shape HARD RULE 16 forbids -- and
+    # doubly so here, because a merchant window is open and the player is
+    # buying, which is exactly when that event storms.
+    ('shop-rebuilds-inside-bag-update', 'ui/frame.lua',
+     '    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end',
+     '    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.RefreshShopWindow() end',
+     'shoplist'),
+
+    # The flush driver left running, so the list is rebuilt every frame for
+    # the rest of the session.
+    ('shop-driver-never-stops', 'ui/frame.lua',
+     '    ui.shopDriver:SetScript("OnUpdate", function()\n        ui.shopDriver:Hide()',
+     '    ui.shopDriver:SetScript("OnUpdate", function()',
+     'shoplist'),
+
+    # An empty frame popped over the merchant window every time you talk to a
+    # vendor, which is the behaviour that makes people turn a feature off.
+    ('shop-pops-up-empty', 'ui/frame.lua',
+     '    if table.getn(ui.ShoppingShortRows(ui.craftFlat)) == 0 then return end',
+     '    local _ = ui',
+     'shoplist'),
+
+    # ...and no way to turn it off.
+    ('shop-merchant-setting-ignored', 'ui/frame.lua',
+     '    if A.db.Setting("shopAtMerchant") == false then return end',
+     '    local _ = A',
+     'shoplist'),
+
+    # Walking away from a vendor closing a list the player opened by hand.
+    # Only what we opened automatically is ours to close.
+    ('shop-close-hides-what-you-opened', 'ui/frame.lua',
+     '    if ui.shopAuto then\n        ui.shopAuto = nil\n        ui.HideShopWindow()\n    end',
+     '    ui.HideShopWindow()',
+     'shoplist'),
+
+    # The popout computing from something other than the Crafting tab's list.
+    # Two lists that can disagree about what you need is worse than no second
+    # list at all.
+    ('shop-builds-its-own-list', 'ui/frame.lua',
+     '    local rows, total, complete = ui.ShoppingShortRows(ui.craftFlat)',
+     '    local rows, total, complete = ui.ShoppingShortRows({})',
+     'shoplist'),
+
+    # ---- multi-select, and the field two features shared (v1.53.9) -------
+
+    # THE BUG ITSELF: the chart reading the ledger table's filtered ROW LIST
+    # instead of its own selection. Pressing a period button rebuilds that
+    # list, so the chart gets an array where it expected a set -- it threw,
+    # and silently kept whatever it had drawn last. Reported as 'I have to go
+    # back and select the player for the graph to update as well'.
+    ('chart-selection-shares-the-tables-field', 'ui/frame.lua',
+     '        ui.HistGoldSeries(ui.histWho, from, step, n)',
+     '        ui.HistGoldSeries(ui.histView, from, step, n)',
+     'histgraph'),
+
+    # ...and the same collision from the other end: the ledger's refresh
+    # reaching over and clearing the chart's selection.
+    ('ledger-refresh-clears-the-chart', 'ui/frame.lua',
+     '    local led = A.db.Ledger()\n    ui.histView = {}',
+     '    local led = A.db.Ledger()\n    ui.histWho = {}\n    ui.histView = {}',
+     'histgraph'),
+
+    # 'All Players' ticking alongside the names instead of clearing them,
+    # which draws the account total AND one character -- his gold counted in
+    # both lines.
+    ('all-players-does-not-clear', 'ui/frame.lua',
+     '    if not who then ui.histWho = {}; return ui.histWho end',
+     '    if not who then return ui.histWho end',
+     'histgraph'),
+
+    # A name that can be ticked and never unticked, so there is no way back
+    # to the account view except through All Players.
+    ('unticking-the-last-name-empties-the-chart', 'ui/frame.lua',
+     '    if ui.histWho[who] then\n        ui.histWho[who] = nil',
+     '    if false then\n        ui.histWho[who] = nil',
+     'histgraph'),
+
+    # The selection's names left in pairs() order, which a set has no promise
+    # about -- so the title shuffles between repaints and reads as the chart
+    # reloading while you watch.
+    ('who-list-unsorted', 'ui/frame.lua',
+     '    table.sort(names)\n    return names, table.getn(names)',
+     '    return names, table.getn(names)',
+     'histgraph'),
+
+    # The count dropped from the All Players label, which is the one place
+    # the chart says how many characters it is summing.
+    ('who-label-never-counts', 'ui/frame.lua',
+     '    if n == 0 then return "All Players (" .. (total or 0) .. ")" end',
+     '    if n == 0 then return "All Players" end',
+     'histgraph'),
+
+    # Two characters selected and only the last one's gold drawn -- the sum
+    # replaced rather than accumulated, which is the whole point of picking
+    # two.
+    ('multi-select-draws-only-the-first', 'ui/frame.lua',
+     '        local b = 1\n        while b <= n do out[b] = out[b] + (vals[b] or 0); b = b + 1 end',
+     '        local b = 1\n        while b <= n do out[b] = (vals[b] or 0); b = b + 1 end',
+     'histgraph'),
+
+    # The two stat strings back on one line, anchored to opposite ends. Both
+    # can grow, so on a narrow window they overlapped into 'LOWN0g 14s 6c'.
+    ('stat-rows-share-a-line', 'ui/frame.lua',
+     '    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)\n    ui.histStatR:SetJustifyH("LEFT")',
+     '    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 18)\n    ui.histStatR:SetJustifyH("RIGHT")',
+     'histgraph'),
+
+    # The ledger table squeezed below its own columns, so the Amount column
+    # -- the rightmost thing in the window -- runs under the scrollbar.
+    ('table-columns-run-under-the-scrollbar', 'ui/frame.lua',
+     '    left_min   = 566,',
+     '    left_min   = 420,',
+     'histgraph'),
+
+    # ---- gold-only chart, longer history (v1.53.8) -----------------------
+
+    # Compaction keeping the FIRST sample of each day rather than the last.
+    # The series reader carries the last known figure forward, so a day has
+    # to be represented by what you went to bed with -- keeping the morning's
+    # reports it for the whole of the next day.
+    ('money-compaction-keeps-the-days-first', 'core/db.lua',
+     '        if k > cutoff or not nxt or db.MoneyDayOf(nxt) ~= db.MoneyDayOf(k) then',
+     '        if k > cutoff or not nxt or db.MoneyDayOf(nxt) == db.MoneyDayOf(k) then',
+     'purse'),
+
+    # The recent hours thinned along with the old ones, which flattens the
+    # 24h view -- the one place the hourly detail is the whole point.
+    ('money-compaction-thins-the-fine-window', 'core/db.lua',
+     '        if k > cutoff or not nxt or',
+     '        if false or not nxt or',
+     'purse'),
+
+    # The hard cap behind the compaction removed, so a character played across
+    # more days than it allows grows without bound.
+    ('money-compaction-never-caps', 'core/db.lua',
+     '    while table.getn(keep) > db.MONEY_SAMPLES_MAX do\n        local old = table.remove(keep, 1)\n        rec.hours[old] = nil\n        dropped = dropped + 1\n    end',
+     '    local _ = keep',
+     'purse'),
+
+    # Compacted out of the key list and left in the table, which is a table
+    # that grows forever while reporting that it does not.
+    ('money-compaction-leaves-the-value', 'core/db.lua',
+     '            rec.hours[k] = nil\n            dropped = dropped + 1',
+     '            dropped = dropped + 1',
+     'purse'),
+
+    # Compaction on EVERY write. It is a walk of the key list and this runs
+    # from PLAYER_MONEY, which fires for every copper -- the exact shape
+    # HARD RULE 16 forbids. Amortised it is free.
+    ('money-compaction-runs-every-write', 'core/db.lua',
+     '        if table.getn(rec.keys) > db.MONEY_SAMPLES_MAX then\n            db.CompactMoney(rec, now)\n        end',
+     '        db.CompactMoney(rec, now)',
+     'purse'),
+
+    # The per-character filter dropped, so picking one character in the
+    # dropdown draws the whole account's gold under their name.
+    ('money-series-ignores-the-character-filter', 'core/db.lua',
+     '      if not who or name == who then',
+     '      if true then',
+     'purse'),
+
+    # A character with no samples in the window reported the same as one
+    # holding nothing -- so an alt you have never seen is drawn flat on the
+    # baseline instead of saying so.
+    ('money-series-cannot-tell-empty-from-absent', 'core/db.lua',
+     '                    if v then held = v; seen = true end',
+     '                    if v then held = v end',
+     'purse'),
+
+    # The all-time window starting at the NEWEST sample rather than the
+    # oldest, which is a chart with nothing on it.
+    ('oldest-money-takes-the-newest', 'core/db.lua',
+     '        local k = rec.keys and rec.keys[1]',
+     '        local k = rec.keys and rec.keys[table.getn(rec.keys or {})]',
+     'purse'),
+
+    # THE STAIRCASE ITSELF: a fixed bucket count instead of one derived from
+    # the plot. Thirty points across a 300px plot is one every ten pixels,
+    # and no amount of narrowing the columns rescues that.
+    ('buckets-fixed-not-from-the-plot', 'ui/frame.lua',
+     '    local n = math.floor((w or 0) / HISTL.bucket_px)',
+     '    local n = 30',
+     'histgraph'),
+
+    # ...and the floor removed, so an unmeasured window draws a line from no
+    # points at all.
+    ('buckets-not-clamped', 'ui/frame.lua',
+     '    if n < HISTL.bucket_min then n = HISTL.bucket_min end',
+     '    local _ = n',
+     'histgraph'),
+
+    # ...and the ceiling, which is arithmetic nobody can see the result of.
+    ('buckets-uncapped', 'ui/frame.lua',
+     '    if n > HISTL.bucket_max then n = HISTL.bucket_max end',
+     '    local _ = n',
+     'histgraph'),
+
+    # Columns wider than the gap between data points, so the interpolation is
+    # wasted -- two points inside one column is one of them thrown away.
+    ('columns-wider-than-a-bucket', 'ui/frame.lua',
+     '    col_w      = 2,',
+     '    col_w      = 8,',
+     'histgraph'),
+
+    # The readout clamped to the ends instead of going away when the cursor
+    # leaves the plot, so it keeps showing the first or last figure while you
+    # point at the table beside it -- which reads as a chart that has frozen.
+    ('hover-clamps-off-the-plot', 'ui/frame.lua',
+     '    if rel < 0 or rel > w then return nil end',
+     '    local _ = rel',
+     'histgraph'),
+
+    # The right edge divides to n+1 exactly, the same off-by-one the bucketing
+    # has at `now`. Unclamped it indexes past the end of the series.
+    ('hover-off-by-one-at-the-right-edge', 'ui/frame.lua',
+     '    if b > n then b = n end\n    return b',
+     '    return b',
+     'histgraph'),
+
+    # The readout dated from the bucket's leading edge rather than its middle,
+    # so it reports a moment half a bucket before the pixel under the cursor.
+    ('hover-labels-the-bucket-edge', 'ui/frame.lua',
+     '    local t = (from or 0) + (b - 0.5) * (step or 0)',
+     '    local t = (from or 0) + (b - 1) * (step or 0)',
+     'histgraph'),
+
+    # All-time measured from the first TRANSACTION only, which clips a gold
+    # history that predates any trading -- the common case for a character
+    # who levelled before they ever used the auction house.
+    ('window-all-time-ignores-the-coin-history', 'ui/frame.lua',
+     '        local coin = A.db.OldestMoney and A.db.OldestMoney()\n        if coin and coin < from then from = coin end',
+     '        local _ = from',
+     'histgraph'),
+
+    # The axis label falling back to the full figure, which is longer than the
+    # plot is tall and defeats the point of a label beside a chart.
+    ('shortmoney-is-not-short', 'core/util.lua',
+     '        return sign .. math.floor(gold) .. "g"',
+     '        return sign .. util.FormatMoney(copper)',
+     'util'),
+
+    # The sign dropped, so an axis running below zero labels its negative
+    # marks as though they were positive.
+    ('shortmoney-loses-the-sign', 'core/util.lua',
+     '    if copper < 0 then sign = "-"; copper = -copper end',
+     '    if copper < 0 then copper = -copper end',
+     'util'),
+
+    # ---- the account purse and the chart's views (v1.53.7) ---------------
+
+    # A sample appended for every money change instead of overwriting the
+    # hour. This is written from PLAYER_MONEY, which fires for every copper
+    # earned, spent, looted or mailed -- the history would grow without
+    # bound and tell the chart nothing it cannot already see.
+    ('purse-same-hour-appends', 'core/db.lua',
+     '    if rec.hours[hour] == nil then',
+     '    if true then',
+     'purse'),
+
+
+
+    # The character you are ON read from the stored figure rather than the
+    # live one. It is the only figure that can be exact, and a stale number
+    # where an exact one was available is inexcusable.
+    ('purse-live-figure-ignored', 'core/db.lua',
+     '        if who == me and live then\n            copper = live',
+     '        if false then\n            copper = live',
+     'purse'),
+
+    # A character with nothing stored left out of the total -- the fresh
+    # install case, where the one exact figure is the one that goes missing.
+    ('purse-fresh-character-uncounted', 'core/db.lua',
+     '    if me and live and not seededMe then',
+     '    if false then',
+     'purse'),
+
+    # Gold drawn into the PAST. A character with no sample before a bucket
+    # must contribute nothing there; back-filling its later figure shows the
+    # account holding gold it had not earned yet.
+    ('purse-series-backfills', 'core/db.lua',
+     '            local ki, held = 1, 0',
+     '            local ki, held = 1, (hours[keys[1]] or 0)',
+     'purse'),
+
+    # ...and the opposite: an alt that has not played since Monday dropped to
+    # zero for the rest of the week, which draws gold being spent that never
+    # left anyone's bag.
+    ('purse-series-does-not-carry-forward', 'core/db.lua',
+     '                    if v then held = v; seen = true end',
+     '                    if v then held = 0; seen = true end',
+     'purse'),
+
+    # PLAYER_MONEY only fires when the figure CHANGES, so without the arrival
+    # snapshot a character you log in on and do nothing with never records
+    # what it is carrying -- the same gap that made the account-wide
+    # inventory read as 'only shows the character I am on'.
+    ('purse-not-recorded-on-arrival', 'core/sell.lua',
+     '    A.RegisterEvent("PLAYER_ENTERING_WORLD", function()\n        if A.db and A.db.SetCharMoney and GetMoney then\n            A.db.SetCharMoney(GetMoney())\n        end\n    end)',
+     '    local _ = A',
+     'purse'),
+
+    # ...and the figure never updated while you play.
+    ('purse-money-change-not-recorded', 'core/sell.lua',
+     '        if coin and A.db and A.db.SetCharMoney then A.db.SetCharMoney(coin) end',
+     '        local _ = coin',
+     'purse'),
+
+    # Ledger entries written with no character, so the per-character
+    # breakdown has nothing to break down.
+    ('ledger-txn-unattributed', 'core/db.lua',
+     '        amount = amount, id = itemId, who = db.CharKey() })',
+     '        amount = amount, id = itemId })',
+     'purse'),
+
+    # The unattributed entries not reported. History from before this feature
+    # carries no character and cannot be given one, so a breakdown that
+    # silently omits it does not add up to the totals beside it.
+    ('ledger-bychar-hides-the-unattributed', 'core/db.lua',
+     '            else\n                anon = true\n            end',
+     '            end',
+     'purse'),
+
+    # Zero no longer inside the axis. A cumulative balance that never climbs
+    # above zero is a chart about how far BELOW it went; an axis starting at
+    # the series minimum draws that as a line rising off the baseline.
+    ('range-drops-zero-from-the-axis', 'ui/frame.lua',
+     'function ui.SeriesRange(list)\n    local lo, hi = 0, 0',
+     'function ui.SeriesRange(list)\n    local lo, hi = 1/0, -1/0',
+     'histgraph'),
+
+    # The middle rule at the halfway point of a signed axis, which on a range
+    # of -40g to +120g marks 40g -- nothing in particular. The one line that
+    # has to be findable is the one you are above or below.
+    ('grid-middle-rule-is-not-zero', 'ui/frame.lua',
+     '    local zero = (0 - lo) / span',
+     '    local zero = 0.5',
+     'histgraph'),
+
+    # The rasteriser measuring from zero rather than from the bottom of the
+    # range, so everything below zero clamps onto the baseline and a losing
+    # week reads as breaking even.
+    ('plot-ignores-the-bottom-of-the-range', 'ui/frame.lua',
+     '        local y = ((v or 0) - lo) / span * h',
+     '        local y = (v or 0) / span * h',
+     'histgraph'),
+
+    # The area filled from the bottom of the PLOT rather than from zero, so a
+    # value below the line fills upward from the floor and a losing week
+    # reads as a slightly shorter winning one.
+    ('fill-runs-to-the-floor-not-to-zero', 'ui/frame.lua',
+     '        if bot >= base then y, hh = base, top - base\n        elseif top <= base then y, hh = bot, base - bot\n        else y, hh = bot, top - bot end',
+     '        y, hh = 0, top',
+     'histgraph'),
+
+    # Axis marks that never reach the top of the range, so the highest label
+    # names a value below the highest point of the line.
+    ('axis-marks-are-not-evenly-spaced', 'ui/frame.lua',
+     '        local frac = (i - 1) / (count - 1)',
+     '        local frac = (i - 1) / count',
+     'histgraph'),
+
+    # A label naming a value the chart does not reach.
+    ('axis-marks-invent-a-scale', 'ui/frame.lua',
+     '        local v = 0\n        if span > 0 then v = lo + span * frac end',
+     '        local v = lo + span * frac + 1',
+     'histgraph'),
+
+
+
+
+
+
+    # The character name cut at the first non-letter, so an alt with a hyphen
+    # or an accent in their name selects nothing at all.
+    ('viewchar-uses-a-5.1-pattern-call', 'ui/frame.lua',
+     '    local _, _, who = string.find(view, "^char:(.+)$")',
+     '    local _, _, who = string.find(view, "^char:(%a+)$")',
+     'histgraph'),
+
+    # ---- pressing Bid must place a BID (v1.53.6) -------------------------
+
+    # THE BUG ITSELF, restored: buy.Bid noticing that the server would treat
+    # the amount as a purchase and quietly performing one. The dialog says
+    # "Bid on Meat Cleaver? bid 1g 99s 98c" and 1g 99s 98c leaves the bag.
+    ('bid-escalates-to-a-buyout', 'core/buy.lua',
+     '    if buy.BidIsBuyout(row, amount) then\n        return false,\n            "That is at or above the buyout \\226\\128\\148 it would buy it outright."\n    end',
+     '    if buy.BidIsBuyout(row, amount) then return buy.Buyout(row) end',
+     'bidpath'),
+
+    # ...and the test the caller uses to ask the question BEFORE the dialog
+    # goes up, answering no on the posting that broke it: a start bid equal
+    # to the buyout, where the minimum bid is already a purchase.
+    ('bid-buyout-test-misses-the-boundary', 'core/buy.lua',
+     '    return amount >= out',
+     '    return amount > out',
+     'bidpath'),
+
+    # ...or answering it about a bid-only auction, which has no buyout to
+    # reach at any price.
+    ('bid-buyout-test-ignores-a-missing-buyout', 'core/buy.lua',
+     '    if out <= 0 then return false end',
+     '    if out < 0 then return false end',
+     'bidpath'),
+
+    # The Bid box read and then thrown away -- the half that did nothing at
+    # all. A player who types a higher bid gets the minimum, silently.
+    ('bid-box-typed-figure-ignored', 'ui/frame.lua',
+     '    if not typed or typed < least then return least end\n    return typed',
+     '    local _ = typed\n    return least',
+     'bidpath'),
+
+    # ...or used below the minimum, which the server refuses outright.
+    ('bid-box-allows-under-the-minimum', 'ui/frame.lua',
+     '    if not typed or typed < least then return least end',
+     '    if not typed then return least end',
+     'bidpath'),
+
+    # ...or read for a row the box does not belong to. The Crafting tab's
+    # rows have a Bid button and no box of their own.
+    ('bid-box-read-for-the-wrong-row', 'ui/frame.lua',
+     '    if ui.buyBidBox and row == ui.buySel then',
+     '    if ui.buyBidBox then',
+     'bidpath'),
+
+    # The dialog asking "Bid?" and performing a purchase, because the caller
+    # stopped asking the engine what the amount would really do.
+    ('bid-dialog-does-not-check-for-a-purchase', 'ui/frame.lua',
+     '    if A.buy.BidIsBuyout(row, amount) then',
+     '    if false then',
+     'bidpath'),
+
+    # The quoted amount recomputed after the dialog instead of sent as shown,
+    # which is how the number on screen and the number sent come apart.
+    ('bid-sends-a-different-amount-than-it-quoted', 'ui/frame.lua',
+     '    local ok, err = A.buy.Bid(row, amount)',
+     '    local ok, err = A.buy.Bid(row, row.nextBid)',
+     'bidpath'),
+
+    # The ledger write for a purchase back in the UI handler, so the other
+    # route into buy.Buyout spends the gold and never reaches History --
+    # which the graph on that tab now reads.
+    ('buyout-ledger-write-left-to-the-caller', 'core/buy.lua',
+     '    if A.db and A.db.RecordTxn then\n        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)\n    end',
+     '    local _ = row',
+     'bidpath'),
+
+    # ...or booked for a purchase that was REFUSED, which is a number the
+    # player cannot reconcile against their own bag.
+    ('buyout-books-a-refused-purchase', 'core/buy.lua',
+     '    if not row.buyout or row.buyout <= 0 then return false, "No buyout price." end',
+     '    if false then return false end',
+     'bidpath'),
+
+    # ---- the History graph (v1.53.5) -------------------------------------
+
+
+
+    # "All time" starting at the epoch rather than at the oldest transaction,
+    # which is one flat line against the right-hand edge.
+    ("hist-all-time-starts-at-the-epoch", "ui/frame.lua",
+     "            if t and t < from then from = t end",
+     "            if t and t > from then from = t end",
+     "histgraph"),
+
+    # ...and the guard against a zero span, which is a division by zero in a
+    # repaint on any account with an empty ledger.
+    ("hist-zero-span-divides-by-zero", "ui/frame.lua",
+     "        if from >= now then from = now - 86400 end",
+     "        local _ = now",
+     "histgraph"),
+
+
+    # Each series scaled to its own maximum. Two axes on one chart is two
+    # charts drawn on top of each other, and both lines then peak at the top
+    # however far apart they are.
+    ("hist-series-do-not-share-a-scale", "ui/frame.lua",
+     "    while i <= table.getn(list or {}) do\n        local ser = list[i]",
+     "    while i <= 1 do\n        local ser = list[i]",
+     "histgraph"),
+
+    # The line read as a staircase: a column between two buckets snapping to
+    # the bucket it started in instead of taking the height the line has there.
+    ("hist-line-is-a-staircase", "ui/frame.lua",
+     "    return a + (b - a) * f",
+     "    return a",
+     "histgraph"),
+
+    # A span allowed past the top of the plot. These are textures on the chart
+    # frame and nothing clips one that overruns -- it draws over the axis
+    # labels and over the table in the other half.
+    ("hist-span-overruns-the-plot", "ui/frame.lua",
+     "        if hh > h - y then hh = h - y end",
+     "        local _ = h",
+     "histgraph"),
+
+    # ...and below the baseline, which is the same fault at the other end.
+    ("hist-span-hangs-below-the-baseline", "ui/frame.lua",
+     "        if y < 0 then hh = hh + y; y = 0 end",
+     "        local _ = y",
+     "histgraph"),
+
+    # A span with no height at all, which is a line with gaps in it.
+    ("hist-span-can-be-invisible", "ui/frame.lua",
+     "        if hh < 1 then hh = 1 end",
+     "        local _ = hh",
+     "histgraph"),
+
+    # Columns that do not touch, which draws a dashed line rather than a line.
+    ("hist-columns-leave-gaps", "ui/frame.lua",
+     "        push(c * colW, lo, hi, colW)",
+     "        push(c * colW, lo, hi, colW - 1)",
+     "histgraph"),
+
+    # A single bucket drawing nothing, which reads as a broken chart on the
+    # real state "one day of data".
+    ("hist-one-point-draws-nothing", "ui/frame.lua",
+     "    if n == 1 then\n        local y = yAt(values[1])\n        push(0, y, y, w)\n        return out\n    end",
+     "    if n == 1 then\n        return out\n    end",
+     "histgraph"),
+
+    # An empty period taken as a scale of zero and divided by.
+    ("hist-empty-period-divides-by-zero", "ui/frame.lua",
+     "        if span <= 0 then return 0 end",
+     "        local _ = span",
+     "histgraph"),
+
+    # The chart given the table's minimum width whatever the window, so it
+    # never grows -- and the panel's two halves stop adding up.
+    ("hist-split-does-not-follow-the-window", "ui/frame.lua",
+     "    local graph = math.floor(inner * HISTL.graph_frac)",
+     "    local graph = HISTL.graph_min",
+     "histgraph"),
+
+    # The CHART winning the squeeze instead of the table. The table's columns
+    # are fixed and its Amount column is the rightmost thing that can be
+    # clipped.
+    ("hist-table-loses-the-squeeze", "ui/frame.lua",
+     "    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end",
+     "    local _ = inner",
+     "histgraph"),
+
+    # The plot measured off a two-corner-anchored frame, which reports the size
+    # it was created at -- so the chart keeps its first width however far the
+    # window is dragged. This trap has taken five other things in this file.
+    ("hist-plot-measures-a-stale-frame", "ui/frame.lua",
+     "    local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())",
+     "    local pw, ph = ui.histPlot:GetWidth(), ui.histPlot:GetHeight()",
+     "histgraph"),
+
+    # The table anchored corner to corner again -- the way every other list in
+    # this window is built, and so the easy thing to "fix" it back to. It runs
+    # the table under the chart.
+    ("hist-table-anchored-under-the-chart", "ui/frame.lua",
+     '    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,\n                    LISTBOX.hist.bot)',
+     '    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.hist.bot)',
+     "histgraph"),
+
+    # The chart never repainted with the table, so it keeps whichever period
+    # was selected when the tab was built.
+    ("hist-chart-not-repainted", "ui/frame.lua",
+     "    ui.UpdateHistoryGraph()\nend",
+     "end",
+     "histgraph"),
+
+    # Spans anchored from the TOP of the plot, which inverts the whole chart --
+    # ui.PlotColumns returns y measured up from the baseline precisely so the
+    # painter never has to think about the sign.
+    ("hist-spans-anchored-upside-down", "ui/frame.lua",
+     '            t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)',
+     '            t:SetPoint("TOPLEFT", ui.histPlot, "TOPLEFT", r.x, r.y)',
+     "histgraph"),
+
+    # Re-anchored without clearing. SetPoint ADDS a point on 1.12, so a span
+    # ends up pinned to its old position and its new one -- stretched rather
+    # than moved, and only once the data has changed.
+    ("hist-spans-not-cleared", "ui/frame.lua",
+     "            t:ClearAllPoints()\n            t:SetPoint(\"BOTTOMLEFT\", ui.histPlot",
+     "            t:SetPoint(\"BOTTOMLEFT\", ui.histPlot",
+     "histgraph"),
+
+    # Spare spans left showing, so the chart keeps the tail of whatever it drew
+    # last time.
+    ("hist-spare-spans-left-showing", "ui/frame.lua",
+     "            t:Show()\n        else\n            t:Hide()\n        end\n        i = i + 1\n    end\nend\n\n-- Paint the area under a line",
+     "            t:Show()\n        end\n        i = i + 1\n    end\nend\n\n-- Paint the area under a line",
+     "histgraph"),
+
+    # Spans built as FRAMES rather than textures. A few hundred textures on
+    # one frame is affordable; a few hundred frames is not.
+    ("hist-spans-are-frames", "ui/frame.lua",
+     '        local t = ui.histPlot:CreateTexture(nil, "ARTWORK")\n        t:Hide()\n        pool[i] = t',
+     '        local t = CreateFrame("Frame", nil, ui.histPlot)\n        t:Hide()\n        pool[i] = t',
+     "histgraph"),
+
+    # ---- the Auctions split: book value and bids (v1.53.4) ---------------
+
+    # A bid-only auction folded into the "if it all sells" total as though its
+    # MINIMUM BID were a buyout. One with a 1c minimum could fetch anything,
+    # and a guess averaged into a total makes the whole total a guess.
+    ("book-counts-the-minimum-bid", "core/sell.lua",
+     "            skipped = skipped + 1",
+     "            gross = gross + (r.minBid or 0)\n            skipped = skipped + 1",
+     "bids"),
+
+    # ...or counted as a real buyout of zero, which loses the count of how many
+    # could not be totalled -- so the line stops saying it left any out.
+    ("book-bid-only-counted-as-sold", "core/sell.lua",
+     "        if r.buyout and r.buyout > 0 then",
+     "        if r.buyout then",
+     "bids"),
+
+    # The consignment cut never taken, so every book reads 5% richer than it
+    # could ever pay.
+    ("book-forgets-the-cut", "core/sell.lua",
+     "    return gross, math.floor(gross * (1 - cut)), counted, skipped",
+     "    return gross, math.floor(gross), counted, skipped",
+     "bids"),
+
+    # The heading stating a certainty instead of a maximum. Same arithmetic,
+    # different claim, and only one of them is true.
+    ("book-line-states-a-certainty", "ui/frame.lua",
+     '    local s = "at most " .. util.FormatMoney(net or 0, true) .. " after the cut"',
+     '    local s = util.FormatMoney(net or 0, true)',
+     "bids"),
+
+    # ...and quietly leaving the uncountable ones out of the wording, which is
+    # a total nobody can check.
+    ("book-line-hides-the-uncounted", "ui/frame.lua",
+     '        s = s .. " (" .. skipped .. " bid-only not counted)"',
+     "        s = s",
+     "bids"),
+
+    # Gold you were OUTBID ON counted as committed. 1.12 takes the gold when
+    # you bid and mails it back the moment someone beats you, so those coins
+    # are in your purse -- counting them reports the same gold twice.
+    ("bid-total-counts-outbid-as-committed", "core/sell.lua",
+     "        if r.winning then\n            committed = committed + (r.bid or 0)",
+     "        if true then\n            committed = committed + (r.bid or 0)",
+     "bids"),
+
+    # highBidder ignored, so every row reads as one you are winning -- and the
+    # amount shown against it belongs to whoever beat you.
+    ("bid-winning-flag-ignored", "core/sell.lua",
+     "                winning  = (highBidder and highBidder ~= 0) and true or false,",
+     "                winning  = true,",
+     "bids"),
+
+    # The bids read from the OWNER list, which is the list of what you are
+    # selling. Every number would be real and none of it would be a bid.
+    ("bid-list-reads-the-owner-list", "core/sell.lua",
+     '    local n = GetNumAuctionItems("bidder")',
+     '    local n = GetNumAuctionItems("owner")',
+     "bids"),
+
+    # The page count allowed to be zero, so "page 1 of 0" and a next button
+    # that is enabled with nowhere to go.
+    ("bid-page-count-can-be-zero", "core/sell.lua",
+     "    local pages = math.ceil(total / sell.BIDDER_PAGE_SIZE)\n    if pages < 1 then pages = 1 end",
+     "    local pages = math.ceil(total / sell.BIDDER_PAGE_SIZE)",
+     "bids"),
+
+    # ...and the page never clamped, so a bid resolving while you look at page
+    # two leaves you on a page that no longer exists.
+    ("bid-page-never-clamped", "core/sell.lua",
+     "    if page > pages - 1 then page = pages - 1 end\n    return page, pages, total\nend\n\n-- The auctions you have bid on",
+     "    return page, pages, total\nend\n\n-- The auctions you have bid on",
+     "bids"),
+
+    # Blizzard's own Bidder frame left unseeded. Its handler is registered even
+    # though we replace the window, and it does arithmetic on a field its
+    # OnShow would have set -- the same throw the owner list produced.
+    ("bid-request-skips-blizzard-seed", "core/sell.lua",
+     "    if AuctionFrameBidder then AuctionFrameBidder.page = page end",
+     "    local _ = page",
+     "bids"),
+
+    # ---- the Auctions split: geometry (v1.53.4) --------------------------
+
+    # The bids half never collapsing, so a player who has never bid loses a
+    # third of their auctions table to an empty box.
+    ("split-bids-half-never-collapses", "ui/frame.lua",
+     "    if bids <= 0 then\n        return ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H, AUC_ROWS_MAX), 0\n    end",
+     "    if bids < 0 then\n        return ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H, AUC_ROWS_MAX), 0\n    end",
+     "geometry"),
+
+    # The open split measured against the COLLAPSED box, which is one band
+    # taller -- so both halves together ask for one more row than the panel
+    # has, and nothing clips a list row.
+    ("split-measures-the-collapsed-box", "ui/frame.lua",
+     "    local total = ui.ListRowsAt(h, LISTBOX.aucSplit, AUC_ROW_H,",
+     "    local total = ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H,",
+     "geometry"),
+
+    # The bids half taking the larger share, which reads as the bids being the
+    # point of the tab -- and the auctions half is the one that pages at 50.
+    ("split-bids-half-takes-the-larger-share", "ui/frame.lua",
+     "    split_frac = 0.58,",
+     "    split_frac = 0.32,",
+     "geometry"),
+
+    # Rows handed to the bids half that it has no bids to fill, which is space
+    # the auctions table wanted.
+    ("split-bids-half-keeps-empty-rows", "ui/frame.lua",
+     "    if bid > bids then auc = auc + (bid - bids); bid = bids end",
+     "    local _ = bids",
+     "geometry"),
+
+    # The pool ceilings dropped, so a window dragged past the cap asks a
+    # painter for a row that was never built.
+    ("split-forgets-the-auctions-cap", "ui/frame.lua",
+     "    if auc > AUC_ROWS_MAX then auc = AUC_ROWS_MAX end",
+     "    local _ = auc",
+     "geometry"),
+    ("split-forgets-the-bids-cap", "ui/frame.lua",
+     "    if bid > AUCL.bid_max then bid = AUCL.bid_max end",
+     "    local _ = bid",
+     "geometry"),
+
+    # The auctions list anchored at both ends again, the way every other list
+    # in this window is -- which discards SetHeight and puts the bids table on
+    # top of it.
+    ("split-auctions-list-anchored-at-both-ends", "ui/frame.lua",
+     '    scroll:SetPoint("TOPRIGHT", panel, "TOPRIGHT",\n                    -AUCL.scroll_r, -LISTBOX.auc.top)',
+     '    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -AUCL.scroll_r, 10)',
+     "geometry"),
+
+    # Re-anchored without clearing. SetPoint ADDS a point on 1.12, so the
+    # widget ends up pinned to its old position and its new one -- stretched
+    # rather than moved, and only after the first resize.
+    ("split-layout-does-not-clear-points", "ui/frame.lua",
+     "    ui.bidScroll:ClearAllPoints()\n    ui.bidScroll:SetPoint(\"TOPLEFT\", panel, \"TOPLEFT\", AUCL.row_left, -by)",
+     "    ui.bidScroll:SetPoint(\"TOPLEFT\", panel, \"TOPLEFT\", AUCL.row_left, -by)",
+     "geometry"),
+
+    # The painter sizing the two halves separately instead of taking the split
+    # once and handing it to both.
+    ("split-bids-half-sizes-itself", "ui/frame.lua",
+     "    ui.UpdateBidsList(bidVis)",
+     "    ui.UpdateBidsList()",
+     "geometry"),
+
+    # A refresh that asks for the owner list and not the bidder list, so the
+    # lower half sits empty on a tab that has just refreshed.
+    ("split-refresh-never-asks-for-bids", "ui/frame.lua",
+     "        A.sell.RequestBidderAuctions(0)",
+     "        local _ = A",
+     "geometry"),
+
+    # ...and the reply never listened for. The owner-list event does not fire
+    # for a bid.
+    ("split-bidder-reply-ignored", "ui/frame.lua",
+     'A.RegisterEvent("AUCTION_BIDDER_LIST_UPDATE", function()',
+     'A.RegisterEvent("AUCTION_BIDDER_LIST_UNUSED", function()',
+     "geometry"),
+
+    # ---- the bags bucket erased by its own writer (v1.53.3) --------------
+
+    # THE BUG ITSELF. An unanswered bag walk -- containers reporting no slots,
+    # which is every session's first moments -- allowed to overwrite a stored
+    # snapshot. The character then holds none of anything and is dropped from
+    # the rows entirely, so the account-wide block shows the alts that banked
+    # and none of the ones that only ever carried it.
+    ("inventory-empty-walk-may-be-written", "core/sell.lua",
+     "    return (slots or 0) > 0",
+     "    return true",
+     "inventory"),
+
+    # ...and the same thing reached the other way: the guard in the snapshot
+    # dropped, so the rule exists but nothing consults it.
+    ("inventory-snapshot-ignores-the-guard", "core/sell.lua",
+     "    if not sell.SnapshotWritable(sell.bagSlots) then return counts, false end",
+     "    local _ = sell.bagSlots",
+     "inventory"),
+
+    # The walker no longer reporting how many slots it saw, which is the only
+    # thing that separates "empty" from "the client did not answer".
+    ("inventory-walker-hides-slot-count", "core/sell.lua",
+     "    return out, seen",
+     "    return out",
+     "inventory"),
+
+    # The slot count taken from the LAST container rather than all of them, so
+    # a player whose fifth bag slot is empty reads as an unanswered client.
+    ("inventory-slots-not-accumulated", "core/sell.lua",
+     "        seen = seen + slots",
+     "        seen = slots",
+     "inventory"),
+
+    # Arrival taking the snapshot outright instead of arming one -- the first,
+    # incomplete version of this fix. The read lands mid-storm and stores the
+    # half of the bag that had resolved by then.
+    ("inventory-arrival-never-waits", "core/sell.lua",
+     '    if (now - (touchedAt or armedAt)) < sell.BAG_SETTLE then return "wait" end',
+     "    local _ = touchedAt",
+     "inventory"),
+
+    # The settle clock read from the ARM rather than the last bag change, so a
+    # storm running past BAG_SETTLE no longer pushes the snapshot back.
+    ("inventory-settle-clock-ignores-the-storm", "core/sell.lua",
+     "    if (now - (touchedAt or armedAt)) < sell.BAG_SETTLE then",
+     "    if (now - armedAt) < sell.BAG_SETTLE then",
+     "inventory"),
+
+    # BAG_UPDATE no longer stamping that clock, which comes to the same thing
+    # from the other end.
+    ("inventory-bag-update-does-not-stamp", "core/sell.lua",
+     "        sell.bagTouchedAt = GetTime and GetTime() or 0",
+     "        local _ = sell",
+     "inventory"),
+
+    # The cap on the wait removed. A character parked where something writes
+    # to their bags every second never sees quiet and is never recorded at
+    # all -- a worse failure than recording something imperfect.
+    ("inventory-arrival-waits-forever", "core/sell.lua",
+     '    if (now - armedAt) >= sell.BAG_SETTLE_MAX then return "take" end',
+     "    local _ = armedAt",
+     "inventory"),
+
+    # The armed snapshot never disarmed, so every frame for the rest of the
+    # session walks the bags and writes the DB.
+    ("inventory-arrival-never-disarms", "core/sell.lua",
+     "    sell.bagArmedAt, sell.bagTouchedAt = nil, nil\n    sell.SnapshotBags()",
+     "    sell.SnapshotBags()",
+     "inventory"),
+
+    # The driver frame not running the armed snapshot at all, so arrival arms
+    # something nothing ever takes.
+    ("inventory-driver-skips-the-snapshot", "core/sell.lua",
+     "    local busy = sell.StepBagSnapshot(GetTime and GetTime() or 0)",
+     "    local busy = false",
+     "inventory"),
+
+    # ...and arrival never starting the driver, which comes to the same thing.
+    ("inventory-arrival-never-starts-the-driver", "core/sell.lua",
+     "        sell.ArmBagSnapshot(GetTime and GetTime() or 0)\n        sell.invDriver:Show()",
+     "        sell.ArmBagSnapshot(GetTime and GetTime() or 0)",
+     "inventory"),
+
+    # ---- grouped Buy results (v1.53.0) -----------------------------------
+
+    # Grouping by NAME. Two different items can share one on this client -- a
+    # recipe and the thing it teaches -- and merging them totals two separate
+    # markets into one price. The price it then reports is the LOWER of the
+    # two, which is the direction that reads as a bargain.
+    ("buy-group-keyed-by-name", "core/buy.lua",
+     """        local key = r.itemId and ("i" .. r.itemId) or ("n" .. (r.name or "?"))""",
+     """        local key = "n" .. (r.name or "?")""",
+     "buygroup"),
+
+    # A bid-only auction setting the lowest price. It is a listing you can see
+    # and not a price you can pay, so this quotes a number nobody can buy at.
+    ("buy-group-lowest-counts-bid-only", "core/buy.lua",
+     """        if r.unit and r.unit > 0 then
+            if not g.low or r.unit < g.low then g.low = r.unit end
+        end""",
+     """        local u = r.unit or r.buyout or 0
+        if not g.low or u < g.low then g.low = u end""",
+     "buygroup"),
+
+    # ...and the opposite: a bid-only auction dropped from the LISTING count,
+    # so the parent under-reports what is on the auction house.
+    ("buy-group-drops-bid-only-listings", "core/buy.lua",
+     "        g.listings = g.listings + 1",
+     "        if r.unit then g.listings = g.listings + 1 end",
+     "buygroup"),
+
+    # `units` counting auctions rather than items, so a page of stacks reads as
+    # a page of singles.
+    ("buy-group-units-counts-auctions", "core/buy.lua",
+     "        g.units = g.units + (r.count or 1)",
+     "        g.units = g.units + 1",
+     "buygroup"),
+
+    # The expansion set keyed by INDEX. A re-sort renumbers every row, and this
+    # then expands whichever item slid into the slot -- silently.
+    ("buy-open-keyed-by-index", "ui/frame.lua",
+     "        local isOpen = (many and open[g.key]) and true or nil",
+     "        local isOpen = (many and open[i]) and true or nil",
+     "buygroup"),
+
+    # A group of ONE offering a triangle, which reveals a copy of its own
+    # parent row.
+    ("buy-lone-group-expands", "ui/frame.lua",
+     "        local many = g.listings and g.listings > 1",
+     "        local many = true",
+     "buygroup"),
+
+    # The listings COPIED rather than listed, so the paint reads a second table
+    # that has to be kept in step with the engine's.
+    ("buy-tree-copies-listings", "ui/frame.lua",
+     """                r.kind = "listing"
+                table.insert(rows, r)""",
+     """                table.insert(rows, { kind = "listing", name = r.name })""",
+     "buygroup"),
+
+    # "[]" from an empty name, which parses as a search for a literal pair of
+    # brackets and matches nothing at all.
+    ("exact-term-brackets-nothing", "core/buy.lua",
+     '    if name == "" then return "" end',
+     '    local _ = name',
+     "buygroup"),
+
+    # An unclosed bracket treated as exact, so a typo silently becomes a search
+    # that can never match.
+    ("exact-bracket-unanchored", "core/buy.lua",
+     '        local _, _, bracketed = string.find(raw, "^%[(.+)%]$")',
+     '        local _, _, bracketed = string.find(raw, "%[(.+)")',
+     "buygroup"),
 
     # ---- one table look, one input colour (v1.52.32) ---------------------
 
@@ -3257,8 +4531,8 @@ end
     # BAG_UPDATE doing the walk inline instead of setting a flag -- the HARD
     # RULE 16 violation this design exists to avoid.
     ("inventory-bag-update-walks-inline", "core/sell.lua",
-     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = true end)",
-     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = false end)",
+     "        sell.bagsDirty   = true",
+     "        sell.bagsDirty   = false",
      "inventory"),
 
     # The durable bag snapshot taking the CACHED answer, so what other
@@ -3362,8 +4636,8 @@ end
     # The driver never stops, so an OnUpdate runs for the rest of the session
     # doing nothing.
     ("inventory-driver-never-stops", "core/sell.lua",
-     "    if not sell.mailDirty then sell.invDriver:Hide() end",
-     "",
+     "    if not sell.mailDirty and not busy then sell.invDriver:Hide() end",
+     "    local _ = busy",
      "inventory"),
 
     # Rows no longer ordered with YOU first, so the row you are acting on is
@@ -3617,6 +4891,237 @@ end
      "    if not b or b.aegisNudged then return false end",
      "    if not b then return false end",
      "external.buttons"),
+
+    # ---- the row icon (v1.53.14) ----------------------------------------
+
+    # THE BUG THAT SHIPPED IN THE FIRST DRAFT. pcall puts `ok` in front of
+    # GetItemInfo's ten returns, so the texture is the ELEVENTH value back.
+    # Eight discards lands on equipSlot, which is nil for every reagent -- so
+    # every icon is blank and nothing errors, because a nil texture path is a
+    # perfectly legal thing to hand SetTexture.
+    ("craft-icon-reads-equip-slot", "ui/frame.lua",
+     "    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "    local ok, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "crafttree"),
+
+    # ...and one past it, which reads whatever an item's eleventh return is.
+    # Same symptom from the other side of the correct index, so the check has
+    # to pin the exact value and not merely "something non-nil".
+    ("craft-icon-reads-one-past", "ui/frame.lua",
+     "    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "    local ok, _, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "crafttree"),
+
+    # The icon lookup never memoised. GetItemInfo is a per-item CLIENT QUERY
+    # and both lists that read these rows repaint off a BAG_UPDATE flag, which
+    # storms -- HARD RULE 16. Unmemoised it is a query per row per repaint.
+    ("craft-icon-not-memoised", "ui/frame.lua",
+     """    if ok and tex then
+        ui.craftIcon[itemId] = tex
+        return tex
+    end""",
+     """    if ok and tex then
+        return tex
+    end""",
+     "crafttree"),
+
+    # The MISS cached, so an item the client has not loaded yet stays without
+    # an icon until logout. Caching a real value rather than `tex` itself,
+    # because assigning nil to a table key REMOVES it -- the lazy version
+    # would not be a bug at all and the sabotage would prove nothing.
+    ("craft-icon-caches-the-miss", "ui/frame.lua",
+     """    if ok and tex then
+        ui.craftIcon[itemId] = tex
+        return tex
+    end
+    return nil""",
+     """    ui.craftIcon[itemId] = tex or ""
+    return ui.craftIcon[itemId]""",
+     "crafttree"),
+
+    # The texture not stamped on the reagent rows -- only on the projects.
+    # The shopping popout draws the ROWS, so every icon in it would be blank
+    # while the crafting tab above looked fine.
+    ("craft-rows-lose-the-icon", "ui/frame.lua",
+     """        r.quality = ui.CraftQualityOf(r.itemId)
+        r.texture = ui.CraftIconOf(r.itemId)""",
+     "        r.quality = ui.CraftQualityOf(r.itemId)",
+     "crafttree"),
+
+    # ...and the same from the project end.
+    ("craft-projects-lose-the-icon", "ui/frame.lua",
+     """        p.quality = ui.CraftQualityOf(p.itemId)
+        p.texture = ui.CraftIconOf(p.itemId)""",
+     "        p.quality = ui.CraftQualityOf(p.itemId)",
+     "crafttree"),
+
+    # ---- the gradient fill (v1.53.14) ------------------------------------
+
+    # EVERY COLUMN HANDED THE WHOLE IMAGE. This is the bug the function exists
+    # to prevent: a five-pixel column then runs the entire ramp in five pixels
+    # while a hundred-and-fifty-pixel one spreads it over all of them, so the
+    # wash traces the line instead of sitting behind it.
+    ("fill-slice-is-the-whole-image", "ui/frame.lua",
+     """    local top = 1 - (hi / h)
+    local bot = 1 - (lo / h)""",
+     """    local top = 0
+    local bot = 1""",
+     "histgraph"),
+
+    # The mapping the right way up, which is upside down: the image's opaque
+    # end is v=0 and plot height counts UP from the baseline, so the two run
+    # against each other. Getting this wrong puts the solid end at the
+    # baseline -- a wash that is darkest where it should have faded out.
+    ("fill-slice-not-inverted", "ui/frame.lua",
+     """    local top = 1 - (hi / h)
+    local bot = 1 - (lo / h)""",
+     """    local top = lo / h
+    local bot = hi / h""",
+     "histgraph"),
+
+    # A zero-height plot dividing by zero. On 1.12 that is nan, and nan passes
+    # EVERY comparison -- so all four clamps below let it through and the
+    # client is handed nan texture coordinates.
+    ("fill-slice-divides-by-zero", "ui/frame.lua",
+     "    if not h or h <= 0 then return 0, 1 end",
+     "    if not h then return 0, 1 end",
+     "histgraph"),
+
+    # The clamps dropped. 1.12 WRAPS out-of-range texture coordinates, so a
+    # span the rasteriser pushed a rounding pixel past the plot shows the
+    # OPPOSITE end of the ramp -- one bright band in an otherwise clean fade.
+    ("fill-slice-unclamped", "ui/frame.lua",
+     """    if top < 0 then top = 0 end
+    if bot > 1 then bot = 1 end""",
+     "    if false then top = 0 end",
+     "histgraph"),
+
+    # A zero-tall slice left at zero. Some clients draw a zero-height texture
+    # coordinate span as no texture at all rather than as a hairline, so a
+    # flat column vanishes.
+    ("fill-slice-zero-height", "ui/frame.lua",
+     "    if bot <= top then bot = top + 0.001 end",
+     "    if false then bot = top + 0.001 end",
+     "histgraph"),
+
+    # The widening applied at the very top of the image, where it has nowhere
+    # to grow DOWN into -- so bot leaves the image and wraps.
+    ("fill-slice-widens-past-the-edge", "ui/frame.lua",
+     "    if bot > 1 then top, bot = 1 - 0.001, 1 end",
+     "    if false then top, bot = 1 - 0.001, 1 end",
+     "histgraph"),
+
+    # An upside-down span left upside down, so top > bot and the client draws
+    # the slice mirrored.
+    ("fill-slice-not-normalised", "ui/frame.lua",
+     "    if lo > hi then lo, hi = hi, lo end",
+     "    if false then lo, hi = hi, lo end",
+     "histgraph"),
+
+    # The flip ignored, which is the one setting a person regenerating the art
+    # has to reach for when they get the ramp's direction backwards.
+    ("fill-slice-ignores-the-flip", "ui/frame.lua",
+     "    if flip then return 1 - bot, 1 - top end",
+     "    if false then return 1 - bot, 1 - top end",
+     "histgraph"),
+
+    # ---- the demo recipes (v1.53.14) -------------------------------------
+
+    # THE BUG THE WHOLE SET REPLACED. Back to an all-white spread, where the
+    # quality colouring the shopping panel exists to show has nothing to show.
+    # One line does it: the epic reagent becomes a common one.
+    ("demo-reagents-all-white", "core/buy.lua",
+     '        { name = "Sulfuron Ingot",        itemId = 17203, count = 8 },',
+     '        { name = "Thorium Bar",           itemId = 12359, count = 8 },',
+     "purse"),
+
+    # ...and the same from the recipe end. THE RARE ONE, not an epic one:
+    # there are deliberately TWO epic recipes in the set, so no single edit can
+    # take purple off the product lines and a sabotage claiming to would be
+    # passing on the other one. Arcanite Reaper is the only blue product, so
+    # this is the edit the "a demo recipe is RARE" check actually answers.
+    ("demo-recipes-lose-the-rare", "core/buy.lua",
+     '    { name = "Arcanite Reaper", itemId = 12784, want = 1, reagents = {',
+     '    { name = "Dark Iron Bar", itemId = 11371, want = 1, reagents = {',
+     "purse"),
+
+    # An id nobody looked up. The quality table in the suite is the record of
+    # what was VERIFIED rather than remembered, so a recipe added without
+    # checking its colour has to fail loudly -- otherwise the spread checks
+    # keep passing on the entries that were checked.
+    ("demo-recipe-quality-unverified", "core/buy.lua",
+     '        { name = "Lava Core",             itemId = 17011, count = 10 },',
+     '        { name = "Essence of Water",      itemId = 7080,  count = 10 },',
+     "purse"),
+
+    # The vendor-sold line priced BELOW the merchant at auction, so
+    # craft.CheaperSource is reached and never takes the vendor branch -- the
+    # source column becomes a column of one value and nobody notices.
+    ("demo-vendor-never-cheaper", "core/buy.lua",
+     "    [14341] = 5200,      -- Rune Thread                  52s",
+     "    [14341] = 1200,      -- Rune Thread                  12s",
+     "purse"),
+
+    # A demo item with no demo price, so its money column reads as a dash --
+    # which is the state the prices exist to get rid of.
+    ("demo-price-missing", "core/buy.lua",
+     "    [17203] = 4500000,   -- Sulfuron Ingot          450g",
+     "",
+     "purse"),
+
+    # ---- craft.MarketUnit / craft.VendorUnit (v1.53.14) ------------------
+
+    # Demo mode falling THROUGH to the real price DB, so the tab shows a mix
+    # of invented and real numbers -- the one thing a demo may not be.
+    ("market-unit-demo-falls-through", "core/buy.lua",
+     """    if A.db.demo then
+        local d = craft.DEMO_PRICE[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end""",
+     """    if A.db.demo then
+        local d = craft.DEMO_PRICE[itemId]
+        if d and d > 0 then return d end
+    end""",
+     "purse"),
+
+    # ...and the same on the vendor side.
+    ("vendor-unit-demo-falls-through", "core/buy.lua",
+     """    if A.db.demo then
+        local d = craft.DEMO_VENDOR[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end""",
+     """    if A.db.demo then
+        local d = craft.DEMO_VENDOR[itemId]
+        if d and d > 0 then return d end
+    end""",
+     "purse"),
+
+    # A zero let through as a price. An item recorded at nothing is an item we
+    # have not really seen, and a cost total that reads COMPLETE when it is
+    # not is a crafting cost that reads LOW -- the direction that loses money.
+    ("market-unit-zero-is-a-price", "core/buy.lua",
+     """    local m = A.db.MinBuyout and A.db.MinBuyout(itemId)
+    if m and m > 0 then return m end
+    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m and m > 0 then return m end""",
+     """    local m = A.db.MinBuyout and A.db.MinBuyout(itemId)
+    if m then return m end
+    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m then return m end""",
+     "purse"),
+
+    # The market-value fallback dropped, so an item seen on an earlier day but
+    # not today prices as unknown and the whole recipe reads incomplete.
+    ("market-unit-loses-the-fallback", "core/buy.lua",
+     """    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m and m > 0 then return m end
+    return nil
+end""",
+     """    return nil
+end""",
+     "purse"),
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -3656,6 +5161,12 @@ SUITES = {
     "rowbudget": "tests/units/rowbudget_test.lua",
     "craftqueue": "tests/units/craftqueue_test.lua",
     "crafttree": "tests/units/crafttree_test.lua",
+    "buygroup": "tests/units/buygroup_test.lua",
+    "bids": "tests/units/bids_test.lua",
+    "histgraph": "tests/units/histgraph_test.lua",
+    "shoplist": "tests/units/shoplist_test.lua",
+    "bidpath": "tests/units/bidpath_test.lua",
+    "purse": "tests/units/purse_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

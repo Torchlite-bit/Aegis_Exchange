@@ -18,6 +18,527 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.14] — restart
+
+> **restart** — this release adds an image file (`art/gradient-fill.tga`).
+> WoW 1.12 builds its file list at startup, so a `/reload` may not find a
+> texture that was not there when the client launched. If the fade under the
+> line does not appear, restart the client; `/aex diag` says which fill the
+> chart actually drew.
+
+### Added
+- **A real gradient under the chart line.** The wash beneath the line now
+  fades from solid at the line to nothing at the baseline, instead of being a
+  flat block of colour.
+
+  The fade belongs to the **plot**, not to each column: a five-pixel column and
+  a hundred-and-fifty-pixel one each take the slice of the image their own
+  position earns, so the slices stack into one continuous gradient rather than
+  each running the whole ramp and tracing the line.
+
+  *(v1.53.11 tried this with `SetGradientAlpha` and it came out a solid block —
+  that call modulates an **image**, and a solid-colour texture has none, so it
+  succeeded and did nothing. This one loads an actual image file and uses what
+  `SetTexture` **returns** to decide whether it worked, so the flat wash comes
+  back as a visible fallback rather than a silent one.)*
+
+- **Item icons on the shopping list at a vendor.** Each line now shows the
+  item's icon beside its name, so the list reads at a glance rather than by
+  reading every row.
+
+- **Demo mode has invented prices**, so every money figure on the Crafting tab
+  and the shopping list shows something instead of a dash. Same discipline as
+  the rest of the demo — consulted *instead of* your price data, never written
+  to it, gone on `/reload`.
+
+### Changed
+- **The demo recipes are epic and rare now**, not four shades of white. The
+  old set was all common-quality, so the quality colouring on the shopping
+  panel had nothing to colour — the feature was invisible in the demo built to
+  show it. The set is now Sulfuron Hammer and Black Dragonscale Boots (epic),
+  Arcanite Reaper (rare) and Arcanite Bar (uncommon), with an epic reagent,
+  two rare ones, and the commons for contrast. One recipe is still a reagent
+  of two others, so the sub-reagent expansion still runs, and one reagent is
+  still vendor-sold so the list still has to choose a source.
+
+### Fixed
+- **The gold readout when you hover the chart no longer clips.** It sat above
+  the plot, in the same band as the character picker and the topmost axis
+  label; it is now inside the drawing area.
+
+- **The vendor shopping list never showed an item's icon** because the texture
+  was read from the wrong position in the client's reply — `equipSlot`, which
+  is empty for every reagent. Nothing errored; the icons were simply blank.
+
+
+## [1.53.13]
+
+### Added
+- **A shopping-list button on the merchant frame.** A bag icon beside the
+  "sell marked" button — click it to show or hide the list, with a badge
+  showing how many lines are still to buy and a gold border while the list is
+  up. It dims rather than disappears when there is nothing left, because a
+  button that vanishes is one you cannot press to check.
+
+  *(1.12 has no shopping-cart icon in the stock art. A bag is the closest
+  thing, and is what the game itself uses for "things you are carrying".)*
+
+- **Demo mode reaches the Crafting tab.** `/aex demo` now also supplies four
+  made-up recipes with some of their reagents part-gathered, so the crafting
+  tree, the shopping list and the merchant badge all have something to show on
+  a character that has not tracked anything yet.
+
+  The recipes are picked to exercise the list rather than just fill it: one of
+  them is a **reagent of another**, so the sub-reagent expansion runs, and two
+  reagents are vendor-sold so the list has to choose a source per line. Same
+  discipline as the gold — consulted *instead of* your data, never written to
+  it, gone on `/reload`.
+
+## [1.53.12]
+
+### Added
+- **`/aex demo` — a preview mode for the gold chart.** It draws invented gold
+  for four made-up characters so you can see what the chart looks like with a
+  real history behind it, which a new character or a fresh install does not
+  have. The heading says **DEMO** in red while it is on.
+
+  **Nothing is saved and nothing real is touched.** It is a session flag, and
+  the generators are consulted *instead of* your data rather than written into
+  it — so there is no path by which invented gold reaches your save, not on
+  logout, not on a crash, not if you forget it is on. `/aex demo` again, or a
+  `/reload`, turns it off. The IN / OUT / NET row still reads your real ledger;
+  only the gold line is invented.
+
+### Fixed
+- **The gradient under the line is gone; the fill is a flat wash again.** It
+  came out a solid block of green. `SetGradientAlpha` **succeeded and did
+  nothing**: on 1.12 a texture made from a plain colour has no image behind it
+  for a gradient to modulate, so the `pcall` guarding the call reported success,
+  the flat alpha was taken back off on the strength of that, and the fill went
+  opaque. A `pcall` that succeeds is not a call that worked.
+- **"Clear history" sat on top of the AMOUNT column header.** Moving it to
+  follow the table's right edge put it into the one band that was already
+  occupied; it is up on the totals line now.
+- **The chart's x-axis mixed two kinds of label.** A one-day window read
+  "Sep 10 · 18h 0m ago · 12h 0m ago · 6h 0m ago · now", because the leftmost
+  mark is exactly a day old and crossed the date threshold while the others did
+  not. The format is decided once for the whole axis by its span, and the
+  relative form is compact — `18h`, not `18h 0m ago`.
+
+## [1.53.11]
+
+### Fixed
+- **The check boxes never ticked.** Selecting a name worked — the chart and the
+  title both followed it — but the box beside it stayed empty. The selection is
+  keyed by **name** because that is what filters the series; the menu's entries
+  are keyed `char:Name` because that is what tells a character apart from *All
+  Players*. Handing one straight to the other looked up a key that was never
+  there, and a set lookup that misses returns nil rather than erroring, so
+  nothing said so.
+
+### Changed
+- **The chart has its own title bar.** "Player Gold" on the left, the **period
+  buttons on the right** — they used to sit at the panel's top-left, a table's
+  width away from the thing they change, so nothing about the layout said they
+  were connected. The character picker sits below them with what that selection
+  is holding right now beside it.
+- **The band the periods used to occupy went to the ledger table**, which now
+  shows another row at every window height.
+- **Vertical gridlines**, one under each of five dated x labels. Without them a
+  label is a caption for a band whose edges you have to estimate.
+- **A real gradient under the line**, fading downward from just under it. 1.12's
+  `SetGradientAlpha` applies per *texture* and the fill is one texture per
+  column, so each column takes the **slice** of the plot-wide gradient it
+  actually occupies — one pair of endpoints for every column would make a short
+  column run the whole fade in five pixels and trace the line instead of
+  sitting behind it. A client that refuses the call keeps the flat wash.
+
+## [1.53.10]
+
+### Added
+- **The shopping list, out on its own.** `/aex shop` opens a small movable
+  window with everything you still have to buy, anywhere — and it pops up by
+  itself when you open a **merchant**, which is where half a reagent list gets
+  bought. The main window only opens at an auction house, so until now none of
+  this was reachable at a vendor.
+  - Only what is **left to buy**: things you already have enough of are off it,
+    and so is anything you can craft from what is on the list already —
+    listing that would tell you to purchase something you do not need.
+  - **Alphabetical**, because a shopping list is read against what is in front
+    of you and cost order re-shuffles it every time a price is learned.
+  - The count colour says **where**: green for a vendor line, gold for an
+    auction one. Hover a row for the price and which recipes want it.
+  - It closes again when you leave the merchant — **unless you opened it
+    yourself**, in which case it stays.
+  - Nothing to buy, nothing pops up. Turn the automatic half off on the Aegis
+    tab: *Show the shopping list at a merchant*.
+
+- **Real check boxes in the History chart's character picker**, the same ones
+  the Aegis tab's settings use, instead of a tick character in the label. A
+  check box reads as "several of these" at a glance. The whole row still takes
+  the click.
+
+## [1.53.9]
+
+### Fixed
+- **Changing the period did not redraw the chart** until you reselected a
+  player. `ui.histView` has been the ledger table's filtered row list since
+  long before there was a chart, and the chart's selection borrowed the same
+  field — so pressing a period button, which rebuilds that list, replaced the
+  selection with an array. The next repaint threw and the chart silently kept
+  what it had drawn last. The chart's field is `ui.histWho` now, and the suite
+  checks each feature only touches its own.
+- **The figures under the chart overlapped.** "LOW 9g 14s 6c" and "IN 37s 92c"
+  were two strings anchored to opposite ends of one line, and on a narrow
+  window they ran into each other. They are stacked on two rows now — two
+  strings that can both grow cannot share a line.
+- **The x-axis labels collided**, because the "alts as last seen" note was
+  appended to the right-hand one and grew it into its neighbour. The note sits
+  with the HIGH/LOW row now.
+
+### Added
+- **Pick more than one character.** Tick two names and the chart shows what
+  they hold **together** — one line, because "gold between Torchlite and
+  Troglodyte" is one figure. The menu stays open while you tick. **All
+  Players** clears the selection rather than ticking alongside the names
+  (otherwise the account total is drawn twice with one character's gold in
+  both), and unticking the last name goes back to everyone.
+
+### Changed
+- **The chart is wider.** The ledger table's Item column had the only slack in
+  it — it held the longest name with room to spare — so 54px moved across at
+  every window width, and the chart's share of what is left went from 36% to
+  46%.
+- **The x axis carries dates** rather than "30d ago", which stops being
+  placeable once the window is months long.
+- **`3M` is `3m`**, matching the other period labels.
+
+## [1.53.8]
+
+### Changed
+- **The History chart shows one thing: gold held, over time.** The four views
+  are gone. Income and spending are what the **table beside it** answers —
+  exactly, line by line, with the item names attached — and what a chart is
+  good at and a table is not is a shape over time. So the dropdown now picks
+  **whose** gold, not which question: **All Players (N)** or any one character.
+
+- **The line is much smoother.** The cause was not the column width — bucket
+  counts were fixed per period, and thirty data points across a 300px plot is
+  one every ten pixels. The count now comes from the **plot width** (a point
+  every three pixels at any window size) and columns are 2px instead of 4.
+
+- **Three months of history, for the same SavedVariables.** Samples start
+  hourly and are **compacted** once they age out of a four-day window: all but
+  each day's closing figure is dropped. 96 hourly samples plus ~800 daily ones
+  reaches back about two years; hourly for two years would have been 17,000
+  numbers per character, written out as Lua source on every logout.
+
+### Added
+- **A 3M period button**, and "All" now reaches back to the oldest thing known
+  — the earlier of your first transaction and your first coin sample, so a
+  character who levelled before they ever used the auction house still gets
+  their whole gold history.
+- **Hover the chart** for what was held at that point and when. A vertical
+  crosshair follows the cursor and the figure reads out above the plot; past a
+  day it is dated rather than "9d ago", which stops being placeable once the
+  window is months long.
+- **Short axis labels** (`84s`, `12g`, `4.2kg`) via `util.ShortMoney`, because
+  `1,240g 17s 3c` is longer than the plot is tall.
+
+## [1.53.7]
+
+### Added
+- **The History chart tracks your account's gold, and the dropdown picks what
+  it shows.** Four views plus one entry per character in your ledger:
+  - **In / out** — income and spending per period, as before.
+  - **Account gold** — what every character on the realm is carrying, summed,
+    over time. Filled under the line.
+  - **Cumulative** — a running balance that **goes below zero** when you spent
+    more than you earned. The axis now keeps zero inside it and puts a rule on
+    it, so a losing week reads as a losing week.
+  - **By character** — up to four cumulative lines, biggest mover first *by
+    size*, so a character who lost 200g sorts alongside one who made it.
+  - **…or one character on their own**, filled, from the same menu.
+
+- **What every character is carrying in coin is now recorded.** 1.12 has one
+  money call and it answers for the character you are on, so an account total
+  is necessarily a sum of remembered figures — each as fresh as the last time
+  that character played, and the chart says so. Your own figure is always read
+  live. One sample per hour per character, capped at about a month.
+
+- **A stats strip under the chart**: HIGH and LOW of the plotted line, and IN /
+  OUT / NET for the period, from the same ledger totals the table's heading
+  uses — so the two halves of the tab cannot disagree about the period.
+
+- **A proper y axis.** Five labelled rules down the left of the plot instead of
+  three unlabelled ones, and three x labels instead of two.
+
+- **Ledger entries now record which character made them**, which is what the
+  per-character breakdown reads. **History from before this release has no
+  name and cannot be given one** — those entries are counted in the totals and
+  left out of the breakdown, and the chart says "some unattributed" rather than
+  pinning them on whoever is logged in.
+
+## [1.53.6]
+
+### Fixed
+- **Pressing Bid could buy the item outright.** Reported from a live client,
+  and it was three faults on one path.
+
+  On 1.12, `PlaceAuctionBid` with an amount **at or above the buyout is not a
+  bid** — the server sells you the item. Aegis noticed that and quietly turned
+  the bid into a purchase. So the dialog said *"Bid on Meat Cleaver? • bid
+  1g 99s 98c"*, you pressed **Bid**, and 1g 99s 98c left your bag as a buyout.
+
+  It was not a rare corner. An auction posted with its **start bid equal to its
+  buyout** has a minimum bid that already *is* the buyout — an ordinary posting,
+  and exactly what Aegis's own Sell tab produces when both prices are set the
+  same. On every one of those listings the Bid button was a second Buy button.
+
+  Now the engine refuses, and the tab asks the question it is actually going to
+  perform: you get the **buyout** confirmation, saying in words that a bid of
+  that size buys it. Press it or don't — but you are told first.
+
+- **The Bid box did nothing.** It was filled with the minimum whenever you
+  selected a row and then read by nothing at all — every Bid press sent the
+  minimum. Type a figure and that is what gets bid now. Type one below the
+  minimum and the minimum stands in, because the server will not take less.
+
+- **A bid that became a purchase never reached History.** The ledger entry for
+  a buyout was written by the Buy tab's own buyout handler, so the other route
+  into the same function — the silent escalation above — spent the gold and
+  logged nothing. It is written by the engine now, beside the session tally it
+  has to agree with, so both routes are covered. This matters twice over now
+  the History chart reads that ledger.
+
+## [1.53.5]
+
+### Added
+- **The History tab is split: the ledger on the left, a line graph on the
+  right.** Income in green, spending in orange — the same two colours the Type
+  column has always used, which are now one pair in the palette rather than a
+  literal in each painter.
+  - **The period buttons drive both halves.** 24h is plotted hourly, 7d daily,
+    30d daily, and **All spans from your oldest transaction** rather than from
+    the epoch — a chart whose x axis starts in 1970 is one flat line jammed
+    against the right-hand edge.
+  - **Both lines share one scale**, because the question the chart answers is
+    whether one is above the other, and two axes on one chart is two charts
+    drawn on top of each other.
+  - **A quiet period says so** instead of drawing an empty box.
+  - The table keeps every column it had. It wins the squeeze when the window is
+    narrow: its columns are fixed and its Amount column is the rightmost thing
+    in the window that can be clipped, so the chart narrows and the table does
+    not.
+
+### Notes
+- **How you draw a line graph on a client with no charting primitive**, since
+  it is the part most likely to be "improved" later:
+  - A texture per plotted **pixel** is 51,000 textures for one chart. Not a
+    candidate.
+  - A bar per **bucket** is cheap and is a bar chart, not a line.
+  - **Rotated segments** would give true diagonals, but 1.12 has no
+    `Texture:SetRotation` (that is 3.x) and the eight-argument `SetTexCoord`
+    shear that fakes one cannot be checked by anything in `tests/`. Rejected
+    for being untestable, not for being impossible.
+  - **A thin vertical span per column** is what ships. Every rectangle is
+    axis-aligned, four pixels wide, and takes the height the line actually has
+    across those four pixels — so consecutive spans overlap and read as one
+    continuous line. A 500px plot costs about 125 textures per series, on one
+    frame.
+  - The drawing area is **computed, not measured**. The plot frame is anchored
+    by two corners, and `GetWidth` on one of those reports the size it was
+    created at — the trap that has already taken the Buy table, the Advanced
+    widths, the Saved Searches columns and all six list row counts.
+
+## [1.53.4]
+
+### Added
+- **The Auctions tab is split: your auctions above, your bids below.**
+
+  You asked for a Bids tab *or* a split, and this is the split. They are one
+  question — a bid is an outgoing commitment exactly the way a posted auction
+  is an incoming one, and both are decided by the same clock, so "what is my
+  gold tied up in, and what resolves soon" is answered by seeing them together
+  and answered badly by flipping between two tabs. It also keeps the sub-tab
+  strip at six.
+
+- **"At most X after the cut" on the auctions half** — what this page of your
+  book would pay if every auction on it sold at buyout, less the 5% consignment
+  cut, which comes off the sale rather than off the profit.
+  - It is a **maximum** and it says so. Nothing here claims anything will sell.
+  - **Bid-only auctions are counted separately and named**, never averaged in.
+    One with a 1c minimum bid could fetch anything, and a guess folded into a
+    total makes the whole total a guess — so the line reads `at most 412g after
+    the cut (2 bid-only not counted)`.
+  - Per page, like every other figure on that half, because the client only
+    holds one page of your book at a time.
+
+- **The bids half: what you have bid on, what you are winning, and what it has
+  committed.** Item, stack, unit, bid, buyout, status and time left, with the
+  same sorting, right-click-to-price, hover tooltip and row chrome the auctions
+  table has — the two halves are one table split in two.
+  - **"Committed" counts only what you are winning**, and that is the exact
+    figure rather than a cautious one: 1.12 takes the gold when you bid and
+    mails it back the moment someone beats you, so an outbid row is money you
+    already have. Counting it would report the same gold twice.
+  - **An outbid row shows the price to beat, dimmed, never a figure presented
+    as yours.** `bidAmount` on a bidder row is the auction's *current* bid, and
+    once you have been outbid it belongs to whoever beat you — 1.12 will not
+    tell you what you bid.
+  - **Paged at 50, with its own controls**, because `GetNumAuctionItems` hands
+    back a batch and a total for the bidder list exactly as it does for the
+    owner list — which this addon read only page 0 of for its whole life.
+  - **Time left is the client's 1–4 bucket, not a countdown**, and the line
+    above the table says so. Nothing finer exists on 1.12.
+
+- **No bids, no half.** The bottom collapses to the single line saying so and
+  hands every row back to the auctions table — which is what the tab was before
+  the split, and what it should look like again whenever the split has nothing
+  to add. That is the common case, and the split costs nothing there.
+
+## [1.53.3]
+
+### Fixed
+- **The account-wide inventory block was erasing the alts it had recorded.**
+  Reported as a tooltip showing two characters where another addon showed
+  four — and the two it showed were the two holding the item in their **bank**,
+  the two it missed were holding it in their **bags**.
+
+  That asymmetry was the whole answer. The bank bucket is only ever written
+  while the bank frame is open, a moment the client can always answer. The bags
+  bucket had just gained a second writer in 1.53.1 — `PLAYER_ENTERING_WORLD` —
+  which fires at a moment it frequently *cannot*: the containers are still
+  arriving and the item data behind them resolves for several seconds
+  afterwards. A walk over containers that report nothing yet returns the same
+  empty answer a genuinely empty character does, and that empty answer
+  overwrote a real snapshot. The character then held none of anything, and a
+  character holding none of it is left out of the block entirely — so the alt
+  simply was not there.
+
+  Two changes, because there were two faults:
+  - **A bag walk now reports how many container slots it saw**, and a walk that
+    saw none is refused a write. No slots is not an empty bag, it is an
+    unanswered question, and a question must never overwrite an answer. A
+    character genuinely carrying nothing still records that, because it saw
+    slots.
+  - **Arrival now arms the snapshot instead of taking one.** It is taken once
+    the bags have gone quiet for three seconds — `BAG_UPDATE` stamps the clock,
+    so a storm pushes it back — or after thirty seconds if quiet never comes,
+    because never recording anything is a worse failure than recording
+    something imperfect. It rides the existing inventory driver frame, one flag
+    test and one clock comparison per tick, and stops the moment it is done.
+
+  Leaving the world still snapshots outright: bags are certainly readable then,
+  and there is no frame left to defer into.
+
+## [1.53.2]
+
+### Added
+- **Buy results group by item.** Search something broad and you get **one row
+  per item** — its name, how many auctions there are, and the lowest price you
+  can actually pay — instead of forty rows of Mana Potion.
+  - **Left-click a row to open it** and see the individual auctions underneath,
+    each with its seller, stack, time left and price. That is a repaint, not
+    another search: the listings are already in hand, which is what grouping
+    them means.
+  - **Right-click to search for that item alone.** The box fills with
+    `[Greater Mana Potion]` and the table goes flat. It is a real query, not a
+    filter over the page you have — asking for one item asks the server for
+    *all* of it, which is usually a longer list and the one you wanted.
+    Right-click works on a child row too, so you do not have to fold a group up
+    to reach its parent.
+  - **A group of one never opens.** There is nothing under it but the row you
+    are already looking at.
+  - The **count sits in the Time Left column** on a multi-auction parent,
+    because time left is genuinely undefined there — the auctions under it all
+    have different ones. A parent with a single auction shows its real time
+    left instead.
+  - **Groups sort with the listings**, for free: sorting by unit price puts each
+    item's cheapest auction first and therefore each group where that auction
+    sorted to, with the children already in the same order. One sort, not two
+    answers to the same question.
+  - A new search **forgets what was expanded** — a key left over from the last
+    page would spring open a row nobody touched.
+
+### Internal
+- The grouping flag is read from the **term the engine ran**, parsed, not from
+  the search box and not by looking for brackets: `[Name]` and `/exact/Name` are
+  one request, and the view must not depend on which spelling was used.
+- `buygroup_test.lua` to 67 checks, seven more sabotages. Two of them escaped
+  first because a second occurrence in the file rescued the check — the counts
+  are counted now, with the receiver in the needle.
+
+---
+
+## [1.53.1]
+
+### Fixed
+- **The account-wide inventory block was only ever showing the character you
+  are on**, and the reason was *when* a character gets recorded, not how it is
+  read. Bags were stored on **`BANKFRAME_OPENED`** and **`PLAYER_LEAVING_WORLD`**
+  and nowhere else — so an alt you had not banked on, and had not logged out of
+  cleanly, had no record at all. A character with no record is left out of the
+  block entirely (which is right — a tooltip listing every alt you have ever
+  played, most of them saying zero, is a worse answer), so the feature read as
+  never working.
+  - Leaving is also the less reliable half: 1.12 clients get closed with alt-F4
+    and they crash, and neither fires it.
+  - A character now records what it is carrying **on arrival** as well. One
+    visit to an alt is enough, and it counts from the moment you get there
+    rather than from remembering to leave properly.
+- **The block now says when it only knows about you** — *"other characters
+  appear once you log in on them"*. A character holding none of the item is
+  omitted, which made "nobody else has ever been seen" look exactly like
+  "nobody else has any". On a fresh install the first is true of every alt.
+
+### Internal
+- `db.InventoryOnlyYou` is pure and tested — one row, and it is yours. Four
+  sabotages: each snapshot point removed, the check ignoring *whose* row it is
+  (which would caption an alt's own row), and it counting an empty block.
+
+---
+
+## [1.53.0]
+
+The 1.52 line merged. This starts the next body of work: grouped Buy results,
+the Auctions split, and the History graph. **One push, one MINOR** — everything
+inside it is a `1.53.x` patch.
+
+### Added
+- **The arithmetic behind grouped Buy results**, split from the widgets the way
+  the shopping list was, because this half can be proven and the other half
+  cannot.
+  - `buy.GroupListings` turns a page of auctions into **one row per item**, each
+    carrying how many listings it has, how many units across them, the lowest
+    price you can actually pay, and the listings themselves.
+  - **Grouped by item id, not by name.** Two different items can share a name on
+    this client — a recipe and the thing it teaches — and merging them totals two
+    separate markets into one price. The name is the fallback for a row whose
+    link has not resolved yet, which is a real state on 1.12 and not an error.
+  - **A bid-only auction counts as a listing but sets no price.** It is on the
+    auction house and the parent row should say so; it just cannot set the
+    lowest *available* price, because there is no price at which you can take it
+    home. Counting it would quote a number nobody can buy at.
+  - `ui.BuyTreeRows` flattens groups and their listings into one mixed row list,
+    the same shape as the Crafting tab's shopping tree — and **keyed by item, not
+    by index**, because a re-sort renumbers every row and an index-keyed set then
+    expands whichever item slid into the slot.
+  - A **group of one never expands**. There is nothing under it but the row you
+    are already looking at.
+- **`[Item Name]` in the search box means exact match**, which is what a
+  right-click on a grouped row will put there. `/exact` has always meant the
+  same thing to the parser; brackets are the spelling a person can read back and
+  retype. An unclosed bracket stays a plain name — people mistype.
+
+### Internal
+- `tests/units/buygroup_test.lua`, 56 checks, with eleven sabotages: grouping by
+  name, a bid-only auction setting the price, one dropped from the count, units
+  counting auctions, an index-keyed expansion set, a lone group that expands,
+  copied listings, `[]` from an empty name, and an unanchored bracket pattern.
+
+---
+
 ## [1.52.34]
 
 ### Fixed
@@ -39,12 +560,18 @@ printed in the window title bar — quote it in bug reports.
   `table.getn` each time round is a loop whose end moves away as fast as the
   cursor reaches it. The dedupe flag stops that today; the bound is what makes
   it terminate if the flag ever fails, and a hung client is not a bug you get to
-  debug. Found by a sabotage that hung the test runner outright.
-  - That sabotage is **not** in the suite, and there is a note saying why:
-    proving the bound needs a permanently failing dedupe, which turns the
-    unbounded walk into a hang rather than a failure. A sabotage that hangs the
-    harness is worse than none. A test forges a single failure instead and
-    asserts the list does not run away.
+  debug.
+  - **Correction to how this was first written up.** The entry above originally
+    said the hazard was "found by a sabotage that hung the test runner
+    outright". It was not: that run exceeded a 120-second timeout on my side and
+    finished normally afterwards, with the sabotage caught. The unbounded walk
+    is a real termination hazard and the bound is worth keeping, but no hang was
+    ever observed and the claim should not have been made.
+  - The bound has **no sabotage**, and there is a note saying why: proving it
+    needs a permanently failing dedupe, which would turn the unbounded walk into
+    a genuine hang rather than a failure, and a sabotage that hangs the harness
+    is worse than none. A test forges a single failure instead and asserts the
+    list does not run away.
 
 ---
 
@@ -4945,6 +5472,21 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

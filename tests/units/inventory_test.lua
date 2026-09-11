@@ -391,4 +391,205 @@ H.eq("...", accRows[3].class, "DRUID")
 -- plus a bank snapshot.
 H.check("an alt's row is aged", accRows[2].oldest ~= nil)
 
+-- ---------------------------------------------------------------------------
+H.section("when the block only knows about you")
+-- ---------------------------------------------------------------------------
+
+-- A character holding none of the item is left out, which is right -- and it
+-- makes "no other character has ever been seen" look exactly like "no other
+-- character has any". On a fresh install the first is true of EVERY alt, and
+-- that is how the account-wide block came to be reported as only ever showing
+-- the character you are on.
+
+H.check("one row, and it is you", db.InventoryOnlyYou({ { you = true } }),
+        "the block cannot tell you it has nothing else to show")
+H.check("one row that is NOT you is not the lonely case",
+        not db.InventoryOnlyYou({ { you = nil, name = "Alt" } }),
+        "an alt holding some is a real answer, not an empty one")
+H.check("two rows is not the lonely case",
+        not db.InventoryOnlyYou({ { you = true }, { you = nil } }),
+        "it knows about somebody else")
+H.check("no rows is not the lonely case either",
+        not db.InventoryOnlyYou({}),
+        "an empty block draws nothing at all, so it says nothing")
+H.check("...and nil is not", not db.InventoryOnlyYou(nil),
+        "nil rows must not claim to be a one-character answer")
+
+-- ---------------------------------------------------------------------------
+H.section("a character records what it carries on ARRIVAL")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR. Bags were stored only on BANKFRAME_OPENED and
+-- PLAYER_LEAVING_WORLD, so an alt you had not banked or logged out cleanly on
+-- had NO record -- and a character with no record is omitted entirely. Leaving
+-- is also the less reliable half: alt-F4 and a crash both skip it.
+do
+    local f = assert(io.open("core/sell.lua", "r"),
+                     "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    H.check("arriving in the world arms a bag snapshot",
+            string.find(src, "sell.ArmBagSnapshot(GetTime and GetTime() or 0)",
+                        1, true) ~= nil,
+            "one visit to an alt has to be enough to record it")
+    H.check("...and leaving still takes one outright",
+            string.find(src,
+                'A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)',
+                1, true) ~= nil,
+            "the departing snapshot is what catches what you picked up")
+    -- ARMS, not takes. Snapshotting inline here is what made the first attempt
+    -- at this fix incomplete -- see the section below.
+    H.check("arrival does NOT snapshot inline",
+            string.find(src,
+                'A.RegisterEvent("PLAYER_ENTERING_WORLD", function() sell.SnapshotBags() end)',
+                1, true) == nil,
+            "arrival is the worst moment to read bags")
+end
+
+-- ---------------------------------------------------------------------------
+H.section("an unanswered bag read must not erase a stored one")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR, and it is the second half of the one above.
+--
+-- Two characters holding an item in their BAGS were missing from the
+-- account-wide tooltip while two holding it in their BANK were present. The
+-- asymmetry was the whole clue: bank is written only from BANKFRAME_OPENED, a
+-- moment the client can always answer; bags had just gained a second writer on
+-- PLAYER_ENTERING_WORLD, which fires at a moment it often cannot. The walk
+-- came back {} and {} overwrote a real snapshot, so the character held none of
+-- anything and was dropped from the rows -- exactly how it looked on screen.
+H.eq("a walk over real containers may be written",
+     sell.SnapshotWritable(80), true)
+H.eq("a walk that saw no slots may NOT be",
+     sell.SnapshotWritable(0), false)
+H.eq("...nor may a missing count", sell.SnapshotWritable(nil), false)
+
+-- The second return of the walker is what carries that, so it cannot be
+-- guessed at from the counts.
+W.SetBags({ [0] = { { link = SILK, count = 4 }, {} } })
+local c2, slots2 = sell.CountContainers(sell.BAG_CONTAINERS)
+H.eq("the walker reports the slots it saw", slots2, 2)
+H.eq("...alongside the counts", c2[4306], 4)
+
+W.SetBags({})
+local c3, slots3 = sell.CountContainers(sell.BAG_CONTAINERS)
+H.eq("no containers, no slots", slots3, 0)
+H.eq("...and no counts", next(c3), nil)
+
+-- Now the property that matters: an empty read cannot destroy a good one.
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db, sell = A.db, A.sell
+W.AddItem(4306, { name = "Silk Cloth", quality = 1 })
+SILK = W.items[4306].link
+
+W.SetBags({ [0] = { { link = SILK, count = 50 } } })
+sell.bagsDirty = true
+local _, stored = sell.SnapshotBags()
+H.eq("a real walk is stored", stored, true)
+
+-- The client goes quiet -- containers report nothing, as they do for the first
+-- moments of a session.
+W.SetBags({})
+sell.bagsDirty = true
+local _, stored2 = sell.SnapshotBags()
+H.eq("a walk with no slots is refused", stored2, false)
+local kept = db.InventoryRows(4306, nil)
+H.eq("...and the stored snapshot survives it", kept[1].bags, 50)
+
+-- A character genuinely carrying nothing is a different thing, and IS stored.
+W.SetBags({ [0] = { {}, {}, {} } })
+sell.bagsDirty = true
+local _, stored3 = sell.SnapshotBags()
+H.eq("an empty bag with slots is a real answer", stored3, true)
+H.eq("...and it does clear the count",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+
+-- ---------------------------------------------------------------------------
+H.section("the arrival snapshot waits for the bags to go quiet")
+-- ---------------------------------------------------------------------------
+
+-- Arrival is the worst moment to read bags. The containers are still arriving
+-- and the item data behind GetContainerItemLink resolves for seconds
+-- afterwards -- that resolution is what makes BAG_UPDATE storm, and a snapshot
+-- taken mid-storm is a partial one. So arrival arms; the driver takes it.
+H.eq("nothing armed is idle",
+     sell.BagSettleVerdict(1000, nil, nil, 80), "idle")
+H.eq("armed but the client has not answered yet",
+     sell.BagSettleVerdict(1000, 1000, 1000, 0), "wait")
+H.eq("answered, but the bags are still churning",
+     sell.BagSettleVerdict(1002, 1000, 1002, 80), "wait")
+H.eq("quiet for long enough",
+     sell.BagSettleVerdict(1004, 1000, 1000, 80), "take")
+
+-- The churn clock is the LAST touch, not the arm, so a storm pushes it back.
+H.eq("a late BAG_UPDATE pushes the snapshot back",
+     sell.BagSettleVerdict(1010, 1000, 1009, 80), "wait")
+
+-- ...but not forever. A character parked somewhere with something writing to
+-- their bags every second would never see quiet, and never recording anything
+-- is a worse failure than recording something imperfect.
+H.eq("waiting too long takes what there is",
+     sell.BagSettleVerdict(1040, 1000, 1039, 80), "take")
+H.eq("...even with the client still silent",
+     sell.BagSettleVerdict(1040, 1000, 1039, 0), "take")
+
+-- End to end, on the driven clock.
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db, sell = A.db, A.sell
+W.AddItem(4306, { name = "Silk Cloth", quality = 1 })
+SILK = W.items[4306].link
+
+-- Driven through the DRIVER FRAME, not by calling the step directly, because
+-- the wiring is half the feature: arrival has to show the driver, and the
+-- driver has to stop once the snapshot is taken.
+W.SetBags({})                       -- the client has not answered yet
+W.FireEvent(A.frame, "PLAYER_ENTERING_WORLD")
+H.check("arrival arms the snapshot", sell.bagArmedAt ~= nil)
+H.eq("...and starts the driver", sell.invDriver.shown, true)
+H.eq("...and nothing is stored yet",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+
+W.Advance(2)
+W.Tick(sell.invDriver)
+H.eq("a tick with no containers stores nothing",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+H.eq("...and the driver keeps running", sell.invDriver.shown, true)
+
+-- The bags arrive, item by item, the way the client actually sends them.
+W.SetBags({ [0] = { { link = SILK, count = 20 }, {} } })
+W.FireEvent(A.frame, "BAG_UPDATE")
+W.Advance(2)
+W.Tick(sell.invDriver)
+H.eq("a tick during the storm stores nothing either",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+
+-- STILL STORMING, and now past BAG_SETTLE measured from ARRIVAL. This is the
+-- tick that separates a settle clock stamped by BAG_UPDATE from one that only
+-- ever knew when the loading screen ended: the second would snapshot here and
+-- store the 20 that had resolved, losing the 30 still on its way.
+W.FireEvent(A.frame, "BAG_UPDATE")
+W.Advance(2)
+W.Tick(sell.invDriver)
+H.eq("a storm running past the settle window still stores nothing",
+     table.getn(db.InventoryRows(4306, nil)), 0)
+
+W.SetBags({ [0] = { { link = SILK, count = 20 },
+                    { link = SILK, count = 30 } } })
+W.FireEvent(A.frame, "BAG_UPDATE")
+W.Advance(4)                        -- quiet at last
+W.Tick(sell.invDriver)
+local arrived = db.InventoryRows(4306, nil)
+H.eq("quiet, so the snapshot is taken", table.getn(arrived), 1)
+H.eq("...and it is the WHOLE bag, not the half that had resolved",
+     arrived[1].bags, 50)
+H.isNil("...and it disarms", sell.bagArmedAt)
+H.eq("...and the driver stops", sell.invDriver.shown, false)
+H.eq("a step with nothing armed is idle",
+     sell.StepBagSnapshot(GetTime()), false)
+
 os.exit(H.report("inventory"))

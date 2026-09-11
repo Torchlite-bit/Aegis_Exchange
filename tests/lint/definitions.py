@@ -43,6 +43,38 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.53.7. The chart gained views whose series can go NEGATIVE -- a
+    # cumulative balance below zero, a character down on the week -- so an
+    # axis described by its maximum alone stopped being enough. ui.SeriesRange
+    # returns lo AND hi and always keeps zero inside them, which is the only
+    # honest way to draw a line that crosses it.
+    "ui.SeriesMax": "v1.53.7 -- replaced by ui.SeriesRange, which returns a "
+                    "signed range rather than a maximum",
+    # v1.53.8. The chart shows ONE thing now -- gold held over time -- because
+    # income and spending are what the TABLE beside it answers, line by line,
+    # with the item names attached. These four served the views that framing
+    # replaced.
+    "ui.HistViewSeries":   "v1.53.8 -- one view left; ui.HistGoldSeries",
+    "ui.CumulativeSeries": "v1.53.8 -- the ledger-balance view is gone; the "
+                           "table beside the chart answers that exactly",
+    "ui.CharSeries":       "v1.53.8 -- the dropdown picks a character and the "
+                           "chart draws their GOLD, not their ledger",
+    "ui.PaintLegend":      "v1.53.8 -- one line needs one name, not a key",
+    # v1.53.9. The x axis carries DATES now -- "30d ago" stops being placeable
+    # once the window is months long, which is why the reference chart labels
+    # months. ui.WhenLabel does all three labels.
+    "ui.HistMidLabel":     "v1.53.9 -- the x axis is dated by ui.WhenLabel",
+    # v1.53.12. The gradient under the chart's fill is gone, and with it the
+    # per-column alpha slicing it needed. SetGradientAlpha SUCCEEDED on 1.12
+    # and did nothing -- a texture made by SetTexture(r, g, b) is a solid
+    # colour with no image behind it for a gradient to modulate -- so the
+    # pcall guarding it reported the wrong answer and the fill came out solid.
+    "ui.FillAlphaAt": "v1.53.12 -- the fill is a flat wash; SetGradientAlpha "
+                      "cannot modulate a solid-colour texture on 1.12",
+    # ...and the bucketing that fed them. What survived is the window it
+    # computed, which every version of this chart needed.
+    "ui.HistBuckets":      "v1.53.8 -- split; ui.HistWindow is the half that "
+                           "is still used",
     "ui.RowsFor": "v1.23.0 -- measured a two-edge-anchored scroll frame, "
                   "which is the trap four separate bugs walked into; "
                   "replaced by ui.ListRowsAt",

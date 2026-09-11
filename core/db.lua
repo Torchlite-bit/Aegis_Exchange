@@ -212,6 +212,13 @@ local SETTING_DEFAULTS = {
     -- Ask before posting an auction. Off = post on the first click, which is
     -- what you want when relisting a stack at a time.
     confirmPost    = true,
+    -- Pop the shopping list up when you open a merchant.
+    --
+    -- The list is only useful where you can ACT on it, and a vendor is one of
+    -- the two places that is true (the auction house being the other, where
+    -- the Crafting tab already has it). On by default because a player who
+    -- tracked a recipe has already said they intend to buy its reagents.
+    shopAtMerchant = true,
     -- After posting, keep any REMAINING items of the same type in the sell
     -- slot at the same price, so the leftover stack can go straight out. Off
     -- clears the slot, which is what you want when posting one thing at a
@@ -350,6 +357,21 @@ function db.SetInventoryBucket(bucket, counts, class)
     rec.t[bucket] = time()
     if class and class ~= "" then rec.class = class end
     return rec
+end
+
+-- Does this answer cover ONLY the character you are on?
+--
+-- A character is left out of the block entirely when it holds none of the item
+-- -- which is right, and which makes "no other character has ever been seen"
+-- indistinguishable from "no other character has any". The first of those
+-- deserves a word on screen, because it is the state a fresh install is in for
+-- every alt, and without it the whole account-wide feature reads as broken.
+--
+-- Pure: rows in, boolean out.
+function db.InventoryOnlyYou(rows)
+    local n = table.getn(rows or {})
+    if n ~= 1 then return false end
+    return rows[1].you and true or false
 end
 
 -- How many of `itemId` each character on this realm holds, and where.
@@ -913,13 +935,23 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Append a transaction. kind is "sale" (money in) or "buy" (money out).
+--
+-- STAMPED WITH THE CHARACTER, so the History chart can break the ledger down
+-- by who earned and who spent. `who` is the character the entry was recorded
+-- on, not the one that posted the auction -- a sale arrives as mail wherever
+-- you happen to be standing, and pretending otherwise would attribute it to
+-- whoever opened the mailbox anyway.
+--
+-- ENTRIES WRITTEN BEFORE v1.53.7 HAVE NO `who` AT ALL, and there is no way to
+-- recover it. Every reader has to treat a missing one as unknown rather than
+-- as any particular character; see db.LedgerByChar.
 function db.RecordTxn(kind, item, amount, itemId)
     if not db.account then return end
     if not amount or amount <= 0 then return end
     local led = db.account.ledger
     if not led then led = {}; db.account.ledger = led end
     table.insert(led, { t = time(), kind = kind, item = item or "?",
-        amount = amount, id = itemId })
+        amount = amount, id = itemId, who = db.CharKey() })
     -- Prune oldest beyond the cap.
     while table.getn(led) > LEDGER_MAX do
         table.remove(led, 1)
@@ -940,6 +972,386 @@ function db.MarkSeen(key)
     if not db.account then return end
     if not db.account.ledgerSeen then db.account.ledgerSeen = {} end
     db.account.ledgerSeen[key] = true
+end
+
+-- ---------------------------------------------------------------------------
+-- What every character on this realm is carrying in COIN
+-- ---------------------------------------------------------------------------
+--
+-- 1.12 HAS ONE MONEY CALL AND IT ANSWERS FOR YOU. `GetMoney()` is the
+-- character you are logged in as, and there is nothing that will tell you what
+-- an alt has. So an account total is necessarily a sum of REMEMBERED figures,
+-- each as fresh as the last time that character played, and it has to say so
+-- rather than present itself as a live balance.
+--
+-- This is the same shape Bagshui uses on this client (Components/Character.lua
+-- -> `Character:UpdateMoney`, stored per character in SavedVariables and
+-- totalled in Catalog.lua as though coin were one more item): read GetMoney on
+-- the money events, write it against the character, sum across characters when
+-- asked. We differ in two deliberate ways.
+--
+--   * REALM-SCOPED, like db.Inventories and unlike Bagshui's catalog. Gold on a
+--     character you cannot reach from here is not gold you can spend here, and
+--     the same argument already settled the inventory block.
+--   * WE KEEP A HISTORY, not just the current figure. Bagshui only needs "how
+--     much does this character have"; the History chart needs "how much did the
+--     account have last Tuesday", and that cannot be recovered from a single
+--     number per character.
+--
+-- The history is one sample per HOUR per character -- the resolution the 24h
+-- chart wants, and coarse enough that a day of trading is 24 numbers rather
+-- than one per transaction. A second change inside the same hour overwrites
+-- that hour rather than appending.
+-- TWO RESOLUTIONS IN ONE TABLE, which is how a 3-month chart costs the same
+-- SavedVariables as the old 33-day one.
+--
+-- Every sample starts as an hourly one. Once it falls outside the fine window
+-- it is COMPACTED: all but the last sample of each day is dropped, and the
+-- survivor is that day's closing figure -- which is exactly the right one to
+-- keep, because db.MoneySeries carries the last known figure forward anyway.
+--
+-- The arithmetic: 96 hourly samples covers four days at full detail, and the
+-- remaining ~800 daily ones reach back about two years. Hourly for two years
+-- would have been 17,000 numbers per character, written out as Lua source on
+-- every logout.
+db.MONEY_FINE_HOURS  = 96     -- keep every hour for this long
+db.MONEY_SAMPLES_MAX = 900    -- total samples per character, both resolutions
+
+-- The hour a timestamp falls in. The bucket key, and the whole reason the
+-- history does not grow with the number of transactions.
+function db.MoneyHour(t)
+    return math.floor((t or 0) / 3600)
+end
+
+-- The day an HOUR key falls in. Compaction keys off this.
+function db.MoneyDayOf(hour)
+    return math.floor((hour or 0) / 24)
+end
+
+-- Thin the history: full detail inside the fine window, one closing figure a
+-- day outside it, and the oldest dropped if it is still over the cap.
+--
+-- Returns the number of samples dropped, so a test can see it did something
+-- rather than only that the result is small enough.
+--
+-- IT KEEPS THE LAST SAMPLE OF EACH DAY, not the first. The series reader
+-- carries the last known figure forward, so a day is represented by what you
+-- went to bed with -- keeping the first would report the morning's figure for
+-- the whole of the following day.
+--
+-- Called only when the cap is exceeded, so its walk is amortised across
+-- hundreds of writes and the PLAYER_MONEY handler stays O(1).
+function db.CompactMoney(rec, now)
+    if not rec or not rec.keys or not rec.hours then return 0 end
+    local cutoff = db.MoneyHour(now or time()) - db.MONEY_FINE_HOURS
+    local keep, dropped = {}, 0
+    local n = table.getn(rec.keys)
+    local i = 1
+    while i <= n do
+        local k = rec.keys[i]
+        local nxt = rec.keys[i + 1]
+        -- Inside the fine window, or the last sample this side of a day
+        -- boundary. `nxt` nil means this is the newest sample there is.
+        if k > cutoff or not nxt or db.MoneyDayOf(nxt) ~= db.MoneyDayOf(k) then
+            table.insert(keep, k)
+        else
+            rec.hours[k] = nil
+            dropped = dropped + 1
+        end
+        i = i + 1
+    end
+    -- Still over? Drop from the oldest end, which is the only end where losing
+    -- a sample costs nothing anyone is looking at.
+    while table.getn(keep) > db.MONEY_SAMPLES_MAX do
+        local old = table.remove(keep, 1)
+        rec.hours[old] = nil
+        dropped = dropped + 1
+    end
+    rec.keys = keep
+    return dropped
+end
+
+-- The current realm's per-character coin records, created on demand.
+-- Each is { now = copper, t = epoch, hours = { [hourKey] = copper } }.
+function db.Purses()
+    if not db.account then return nil end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.purses then bucket.purses = {} end
+    return bucket.purses
+end
+
+-- Record what the character you are on is carrying. Returns the record.
+--
+-- O(1) AND IT HAS TO BE: the caller is a PLAYER_MONEY handler, which fires for
+-- every copper the player earns, spends, loots or is mailed. A table write, a
+-- compare and at most one array append -- see HARD RULE 16.
+function db.SetCharMoney(copper, now)
+    local purses = db.Purses()
+    local who = db.CharKey()
+    if not purses or not who or not copper or copper < 0 then return nil end
+    now = now or time()
+    local rec = purses[who]
+    if not rec then rec = { hours = {}, keys = {} }; purses[who] = rec end
+    if not rec.hours then rec.hours = {} end
+    if not rec.keys then rec.keys = {} end
+    rec.now = copper
+    rec.t = now
+    local hour = db.MoneyHour(now)
+    -- The KEY LIST is what makes the prune bounded. `hours` is keyed by hour,
+    -- so it has no order of its own and no length -- finding the oldest would
+    -- be a walk of the whole table on every write. The list is append-only and
+    -- in order by construction, so the oldest is always its first element.
+    if rec.hours[hour] == nil then
+        table.insert(rec.keys, hour)
+        -- ONLY WHEN OVER THE CAP. Compaction is a walk of the key list, and
+        -- this runs from PLAYER_MONEY -- which fires for every copper. Doing
+        -- it on every write would be the exact shape HARD RULE 16 forbids;
+        -- doing it once every few hundred writes is free.
+        if table.getn(rec.keys) > db.MONEY_SAMPLES_MAX then
+            db.CompactMoney(rec, now)
+        end
+    end
+    rec.hours[hour] = copper
+    return rec
+end
+
+-- ---------------------------------------------------------------------------
+-- Demo data for the gold chart
+-- ---------------------------------------------------------------------------
+--
+-- WHY THIS EXISTS. The chart needs months of trading to look like anything,
+-- and a new character or a fresh install has hours. Judging a layout -- is the
+-- gradient banding, do the labels collide, does the line read at this width --
+-- against one vertical spike is not judging it at all.
+--
+-- NOTHING IS EVER WRITTEN. `db.demo` is a SESSION flag and these functions are
+-- consulted INSTEAD of the store while it is set, so there is no path by which
+-- generated gold reaches a player's SavedVariables -- not by logging out, not
+-- by crashing, not by forgetting it was on. A /reload clears it. That is the
+-- whole reason this is a substitute reader rather than a seeded writer, which
+-- would have been half the code and permanently dangerous.
+--
+-- DETERMINISTIC, because a chart that redraws differently every frame cannot
+-- be looked at. The same window always produces the same shape.
+db.DEMO_CHARS = { "Ashvane", "Corvid", "Marrowlight", "Tessaly" }
+
+-- Park-Miller. THE MULTIPLIER IS SMALL ON PURPOSE and it is a named constant
+-- so the reason can be checked rather than trusted: Lua 5.0 numbers are
+-- doubles, exact only to 2^53, and the usual LCG multipliers (1103515245 and
+-- friends) reach ~2.4e18 against a 2^31 modulus. That does not error -- it
+-- quietly stops being arithmetic. 2147483647 * 16807 is about 3.6e13,
+-- comfortably inside it, and the suite asserts that product directly.
+db.DEMO_MOD  = 2147483647
+db.DEMO_MULT = 16807
+
+function db.DemoNext(seed)
+    return math.mod((seed or 1) * db.DEMO_MULT, db.DEMO_MOD)
+end
+
+-- A stable seed for a name. Position-weighted, so two characters whose names
+-- are anagrams do not draw the same line.
+function db.DemoSeed(name)
+    local seed = 7
+    local i = 1
+    while i <= string.len(name or "") do
+        seed = math.mod(seed * 31 + string.byte(name, i) * i, db.DEMO_MOD)
+        i = i + 1
+    end
+    if seed <= 0 then seed = 1 end
+    return seed
+end
+
+-- One character's gold across `n` buckets.
+--
+-- A RANDOM WALK THAT LOOKS LIKE TRADING: a gentle upward drift, noise on every
+-- bucket, and an occasional large drop for a purchase. A pure upward line
+-- would exercise none of the things worth looking at -- the fill's gradient
+-- over a varying height, the axis labels at different magnitudes, the hover
+-- readout on a slope.
+--
+-- Never negative: gold held cannot be, and a chart drawn from data its own
+-- reader could not produce is testing the wrong thing.
+function db.DemoSeries(from, step, n, who)
+    local out = {}
+    n = n or 0
+    local names = db.DEMO_CHARS
+    if who then names = { who } end
+    local ci = 1
+    while ci <= table.getn(names) do
+        local seed = db.DemoSeed(names[ci])
+        -- A different starting purse per character, so the account total is
+        -- not four copies of one line.
+        local held = 20000 + math.mod(seed, 900000)
+        local b = 1
+        while b <= n do
+            seed = db.DemoNext(seed)
+            local r = seed / db.DEMO_MOD
+            if r < 0.02 then
+                -- A BIG FIXED PURCHASE -- a mount, an epic, a stack of bars.
+                -- A flat cost rather than a fraction of the purse, because
+                -- that is what a real one is, and because a fraction can never
+                -- take you below zero: the floor underneath would be a guard
+                -- nothing could reach, which is worse than no guard at all.
+                held = held - 400000
+            elseif r < 0.06 then
+                held = held - held * (0.15 + r * 4)
+            else
+                held = held + held * (r - 0.42) * 0.06
+            end
+            -- ...and it CAN, which is why this is here.
+            if held < 0 then held = 0 end
+            out[b] = (out[b] or 0) + math.floor(held)
+            b = b + 1
+        end
+        ci = ci + 1
+    end
+    local i = 1
+    while i <= n do out[i] = out[i] or 0; i = i + 1 end
+    return out, true
+end
+
+-- The demo characters as purse rows, so the picker lists them.
+function db.DemoRows()
+    local rows, total = {}, 0
+    local i = 1
+    while i <= table.getn(db.DEMO_CHARS) do
+        local name = db.DEMO_CHARS[i]
+        local vals = db.DemoSeries(0, 3600, 1, name)
+        local copper = vals[1] or 0
+        table.insert(rows, { name = name, you = (i == 1), copper = copper,
+                             age = (i == 1) and nil or (i * 3600) })
+        total = total + copper
+        i = i + 1
+    end
+    return rows, total
+end
+
+-- What each character on this realm is carrying, and the total.
+--
+-- Returns rows, total. Each row is { name, you, copper, age } where `age` is
+-- how long ago that figure was read, in seconds, and is nil for the character
+-- you are on -- theirs was read this frame.
+--
+-- `live` (optional) is GetMoney() for the current character, passed in rather
+-- than read here so this file stays free of client calls and the caller that
+-- can be exact is the one that supplies it. Same arrangement db.InventoryRows
+-- has with bags.
+function db.PurseRows(live)
+    -- CONSULTED INSTEAD OF THE STORE, never merged with it. See db.DemoSeries:
+    -- the substitution is what makes it impossible for generated gold to reach
+    -- a real save.
+    if db.demo then return db.DemoRows() end
+    local rows, total = {}, 0
+    local purses = db.account and db.Purses()
+    if not purses then return rows, total end
+    local me = db.CharKey()
+    local now = time()
+    local seededMe = false
+    for who, rec in pairs(purses) do
+        local copper, age = rec.now or 0, nil
+        if who == me and live then
+            copper = live                 -- exact, read a moment ago
+            seededMe = true
+        elseif rec.t then
+            age = now - rec.t
+        end
+        table.insert(rows, { name = who, you = (who == me), copper = copper,
+                             age = age })
+        total = total + copper
+    end
+    -- The character you are ON gets a row whether or not anything has ever been
+    -- stored for them -- the fresh-install case, and without this their own
+    -- coin, the one figure that is exact, is the one missing from the total.
+    if me and live and not seededMe then
+        table.insert(rows, { name = me, you = true, copper = live })
+        total = total + live
+    end
+    table.sort(rows, function(a, b)
+        if a.you ~= b.you then return a.you end
+        return (a.copper or 0) > (b.copper or 0)
+    end)
+    return rows, total
+end
+
+-- The ACCOUNT's coin over time: one figure per bucket, summed across every
+-- character on the realm.
+--
+-- THE SUM IS OF LAST-KNOWN FIGURES, which is the only honest way to build it.
+-- At any point on the x axis a character contributes the most recent sample it
+-- had taken AT OR BEFORE that moment -- an alt that has not played since Monday
+-- holds Monday's figure across the rest of the week, because that is genuinely
+-- what is known. A character with no sample before the bucket contributes
+-- nothing rather than its later figure: back-filling would draw gold into the
+-- past.
+--
+-- `from` and `step` come from ui.HistBuckets, so the chart's two series line up
+-- bucket for bucket. Returns an array of n copper figures.
+-- The earliest moment any character's coin was recorded, or nil.
+--
+-- What "all time" means for the chart: a window starting at the epoch is one
+-- flat line jammed against the right-hand edge.
+function db.OldestMoney()
+    -- Demo mode has to answer this too, or "All" is a window with no span and
+    -- the chart the demo exists to show falls back to a day.
+    if db.demo then return time() - 180 * 86400 end
+    local purses = db.account and db.Purses()
+    if not purses then return nil end
+    local oldest = nil
+    for _, rec in pairs(purses) do
+        local k = rec.keys and rec.keys[1]
+        if k then
+            local t = k * 3600
+            if not oldest or t < oldest then oldest = t end
+        end
+    end
+    return oldest
+end
+
+-- `who` (optional) narrows it to ONE character. Returns the series and
+-- whether anything was found for them at all -- a character with no samples
+-- in the window is a real state and deserves to be told apart from one
+-- holding nothing.
+function db.MoneySeries(from, step, n, who)
+    if db.demo then return db.DemoSeries(from, step, n, who) end
+    local out, seen = {}, false
+    local i = 1
+    while i <= (n or 0) do out[i] = 0; i = i + 1 end
+    local purses = db.account and db.Purses()
+    if not purses or not from or not step or step <= 0 then return out, seen end
+    for name, rec in pairs(purses) do
+      if not who or name == who then
+        local hours, keys = rec.hours, rec.keys
+        if hours and keys then
+            -- One walk per character, in order, carrying the last figure
+            -- forward. A search per bucket would be n x samples.
+            --
+            -- `held` STARTS AT ZERO AND THAT IS THE ANTI-BACK-FILL RULE. A
+            -- character contributes nothing until its first sample has been
+            -- passed; seeding it from the earliest known figure instead would
+            -- draw gold into the past, showing the account holding money it
+            -- had not earned yet. There is no separate "have we seen one"
+            -- flag because zero already says it.
+            local ki, held = 1, 0
+            local nk = table.getn(keys)
+            local b = 1
+            while b <= n do
+                local edge = from + b * step
+                while ki <= nk and (keys[ki] * 3600) < edge do
+                    local v = hours[keys[ki]]
+                    if v then held = v; seen = true end
+                    ki = ki + 1
+                end
+                out[b] = out[b] + held
+                b = b + 1
+            end
+        end
+      end
+    end
+    return out, seen
 end
 
 -- ---------------------------------------------------------------------------
@@ -1059,6 +1471,35 @@ function db.LedgerTotals(sinceEpoch)
         i = i + 1
     end
     return income, spend, n
+end
+
+-- Who is in the ledger, over the window starting at `sinceEpoch`.
+--
+-- Returns an array of names, sorted, plus whether any entry had no character
+-- recorded. The flag is the point: history from before v1.53.7 carries no name
+-- and neither does a transaction booked by a companion addon that did not
+-- supply one, so a per-character breakdown has to be able to say "and some of
+-- this is not attributable" instead of quietly dropping it.
+function db.LedgerByChar(sinceEpoch)
+    local seen, names, anon = {}, {}, false
+    local led = db.Ledger()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if not sinceEpoch or (e.t and e.t >= sinceEpoch) then
+            if e.who and e.who ~= "" then
+                if not seen[e.who] then
+                    seen[e.who] = true
+                    table.insert(names, e.who)
+                end
+            else
+                anon = true
+            end
+        end
+        i = i + 1
+    end
+    table.sort(names)
+    return names, anon
 end
 
 function db.ClearLedger()

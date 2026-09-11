@@ -267,17 +267,26 @@ end
 sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }
 sell.BAG_CONTAINERS  = { 0, 1, 2, 3, 4 }
 
--- Count every item across a list of containers. Returns { [itemId] = n }.
+-- Count every item across a list of containers.
+--
+-- Returns { [itemId] = n }, TOTAL SLOTS SEEN.
 --
 -- ONE walker for bags and bank, because they are the same walk over different
 -- container numbers, and two copies would drift the moment one of them learned
 -- something the other did not.
+--
+-- THE SECOND RETURN IS NOT A STATISTIC, it is the difference between "empty"
+-- and "the client did not answer". Early in a session GetContainerNumSlots
+-- reports 0 for bags the client has not finished sending, and a walk over
+-- nothing returns the same {} a genuinely empty character does. Writing that
+-- over a stored snapshot erases a real count; see sell.SnapshotWritable.
 function sell.CountContainers(bags)
-    local out = {}
+    local out, seen = {}, 0
     local bi = 1
     while bi <= table.getn(bags or {}) do
         local bag = bags[bi]
         local slots = GetContainerNumSlots(bag) or 0
+        seen = seen + slots
         local slot = 1
         while slot <= slots do
             local link = GetContainerItemLink(bag, slot)
@@ -290,7 +299,7 @@ function sell.CountContainers(bags)
         end
         bi = bi + 1
     end
-    return out
+    return out, seen
 end
 
 -- Bag counts for the character you are on, rebuilt only when the bags have
@@ -304,10 +313,12 @@ end
 -- happens here, at most once per actual change, driven by whoever asks.
 sell.bagsDirty = true
 sell.bagCounts = nil
+sell.bagSlots  = 0
 
 function sell.BagCounts(force)
     if force or sell.bagsDirty or not sell.bagCounts then
-        sell.bagCounts = sell.CountContainers(sell.BAG_CONTAINERS)
+        sell.bagCounts, sell.bagSlots =
+            sell.CountContainers(sell.BAG_CONTAINERS)
         sell.bagsDirty = false
     end
     return sell.bagCounts
@@ -336,18 +347,113 @@ function sell.SnapshotBank()
     return counts
 end
 
+-- May a walk that saw `slots` container slots be WRITTEN to the DB?
+--
+-- Pure, and the whole of the answer, so the rule lives in one place and can be
+-- tested without a client.
+--
+-- THE BUG THIS EXISTS FOR. Two characters holding an item in their BAGS were
+-- missing from the account-wide tooltip while two holding it in their BANK
+-- were present. The asymmetry was the clue: the bank bucket is only ever
+-- written from BANKFRAME_OPENED, a moment the client can always answer, while
+-- the bags bucket had just been given a second writer -- PLAYER_ENTERING_WORLD
+-- -- which fires at a moment it frequently cannot. A walk over containers that
+-- report no slots yet returns {}, and {} overwrote a good snapshot with an
+-- empty one. The character then held none of anything and was dropped from the
+-- rows entirely, which is exactly how it looked: the alt simply was not there.
+--
+-- Slots, not items, because a character really can be carrying nothing and
+-- that empty answer is worth storing. No slots is not an empty bag, it is an
+-- unanswered question, and a question must never overwrite an answer.
+function sell.SnapshotWritable(slots)
+    return (slots or 0) > 0
+end
+
 -- Write the bag snapshot as well, so the OTHER characters can see what this
 -- one is carrying. The live read above is what this character's own row uses;
 -- this is the copy that has to outlive the session.
+--
+-- Returns the counts, and whether they were stored.
 function sell.SnapshotBags()
     -- FORCED, not the cached answer. This copy is what other characters read,
     -- possibly for days, so it is worth one walk to be certain -- and the
     -- cache is only as good as the BAG_UPDATE that should have invalidated it.
     local counts = sell.BagCounts(true)
+    if not sell.SnapshotWritable(sell.bagSlots) then return counts, false end
     if A.db and A.db.SetInventoryBucket then
         A.db.SetInventoryBucket("bags", counts, sell.PlayerClass())
+        return counts, true
     end
-    return counts
+    return counts, false
+end
+
+-- ---------------------------------------------------------------------------
+-- The arrival snapshot, and why it waits
+-- ---------------------------------------------------------------------------
+--
+-- PLAYER_ENTERING_WORLD is the only event an alt is guaranteed to fire -- 1.12
+-- clients are closed with alt-F4 and they crash, and neither sends
+-- PLAYER_LEAVING_WORLD -- so it has to be the one that records what a
+-- character is carrying. But it fires at the WORST possible moment to read
+-- bags: the containers are still arriving, and the item data behind
+-- GetContainerItemLink is resolving for several seconds afterwards. That
+-- resolution is what makes BAG_UPDATE storm, and a snapshot taken mid-storm is
+-- a partial one.
+--
+-- So arrival ARMS a snapshot rather than taking one, and the driver takes it
+-- once the bags have gone quiet. sell.BagSettleVerdict is the whole rule.
+sell.BAG_SETTLE     = 3     -- seconds of quiet bags before the snapshot
+sell.BAG_SETTLE_MAX = 30    -- ...and the longest we will wait for that quiet
+sell.bagArmedAt   = nil     -- GetTime() when arrival armed it
+sell.bagTouchedAt = nil     -- GetTime() of the last BAG_UPDATE
+
+-- Pure: four numbers in, one of three words out.
+--
+--   "idle" -- nothing armed
+--   "wait" -- the client is still talking, or has not started
+--   "take" -- quiet long enough, or waited long enough to stop caring
+--
+-- The MAX arm is not a nicety. A character parked somewhere with an addon
+-- writing to their bags every second would never see quiet, and never
+-- recording anything is a worse failure than recording something imperfect.
+function sell.BagSettleVerdict(now, armedAt, touchedAt, slots)
+    if not armedAt then return "idle" end
+    if (now - armedAt) >= sell.BAG_SETTLE_MAX then return "take" end
+    if not sell.SnapshotWritable(slots) then return "wait" end
+    if (now - (touchedAt or armedAt)) < sell.BAG_SETTLE then return "wait" end
+    return "take"
+end
+
+function sell.ArmBagSnapshot(now)
+    sell.bagArmedAt   = now
+    sell.bagTouchedAt = now
+end
+
+-- How many bag slots the client will admit to RIGHT NOW. Five calls and no
+-- item reads, so it is safe to ask every frame -- which is the point: the
+-- expensive part of a bag walk is the per-slot link and item lookup, and this
+-- deliberately does none of it.
+function sell.BagSlotsNow()
+    if not GetContainerNumSlots then return 0 end
+    local seen, i = 0, 1
+    while i <= table.getn(sell.BAG_CONTAINERS) do
+        seen = seen + (GetContainerNumSlots(sell.BAG_CONTAINERS[i]) or 0)
+        i = i + 1
+    end
+    return seen
+end
+
+-- One step of the armed snapshot. Returns true while it still has work, so the
+-- driver knows whether to keep running.
+function sell.StepBagSnapshot(now)
+    local verdict = sell.BagSettleVerdict(now, sell.bagArmedAt,
+                                          sell.bagTouchedAt,
+                                          sell.BagSlotsNow())
+    if verdict == "idle" then return false end
+    if verdict == "wait" then return true end
+    sell.bagArmedAt, sell.bagTouchedAt = nil, nil
+    sell.SnapshotBags()
+    return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -633,6 +739,158 @@ function sell.CancelOwnerAuction(i)
     if not i or not CancelAuction then return false end
     CancelAuction(i)
     return true
+end
+
+-- ---------------------------------------------------------------------------
+-- What the book is worth, and what you have bid
+-- ---------------------------------------------------------------------------
+
+-- What this page of your auctions would pay IF EVERY ONE OF THEM SOLD AT
+-- BUYOUT. Returns gross, net, counted, skipped.
+--
+-- `skipped` is not a footnote. A bid-only auction has no buyout, so there is
+-- no figure to add -- it could fetch its minimum bid or ten times that, and
+-- averaging a guess into a total makes the whole total a guess. It is counted
+-- separately and the UI says how many, because "3,412g (2 bid-only auctions
+-- not counted)" is an answer a player can act on and "3,412g" alone is not.
+--
+-- THE CUT COMES OFF THE SALE. Five percent of what the buyer pays leaves
+-- before you ever see it, the same convention ui.ListNet uses on the Crafting
+-- tab -- one flooring at the end, not one per row, because the rounding of a
+-- hundred separate sales is noise next to the fact that this is a maximum.
+--
+-- And it IS a maximum: nothing here says anything will sell. Label it so.
+function sell.BookValue(rows, cut)
+    cut = cut or sell.CUT
+    local gross, counted, skipped = 0, 0, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 then
+            gross = gross + r.buyout
+            counted = counted + 1
+        else
+            skipped = skipped + 1
+        end
+        i = i + 1
+    end
+    return gross, math.floor(gross * (1 - cut)), counted, skipped
+end
+
+-- ---- your bids ----------------------------------------------------------
+
+-- The bidder list is paged exactly like the owner list, and for the same
+-- reason: the client holds one page and every index is an index into it.
+sell.BIDDER_PAGE_SIZE = 50
+
+-- Ask the server for one page of the auctions you have bid on (0-indexed).
+-- The reply arrives as AUCTION_BIDDER_LIST_UPDATE.
+--
+-- Seeds AuctionFrameBidder.page for the same reason RequestOwnerAuctions seeds
+-- AuctionFrameAuctions.page: we replace the stock AH window, so Blizzard's
+-- Bidder tab may never have been shown and its own handler does arithmetic on
+-- a field its OnShow would have set.
+function sell.RequestBidderAuctions(page)
+    if AuctionFrameBidder and AuctionFrameBidder.page == nil then
+        AuctionFrameBidder.page = 0
+    end
+    page = page or 0
+    if page < 0 then page = 0 end
+    sell.bidderPage = page
+    if AuctionFrameBidder then AuctionFrameBidder.page = page end
+    if GetBidderAuctionItems then GetBidderAuctionItems(page) end
+end
+
+-- Which page of bids the client holds, and how many there are.
+-- Returns page (0-indexed), pageCount, total.
+function sell.BidderPageInfo()
+    local total = 0
+    if GetNumAuctionItems then
+        local _, t = GetNumAuctionItems("bidder")
+        total = t or 0
+    end
+    local pages = math.ceil(total / sell.BIDDER_PAGE_SIZE)
+    if pages < 1 then pages = 1 end
+    local page = sell.bidderPage or 0
+    -- Bids resolve while you are looking at them, so the page you were on can
+    -- stop existing. Same clamp the owner list needs.
+    if page > pages - 1 then page = pages - 1 end
+    return page, pages, total
+end
+
+-- The auctions you have bid on, from the "bidder" list.
+--
+-- `bidAmount` IS THE AUCTION'S CURRENT BID, NOT YOURS. That is the whole
+-- subtlety of this list and it decides how every number below is labelled.
+-- While `highBidder` is set, the current bid is yours -- it is what you will
+-- pay and it has already left your purse. Once someone outbids you the client
+-- still reports a bid amount, but it is THEIRS; your gold is already on its
+-- way back by mail and nothing in the 1.12 API will tell you what you bid.
+-- So an outbid row shows the price to beat, never a figure presented as yours.
+function sell.BidderAuctions()
+    local rows = {}
+    if not GetNumAuctionItems or not GetAuctionItemInfo then return rows end
+    local n = GetNumAuctionItems("bidder")
+    local i = 1
+    while i <= (n or 0) do
+        local name, texture, count, quality, canUse, level, minBid, minInc,
+              buyout, bidAmount, highBidder, owner =
+              GetAuctionItemInfo("bidder", i)
+        if name then
+            count = count or 1
+            local itemId
+            if GetAuctionItemLink then
+                itemId = util.ItemIdFromLink(GetAuctionItemLink("bidder", i))
+            end
+            local timeLeft
+            if GetAuctionItemTimeLeft then
+                timeLeft = GetAuctionItemTimeLeft("bidder", i)
+            end
+            local bid = bidAmount or 0
+            table.insert(rows, {
+                index    = i,
+                name     = name,
+                texture  = texture,
+                count    = count,
+                quality  = quality,
+                bid      = bid,
+                unit     = (bid > 0) and math.floor(bid / count) or nil,
+                minBid   = minBid or 0,
+                minInc   = minInc or 0,
+                buyout   = buyout or 0,
+                winning  = (highBidder and highBidder ~= 0) and true or false,
+                timeLeft = timeLeft,
+                owner    = owner,
+                itemId   = itemId,
+            })
+        end
+        i = i + 1
+    end
+    return rows
+end
+
+-- What your bids add up to. Returns committed, winning, outbid.
+--
+-- COMMITTED COUNTS ONLY THE ROWS YOU ARE WINNING, and that is the exact figure
+-- rather than a cautious one: 1.12 takes the gold when you bid and mails it
+-- back the moment someone beats you, so an outbid row is money you already
+-- have. Adding those in would double-count gold sitting in your purse, and
+-- adding the price-to-beat instead would report a number you never agreed to
+-- pay.
+function sell.BidTotals(rows)
+    local committed, winning, outbid = 0, 0, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.winning then
+            committed = committed + (r.bid or 0)
+            winning = winning + 1
+        else
+            outbid = outbid + 1
+        end
+        i = i + 1
+    end
+    return committed, winning, outbid
 end
 
 -- ---------------------------------------------------------------------------
@@ -1847,7 +2105,10 @@ sell.invDriver:SetScript("OnUpdate", function()
     -- flush's return instead would leave the driver running one extra frame
     -- after every flush, for no work.
     sell.FlushInventory()
-    if not sell.mailDirty then sell.invDriver:Hide() end
+    -- The armed arrival snapshot rides the same frame. Both are O(1) per tick:
+    -- a flag test and a clock comparison.
+    local busy = sell.StepBagSnapshot(GetTime and GetTime() or 0)
+    if not sell.mailDirty and not busy then sell.invDriver:Hide() end
 end)
 
 if A.RegisterEvent then
@@ -1872,7 +2133,14 @@ if A.RegisterEvent then
     A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() sell.CancelOwnerSweep() end)
     -- Bags changed. O(1) BY DESIGN -- see sell.BagCounts. This event storms,
     -- and the walk it invites is the shape that hard-froze Courier.
-    A.RegisterEvent("BAG_UPDATE", function() sell.bagsDirty = true end)
+    --
+    -- It also stamps the clock the arrival snapshot waits on: a storming
+    -- BAG_UPDATE is the client still talking, and a snapshot taken while it is
+    -- still talking is a partial one. Two assignments, still O(1).
+    A.RegisterEvent("BAG_UPDATE", function()
+        sell.bagsDirty   = true
+        sell.bagTouchedAt = GetTime and GetTime() or 0
+    end)
     -- The bank is open, which is the only moment the client will tell us what
     -- is in it. Fires once per visit.
     A.RegisterEvent("BANKFRAME_OPENED", function()
@@ -1882,12 +2150,53 @@ if A.RegisterEvent then
     -- Leaving the world: keep what this character is carrying, so the others
     -- can see it. PLAYER_LEAVING_WORLD covers logout, exit and a zone change.
     A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)
+    -- ...AND ARRIVING, which is the one that was missing.
+    --
+    -- Until now a character recorded what it was carrying only when it opened
+    -- a bank or left the world. An alt you have not played since installing
+    -- therefore had NO record -- and a character with no record is left out of
+    -- the inventory block entirely, so the whole account-wide feature read as
+    -- "only shows the character I am on". It was reported exactly that way.
+    --
+    -- Leaving is also the less reliable half: 1.12 clients are closed by
+    -- alt-F4 and they crash, and neither fires it. Arriving always does, so
+    -- one visit to an alt is now enough and it counts from the moment you get
+    -- there rather than when you remember to leave properly.
+    --
+    -- It ARMS the snapshot rather than taking one, because arrival is the
+    -- worst moment to read bags -- see sell.BagSettleVerdict. Taking it inline
+    -- here is what made this fix incomplete the first time: the read came back
+    -- empty or partial and overwrote a good snapshot with it.
+    A.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+        sell.ArmBagSnapshot(GetTime and GetTime() or 0)
+        sell.invDriver:Show()
+    end)
     -- At a merchant: learn what it charges. Bounded, one fire per merchant.
     A.RegisterEvent("MERCHANT_SHOW", function() sell.ScanMerchant() end)
     -- Money moved. O(1): a subtraction against an armed watch, and an
     -- immediate return when there is none -- which is every other time this
     -- fires, and it fires for every copper the player earns or spends.
     A.RegisterEvent("PLAYER_MONEY", function()
-        sell.SettleDepositWatch(GetMoney and GetMoney() or nil)
+        local coin = GetMoney and GetMoney() or nil
+        sell.SettleDepositWatch(coin)
+        -- ...and remember what this character is carrying, so the other
+        -- characters can be counted. O(1) -- a compare and a table write, see
+        -- db.SetCharMoney. This event fires for every copper the player earns,
+        -- spends, loots or is mailed, so it is the one handler in the file
+        -- that has no room at all for a walk.
+        if coin and A.db and A.db.SetCharMoney then A.db.SetCharMoney(coin) end
+    end)
+    -- The purse, on arrival. PLAYER_MONEY only fires when the figure CHANGES,
+    -- so a character you log in on and do nothing with would never record what
+    -- it is carrying -- the same gap that made the account-wide inventory read
+    -- as "only shows the character I am on" until v1.53.1.
+    --
+    -- Unlike the bag snapshot this needs no settle: GetMoney is answered from
+    -- the login packet and has nothing to resolve, so there is no partial
+    -- reading of it to wait out.
+    A.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+        if A.db and A.db.SetCharMoney and GetMoney then
+            A.db.SetCharMoney(GetMoney())
+        end
     end)
 end

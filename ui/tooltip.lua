@@ -314,6 +314,16 @@ function tooltip.Extend(gtt, itemId, count)
             gtt:AddLine("    bags are live; bank, auctions and mail are as of"
                 .. " your last visit", 0.44, 0.40, 0.33)
         end
+        -- SAY SO WHEN WE ONLY KNOW ABOUT YOU. A character holding none of the
+        -- item is left out, which is right -- but it makes "no other character
+        -- has ever been seen" look exactly like "no other character has any",
+        -- and on a fresh install the first is true of every alt. Without this
+        -- line the whole account-wide block reads as only ever showing the
+        -- character you are on, which is how it was reported.
+        if A.db.InventoryOnlyYou and A.db.InventoryOnlyYou(invRows) then
+            gtt:AddLine("    other characters appear once you log in on them",
+                0.44, 0.40, 0.33)
+        end
     end
 
     gtt:Show()
