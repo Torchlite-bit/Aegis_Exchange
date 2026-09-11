@@ -2645,8 +2645,8 @@ end
     # you are on, which is exactly how it was reported. alt-F4 and a crash
     # both skip the leaving event.
     ("inventory-no-arrival-snapshot", "core/sell.lua",
-     '    A.RegisterEvent("PLAYER_ENTERING_WORLD", function() sell.SnapshotBags() end)',
-     "    local _ = sell",
+     "        sell.ArmBagSnapshot(GetTime and GetTime() or 0)",
+     "        local _ = sell",
      "inventory"),
 
     # ...and the departing one dropped, which loses everything picked up since
@@ -2669,6 +2669,89 @@ end
     ("inventory-lonely-counts-empty", "core/db.lua",
      "    if n ~= 1 then return false end",
      "    if n > 1 then return false end",
+     "inventory"),
+
+    # ---- the bags bucket erased by its own writer (v1.53.3) --------------
+
+    # THE BUG ITSELF. An unanswered bag walk -- containers reporting no slots,
+    # which is every session's first moments -- allowed to overwrite a stored
+    # snapshot. The character then holds none of anything and is dropped from
+    # the rows entirely, so the account-wide block shows the alts that banked
+    # and none of the ones that only ever carried it.
+    ("inventory-empty-walk-may-be-written", "core/sell.lua",
+     "    return (slots or 0) > 0",
+     "    return true",
+     "inventory"),
+
+    # ...and the same thing reached the other way: the guard in the snapshot
+    # dropped, so the rule exists but nothing consults it.
+    ("inventory-snapshot-ignores-the-guard", "core/sell.lua",
+     "    if not sell.SnapshotWritable(sell.bagSlots) then return counts, false end",
+     "    local _ = sell.bagSlots",
+     "inventory"),
+
+    # The walker no longer reporting how many slots it saw, which is the only
+    # thing that separates "empty" from "the client did not answer".
+    ("inventory-walker-hides-slot-count", "core/sell.lua",
+     "    return out, seen",
+     "    return out",
+     "inventory"),
+
+    # The slot count taken from the LAST container rather than all of them, so
+    # a player whose fifth bag slot is empty reads as an unanswered client.
+    ("inventory-slots-not-accumulated", "core/sell.lua",
+     "        seen = seen + slots",
+     "        seen = slots",
+     "inventory"),
+
+    # Arrival taking the snapshot outright instead of arming one -- the first,
+    # incomplete version of this fix. The read lands mid-storm and stores the
+    # half of the bag that had resolved by then.
+    ("inventory-arrival-never-waits", "core/sell.lua",
+     '    if (now - (touchedAt or armedAt)) < sell.BAG_SETTLE then return "wait" end',
+     "    local _ = touchedAt",
+     "inventory"),
+
+    # The settle clock read from the ARM rather than the last bag change, so a
+    # storm running past BAG_SETTLE no longer pushes the snapshot back.
+    ("inventory-settle-clock-ignores-the-storm", "core/sell.lua",
+     "    if (now - (touchedAt or armedAt)) < sell.BAG_SETTLE then",
+     "    if (now - armedAt) < sell.BAG_SETTLE then",
+     "inventory"),
+
+    # BAG_UPDATE no longer stamping that clock, which comes to the same thing
+    # from the other end.
+    ("inventory-bag-update-does-not-stamp", "core/sell.lua",
+     "        sell.bagTouchedAt = GetTime and GetTime() or 0",
+     "        local _ = sell",
+     "inventory"),
+
+    # The cap on the wait removed. A character parked where something writes
+    # to their bags every second never sees quiet and is never recorded at
+    # all -- a worse failure than recording something imperfect.
+    ("inventory-arrival-waits-forever", "core/sell.lua",
+     '    if (now - armedAt) >= sell.BAG_SETTLE_MAX then return "take" end',
+     "    local _ = armedAt",
+     "inventory"),
+
+    # The armed snapshot never disarmed, so every frame for the rest of the
+    # session walks the bags and writes the DB.
+    ("inventory-arrival-never-disarms", "core/sell.lua",
+     "    sell.bagArmedAt, sell.bagTouchedAt = nil, nil\n    sell.SnapshotBags()",
+     "    sell.SnapshotBags()",
+     "inventory"),
+
+    # The driver frame not running the armed snapshot at all, so arrival arms
+    # something nothing ever takes.
+    ("inventory-driver-skips-the-snapshot", "core/sell.lua",
+     "    local busy = sell.StepBagSnapshot(GetTime and GetTime() or 0)",
+     "    local busy = false",
+     "inventory"),
+
+    # ...and arrival never starting the driver, which comes to the same thing.
+    ("inventory-arrival-never-starts-the-driver", "core/sell.lua",
+     "        sell.ArmBagSnapshot(GetTime and GetTime() or 0)\n        sell.invDriver:Show()",
+     "        sell.ArmBagSnapshot(GetTime and GetTime() or 0)",
      "inventory"),
 
     # ---- grouped Buy results (v1.53.0) -----------------------------------
@@ -3426,8 +3509,8 @@ end
     # BAG_UPDATE doing the walk inline instead of setting a flag -- the HARD
     # RULE 16 violation this design exists to avoid.
     ("inventory-bag-update-walks-inline", "core/sell.lua",
-     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = true end)",
-     "    A.RegisterEvent(\"BAG_UPDATE\", function() sell.bagsDirty = false end)",
+     "        sell.bagsDirty   = true",
+     "        sell.bagsDirty   = false",
      "inventory"),
 
     # The durable bag snapshot taking the CACHED answer, so what other
@@ -3531,8 +3614,8 @@ end
     # The driver never stops, so an OnUpdate runs for the rest of the session
     # doing nothing.
     ("inventory-driver-never-stops", "core/sell.lua",
-     "    if not sell.mailDirty then sell.invDriver:Hide() end",
-     "",
+     "    if not sell.mailDirty and not busy then sell.invDriver:Hide() end",
+     "    local _ = busy",
      "inventory"),
 
     # Rows no longer ordered with YOU first, so the row you are acting on is

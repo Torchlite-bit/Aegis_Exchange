@@ -18,6 +18,41 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.3]
+
+### Fixed
+- **The account-wide inventory block was erasing the alts it had recorded.**
+  Reported as a tooltip showing two characters where another addon showed
+  four — and the two it showed were the two holding the item in their **bank**,
+  the two it missed were holding it in their **bags**.
+
+  That asymmetry was the whole answer. The bank bucket is only ever written
+  while the bank frame is open, a moment the client can always answer. The bags
+  bucket had just gained a second writer in 1.53.1 — `PLAYER_ENTERING_WORLD` —
+  which fires at a moment it frequently *cannot*: the containers are still
+  arriving and the item data behind them resolves for several seconds
+  afterwards. A walk over containers that report nothing yet returns the same
+  empty answer a genuinely empty character does, and that empty answer
+  overwrote a real snapshot. The character then held none of anything, and a
+  character holding none of it is left out of the block entirely — so the alt
+  simply was not there.
+
+  Two changes, because there were two faults:
+  - **A bag walk now reports how many container slots it saw**, and a walk that
+    saw none is refused a write. No slots is not an empty bag, it is an
+    unanswered question, and a question must never overwrite an answer. A
+    character genuinely carrying nothing still records that, because it saw
+    slots.
+  - **Arrival now arms the snapshot instead of taking one.** It is taken once
+    the bags have gone quiet for three seconds — `BAG_UPDATE` stamps the clock,
+    so a storm pushes it back — or after thirty seconds if quiet never comes,
+    because never recording anything is a worse failure than recording
+    something imperfect. It rides the existing inventory driver frame, one flag
+    test and one clock comparison per tick, and stops the moment it is done.
+
+  Leaving the world still snapshots outright: bags are certainly readable then,
+  and there is no frame left to defer into.
+
 ## [1.53.2]
 
 ### Added
@@ -5058,6 +5093,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

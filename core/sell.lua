@@ -267,17 +267,26 @@ end
 sell.BANK_CONTAINERS = { -1, 5, 6, 7, 8, 9, 10 }
 sell.BAG_CONTAINERS  = { 0, 1, 2, 3, 4 }
 
--- Count every item across a list of containers. Returns { [itemId] = n }.
+-- Count every item across a list of containers.
+--
+-- Returns { [itemId] = n }, TOTAL SLOTS SEEN.
 --
 -- ONE walker for bags and bank, because they are the same walk over different
 -- container numbers, and two copies would drift the moment one of them learned
 -- something the other did not.
+--
+-- THE SECOND RETURN IS NOT A STATISTIC, it is the difference between "empty"
+-- and "the client did not answer". Early in a session GetContainerNumSlots
+-- reports 0 for bags the client has not finished sending, and a walk over
+-- nothing returns the same {} a genuinely empty character does. Writing that
+-- over a stored snapshot erases a real count; see sell.SnapshotWritable.
 function sell.CountContainers(bags)
-    local out = {}
+    local out, seen = {}, 0
     local bi = 1
     while bi <= table.getn(bags or {}) do
         local bag = bags[bi]
         local slots = GetContainerNumSlots(bag) or 0
+        seen = seen + slots
         local slot = 1
         while slot <= slots do
             local link = GetContainerItemLink(bag, slot)
@@ -290,7 +299,7 @@ function sell.CountContainers(bags)
         end
         bi = bi + 1
     end
-    return out
+    return out, seen
 end
 
 -- Bag counts for the character you are on, rebuilt only when the bags have
@@ -304,10 +313,12 @@ end
 -- happens here, at most once per actual change, driven by whoever asks.
 sell.bagsDirty = true
 sell.bagCounts = nil
+sell.bagSlots  = 0
 
 function sell.BagCounts(force)
     if force or sell.bagsDirty or not sell.bagCounts then
-        sell.bagCounts = sell.CountContainers(sell.BAG_CONTAINERS)
+        sell.bagCounts, sell.bagSlots =
+            sell.CountContainers(sell.BAG_CONTAINERS)
         sell.bagsDirty = false
     end
     return sell.bagCounts
@@ -336,18 +347,113 @@ function sell.SnapshotBank()
     return counts
 end
 
+-- May a walk that saw `slots` container slots be WRITTEN to the DB?
+--
+-- Pure, and the whole of the answer, so the rule lives in one place and can be
+-- tested without a client.
+--
+-- THE BUG THIS EXISTS FOR. Two characters holding an item in their BAGS were
+-- missing from the account-wide tooltip while two holding it in their BANK
+-- were present. The asymmetry was the clue: the bank bucket is only ever
+-- written from BANKFRAME_OPENED, a moment the client can always answer, while
+-- the bags bucket had just been given a second writer -- PLAYER_ENTERING_WORLD
+-- -- which fires at a moment it frequently cannot. A walk over containers that
+-- report no slots yet returns {}, and {} overwrote a good snapshot with an
+-- empty one. The character then held none of anything and was dropped from the
+-- rows entirely, which is exactly how it looked: the alt simply was not there.
+--
+-- Slots, not items, because a character really can be carrying nothing and
+-- that empty answer is worth storing. No slots is not an empty bag, it is an
+-- unanswered question, and a question must never overwrite an answer.
+function sell.SnapshotWritable(slots)
+    return (slots or 0) > 0
+end
+
 -- Write the bag snapshot as well, so the OTHER characters can see what this
 -- one is carrying. The live read above is what this character's own row uses;
 -- this is the copy that has to outlive the session.
+--
+-- Returns the counts, and whether they were stored.
 function sell.SnapshotBags()
     -- FORCED, not the cached answer. This copy is what other characters read,
     -- possibly for days, so it is worth one walk to be certain -- and the
     -- cache is only as good as the BAG_UPDATE that should have invalidated it.
     local counts = sell.BagCounts(true)
+    if not sell.SnapshotWritable(sell.bagSlots) then return counts, false end
     if A.db and A.db.SetInventoryBucket then
         A.db.SetInventoryBucket("bags", counts, sell.PlayerClass())
+        return counts, true
     end
-    return counts
+    return counts, false
+end
+
+-- ---------------------------------------------------------------------------
+-- The arrival snapshot, and why it waits
+-- ---------------------------------------------------------------------------
+--
+-- PLAYER_ENTERING_WORLD is the only event an alt is guaranteed to fire -- 1.12
+-- clients are closed with alt-F4 and they crash, and neither sends
+-- PLAYER_LEAVING_WORLD -- so it has to be the one that records what a
+-- character is carrying. But it fires at the WORST possible moment to read
+-- bags: the containers are still arriving, and the item data behind
+-- GetContainerItemLink is resolving for several seconds afterwards. That
+-- resolution is what makes BAG_UPDATE storm, and a snapshot taken mid-storm is
+-- a partial one.
+--
+-- So arrival ARMS a snapshot rather than taking one, and the driver takes it
+-- once the bags have gone quiet. sell.BagSettleVerdict is the whole rule.
+sell.BAG_SETTLE     = 3     -- seconds of quiet bags before the snapshot
+sell.BAG_SETTLE_MAX = 30    -- ...and the longest we will wait for that quiet
+sell.bagArmedAt   = nil     -- GetTime() when arrival armed it
+sell.bagTouchedAt = nil     -- GetTime() of the last BAG_UPDATE
+
+-- Pure: four numbers in, one of three words out.
+--
+--   "idle" -- nothing armed
+--   "wait" -- the client is still talking, or has not started
+--   "take" -- quiet long enough, or waited long enough to stop caring
+--
+-- The MAX arm is not a nicety. A character parked somewhere with an addon
+-- writing to their bags every second would never see quiet, and never
+-- recording anything is a worse failure than recording something imperfect.
+function sell.BagSettleVerdict(now, armedAt, touchedAt, slots)
+    if not armedAt then return "idle" end
+    if (now - armedAt) >= sell.BAG_SETTLE_MAX then return "take" end
+    if not sell.SnapshotWritable(slots) then return "wait" end
+    if (now - (touchedAt or armedAt)) < sell.BAG_SETTLE then return "wait" end
+    return "take"
+end
+
+function sell.ArmBagSnapshot(now)
+    sell.bagArmedAt   = now
+    sell.bagTouchedAt = now
+end
+
+-- How many bag slots the client will admit to RIGHT NOW. Five calls and no
+-- item reads, so it is safe to ask every frame -- which is the point: the
+-- expensive part of a bag walk is the per-slot link and item lookup, and this
+-- deliberately does none of it.
+function sell.BagSlotsNow()
+    if not GetContainerNumSlots then return 0 end
+    local seen, i = 0, 1
+    while i <= table.getn(sell.BAG_CONTAINERS) do
+        seen = seen + (GetContainerNumSlots(sell.BAG_CONTAINERS[i]) or 0)
+        i = i + 1
+    end
+    return seen
+end
+
+-- One step of the armed snapshot. Returns true while it still has work, so the
+-- driver knows whether to keep running.
+function sell.StepBagSnapshot(now)
+    local verdict = sell.BagSettleVerdict(now, sell.bagArmedAt,
+                                          sell.bagTouchedAt,
+                                          sell.BagSlotsNow())
+    if verdict == "idle" then return false end
+    if verdict == "wait" then return true end
+    sell.bagArmedAt, sell.bagTouchedAt = nil, nil
+    sell.SnapshotBags()
+    return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -1847,7 +1953,10 @@ sell.invDriver:SetScript("OnUpdate", function()
     -- flush's return instead would leave the driver running one extra frame
     -- after every flush, for no work.
     sell.FlushInventory()
-    if not sell.mailDirty then sell.invDriver:Hide() end
+    -- The armed arrival snapshot rides the same frame. Both are O(1) per tick:
+    -- a flag test and a clock comparison.
+    local busy = sell.StepBagSnapshot(GetTime and GetTime() or 0)
+    if not sell.mailDirty and not busy then sell.invDriver:Hide() end
 end)
 
 if A.RegisterEvent then
@@ -1872,7 +1981,14 @@ if A.RegisterEvent then
     A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() sell.CancelOwnerSweep() end)
     -- Bags changed. O(1) BY DESIGN -- see sell.BagCounts. This event storms,
     -- and the walk it invites is the shape that hard-froze Courier.
-    A.RegisterEvent("BAG_UPDATE", function() sell.bagsDirty = true end)
+    --
+    -- It also stamps the clock the arrival snapshot waits on: a storming
+    -- BAG_UPDATE is the client still talking, and a snapshot taken while it is
+    -- still talking is a partial one. Two assignments, still O(1).
+    A.RegisterEvent("BAG_UPDATE", function()
+        sell.bagsDirty   = true
+        sell.bagTouchedAt = GetTime and GetTime() or 0
+    end)
     -- The bank is open, which is the only moment the client will tell us what
     -- is in it. Fires once per visit.
     A.RegisterEvent("BANKFRAME_OPENED", function()
@@ -1895,9 +2011,14 @@ if A.RegisterEvent then
     -- one visit to an alt is now enough and it counts from the moment you get
     -- there rather than when you remember to leave properly.
     --
-    -- Fires per loading screen, not per frame, and sell.BagCounts walks bags
-    -- the player is already waiting on a loading screen for.
-    A.RegisterEvent("PLAYER_ENTERING_WORLD", function() sell.SnapshotBags() end)
+    -- It ARMS the snapshot rather than taking one, because arrival is the
+    -- worst moment to read bags -- see sell.BagSettleVerdict. Taking it inline
+    -- here is what made this fix incomplete the first time: the read came back
+    -- empty or partial and overwrote a good snapshot with it.
+    A.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+        sell.ArmBagSnapshot(GetTime and GetTime() or 0)
+        sell.invDriver:Show()
+    end)
     -- At a merchant: learn what it charges. Bounded, one fire per merchant.
     A.RegisterEvent("MERCHANT_SHOW", function() sell.ScanMerchant() end)
     -- Money moved. O(1): a subtraction against an armed watch, and an

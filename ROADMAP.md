@@ -2390,6 +2390,40 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The bags bucket erased by its own writer — v1.53.3
+
+Reported as a tooltip showing **two** characters where another addon showed
+**four**. The two Aegis showed were the two holding the item in their **bank**;
+the two it missed were holding it in their **bags**.
+
+That asymmetry was the whole answer, and it pointed straight at the fix shipped
+one patch earlier. The bank bucket is only ever written from
+`BANKFRAME_OPENED` — a moment the client can always answer. The bags bucket had
+just gained a second writer in 1.53.1, `PLAYER_ENTERING_WORLD`, which fires at
+a moment it frequently cannot: containers are still arriving and the item data
+behind `GetContainerItemLink` resolves for seconds afterwards. That resolution
+is what makes `BAG_UPDATE` storm in the first place. A walk over containers
+reporting nothing yet returns the same `{}` a genuinely empty character does,
+and `{}` overwrote a real snapshot. The character then held none of anything,
+and `db.InventoryRows` leaves those out entirely — so the alt simply was not
+there.
+
+**The general shape is worth keeping.** A reader that cannot distinguish "no"
+from "I do not know" will eventually write one as the other. `sell.CountContainers`
+now returns the slots it saw alongside the counts, and `sell.SnapshotWritable`
+is the one place that turns that into a verdict: slots, not items, because a
+character really can be carrying nothing and that empty answer is worth
+storing.
+
+**And arrival arms rather than reads.** `sell.ArmBagSnapshot` stamps a clock;
+`sell.BagSettleVerdict` — pure, four numbers in, one of three words out — says
+whether the bags have been quiet for `BAG_SETTLE` (3s, pushed back by every
+`BAG_UPDATE`) or whether `BAG_SETTLE_MAX` (30s) has run out and an imperfect
+record beats none. It rides the existing `sell.invDriver` frame at one flag
+test and one clock comparison per tick, and hides it again the moment it is
+done. `PLAYER_LEAVING_WORLD` still snapshots outright: bags are certainly
+readable then, and there is no frame left to defer into.
+
 ### Wearing another addon's error — v1.52.2
 
 Reported as `ui\tooltip.lua:489: Unknown link type` while hovering. Line 489
