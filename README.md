@@ -18,23 +18,20 @@ values are estimated from the level needed to equip an item and are labelled
 </sub>
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
-with a window that actually knows what things are worth — what you should charge,
-what you should pay, whether that recipe is worth crafting, and how much gold you
-made this week.
+with a window that knows what things are worth — what to charge, what to pay,
+whether that recipe is worth crafting, and where your gold went this week.
 
-> Built for **1.18.1** servers (Octo WoW, Capy WoW, Turtle WoW), which run the
-> original **WoW 1.12 (vanilla)** client on **Lua 5.0**. Not Classic. Not retail.
-> Real vanilla.
+> Built for **1.18.1** servers (Octo WoW, Capy WoW, Turtle WoW, RavenCraft),
+> which run the original **WoW 1.12 (vanilla)** client on **Lua 5.0**. Not
+> Classic. Not retail. Real vanilla.
 
 > ### ⚡ Scans fastest with AuctionQueryThrottle
 > Vanilla makes the client sit out ~5 seconds between auction queries.
 > **[AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)**
 > clears that timer the moment the server replies, and Aegis picks the change up
-> **automatically** — nothing to configure.
->
-> How much you gain depends on the realm, because what's left is the server's own
-> response time: **Octo WoW** is dramatically faster, while **Capy WoW** lands at
-> roughly **2×**. The Aegis tab tells you which you're getting
+> **automatically** — nothing to configure. What's left is your realm's own
+> response time, so the gain varies: **Octo WoW** is dramatically faster, **Capy
+> WoW** lands around **2×**. The Aegis tab tells you which you're getting
 > (`fast — gate 0.02s, server 0.61s`).
 >
 > It's a DLL, not an addon, and it needs the VanillaFixes loader.
@@ -48,28 +45,57 @@ and feature ideas.
 
 - [What it does](#what-it-does) — the six tabs
 - [Using pfUI?](#using-pfui)
-- [Install](#install)
-- [Using it](#using-it)
+- [Install](#install) · [Using it](#using-it)
 - [A few honest notes](#a-few-honest-notes)
 - [Under the hood](#under-the-hood)
-- [Contributing](#contributing)
+- [Something broken?](#something-broken) · [Contributing](#contributing)
 
 ---
 
 ## What it does
 
 ### 🛒 Buy — shop like you mean it
-Search the AH, sort by unit price, stack price, or % of market value, and buy or
-bid straight from the results. Colour-coded so bargains jump out: **green is
-under market, red is over.**
 
-**Typing a name still just searches for that name** — nothing you already do
-changes. But the same box now takes a query language when you want one:
+**Results group by item.** Search something broad and you get **one row per
+item** — its name, how many auctions there are, and the lowest price you can
+actually pay — instead of forty rows of Mana Potion.
+
+- **Left-click** a row to open it and see the individual auctions underneath,
+  each with its seller, stack, time left and price. That's a repaint, not
+  another search — the listings are already in hand.
+- **Right-click** to search that item alone. A real query, so you get *all* of
+  it, not a filter over the page you have. Works on a child row too.
+- A group of one never opens. There's nothing under it but the row you're
+  looking at.
+
+Two columns are the reason to be here: **Unit** (price per item, so a stack of
+20 is comparable to a stack of 1) and **% Mkt** (how this price compares to
+market value). Colour-coded so bargains jump out — **green is under market, red
+is over** — and names are quality-coloured the way their tooltips are.
+
+**It opens looking like the auction house you already know:** Name, Level
+Range, Min Quality, Usable items, the category list down the left, your gold
+with Bid / Buyout / Close along the bottom. Click a row, then bid or buy.
+
+**Advanced**, top right, swaps in a full query box and three views — **Results**,
+**Saved** and **Builder**. *Saved* keeps every search you've run plus a
+favourites column you order yourself. *Builder* is the same thing as a form:
+pick a component, type a value, press Enter, and the clause joins the list.
+Stacked clauses all have to hold; put **`or`** between two to widen, **`not`**
+before one to exclude. Switching carries your search both ways.
+
+**Shortcuts while Buy is open:** **right-click** any bag item to search for it,
+**shift-click** any item anywhere — bags, chat link, tooltip — to drop its name
+in the box, and **Tab** to autocomplete from everything Aegis has ever seen.
+Everywhere else Tab moves to the next field and Shift-Tab back.
+
+<details>
+<summary><b>The search language</b> — optional, and typing a plain name still just searches for that name</summary>
 
 | Type this | Get that |
 |---|---|
 | `linen cloth` | exactly what it always did |
-| `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
+| `[Linen Cloth]` or `linen cloth/exact` | only *Linen Cloth*, not *Bolt of Linen Cloth* |
 | `armor/leather` | the whole Leather Armor category |
 | `armor/plate/chest` | plate chest pieces |
 | `belt/quality3` or `belt/quality/rare` | rare-quality belts |
@@ -92,256 +118,187 @@ changes. But the same box now takes a query language when you want one:
 | `wristbands/disenchant-percent/70` | costs at most **70%** of what it breaks into |
 | `linen;wool;silk` | all three, browsed as one list |
 
-**Categories are the game's own names** — whatever the auction house's own
-dropdowns say, in your own language. Class first, then subclass, then slot:
-`armor/leather` works, `leather/armor` treats "leather" as a name. You don't
-have to match them exactly — `weapon/dagger` finds the "Daggers" category —
-but a word matching *several* categories (`weapon/sword` hits both One-Handed
-and Two-Handed Swords) is left as a name search rather than guessing.
+Terms combine with `/`. `;` runs several searches back to back — page past the
+end of one and it rolls into the next.
 
-**`stack 20` is the reliable form** — it just compares each listing's own
-count, so it needs no item data and works on the first search for any item.
-`stack 8`, `stack 1`, whatever you want. All three spellings work:
-`stack 20`, `stack/20`, `stack20`.
+**Categories are the game's own names**, in your own language. Class first, then
+subclass, then slot: `armor/leather` works, `leather/armor` treats "leather" as
+a name. Close is good enough — `weapon/dagger` finds "Daggers" — but a word
+matching *several* categories (`weapon/sword` hits both One-Handed and Two-Handed)
+stays a name search rather than guessing.
 
-Bare **`stack`** means "full stacks", which needs the item's *maximum* size —
-and vanilla only reports that for items your client has already cached. Aegis
-remembers every maximum it learns, and when it still doesn't know one it falls
-back to the biggest stack of that item on the page, saying so in the status
-line. If you want a guarantee rather than a best guess, give the number.
+**`stack 20` is the reliable form** — it compares each listing's own count, so
+it needs no item data and works on the first search. Bare **`stack`** means
+"full stacks", which needs the item's *maximum* size, and vanilla only reports
+that for items your client has cached; Aegis remembers every maximum it learns
+and otherwise falls back to the biggest stack on the page, saying so. Want a
+guarantee, give the number.
 
-**`tooltip` doesn't need repeating.** Keep listing what you're after and each
-one is another thing the tooltip must say: `wristbands/tooltip/+3 stam/+3 agi`
-wants both. The run ends the moment a word means something else to the search —
-`cloak/tooltip/stamina/exact` still applies *exact* — so if what you're looking
-*for* is one of those words, say `tooltip` again:
-`tooltip/Stamina/tooltip/Weapon` searches tooltips for **Weapon**, while
-`tooltip/Stamina/Weapon` searches the Weapon *category*.
+**`tooltip` doesn't need repeating.** Each following term is another thing the
+tooltip must say. The run ends when a word means something else to the search —
+`cloak/tooltip/stamina/exact` still applies *exact* — so say `tooltip` again if
+what you're after is one of those words.
 
-**`rarity` means exactly that quality, and `left` means "at most this long".**
-The **Min Quality** dropdown already gives you "rare *and better*", so
-`rarity/rare` is the other thing — rares and nothing else. `left/short` is
-what's about to expire, `left/long` is everything except the freshly posted;
-and because it's a bound it still composes, so `left/medium/not/left/short` is
-exactly medium.
+**`rarity` means exactly that quality** (Min Quality already gives you "rare and
+better"), and **`left` is a bound**, so `left/medium/not/left/short` is exactly
+medium.
 
-**`percent` is the deal filter and `vendor-profit` is the flipper's.**
-`percent/70` is "a third under the going rate or better", measured against
-what Aegis has actually seen the item sell for. `vendor-profit/50s` finds what
-you can buy and sell straight to a merchant for 50s more per item.
+**`percent` is the deal filter, `vendor-profit` the flipper's, and
+`disenchant-profit` / `disenchant-percent` the enchanter's.** Disenchant figures
+are **per item**, because each break rolls the table again.
 
-**`disenchant-profit` and `disenchant-percent` are the enchanter's.**
-`disenchant-profit/1g` finds gear worth at least a gold more in mats than it
-costs; `disenchant-percent/70` is the same question as a ratio. Both are per
-item, because each disenchant rolls the table again — a stack of five is five
-separate breaks, not five times one number.
+Some of these can't always answer, and they say so instead of quietly returning
+nothing — rows a filter couldn't judge are **counted and named in the status
+line, with the fix that works**: `3 skipped (no vendor-profit data — vendor
+prices are learned at a merchant)`.
 
-Some of these can't always answer, and they say so rather than quietly
-returning nothing. The seller's name arrives a moment after the page does,
-some servers don't report time left, market value needs a scan, a vendor
-price is only learned by standing at a merchant, and a disenchant value needs
-both the item's level and its materials' prices. Rows a filter can't judge are
-**counted and named in the status line, with the fix that actually works** —
-`3 skipped (no vendor-profit data — vendor prices are learned at a merchant)`.
-
-A **bid-only** auction isn't in that count. It has no buyout because the
-seller didn't set one; that's on the row for you to see, not something a
-rescan would fix.
-
-Terms combine with `/`, and `;` runs several searches back to back — page past
-the end of one and it rolls straight into the next.
-
-Result names are **coloured by item quality**, the way their tooltips are, so
-a rare reads blue and an epic purple at a glance. An item you can't use gets a
-red-tinted icon.
-
-**None of that is required.** The Buy tab opens looking and working like the
-auction house you already know: **Name**, **Level Range**, **Min Quality**,
-**Usable items**, **Search**, the category list down the left, and your gold
-with **Bid** / **Buyout** / **Close** along the bottom. Click a row to select
-it, then bid or buy from the bottom bar — same as the stock window. The
-category list expands the way Blizzard's does (**Armor › Leather › Chest**),
-and the Name field searches *within* whatever you've picked.
-
-Two extra columns are the reason to be here at all: **Unit** (price per item,
-so a stack of 20 is comparable to a stack of 1) and **% Mkt** (how this price
-compares to market value — green under, red over).
-
-The one addition to that layout is **Advanced**, top right. It swaps in the
-full query box and three views — **Results**, **Saved**, and **Builder**.
-**< Back** returns to the simple view.
-
-**Saved** is two columns. *Recent* is every search you've run; **right-click**
-one and it jumps straight into *Favorites*. Right-click a favorite for **Move
-Up / Move Down / Delete** — the order is yours and nothing re-sorts it.
-Left-click either column to run it; **shift**-left-click loads it into the
-Builder instead so you can adjust it first.
-
-**Builder** is the form: name, level range, class, subclass, slot, quality on
-the left, and the **Post Filter** on the right. Pick a component, type a
-value, press **Enter**, and the clause is added to the list:
-
-```
-tooltip: +3 stamina
-tooltip: +3 agi
-max-unit-buy: 5g
-```
-
-**Stacked clauses all have to hold** — that's one item carrying both stats,
-under 5g, and you didn't type a single operator to say so. Put **`or`**
-between two clauses to widen instead, or **`not`** before one to exclude it.
-Click any line to remove it. **Search** runs it, **Build** pushes it into the
-search box, **+ OR** appends it as another `;` term, **Import** pulls whatever
-is in the search box back into the form, and **Clear** empties both.
-
-**Stat names work either way round.** Type `agi` or `Agility`, `stam` or
-`Stamina`, `str`, `int`, `spi` — Aegis looks for both spellings, and the
-Post Filter shows you which other form it will match so you can see it landed
-before spending a scan on it.
-
-Switching carries your search with you in both directions, so you can start
-simple, hit Advanced to add something the plain view can't express, and come
-back. Anything that *only* exists in Advanced (a tooltip filter, say) is left
-behind on the way back — and the status line says so rather than quietly
-narrowing your results.
-
-**Shortcuts while the Buy tab is open:** **right-click** any bag item to search
-for it, or **shift-click** any item *anywhere* — bags, a chat link, a tooltip —
-to drop its name in the box and go. **Tab** completes what you've typed from
-every item Aegis has ever seen, pressing it again to cycle through the matches.
-
-**Everywhere else, Tab moves to the next box** and **Shift-Tab** back — down
-the Sell tab's stack size, count and price fields, through the Builder's form,
-across the gold / silver / copper triplets a coin at a time. Boxes the current
-mode has hidden are stepped over. The two search boxes are the one exception:
-they keep autocomplete, which is worth more on a search box than stepping to
-the level fields.
+</details>
 
 ### 💰 Sell — price it right the first time
-**Your Bags** lists what you can post — one line per item showing everything
-you hold, categorised, quality-coloured, click to load it. Drop an item in and
-Aegis scans the AH for *just that item*, shows you every competing listing, and
-pre-fills your price.
 
-One caveat vanilla forces on everyone: **stacks can't be merged**. Thirty
-essence held as three stacks of ten is thirty items, but the biggest stack you
-can post is ten — so the size slider stops there and the header still tells you
-the total. **Max** fills in every stack of the chosen size you can actually
-assemble.
+**Your Bags** lists everything you can post, categorised and quality-coloured.
+Click one, and Aegis scans the AH for *just that item*, shows every competing
+listing, and pre-fills your price — **Undercut** by a percentage or a flat
+amount (yes, 1 copper works) or **Price match** to sit level with the cheapest.
+Click any competitor's row to steal their price.
 
-**Leftovers stay ready.** Post two stacks of ten out of twenty-five and the
-remaining five come straight back into the slot at the same price, so the
-small stack goes out without hunting for it in your bags again. Turn it off on
-the Aegis tab if you'd rather pick the next item yourself. Two columns: on the left *what
-you're posting* — stack size and stack count on interlocking sliders, duration
-underneath; on the right *for how much* — **Undercut** (by a percentage or a
-flat amount; yes, 1 copper works) or **Price match** to sit level with the
-cheapest seller, above bid and buyout in gold / silver / copper.
+A header band carries the four figures that matter: **Total**, **Deposit**,
+**After cut** (what actually lands in your mailbox after the 5% consignment cut)
+and **Listings** against the 120-auction cap.
 
-A header band across the top carries the four figures that matter as labelled
-columns — **Total**, **Deposit**, **After cut** (what actually lands in your
-mailbox once the 5% consignment cut is taken) and **Listings** against the
-120-auction cap. Post **multiple stacks at once** — "3 stacks of 20". Click any
-competitor's row to steal their price. If your price ever drops below what a
-merchant would pay, the action bar says so — and if the item is **worth more
-disenchanted** than sold, it says that instead, because that is the larger
-mistake. That warning is deliberately hard to trigger: it needs an *exact* item
-level (one you learned by disenchanting, or one ClassicAPI supplied — never the
-approximation) and a 25% margin, because it is recommending something you cannot
-undo. And after a **bag scan**, Aegis loads the
-first item into the sell slot and walks you down the list — **Post** or **Skip**
-moves to the next one, so you can clear a full bag without clicking back and
-forth.
+- **Post multiple stacks at once** — "3 stacks of 20" — on interlocking sliders.
+- **Stacks can't be merged** on 1.12, so thirty essence held as three stacks of
+  ten caps the slider at ten. **Max** fills in every stack of that size you can
+  actually assemble.
+- **Leftovers stay ready.** Post two stacks of ten out of twenty-five and the
+  last five come back into the slot at the same price.
+- **After a bag scan, Post / Skip walks your whole inventory** without clicking
+  back and forth.
+- If your price drops below what a merchant would pay, the action bar says so —
+  and if the item is **worth more disenchanted**, it says that instead, because
+  that's the larger mistake.
 
 ### 🏪 Vendor list — some things just aren't worth listing
-Not everything belongs on the auction house. Hit **Vendor** on the Sell tab and
-Aegis shows the bag items worth **more at a merchant** than on the AH — comparing
-the vendor price against the best AH price *after the 5% cut* — sorted by what
-you'd actually gain:
+
+Hit **Vendor** on the Sell tab for the bag items worth **more at a merchant**
+than on the AH — vendor price against the best AH price *after the cut* — sorted
+by what you'd gain:
 
 | Item | Qty | Vendor (ea) | AH net (ea) | You gain |
 |---|---|---|---|---|
 | Tough Jerky | x5 | 25c | 9c | +80c |
 
-**Tick the ones you want gone** (or *Mark all*). Then at any merchant, an Aegis
-button appears on the vendor window — **"Aegis: sell 6 marked"** — which confirms
-what's about to go, sells the lot, and logs the gold to your History.
+**Tick the ones you want gone** (or *Mark all*). At any merchant an Aegis button
+appears — **"Aegis: sell 6 marked"** — which confirms, sells the lot, and logs
+the gold to your History.
 
-> Vendor prices are learned by **hovering items at a merchant** (1.12's API
-> doesn't expose them otherwise), so this list fills in as you play. What a
-> merchant *charges* is easier: opening any vendor reads its whole shelf in one
-> pass, so that side fills in just by walking past.
+> Vendor prices are learned by **hovering items at a merchant** (1.12 exposes
+> them no other way), so this fills in as you play. What a merchant *charges* is
+> easier: opening any vendor reads its whole shelf in one pass.
 
-### 📜 Auctions — mind the store
-Every auction you have out, with time left, current bid, and the thing you
-actually care about: **have I been undercut?** Green means you're still the
-cheapest. Red means someone slid under you. Cancel anything with one click.
+### 📜 Auctions — mind the store, and your bids
 
-Every column sorts — click **vs market** and the auctions you've been undercut
-hardest on come to the top.
+**Your auctions above, your bids below.** A bid is an outgoing commitment
+exactly the way a posted auction is an incoming one, and both are decided by the
+same clock.
 
-The client hands out your auctions **50 at a time**, so a full book (Turtle caps
-you at 120) needs paging — use **`<` / `>`** at the top right. The header counts
-what you *own*, not what the page shows. It pages rather than gathering them all
-into one list on purpose: cancelling works on an index into the page the client
-is holding, so showing exactly that page is what keeps every Cancel pointed at
-the auction you clicked. The trade is that **undercut counts are per page**, and
-the status line says so.
+**Your auctions:** time left, current bid, and the thing you actually care
+about — **have I been undercut?** Green means you're still cheapest, red means
+someone slid under you; cancel with one click. Every column sorts, so clicking
+**vs market** brings the worst news to the top. A line above it reads **"at most
+412g after the cut"** — what the page would pay if everything sold at buyout.
+Bid-only auctions can't be guessed at, so they're **counted and named
+separately**, never averaged in.
+
+**Your bids:** what you've bid on, what you're **winning**, and what that has
+committed — same sorting, tooltips and row chrome as the half above. *Committed*
+counts only what you're winning, and that figure is exact: 1.12 takes the gold
+when you bid and mails it back the moment someone beats you, so an outbid row is
+money you already have. An outbid row shows the **price to beat**, dimmed —
+never a number presented as yours, because 1.12 won't tell you what you bid.
+
+Both halves page at **50** (`<` / `>`, top right) because that's how the client
+hands them over, and cancelling works on an index into the page it's holding.
+The trade is that undercut counts are per page, and the status line says so.
+**No bids, no half** — the bottom collapses and gives every row back to the
+table above.
 
 ### 🔨 Crafting — one shopping list for everything you're making
+
 Open a profession, pick a recipe, hit **Add to Aegis**. Track as many as you
-like, set how many of each you want with `[-] 5 [+]`, and the tab turns the lot
-into **one shopping list**:
+like, set how many of each with `[-] 5 [+]`, and the tab turns the lot into
+**one shopping list**:
 
 > **Dreamfoil** &nbsp; `18/40` &nbsp;&nbsp; **Gromsblood** &nbsp; `12/42`
 > &nbsp;&nbsp; **Crystal Vial** &nbsp; `22/28` ᵛ
 
 Two recipes wanting Dreamfoil is **one line for forty**, not two lines you shop
-for twice. It counts what's already in your bags and bank, and a small `v`
-means a **vendor sells it cheaper** than the auction house does.
+for twice. It counts what's in your bags and bank, and a small `v` means a
+**vendor sells it cheaper**.
 
-- **Click a reagent** to search for it — a real auction query, not a filter over
-  what's already on screen.
-- **Price all** walks the whole list for you, searching each thing you're still
-  short of, so the prices and the run's total fill in. It buys nothing. Press it
-  again to stop.
-- **Expand a recipe** to see what *it* needs, at the quantity you asked for.
-  Wanting five of something made in twos is three crafts, so it says six
-  Dreamfoil — not ten.
+- **Click a reagent** to search for it — a real auction query.
+- **Price all** walks the whole list, searching everything you're short of so
+  the total fills in. It buys nothing. Press again to stop.
+- **Expand a recipe** to see what *it* needs at the quantity you asked. Wanting
+  five of something made in twos is three crafts, so it says six — not ten.
 - **Something you can craft yourself** goes dim instead of red: its own reagents
-  are already further down the list, so you're not told to buy the bolt *and*
-  the cloth to make it.
-- **Spent 41g 20s of 104g 30s** tracks the run as you buy. Hover any reagent for
-  what you've paid for it so far, and the average per unit.
+  are already further down the list.
+- **Spent 41g 20s of 104g 30s** tracks the run as you buy.
+
+**The list follows you to the vendor.** `/aex shop` opens it anywhere, and it
+pops up by itself at a **merchant** — which is where half a reagent list
+actually gets bought. A **bag button on the merchant window** toggles it, with a
+badge for how many lines are left. Only what's **still to buy**, alphabetical,
+with item icons and quality colours; a green count means buy it from the
+merchant, gold means the auction house. It closes when you leave — unless you
+opened it yourself.
 
 And it still does the maths you were doing in your head:
 
 > **mats 12g 40s → sells 18g** · **Profit 4g 71s** *(after the 5% cut)*
 
-That same profit line shows up **right on the profession window**, live, as you
+That profit line shows up **on the profession window itself**, live, as you
 click through recipes. It reads saved prices, so it works with the AH closed.
 
 ### 📈 History — where did all the gold go?
-Sales get logged **straight from your mailbox** — open your mail and Aegis
-records every "Auction successful" for you. Purchases get logged when you buy.
-Then it tells you **Income · Spent · Net** over the last 24h, 7d, 30d, or all
-time. Sort by when, type, item or amount — newest first unless you say
-otherwise.
+
+**The ledger on the left, your gold over time on the right.**
+
+Sales are logged **straight from your mailbox** — open your mail and Aegis
+records every "Auction successful". Purchases are logged when you buy. Then it
+tells you **Income · Spent · Net** over 24h, 7d, 30d, 3m or all time, sortable
+by when, type, item or amount.
+
+The chart plots **gold held, for your whole account**. Tick one character, tick
+several to see what they hold together, or *All Players*. **Hover the line** for
+what you were carrying at that point and when. **HIGH / LOW** of the line and
+**IN / OUT / NET** for the period sit underneath, from the same totals the table
+uses — so the two halves can't disagree.
+
+Roughly **three months of history** fits in the same saved variables: samples
+start hourly and compact to one a day once they age past four days.
+
+> 1.12 has one money call and it answers for the character you're on, so an
+> account total is necessarily a sum of remembered figures — each as fresh as
+> the last time that character played, and the chart says so. Your own figure is
+> always live.
 
 ### 🪟 Resize it — or scale it
-Drag the grip in the bottom-right corner. **Every** list re-fits — Buy, Sell,
-Auctions, Crafting and History — so a taller window shows **more rows** rather
-than more blank space. Vanilla frames
-never reflow, so that's all size can do — for *bigger*, there's a **window
-scale** on the Aegis tab (70%–150%). Both are remembered per character.
+
+Drag the grip in the bottom-right and **every** list re-fits, so a taller window
+shows more rows rather than more blank space. Vanilla frames never reflow, so
+for *bigger* there's a **window scale** (70%–150%) on the Aegis tab. Both are
+remembered per character.
 
 ### 🔍 Aegis tab — scanning + settings
-Run a full scan, a category-targeted scan, or scan everything in your bags to
-price it. Pause, resume, or **stop** whenever. Plus your defaults: post duration,
-undercut rule (% or flat, entered in coins), auto-fill price, window scale,
-tooltip lines, profit line, and the pfUI skin — all in one place.
+
+Run a full scan, a category-targeted scan, or scan your bags to price them.
+Pause, resume or stop whenever. Plus your defaults: post duration, undercut rule,
+auto-fill price, window scale, tooltip lines, profit line, whether the shopping
+list pops up at a merchant, and the pfUI skin.
 
 ### 💬 Tooltips everywhere
+
 Bags, inventory, the auction house, merchants, the mailbox, **loot windows,
 quest rewards and profession reagents** — all gain the same block:
 
@@ -355,7 +312,9 @@ Buy from Vendor:                       12s 0c
 
 Crafting Cost:                         5s 40c
 
-Class: Weapon
+You have: 14  (bags 6 · bank 8)
+Alts: Torchlite 20 · Troglodyte 5
+
 Disenchants Into (approx, from required level):
     81%  Lesser Magic Essence  x1.5
     19%  Strange Dust  x1.5
@@ -363,70 +322,69 @@ Disenchants Into (approx, from required level):
 Disenchant (worth more than the AH):   10s 40c
 ```
 
-Every number carries what qualifies it. The **sighting count** leads, because it
-is context for every figure below it. **Buyout** sits above **Market** — today's
-cheapest is what you act on, the median is the context for it. **Sell to
-Vendor** and **Buy from Vendor** sit together because they are opposite sides of
-the same NPC — money in and money out — and a vendor whose stock was finite
-reads *Buy from Vendor (limited)*, because a price you can't go back to is not
-a supply. Pick which lines
-you want on the Aegis tab, and optionally show stack totals only while **Shift**
-is held.
+Every number carries what qualifies it. The **sighting count** leads, because
+it's context for everything below. **Buyout** sits above **Market** — today's
+cheapest is what you act on, the median is the context. **Sell to Vendor** and
+**Buy from Vendor** sit together because they're opposite sides of the same NPC,
+and a vendor whose stock was finite reads *Buy from Vendor (limited)*.
 
-**Crafting Cost** appears when a recipe you have opened makes the item, priced
-per unit rather than per craft. It stays quiet unless *every* reagent is priced:
-a partial total reads low, and low is the direction that loses money.
+**How many you have** counts bags, bank, auctions and mail — **across your whole
+account**, not just the character you're on. Alts are recorded the first time
+you log in on them.
+
+**Crafting Cost** appears when a recipe you've opened makes the item, priced per
+unit. It stays quiet unless *every* reagent is priced: a partial total reads
+low, and low is the direction that loses money.
 
 **The verdict** — *worth more than vendor*, *worth more than the AH*, or *sells
-for more than it breaks for* — is the comparison that made you hover, in green or
-red. It stays silent when the two are within 10% of each other.
+for more than it breaks for* — is the comparison that made you hover. It stays
+silent when the two are within 10%.
 
-#### How the disenchant line knows
+Pick which lines you want on the Aegis tab, and optionally show stack totals
+only while **Shift** is held.
+
+<details>
+<summary><b>How the disenchant line knows</b></summary>
 
 Item level is the one input the calculation needs, and the 1.12 client gives
 addons no way to read it. Aegis has three sources, best first:
 
 1. **You disenchanted one.** Evidence from the server you actually play on, so
    it outranks everything else. It won't guess from a single result: an essence
-   pins an item down, a dust leaves two or three possibilities, so it keeps quiet
-   until a second break settles it.
+   pins an item down, a dust leaves two or three possibilities, so it keeps
+   quiet until a second break settles it.
 2. **[ClassicAPI](https://github.com/brues-code/ClassicAPI)** — a DLL, not an
    addon. 1.12 stores an item level on every item and shows it nowhere;
-   ClassicAPI hands over the real number for everything, Turtle's custom gear
-   included.
+   ClassicAPI hands over the real number, Turtle's custom gear included.
 3. **The level required to equip it**, plus five. Approximate, and **always
    labelled** *(approx, from required level)* — required level moves in steps of
    five where item level does not, so an item near a boundary can land one band
-   out. This is what answers without any DLL at all.
+   out. This is what answers with no DLL at all.
 
-When the rule can answer but the market cannot, the line says which material is
+When the rule can answer but the market can't, the line says which material is
 missing — *no price yet for Large Glowing Shard* — instead of going quiet.
 
-The value shown is for **one** item: a stack of twenty is twenty separate rolls,
-not twenty times that number. The numbers behind it come from **8.8 million
-observed disenchants**, not typed by hand; epics and anything above item level 65
-are deliberately left unanswered because the data there isn't good enough to
-trust. See `tools/README.md` for the workings.
+The value shown is for **one** item: a stack of twenty is twenty separate rolls.
+The numbers behind it come from **8.8 million observed disenchants**, not typed
+by hand; epics and anything above item level 65 are deliberately left unanswered
+because the data there isn't good enough to trust. See `tools/README.md`.
 
-ClassicAPI does the same for **vendor prices**. Without it they are still learned
+ClassicAPI does the same for **vendor prices**. Without it they're still learned
 two ways that cost you nothing: hovering an item at a merchant, and **putting one
-in the auction house sell slot** — every item you post teaches Aegis its exact
-vendor price.
+in the sell slot** — every item you post teaches Aegis its exact vendor price.
+
+</details>
 
 ---
 
 ## Using pfUI?
 
-> There's no pfUI badge above on purpose — pfUI is **not required**. Aegis simply
-> notices it and matches its look.
+Aegis notices pfUI and **restyles itself to match** — borders, buttons,
+checkboxes and scrollbars. Nothing to install. Turn it off with **"Match pfUI's
+look"** on the Aegis tab (takes a `/reload`).
 
-Aegis notices and **restyles itself to match** — pfUI's borders, buttons,
-checkboxes and scrollbars instead of vanilla tooltip frames. Nothing to install;
-it just happens. Turn it off any time with **"Match pfUI's look"** on the Aegis
-tab (takes a `/reload`).
-
-The skinning is purely cosmetic and fully guarded — if pfUI changes its API,
-the worst case is Aegis keeps its default look. It never affects behaviour.
+The skinning is purely cosmetic and fully guarded: if pfUI changes its API, the
+worst case is that Aegis keeps its default look. It never affects behaviour.
 
 <details>
 <summary>Using <b>pfUI-addonskinner</b>?</summary>
@@ -447,15 +405,10 @@ That file just calls Aegis's own skinning routine, so both paths stay identical.
 ## Install
 
 1. Download this repo (**Code → Download ZIP**, or clone it).
-2. Drop the folder into:
-   ```
-   World of Warcraft/Interface/AddOns/Aegis_Exchange
-   ```
+2. Drop the folder into `World of Warcraft/Interface/AddOns/Aegis_Exchange`.
 3. **The folder must be named exactly `Aegis_Exchange`** — GitHub's ZIP unpacks
    as `Aegis_Exchange-main`, so rename it or the addon won't load.
-4. Restart the client. Visit an auctioneer.
-
-That's it. Aegis takes over the auction window automatically.
+4. Restart the client, then visit an auctioneer.
 
 ---
 
@@ -465,38 +418,42 @@ That's it. Aegis takes over the auction window automatically.
 |---|---|
 | Talk to an auctioneer | The Aegis window opens automatically |
 | `/aex` | Hand the session back to the stock Blizzard AH |
-| **Blizzard UI** button | Same thing, with a mouse |
-| **Aegis UI** button (on the stock AH) | Come back |
+| **Blizzard UI** / **Aegis UI** buttons | The same swap, with a mouse |
+| `/aex shop` | The crafting shopping list, anywhere — no AH needed |
+| `/aex demo` | Fill the gold chart and Crafting tab with invented data, to see what they look like with a real history. Nothing is saved; `/reload` clears it |
+| `/aex diag <shift-click an item>` | Everything Aegis knows about that item, and how it knows it |
+| `/aex cache` | How many items Aegis has learned from the client |
 | `/aex debug` | Verbose scanner trace, for when something looks wrong |
 
-**Prices come from scanning.** A fresh install knows nothing — run a scan (or
-just search for things; ordinary searches feed the database too) and the market
-numbers, % colours, and profit estimates fill in as you go.
+**Prices come from scanning.** A fresh install knows nothing — run a scan, or
+just search for things (ordinary searches feed the database too) and the market
+numbers, % colours and profit estimates fill in as you go.
 
 ---
 
 ## A few honest notes
 
-- **Deposits are approximate.** Turtle inflates the number the client reports, so
-  Aegis scales it and always labels it *approx*. Never treat it as exact.
-- **Turtle specifics are baked in:** durations are ×3 (6h / 24h / 72h), there's a
+- **Deposits are approximate, and labelled *approx*.** Where an item is in the
+  sell slot the client's own figure is used as-is. For a bag preview, which
+  can't reach that figure, Aegis applies a ratio it measured from the slot — and
+  separately compares what the client quoted against the gold that actually left
+  your bags on a real post, so the number improves as you use it. Never treat it
+  as exact.
+- **Turtle specifics are baked in:** durations are ×3 (6h / 24h / 72h), a
   120-auction account cap, a 5% cut on sales, and the auction house is
   **cross-faction** — one shared economy, so prices aren't split by side.
 - **Scanning is paced by your client, not by us.** Aegis waits on the client's
   own `CanSendAuctionQuery()` gate, which vanilla keeps shut ~5s after every
   query. A full scan takes a while; that's the protocol, not the addon.
-  - Running the [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)
-    DLL? It clears that timer as soon as the server replies, so **Aegis speeds
-    up automatically** — nothing to configure. It's a DLL rather than an addon,
-    so there's nothing to detect: the gate *is* the signal. The Aegis tab shows
-    which you're getting (`fast — gate opened in 0.28s`), and **Safe 4s** pacing
-    is there if you ever want the old fixed floor back.
-- **Mail sale-tracking is enUS-only** right now (it matches "Auction successful:").
-- **What Aegis itself needs: nothing but the client.** It calls only vanilla 1.12
-  API — no SuperWoW, Nampower, UnitXP_SP3 or ClassicAPI calls anywhere in the
-  source, so it runs fine without any of them.
-  [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle) is
-  the only external thing that changes anything here, and only how fast scans go.
+  [AuctionQueryThrottle](https://github.com/brues-code/AuctionQueryThrottle)
+  clears that timer and Aegis speeds up on its own — and **Safe 4s** pacing is
+  there if you ever want the old fixed floor back.
+- **Mail sale-tracking is enUS-only** right now (it matches "Auction
+  successful:").
+- **Aegis needs nothing but the client.** The only external thing it calls is
+  ClassicAPI's `C_Item`, for exact item levels and vendor prices, and every call
+  is guarded — without it those are estimated and labelled. No SuperWoW,
+  Nampower or UnitXP_SP3 calls anywhere in the source.
 
 ---
 
@@ -505,30 +462,36 @@ numbers, % colours, and profit estimates fill in as you go.
 ```
 Aegis_Exchange/
 ├── core/
-│   ├── init.lua    namespace + event dispatcher
-│   ├── util.lua    Lua 5.0-safe helpers (money, strings, tables)
-│   ├── db.lua      price database, settings, ledger, vendor prices
+│   ├── init.lua        namespace + event dispatcher
+│   ├── util.lua        Lua 5.0-safe helpers (money, strings, tables)
+│   ├── db.lua          price database, settings, ledger, vendor prices
 │   ├── disenchant.lua  the disenchant rule, and what it learns from play
-│   ├── scan.lua    page-by-page scanner state machine
-│   ├── sell.lua    posting engine + owned auctions
-│   └── buy.lua     search/buy engine + shopping lists + crafting
+│   ├── scan.lua        page-by-page scanner state machine
+│   ├── sell.lua        posting engine + owned auctions
+│   └── buy.lua         search/buy engine + shopping lists + crafting
 ├── ui/
-│   ├── frame.lua   the window and every tab
-│   ├── skin.lua    optional pfUI restyling
-│   └── tooltip.lua price lines on item tooltips
-├── pfui/           drop-in skin for pfUI-addonskinner (not loaded by Aegis)
-└── design/         mockups (reference only — never loaded)
+│   ├── frame.lua       the window and every tab
+│   ├── skin.lua        optional pfUI restyling
+│   └── tooltip.lua     price lines on item tooltips
+├── art/                textures (the chart's gradient)
+├── pfui/               drop-in skin for pfUI-addonskinner (not loaded by Aegis)
+├── tests/              lint + unit suites + the sabotage layer (never shipped)
+├── tools/              build-time generators (never shipped)
+└── design/             mockups (reference only — never loaded)
 ```
 
 Market value is a **time-weighted median** of each item's daily minimum buyout
 over the last **30 days**, weighted so today counts fully, a week ago about a
-third, and a month ago barely at all. One weird lowball can't wreck your
-numbers — it's a median, so a single absurd listing moves it by nothing — while
-a genuine price shift is tracked within about five days.
+third, and a month ago barely at all. One weird lowball can't wreck your numbers
+— it's a median, so a single absurd listing moves it by nothing — while a
+genuine price shift is tracked within about five days.
 
 Everything is **Lua 5.0 and 1.12 API only** — no `string.match`, no `#`, no `%`
-operator, no secure hooks. If you're contributing, `CLAUDE.md` has the full rules
-and the reasons behind them, most of which were learned the hard way.
+operator, no secure hooks. `./tests/run.sh` checks the language rules, the
+32-upvalue ceiling and the unit suites; `--sabotage` additionally plants real
+bugs in a throwaway copy and requires the suites to catch them.
+[`CLAUDE.md`](CLAUDE.md) has the full rules and the reasons behind them, most of
+which were learned the hard way.
 
 ---
 
