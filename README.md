@@ -43,7 +43,7 @@ and feature ideas.
 
 ## Contents
 
-- [What it does](#what-it-does) — the six tabs
+- [What it does](#what-it-does) — the six tabs, and the shopping list
 - [Using pfUI?](#using-pfui)
 - [Install](#install) · [Using it](#using-it)
 - [A few honest notes](#a-few-honest-notes)
@@ -245,20 +245,49 @@ for twice. It counts what's in your bags and bank, and a small `v` means a
   are already further down the list.
 - **Spent 41g 20s of 104g 30s** tracks the run as you buy.
 
-**The list follows you to the vendor.** `/aex shop` opens it anywhere, and it
-pops up by itself at a **merchant** — which is where half a reagent list
-actually gets bought. A **bag button on the merchant window** toggles it, with a
-badge for how many lines are left. Only what's **still to buy**, alphabetical,
-with item icons and quality colours; a green count means buy it from the
-merchant, gold means the auction house. It closes when you leave — unless you
-opened it yourself.
-
 And it still does the maths you were doing in your head:
 
 > **mats 12g 40s → sells 18g** · **Profit 4g 71s** *(after the 5% cut)*
 
 That profit line shows up **on the profession window itself**, live, as you
 click through recipes. It reads saved prices, so it works with the AH closed.
+
+### 🛍️ The shopping list, out on its own
+
+The main window only opens at an auction house — `AuctionFrame` is what it
+replaces. But half a reagent list isn't an auction house problem: a good part of
+it is sold by a **vendor**, and the moment you want to read it is while you're
+standing at one.
+
+**`/aex shop` opens the list anywhere**, in a small movable window, and it pops
+up by itself when you open a **merchant**. A **bag button on the merchant
+frame** toggles it, carrying a badge of how many lines are still to buy — it
+dims rather than disappears when there's nothing left, because a button that
+vanishes is one you can't press to check.
+
+```
+Shopping list                              X
+9 to buy • 4301g 56s 60c
+  ▪ Arcane Crystal                     6 / 54
+  ▪ Blood of the Mountain              0 / 10
+  ▪ Dense Grinding Stone                1 / 2
+  ▪ Fiery Core                         4 / 13
+  ▪ Rune Thread                         0 / 2
+  ▪ Sulfuron Ingot                      2 / 8
+```
+
+- **Only what's left to buy.** Anything you already have enough of is off it,
+  and so is anything you can craft from what's on the list already — listing
+  that would tell you to purchase something you don't need.
+- **Alphabetical**, because a shopping list is read against what's in front of
+  you, and cost order re-shuffles it every time a price is learned.
+- **Item icons and quality colours**, so the list reads at a glance.
+- **The count colour says where:** green for a vendor line, gold for an auction
+  one. Hover a row for the price and which recipes want it.
+- It closes when you leave the merchant — **unless you opened it yourself**, in
+  which case it stays.
+- **Nothing to buy, nothing pops up.** Turn the automatic half off on the Aegis
+  tab: *Show the shopping list at a merchant*.
 
 ### 📈 History — where did all the gold go?
 
@@ -312,14 +341,18 @@ Buy from Vendor:                       12s 0c
 
 Crafting Cost:                         5s 40c
 
-You have: 14  (bags 6 · bank 8)
-Alts: Torchlite 20 · Troglodyte 5
-
+Class: Armor
 Disenchants Into (approx, from required level):
     81%  Lesser Magic Essence  x1.5
     19%  Strange Dust  x1.5
 
 Disenchant (worth more than the AH):   10s 40c
+
+Inventory                            39 total
+    Torchlite                 20  (14 bags, 6 bank)
+    Troglodyte                14  (2 bags, 8 bank, 4 ah)
+    Ghokin                     5  (5 mail)
+    bags are live; bank, auctions and mail are as of your last visit
 ```
 
 Every number carries what qualifies it. The **sighting count** leads, because
@@ -328,10 +361,6 @@ cheapest is what you act on, the median is the context. **Sell to Vendor** and
 **Buy from Vendor** sit together because they're opposite sides of the same NPC,
 and a vendor whose stock was finite reads *Buy from Vendor (limited)*.
 
-**How many you have** counts bags, bank, auctions and mail — **across your whole
-account**, not just the character you're on. Alts are recorded the first time
-you log in on them.
-
 **Crafting Cost** appears when a recipe you've opened makes the item, priced per
 unit. It stays quiet unless *every* reagent is priced: a partial total reads
 low, and low is the direction that loses money.
@@ -339,6 +368,17 @@ low, and low is the direction that loses money.
 **The verdict** — *worth more than vendor*, *worth more than the AH*, or *sells
 for more than it breaks for* — is the comparison that made you hover. It stays
 silent when the two are within 10%.
+
+**Inventory is account-wide, and it comes last** because it's the only line
+that's about *you* rather than about the item. One row per character holding
+any, with the split across **bags, bank, auctions and mail**, and names in
+class colour — the character you're on at full strength, the rest held back,
+because their numbers are memories and yours is not. A character holding none
+is left out. If nobody but you has ever been recorded it says so
+(*other characters appear once you log in on them*), because on a fresh install
+"no alt has any" and "no alt has been seen" look identical otherwise. Alts are
+recorded the first time you log in on them, and it's **per realm**: twenty Silk
+Cloth on a character you can't reach from here isn't stock you have.
 
 Pick which lines you want on the Aegis tab, and optionally show stack totals
 only while **Shift** is held.
