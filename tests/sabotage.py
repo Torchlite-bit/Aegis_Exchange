@@ -2671,6 +2671,84 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- demo data, and the gradient that could not work (v1.53.12) ------
+
+    # The wash under the line drawn solid. It is the same colour as the line,
+    # so a solid fill IS a solid block with no line visible on it -- which is
+    # exactly what shipped in v1.53.11 when a pcall reported that a gradient
+    # had been applied and it had not.
+    ('fill-is-opaque', 'ui/frame.lua',
+     '            t:SetAlpha(HISTL.fill_flat)',
+     '            t:SetAlpha(1)',
+     'histgraph'),
+
+    # The x-axis format decided per MARK rather than for the whole axis. On a
+    # 24h chart the leftmost mark is exactly a day old and crosses the date
+    # threshold while the four to its right do not, so the axis reads
+    # "Sep 10 / 18h 0m ago / 12h 0m ago / 6h 0m ago / now".
+    ('axis-labels-decided-per-mark', 'ui/frame.lua',
+     '            fs:SetText(ui.AxisTimeLabel(m.t, now, now - from))',
+     '            fs:SetText(ui.WhenLabel(m.t, now))',
+     'histgraph'),
+
+    # ...and the same rule the wrong way round: dates on a one-day chart and
+    # relative times on a three-month one.
+    ('axis-label-threshold-inverted', 'ui/frame.lua',
+     '    if not span or span < 2 * 86400 then',
+     '    if not span or span > 2 * 86400 then',
+     'histgraph'),
+
+    # The axis label back to "18h 0m ago", which is three times the width for
+    # no more information -- five of those across a narrow plot run into each
+    # other.
+    ('agoshort-keeps-the-long-form', 'core/util.lua',
+     '    if sec < 86400 then return math.floor(sec / 3600) .. "h" end',
+     '    if sec < 86400 then return util.FormatAgo(sec) end',
+     'util'),
+
+    # Demo mode no longer substituting the reader. The whole safety of the
+    # mode is that generated gold is never anywhere the store can see it --
+    # not on logout, not on a crash, not if you forget it is on.
+    ('demo-data-is-written-to-the-store', 'core/db.lua',
+     '    if db.demo then return db.DemoRows() end',
+     '    local _ = db',
+     'purse'),
+
+    # ...and the same for the series, which is the half the chart draws.
+    ('demo-series-not-substituted', 'core/db.lua',
+     '    if db.demo then return db.DemoSeries(from, step, n, who) end',
+     '    local _ = who',
+     'purse'),
+
+    # Generated gold allowed below zero. A chart drawn from data its own
+    # reader could not have produced is testing the wrong thing.
+    ('demo-walk-can-go-negative', 'core/db.lua',
+     '            if held < 0 then held = 0 end',
+     '            local _ = held',
+     'purse'),
+
+    # Every demo character seeded the same, so the account view is one line
+    # multiplied by four rather than four lines summed.
+    ('demo-characters-all-alike', 'core/db.lua',
+     '        local seed = db.DemoSeed(names[ci])',
+     '        local seed = 12345',
+     'purse'),
+
+    # A seed that is just a sum of letters, so two names that are anagrams
+    # draw the same line.
+    ('demo-seed-ignores-position', 'core/db.lua',
+     '        seed = math.mod(seed * 31 + string.byte(name, i) * i, db.DEMO_MOD)',
+     '        seed = math.mod(seed + string.byte(name, i), db.DEMO_MOD)',
+     'purse'),
+
+    # The LCG multiplier raised past what a double holds exactly. Lua 5.0
+    # numbers are exact only to 2^53 and this product reaches ~2.4e18 -- it
+    # does not error, it quietly stops being random.
+    ('demo-generator-overflows', 'core/db.lua',
+     'db.DEMO_MULT = 16807',
+     'db.DEMO_MULT = 1103515245',
+     'purse'),
+
     # ---- the chart's own title bar and a real gradient (v1.53.11) --------
 
     # THE BUG ITSELF: the menu handed the NAME-keyed selection while its own
@@ -2710,43 +2788,10 @@ end
      '        local frac = (i - 1) / count\n        table.insert(out, { frac = frac, t = from + span * frac })',
      'histgraph'),
 
-    # Every column handed the same gradient endpoints instead of the slice it
-    # occupies. 1.12's SetGradientAlpha applies per TEXTURE, so a short column
-    # runs the whole fade over five pixels and a tall one over a hundred and
-    # fifty -- the wash traces the line instead of sitting behind it.
-    ('fill-gradient-ignores-the-plot', 'ui/frame.lua',
-     '    local f = (y or 0) / h',
-     '    local f = 1',
-     'histgraph'),
 
-    # The fade inverted: strongest at the baseline and faint under the line,
-    # which reads as a solid block with a line sitting on top of it.
-    ('fill-gradient-upside-down', 'ui/frame.lua',
-     '    return a0 + (a1 - a0) * f',
-     '    return a1 + (a0 - a1) * f',
-     'histgraph'),
 
-    # An alpha extrapolated past its endpoints, which on a column clipped by
-    # the top of the plot is an alpha outside 0..1.
-    ('fill-alpha-not-clamped', 'ui/frame.lua',
-     '    if f < 0 then f = 0 end\n    if f > 1 then f = 1 end',
-     '    local _ = f',
-     'histgraph'),
 
-    # The flat fallback alpha left on after the gradient took. Texture alpha
-    # MULTIPLIES the gradient's, so the wash ends up the two together and
-    # barely visible.
-    ('fill-alpha-multiplied-twice', 'ui/frame.lua',
-     '            if ok then t:SetAlpha(1) end',
-     '            local _ = ok',
-     'histgraph'),
 
-    # ...and the other way: no flat wash set first, so a client that will not
-    # take a gradient gets a solid block of colour under the line.
-    ('fill-has-no-fallback', 'ui/frame.lua',
-     '            t:SetAlpha(HISTL.fill_flat)',
-     '            t:SetAlpha(1)',
-     'histgraph'),
 
     # The period row anchored by its LEFT edge. The chart's width moves with
     # the window and the buttons have to stay against its far side; anchored

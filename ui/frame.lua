@@ -11618,14 +11618,9 @@ local HISTL = {
     -- placeable in time at a glance; without them the x labels are captions
     -- for a band whose edges you have to estimate.
     x_lines    = 5,
-    -- The fill's alpha at the BASELINE and at the TOP of the plot. It fades
-    -- downward, strongest just under the line, which is what the reference
-    -- does -- a wash that is uniform at the bottom reads as a solid block with
-    -- a line on top of it.
-    fill_a0    = 0.04,
-    fill_a1    = 0.42,
-    -- ...and the flat alpha used when the client will not take a gradient.
-    fill_flat  = 0.20,
+    -- The fill under the line. FLAT, not a gradient -- see ui.PaintFill for
+    -- the attempt and why it could not work on this client.
+    fill_flat  = 0.18,
     -- The chart's own title bar: the heading, and the period buttons beside
     -- it.
     per_w      = 32,
@@ -11973,6 +11968,29 @@ function ui.WhenLabel(t, now)
     return util.FormatAgo(ago)
 end
 
+-- One label for an x-axis mark.
+--
+-- THE FORMAT IS DECIDED BY THE SPAN, not by each mark's own age. Deciding per
+-- mark is what put "Sep 10" next to "18h 0m ago" on a one-day chart: the
+-- leftmost mark is exactly 24h old and crossed the date threshold while the
+-- four to its right did not. An axis carrying two kinds of label is one you
+-- have to read twice to place a point on.
+--
+-- Under two days everything is relative and compact; beyond that everything is
+-- a date. `date` is guarded for the reason ui.WhenLabel guards it: it is a
+-- stock 1.12 global and also one another addon can have replaced.
+function ui.AxisTimeLabel(t, now, span)
+    now = now or 0
+    if not span or span < 2 * 86400 then
+        return util.FormatAgoShort(now - (t or 0))
+    end
+    if date then
+        local ok, out = pcall(date, "%b %d", t)
+        if ok and out and out ~= "" then return out end
+    end
+    return util.FormatAgoShort(now - (t or 0))
+end
+
 -- The hover readout: what was held at `b`, and when that was.
 function ui.HoverLabel(values, from, step, b, now)
     if not values or not b then return "" end
@@ -12006,31 +12024,6 @@ function ui.XAxisMarks(from, to, count)
         i = i + 1
     end
     return out
-end
-
--- The fill's alpha at height `y` in a plot `h` tall.
---
--- THE GRADIENT IS THE PLOT'S, NOT THE COLUMN'S, and this is the whole of what
--- makes that true. 1.12's SetGradientAlpha applies per TEXTURE, and the fill
--- is one texture per column -- so handing every column the same pair of
--- endpoints makes a short column run the entire fade over five pixels and a
--- tall one over a hundred and fifty. The result traces the line instead of
--- sitting behind it.
---
--- Each column instead gets the SLICE of the plot-wide gradient it actually
--- occupies: its own bottom and top mapped through here. Stack those slices and
--- the wash is continuous across the whole plot.
---
--- Keyed off the plot floor rather than the zero line, which is the same thing
--- on this chart -- gold held cannot be negative. A chart whose series crosses
--- zero would want the distance from the zero rule instead.
-function ui.FillAlphaAt(y, h, a0, a1)
-    a0, a1 = a0 or HISTL.fill_a0, a1 or HISTL.fill_a1
-    if not h or h <= 0 then return a0 end
-    local f = (y or 0) / h
-    if f < 0 then f = 0 end
-    if f > 1 then f = 1 end
-    return a0 + (a1 - a0) * f
 end
 
 -- How many buckets a plot `w` pixels wide should be divided into.
@@ -12161,8 +12154,14 @@ function ui.BuildHistoryTab()
     -- the panel's top-right, which is where the chart is now -- and the
     -- table's right edge moves with the split, so the only anchor that follows
     -- it is the table itself.
+    --
+    -- UP ON THE TOTALS LINE, not just above the table. Six pixels above the
+    -- scroll frame put it straight through the AMOUNT column header, which
+    -- sits between the totals line and the rows -- the button was anchored to
+    -- the only thing that follows the split and then placed into the one band
+    -- that was already occupied.
     clearBtn:ClearAllPoints()
-    clearBtn:SetPoint("BOTTOMRIGHT", scroll, "TOPRIGHT", 0, 6)
+    clearBtn:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, LISTBOX.hist.top - 8)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -12252,6 +12251,10 @@ function ui.BuildHistoryGraph(panel)
     heading:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -6)
     heading:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     heading:SetText("Player Gold")
+    -- Kept, because it says DEMO while demo mode is on. A chart showing
+    -- invented figures has to be unmistakable at a glance -- the whole risk of
+    -- a preview mode is someone reading it as their own gold.
+    ui.histHeading = heading
 
     ui.histPerBtns = {}
     local prev = nil
@@ -12574,21 +12577,21 @@ function ui.PaintFill(colour, values, lo, hi, w, h)
             t:SetWidth(r.w); t:SetHeight(r.h)
             t:ClearAllPoints()
             t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)
-            -- THE FLAT WASH FIRST, so a client that will not take a gradient
-            -- keeps the fill it had rather than a solid block of colour. The
-            -- gradient then supersedes it.
+            -- A FLAT WASH. NOT A GRADIENT, and the reason is worth keeping.
+            --
+            -- v1.53.11 tried SetGradientAlpha here, guarded by a pcall with
+            -- this flat fill as the fallback. The call SUCCEEDED and did
+            -- nothing: on 1.12 a texture created by SetTexture(r, g, b) is a
+            -- solid colour with no image behind it, and the gradient has
+            -- nothing to modulate. So the pcall returned true, the flat alpha
+            -- was taken back off on the strength of that, and the fill came
+            -- out a solid block of green.
+            --
+            -- The lesson is the one that mattered: A PCALL THAT SUCCEEDS IS
+            -- NOT A CALL THAT WORKED. Guarding an unverified API tells you it
+            -- did not throw, which is a different question from whether it did
+            -- the thing -- and the fallback was wired to the wrong answer.
             t:SetAlpha(HISTL.fill_flat)
-            local aBot = ui.FillAlphaAt(r.y, h)
-            local aTop = ui.FillAlphaAt(r.y + r.h, h)
-            local ok = pcall(function()
-                t:SetGradientAlpha("VERTICAL",
-                    colour[1], colour[2], colour[3], aBot,
-                    colour[1], colour[2], colour[3], aTop)
-            end)
-            -- Texture alpha MULTIPLIES the gradient's, so the flat value has
-            -- to come back off once the gradient is carrying it -- otherwise
-            -- the wash is the two multiplied together and barely visible.
-            if ok then t:SetAlpha(1) end
             t:Show()
         else
             t:Hide()
@@ -12685,6 +12688,14 @@ function ui.UpdateHistoryGraph()
         ui.histWhoDD:SetTicked(ui.HistWhoTicks(ui.histWho), title)
     end
 
+    if ui.histHeading then
+        if A.db.demo then
+            ui.histHeading:SetText("Player Gold  |cffe64c4c(DEMO)|r")
+        else
+            ui.histHeading:SetText("Player Gold")
+        end
+    end
+
     local empty = not (hi > lo)
     if empty then
         ui.histEmpty:SetText(note or "Nothing recorded in this period.")
@@ -12742,7 +12753,7 @@ function ui.UpdateHistoryGraph()
         if x == HISTL.x_lines then
             fs:SetText("now")
         else
-            fs:SetText(ui.WhenLabel(m.t, now))
+            fs:SetText(ui.AxisTimeLabel(m.t, now, now - from))
         end
         x = x + 1
     end
@@ -16078,6 +16089,7 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 .. (lf and ("  last=" .. tostring(lf.method) .. ": "
                     .. tostring(lf.err)) or ""))
         end
+        ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
         ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
             .. "  cached items=" .. tostring(A.db.HarvestCount and A.db.HarvestCount()))
         local itemId = A.de and A.de.ParseReportArgs and A.de.ParseReportArgs(diagArgs)
@@ -16209,6 +16221,30 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         else
             ChatMsg("Aegis: item cache \226\128\148 " .. n .. " items known,"
                 .. " sweep complete.")
+        end
+        return
+    end
+    -- DEMO MODE for the gold chart. A session flag and nothing else: see
+    -- db.DemoSeries for why it substitutes a reader rather than seeding the
+    -- store, and why a /reload turns it off.
+    if string.find(cmd, "demo", 1, true) then
+        A.db.demo = not A.db.demo
+        if A.db.demo then
+            ChatMsg("Aegis: chart demo mode ON \226\128\148 the History chart"
+                .. " now draws INVENTED gold for four made-up characters, so"
+                .. " you can see what it looks like with a real history.")
+            ChatMsg("  Nothing is saved and nothing real is touched. /aex demo"
+                .. " again, or a /reload, turns it off.")
+            ChatMsg("  The IN / OUT / NET row still reads your REAL ledger;"
+                .. " only the gold line is invented.")
+        else
+            ChatMsg("Aegis: chart demo mode OFF.")
+        end
+        -- The picker lists the demo characters while it is on, so the menu has
+        -- to be rebuilt rather than waiting for the next repaint.
+        if ui.histBuilt then
+            ui.histWho = {}
+            ui.RefreshHistory()
         end
         return
     end

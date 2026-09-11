@@ -1119,6 +1119,117 @@ function db.SetCharMoney(copper, now)
     return rec
 end
 
+-- ---------------------------------------------------------------------------
+-- Demo data for the gold chart
+-- ---------------------------------------------------------------------------
+--
+-- WHY THIS EXISTS. The chart needs months of trading to look like anything,
+-- and a new character or a fresh install has hours. Judging a layout -- is the
+-- gradient banding, do the labels collide, does the line read at this width --
+-- against one vertical spike is not judging it at all.
+--
+-- NOTHING IS EVER WRITTEN. `db.demo` is a SESSION flag and these functions are
+-- consulted INSTEAD of the store while it is set, so there is no path by which
+-- generated gold reaches a player's SavedVariables -- not by logging out, not
+-- by crashing, not by forgetting it was on. A /reload clears it. That is the
+-- whole reason this is a substitute reader rather than a seeded writer, which
+-- would have been half the code and permanently dangerous.
+--
+-- DETERMINISTIC, because a chart that redraws differently every frame cannot
+-- be looked at. The same window always produces the same shape.
+db.DEMO_CHARS = { "Ashvane", "Corvid", "Marrowlight", "Tessaly" }
+
+-- Park-Miller. THE MULTIPLIER IS SMALL ON PURPOSE and it is a named constant
+-- so the reason can be checked rather than trusted: Lua 5.0 numbers are
+-- doubles, exact only to 2^53, and the usual LCG multipliers (1103515245 and
+-- friends) reach ~2.4e18 against a 2^31 modulus. That does not error -- it
+-- quietly stops being arithmetic. 2147483647 * 16807 is about 3.6e13,
+-- comfortably inside it, and the suite asserts that product directly.
+db.DEMO_MOD  = 2147483647
+db.DEMO_MULT = 16807
+
+function db.DemoNext(seed)
+    return math.mod((seed or 1) * db.DEMO_MULT, db.DEMO_MOD)
+end
+
+-- A stable seed for a name. Position-weighted, so two characters whose names
+-- are anagrams do not draw the same line.
+function db.DemoSeed(name)
+    local seed = 7
+    local i = 1
+    while i <= string.len(name or "") do
+        seed = math.mod(seed * 31 + string.byte(name, i) * i, db.DEMO_MOD)
+        i = i + 1
+    end
+    if seed <= 0 then seed = 1 end
+    return seed
+end
+
+-- One character's gold across `n` buckets.
+--
+-- A RANDOM WALK THAT LOOKS LIKE TRADING: a gentle upward drift, noise on every
+-- bucket, and an occasional large drop for a purchase. A pure upward line
+-- would exercise none of the things worth looking at -- the fill's gradient
+-- over a varying height, the axis labels at different magnitudes, the hover
+-- readout on a slope.
+--
+-- Never negative: gold held cannot be, and a chart drawn from data its own
+-- reader could not produce is testing the wrong thing.
+function db.DemoSeries(from, step, n, who)
+    local out = {}
+    n = n or 0
+    local names = db.DEMO_CHARS
+    if who then names = { who } end
+    local ci = 1
+    while ci <= table.getn(names) do
+        local seed = db.DemoSeed(names[ci])
+        -- A different starting purse per character, so the account total is
+        -- not four copies of one line.
+        local held = 20000 + math.mod(seed, 900000)
+        local b = 1
+        while b <= n do
+            seed = db.DemoNext(seed)
+            local r = seed / db.DEMO_MOD
+            if r < 0.02 then
+                -- A BIG FIXED PURCHASE -- a mount, an epic, a stack of bars.
+                -- A flat cost rather than a fraction of the purse, because
+                -- that is what a real one is, and because a fraction can never
+                -- take you below zero: the floor underneath would be a guard
+                -- nothing could reach, which is worse than no guard at all.
+                held = held - 400000
+            elseif r < 0.06 then
+                held = held - held * (0.15 + r * 4)
+            else
+                held = held + held * (r - 0.42) * 0.06
+            end
+            -- ...and it CAN, which is why this is here.
+            if held < 0 then held = 0 end
+            out[b] = (out[b] or 0) + math.floor(held)
+            b = b + 1
+        end
+        ci = ci + 1
+    end
+    local i = 1
+    while i <= n do out[i] = out[i] or 0; i = i + 1 end
+    return out, true
+end
+
+-- The demo characters as purse rows, so the picker lists them.
+function db.DemoRows()
+    local rows, total = {}, 0
+    local i = 1
+    while i <= table.getn(db.DEMO_CHARS) do
+        local name = db.DEMO_CHARS[i]
+        local vals = db.DemoSeries(0, 3600, 1, name)
+        local copper = vals[1] or 0
+        table.insert(rows, { name = name, you = (i == 1), copper = copper,
+                             age = (i == 1) and nil or (i * 3600) })
+        total = total + copper
+        i = i + 1
+    end
+    return rows, total
+end
+
 -- What each character on this realm is carrying, and the total.
 --
 -- Returns rows, total. Each row is { name, you, copper, age } where `age` is
@@ -1130,6 +1241,10 @@ end
 -- can be exact is the one that supplies it. Same arrangement db.InventoryRows
 -- has with bags.
 function db.PurseRows(live)
+    -- CONSULTED INSTEAD OF THE STORE, never merged with it. See db.DemoSeries:
+    -- the substitution is what makes it impossible for generated gold to reach
+    -- a real save.
+    if db.demo then return db.DemoRows() end
     local rows, total = {}, 0
     local purses = db.account and db.Purses()
     if not purses then return rows, total end
@@ -1180,6 +1295,9 @@ end
 -- What "all time" means for the chart: a window starting at the epoch is one
 -- flat line jammed against the right-hand edge.
 function db.OldestMoney()
+    -- Demo mode has to answer this too, or "All" is a window with no span and
+    -- the chart the demo exists to show falls back to a day.
+    if db.demo then return time() - 180 * 86400 end
     local purses = db.account and db.Purses()
     if not purses then return nil end
     local oldest = nil
@@ -1198,6 +1316,7 @@ end
 -- in the window is a real state and deserves to be told apart from one
 -- holding nothing.
 function db.MoneySeries(from, step, n, who)
+    if db.demo then return db.DemoSeries(from, step, n, who) end
     local out, seen = {}, false
     local i = 1
     while i <= (n or 0) do out[i] = 0; i = i + 1 end

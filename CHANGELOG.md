@@ -18,6 +18,37 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.12]
+
+### Added
+- **`/aex demo` — a preview mode for the gold chart.** It draws invented gold
+  for four made-up characters so you can see what the chart looks like with a
+  real history behind it, which a new character or a fresh install does not
+  have. The heading says **DEMO** in red while it is on.
+
+  **Nothing is saved and nothing real is touched.** It is a session flag, and
+  the generators are consulted *instead of* your data rather than written into
+  it — so there is no path by which invented gold reaches your save, not on
+  logout, not on a crash, not if you forget it is on. `/aex demo` again, or a
+  `/reload`, turns it off. The IN / OUT / NET row still reads your real ledger;
+  only the gold line is invented.
+
+### Fixed
+- **The gradient under the line is gone; the fill is a flat wash again.** It
+  came out a solid block of green. `SetGradientAlpha` **succeeded and did
+  nothing**: on 1.12 a texture made from a plain colour has no image behind it
+  for a gradient to modulate, so the `pcall` guarding the call reported success,
+  the flat alpha was taken back off on the strength of that, and the fill went
+  opaque. A `pcall` that succeeds is not a call that worked.
+- **"Clear history" sat on top of the AMOUNT column header.** Moving it to
+  follow the table's right edge put it into the one band that was already
+  occupied; it is up on the totals line now.
+- **The chart's x-axis mixed two kinds of label.** A one-day window read
+  "Sep 10 · 18h 0m ago · 12h 0m ago · 6h 0m ago · now", because the leftmost
+  mark is exactly a day old and crossed the date threshold while the others did
+  not. The format is decided once for the whole axis by its span, and the
+  relative form is compact — `18h`, not `18h 0m ago`.
+
 ## [1.53.11]
 
 ### Fixed
@@ -5365,6 +5396,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -126,6 +126,7 @@ for _, sig in ipairs({
     "function ui.PlotColumnCount(",
     "function ui.HoverBucket(",
     "function ui.WhenLabel(",
+    "function ui.AxisTimeLabel(",
     "function ui.HoverLabel(",
     "function ui.HistWindow(",
     "function ui.HistToggleWho(",
@@ -134,7 +135,6 @@ for _, sig in ipairs({
     "function ui.HistWhoTicks(",
     "function ui.HistGoldSeries(",
     "function ui.XAxisMarks(",
-    "function ui.FillAlphaAt(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -765,48 +765,6 @@ do
     H.eq("nil bounds are survivable", table.getn(ui.XAxisMarks(nil, nil, 5)), 5)
 end
 
--- ---- the gradient under the fill ----------------------------------------
-
--- THE GRADIENT IS THE PLOT'S, NOT THE COLUMN'S. 1.12's SetGradientAlpha
--- applies per TEXTURE and the fill is one texture per column, so handing every
--- column the same endpoints makes a short column run the whole fade over five
--- pixels and a tall one over a hundred and fifty -- tracing the line instead
--- of sitting behind it. Each column gets the SLICE it occupies.
-do
-    local A0, A1 = HISTL.fill_a0, HISTL.fill_a1
-    H.eq("the baseline is the low end", ui.FillAlphaAt(0, 100), A0)
-    H.eq("the top of the plot is the high end", ui.FillAlphaAt(100, 100), A1)
-    H.eq("halfway is halfway", ui.FillAlphaAt(50, 100), A0 + (A1 - A0) / 2)
-
-    -- IT FADES UPWARD, strongest just under the line. A wash that is uniform
-    -- at the bottom reads as a solid block with a line on top of it.
-    H.check("it is dimmer at the baseline than at the top",
-            ui.FillAlphaAt(0, 100) < ui.FillAlphaAt(100, 100))
-
-    -- TWO COLUMNS OF DIFFERENT HEIGHTS MEET. A short column's top and a tall
-    -- column's middle at the same height must have the same alpha -- that is
-    -- what makes the slices stack into one continuous wash rather than a row
-    -- of separately-faded blocks.
-    H.eq("the same height is the same alpha whatever column it is in",
-         ui.FillAlphaAt(30, 100), ui.FillAlphaAt(30, 100))
-    H.check("...and a tall column is brighter at its top than a short one",
-            ui.FillAlphaAt(90, 100) > ui.FillAlphaAt(20, 100))
-
-    -- Out of the plot is clamped, not extrapolated past the endpoints.
-    H.eq("below the plot is the low end", ui.FillAlphaAt(-50, 100), A0)
-    H.eq("above it is the high end", ui.FillAlphaAt(500, 100), A1)
-    H.eq("a plot with no height is the low end", ui.FillAlphaAt(10, 0), A0)
-    H.eq("...and a nil one", ui.FillAlphaAt(10, nil), A0)
-
-    -- Every alpha it can produce is a legal one.
-    local y = -20
-    while y <= 120 do
-        local a = ui.FillAlphaAt(y, 100)
-        H.check("alpha at " .. y .. " is in range", a >= 0 and a <= 1, a)
-        y = y + 20
-    end
-end
-
 -- ---------------------------------------------------------------------------
 H.section("the hover readout")
 -- ---------------------------------------------------------------------------
@@ -880,6 +838,49 @@ H.check("...beyond it, it is a date",
 H.check("a moment in the future is not negative",
         string.find(ui.WhenLabel(NOW + 500, NOW), "-", 1, true) == nil,
         ui.WhenLabel(NOW + 500, NOW))
+
+-- ---- the x axis labels --------------------------------------------------
+
+-- ONE FORMAT FOR THE WHOLE AXIS, decided by the SPAN rather than by each
+-- mark's own age.
+--
+-- THE BUG THIS EXISTS FOR: on a 24h chart the leftmost mark is exactly 24h old
+-- and crossed the date threshold while the four to its right did not, so the
+-- axis read "Sep 10 · 18h 0m ago · 12h 0m ago · 6h 0m ago · now". An axis
+-- carrying two kinds of label is one you have to read twice to place a point.
+do
+    local DAY2 = 2 * DAY
+    -- A one-day window: every mark relative, including the one at the far end.
+    local lo = ui.AxisTimeLabel(NOW - DAY, NOW, DAY)
+    local mid = ui.AxisTimeLabel(NOW - DAY / 2, NOW, DAY)
+    -- Asserted as NOT A DATE rather than as containing "h": a full day back is
+    -- "1d", which is both relative and shorter than "24h". Pinning the unit
+    -- would be testing the formatter's arithmetic twice and the rule not at
+    -- all.
+    local function isDate(x) return string.find(x, "^%a%a%a %d") ~= nil end
+    H.check("a short window is relative at the far end", not isDate(lo), lo)
+    H.check("...and in the middle too", not isDate(mid), mid)
+
+    -- COMPACT. "18h 0m ago" is three times the width for no more information,
+    -- and the "ago" is implied by an axis ending at "now".
+    H.check("no empty minutes", string.find(lo, "0m", 1, true) == nil, lo)
+    H.check("no 'ago' on an axis", string.find(lo, "ago", 1, true) == nil, lo)
+
+    -- A long window: every mark a date, including recent ones.
+    local far = ui.AxisTimeLabel(NOW - 60 * DAY, NOW, 90 * DAY)
+    local near = ui.AxisTimeLabel(NOW - 2 * DAY, NOW, 90 * DAY)
+    H.check("a long window is dated at the far end", isDate(far), far)
+    H.check("...and dated at the near end as well, not relative",
+            isDate(near), near)
+
+    -- The threshold itself, both sides of it.
+    H.check("under two days is relative",
+            string.find(ui.AxisTimeLabel(NOW - DAY, NOW, DAY2 - 1),
+                        "ago", 1, true) == nil)
+    H.eq("nil span falls back to relative rather than erroring",
+         ui.AxisTimeLabel(NOW - 60, NOW, nil), "1m")
+end
+
 
 -- ---------------------------------------------------------------------------
 H.section("summing a selection")
@@ -1146,6 +1147,12 @@ do
     H.check("...with the window it was drawn over",
             says(graph, "ui.histFrom, ui.histStep, ui.histN = from, step, n"))
 
+    -- ONE FORMAT FOR THE WHOLE AXIS, decided by the SPAN. Per-mark formatting
+    -- is what put "Sep 10" next to "18h 0m ago" on a one-day chart.
+    H.check("the x labels are formatted for the whole axis",
+            says(graph, "ui.AxisTimeLabel(m.t, now, now - from)"),
+            "per-mark formatting mixes dates and relative times on one axis")
+
     -- BUCKETS FROM THE PLOT WIDTH, which is the whole smoothness fix.
     H.check("the bucket count comes from the plot",
             says(graph, "ui.HistBucketCount(pw)"),
@@ -1164,23 +1171,25 @@ do
             not says(bodyOf("function ui.BuildHistoryTab("),
                      "ui.histPerBtns[pi] = b"))
 
-    -- The flat wash is set FIRST, so a client that will not take a gradient
-    -- keeps a fill rather than a solid block of colour -- and the texture
-    -- alpha comes back off once the gradient is carrying it, because the two
-    -- multiply.
+    -- A FLAT WASH, NOT A GRADIENT. v1.53.11 tried SetGradientAlpha guarded by
+    -- a pcall with the flat fill as its fallback. The call SUCCEEDED and did
+    -- nothing -- on 1.12 a texture made by SetTexture(r, g, b) is a solid
+    -- colour with no image behind it for a gradient to modulate -- so the
+    -- guard reported the wrong answer, the flat alpha was taken back off on
+    -- the strength of it, and the fill came out a solid block.
+    --
+    -- A PCALL THAT SUCCEEDS IS NOT A CALL THAT WORKED, and there is no way to
+    -- ask a 1.12 texture whether a gradient took. So it does not go back.
     local fill = bodyOf("function ui.PaintFill(")
-    H.check("the fill falls back to a flat wash",
+    H.check("the fill is a flat wash",
             says(fill, "t:SetAlpha(HISTL.fill_flat)"))
-    H.check("...before the gradient is tried", says(fill, "t:SetGradientAlpha("))
-    H.check("...inside a pcall, because 1.12 clients differ",
-            says(fill, "local ok = pcall(function()"))
-    H.check("...and the flat alpha comes back off when it took",
-            says(fill, "if ok then t:SetAlpha(1) end"))
-    -- Each column gets the SLICE of the plot-wide gradient it occupies.
-    H.check("each column takes its own slice of the gradient",
-            says(fill, "local aBot = ui.FillAlphaAt(r.y, h)")
-            and says(fill, "local aTop = ui.FillAlphaAt(r.y + r.h, h)"),
-            "one pair of endpoints for every column traces the line")
+    -- ANCHORED ON THE CALL, not the name. The bare word appears in the
+    -- comment above explaining why the gradient is gone, so the plain search
+    -- matched the documentation of its own rule -- which this repo has now
+    -- done often enough to be a habit worth naming.
+    H.check("...and no gradient is attempted",
+            not says(fill, "t:SetGradientAlpha("),
+            "it succeeds and does nothing, which is worse than failing")
 
     local grow = bodyOf("function ui.GrowPlotSpans(")
     H.check("spans are textures on the plot",

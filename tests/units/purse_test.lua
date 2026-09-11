@@ -382,4 +382,200 @@ names = db.LedgerByChar(now - 7 * DAY)
 H.eq("only characters inside the window", table.getn(names), 1)
 H.eq("...the recent one", names[1], "Recent")
 
+-- ---------------------------------------------------------------------------
+H.section("demo data, and where it must never go")
+-- ---------------------------------------------------------------------------
+
+-- THE POINT OF THE MODE: the chart needs months of trading to look like
+-- anything, and a new character has hours. Judging a layout against one
+-- vertical spike is not judging it.
+--
+-- THE POINT OF ITS SHAPE: `db.demo` is a session flag and the generators are
+-- consulted INSTEAD of the store, so there is no path by which invented gold
+-- reaches a real save -- not by logging out, not by crashing, not by
+-- forgetting it was on. That is what the first four checks are for.
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db = A.db
+W.player = "Torchlite"
+
+db.SetCharMoney(4242, 100 * HOUR)
+local realRows, realTotal = db.PurseRows()
+H.eq("the real purse is there to begin with", realTotal, 4242)
+
+db.demo = true
+local demoRows, demoTotal = db.PurseRows()
+H.eq("demo mode lists the made-up characters",
+     table.getn(demoRows), table.getn(db.DEMO_CHARS))
+H.check("...with gold of their own", demoTotal > 0, demoTotal)
+H.check("...which is not the real figure", demoTotal ~= realTotal, demoTotal)
+
+-- NOTHING IS WRITTEN. The whole safety of this mode is that it substitutes a
+-- reader; a seeded writer would have been half the code and permanently
+-- dangerous.
+-- ...AND THE SERIES, which is the half the chart actually draws. The rows are
+-- only the picker's list; substituting one and not the other is a menu full of
+-- made-up characters drawing the real (empty) line.
+do
+    local demoVals = db.MoneySeries(0, HOUR, 12)
+    local moved = false
+    local i = 2
+    while i <= 12 do
+        if demoVals[i] ~= demoVals[1] then moved = true end
+        i = i + 1
+    end
+    H.check("demo mode draws a generated line, not the real one", moved)
+    local one = db.MoneySeries(0, HOUR, 12, "Ashvane")
+    H.check("...and can be filtered to one made-up character",
+            one[12] > 0 and one[12] ~= demoVals[12], one[12])
+end
+
+db.demo = nil
+do
+    -- Back to the real thing: one character with a single sample, so the line
+    -- is flat and unmistakably not generated.
+    local realVals = db.MoneySeries(90 * HOUR, HOUR, 12)
+    H.eq("turning it off draws the real line again", realVals[12], 4242)
+end
+
+local afterRows, afterTotal = db.PurseRows()
+H.eq("turning it off restores the real purse", afterTotal, 4242)
+H.eq("...with the real characters", table.getn(afterRows),
+     table.getn(realRows))
+do
+    local stored = db.Purses()
+    local n = 0
+    for _ in pairs(stored) do n = n + 1 end
+    H.eq("...and nothing was stored for the demo ones", n, 1)
+    local k = 1
+    while k <= table.getn(db.DEMO_CHARS) do
+        H.isNil("no record for " .. db.DEMO_CHARS[k],
+                stored[db.DEMO_CHARS[k]])
+        k = k + 1
+    end
+end
+
+-- ---- the generated shape -------------------------------------------------
+
+-- DETERMINISTIC, because a chart that redraws differently every frame cannot
+-- be looked at -- and because a generator that drifts makes every assertion
+-- below meaningless.
+do
+    local a = db.DemoSeries(0, HOUR, 40, "Ashvane")
+    local b = db.DemoSeries(0, HOUR, 40, "Ashvane")
+    local same = true
+    local i = 1
+    while i <= 40 do
+        if a[i] ~= b[i] then same = false end
+        i = i + 1
+    end
+    H.check("the same window draws the same line twice", same)
+
+    -- ...and two characters do NOT draw the same line, or the account view is
+    -- one line multiplied.
+    local c = db.DemoSeries(0, HOUR, 40, "Corvid")
+    local differs = false
+    i = 1
+    while i <= 40 do
+        if a[i] ~= c[i] then differs = true end
+        i = i + 1
+    end
+    H.check("two characters draw different lines", differs)
+end
+
+-- GOLD HELD CANNOT BE NEGATIVE. A chart drawn from data its own reader could
+-- not have produced is testing the wrong thing.
+--
+-- PER CHARACTER over a long run, not just the account total: four lines summed
+-- can stay positive with one of them well below zero, so the total hides
+-- exactly the fault this is looking for.
+do
+    local k = 1
+    while k <= table.getn(db.DEMO_CHARS) do
+        local one = db.DemoSeries(0, HOUR, 600, db.DEMO_CHARS[k])
+        local worst = nil
+        local i = 1
+        while i <= 600 do
+            if not worst or one[i] < worst then worst = one[i] end
+            i = i + 1
+        end
+        H.check(db.DEMO_CHARS[k] .. " never goes below zero", worst >= 0, worst)
+        k = k + 1
+    end
+end
+
+do
+    local vals = db.DemoSeries(0, HOUR, 200)
+    H.eq("a bucket per request", table.getn(vals), 200)
+    local worst, flat = nil, true
+    local i = 1
+    while i <= 200 do
+        if not worst or vals[i] < worst then worst = vals[i] end
+        if vals[i] ~= vals[1] then flat = false end
+        i = i + 1
+    end
+    H.check("the account total is never negative either", worst >= 0, worst)
+    -- ...and it MOVES. A flat line exercises none of what the mode exists for:
+    -- the fill over a varying height, the axis at different magnitudes, the
+    -- hover on a slope.
+    H.check("the line actually moves", not flat)
+end
+
+-- The account view is the sum of the characters, the same as the real one.
+do
+    local total = db.DemoSeries(0, HOUR, 10)
+    local sum = 0
+    local k = 1
+    while k <= table.getn(db.DEMO_CHARS) do
+        sum = sum + db.DemoSeries(0, HOUR, 10, db.DEMO_CHARS[k])[10]
+        k = k + 1
+    end
+    H.eq("all players is the sum of them", total[10], sum)
+end
+
+H.eq("no buckets is no series", table.getn(db.DemoSeries(0, HOUR, 0)), 0)
+
+-- "All time" has to answer in demo mode too, or the window has no span and the
+-- chart the demo exists to show falls back to a day.
+db.demo = true
+H.check("demo mode has an oldest sample", db.OldestMoney() ~= nil)
+H.check("...well before now", db.OldestMoney() < time() - 86400)
+db.demo = nil
+
+-- The generator's own arithmetic. Lua 5.0 numbers are exact only to 2^53, and
+-- the usual LCG multipliers overflow that against a 2^31 modulus -- which does
+-- not error, it just quietly stops being random.
+do
+    local seed, wrapped = 1, true
+    local i = 1
+    while i <= 50 do
+        seed = db.DemoNext(seed)
+        if seed < 0 or seed >= 2147483647 then wrapped = false end
+        if seed ~= math.floor(seed) then wrapped = false end
+        i = i + 1
+    end
+    H.check("the generator stays a whole number in range", wrapped, seed)
+
+    -- THE MULTIPLY HAS TO STAY EXACT, and this checks the arithmetic rather
+    -- than its symptoms. Lua 5.0 numbers are doubles, exact only to 2^53; the
+    -- usual LCG multipliers (1103515245 and friends) reach ~2.4e18 against a
+    -- 2^31 modulus and quietly stop being arithmetic.
+    --
+    -- Tried first as a behavioural test -- "does any draw come back odd" --
+    -- and that PASSED with the overflowing multiplier, because a float that
+    -- has lost its low bits still lands on odd numbers after a modulo. The
+    -- property worth asserting is the bound itself.
+    H.check("the generator's multiply stays inside 2^53",
+            (db.DEMO_MOD - 1) * db.DEMO_MULT < 9007199254740992,
+            db.DEMO_MOD .. " x " .. db.DEMO_MULT)
+    H.check("a name seeds it", db.DemoSeed("Ashvane") > 0)
+    H.check("...differently from another name",
+            db.DemoSeed("Ashvane") ~= db.DemoSeed("Corvid"))
+    -- Position-weighted, so two names that are anagrams do not draw the same
+    -- line.
+    H.check("...and from its own anagram",
+            db.DemoSeed("Corvid") ~= db.DemoSeed("Divroc"))
+end
+
 os.exit(H.report("purse"))

@@ -399,6 +399,25 @@ H.eq("two links in one string yields the FIRST name",
 H.eq("...and the id comes off the same link", util.ItemIdFromLink(LINK), 2589)
 
 -- ---------------------------------------------------------------------------
+H.section("how long ago, said as short as it goes")
+-- ---------------------------------------------------------------------------
+
+local DAY = 86400
+H.eq("under a minute is now", util.FormatAgoShort(30), "now")
+H.eq("minutes", util.FormatAgoShort(45 * 60), "45m")
+H.eq("hours", util.FormatAgoShort(18 * 3600), "18h")
+H.eq("...with no trailing zero minutes",
+     util.FormatAgoShort(18 * 3600), "18h")
+H.eq("days", util.FormatAgoShort(3 * DAY), "3d")
+H.eq("a negative age is not negative", util.FormatAgoShort(-500), "now")
+H.eq("nil is now", util.FormatAgoShort(nil), "now")
+-- SHORTER THAN THE LONG FORM, which is the entire reason it exists.
+H.check("it is shorter than the full form",
+        string.len(util.FormatAgoShort(18 * 3600 + 120))
+            < string.len(util.FormatAgo(18 * 3600 + 120)),
+        util.FormatAgoShort(18 * 3600 + 120))
+
+-- ---------------------------------------------------------------------------
 H.section("money, said as short as it can be")
 -- ---------------------------------------------------------------------------
 

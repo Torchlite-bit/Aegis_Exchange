@@ -64,6 +64,13 @@ REMOVED_ON_PURPOSE = {
     # once the window is months long, which is why the reference chart labels
     # months. ui.WhenLabel does all three labels.
     "ui.HistMidLabel":     "v1.53.9 -- the x axis is dated by ui.WhenLabel",
+    # v1.53.12. The gradient under the chart's fill is gone, and with it the
+    # per-column alpha slicing it needed. SetGradientAlpha SUCCEEDED on 1.12
+    # and did nothing -- a texture made by SetTexture(r, g, b) is a solid
+    # colour with no image behind it for a gradient to modulate -- so the
+    # pcall guarding it reported the wrong answer and the fill came out solid.
+    "ui.FillAlphaAt": "v1.53.12 -- the fill is a flat wash; SetGradientAlpha "
+                      "cannot modulate a solid-colour texture on 1.12",
     # ...and the bucketing that fed them. What survived is the window it
     # computed, which every version of this chart needed.
     "ui.HistBuckets":      "v1.53.8 -- split; ui.HistWindow is the half that "

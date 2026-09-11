@@ -216,6 +216,23 @@ function util.FormatDuration(sec)
 end
 
 -- Format "how long ago": "just now", "5m ago", "2h 14m ago", "3d ago".
+-- How long ago, AS SHORT AS IT GOES: "now", "45m", "18h", "3d".
+--
+-- FOR AN AXIS, where util.FormatAgo's "18h 0m ago" is three times the width
+-- for no more information -- five of those across a narrow plot is a row of
+-- labels running into each other, and the "ago" is already implied by an axis
+-- that ends at "now".
+--
+-- One unit, never two. "18h 0m" says nothing "18h" does not.
+function util.FormatAgoShort(sec)
+    sec = math.floor(sec or 0)
+    if sec < 0 then sec = 0 end
+    if sec < 60 then return "now" end
+    if sec < 3600 then return math.floor(sec / 60) .. "m" end
+    if sec < 86400 then return math.floor(sec / 3600) .. "h" end
+    return math.floor(sec / 86400) .. "d"
+end
+
 function util.FormatAgo(sec)
     sec = math.floor(sec or 0)
     if sec < 60 then

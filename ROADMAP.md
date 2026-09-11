@@ -2390,6 +2390,58 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### A pcall that succeeds is not a call that worked — v1.53.12
+
+**The gradient came out a solid block of green.** `SetGradientAlpha` was
+guarded by a `pcall` with the flat wash as its fallback, and the call
+SUCCEEDED and did nothing: on 1.12 a texture created by `SetTexture(r, g, b)`
+is a solid colour with no image behind it for a gradient to modulate. So the
+guard reported success, the flat alpha was taken back off on the strength of
+it, and the fill went opaque — the same colour as the line, so the line
+disappeared into it.
+
+**The lesson generalises past this call.** Wrapping an unverified API in a
+`pcall` tells you it did not throw. That is a different question from whether
+it did the thing, and the fallback here was wired to the wrong one of the two.
+Where there is no way to ask the client whether an effect took — and there is
+none for a 1.12 texture — the honest options are to verify it on a real client
+before shipping, or not to depend on it. It is not going back.
+
+**Demo mode, and why it substitutes rather than seeds.** The chart needs months
+of trading to look like anything and a new character has hours, so judging a
+layout against one vertical spike is not judging it. `db.demo` is a SESSION
+flag and `db.DemoSeries` / `db.DemoRows` are consulted INSTEAD of the store —
+there is no path by which generated gold reaches a real save. A seeded writer
+would have been half the code and permanently dangerous; four checks in the
+suite exist to hold that line.
+
+**Two sabotages that could not be caught, and both were the code's fault.**
+
+The floor under the random walk (`if held < 0 then held = 0 end`) was
+unreachable: every drop was a FRACTION of the balance, so it could not cross
+zero by construction. A guard nothing can reach cannot be tested and is worse
+than no guard — the generator now takes a flat cost for a big purchase, which
+can and does go below zero, and the floor is load-bearing.
+
+The LCG multiplier's overflow had no behavioural symptom worth testing. The
+obvious probe — "does any draw come back odd" — PASSED with the overflowing
+multiplier, because a float that has lost its low bits still lands on odd
+numbers after a modulo. `db.DEMO_MULT` is a named constant now and the suite
+asserts the product bound directly: `(DEMO_MOD - 1) * DEMO_MULT < 2^53`. When a
+property has no visible symptom, assert the property.
+
+**One format for the whole x axis.** A 24h chart read "Sep 10 · 18h 0m ago ·
+12h 0m ago · 6h 0m ago · now" because the leftmost mark is exactly a day old
+and crossed the date threshold while the four to its right did not. Deciding
+per mark is what mixes them; `ui.AxisTimeLabel` takes the SPAN and decides once.
+`util.FormatAgoShort` is the compact form — one unit, no "ago", because an axis
+that ends at "now" already implies it.
+
+**And a check fooled by its own documentation, again.** The assertion that no
+gradient is attempted matched the comment explaining why the gradient is gone.
+Anchored on `t:SetGradientAlpha(` now. That is the fifth time in this repo; the
+pattern is always a bare identifier as the needle.
+
 ### The chart's own title bar, and a real gradient — v1.53.11
 
 **Two key spaces, one set.** The check boxes drew empty while the title said a
