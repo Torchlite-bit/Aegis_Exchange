@@ -16051,6 +16051,45 @@ local SHOPL = {
     pad = 8,
 }
 
+-- The once-per-frame flush for everything the shopping list drives.
+--
+-- BAG_UPDATE STORMS, so its handler is a flag and a Show and nothing else. The
+-- rebuild is a walk of every tracked recipe's reagents, which is exactly the
+-- shape HARD RULE 16 forbids inside a handler -- and it is doubly so here,
+-- because a merchant window is open and the player is buying.
+--
+-- IT IS NOT OWNED BY THE WINDOW, and that was the bug. It used to be created
+-- inside ui.BuildShopWindow, but it drives TWO surfaces with SEPARATE
+-- lifetimes: the list, built only when something actually shows it, and the
+-- cart button, attached whenever a merchant opens. The auto-popup skips
+-- building the list when the setting is off or there is nothing left to buy --
+-- which is the common case, since most characters track no recipes -- so any
+-- merchant left a visible cart button and no driver, and every BAG_UPDATE
+-- threw. One error per fire, at the moment BAG_UPDATE fires hardest.
+--
+-- PARENTED TO UIParent, NOT TO THE LIST. A frame whose parent is hidden does
+-- not run its OnUpdate, so a driver hanging off the list would have gone quiet
+-- in precisely the case the cart badge exists for: list closed, cart on screen,
+-- player buying. Fixing only the nil would have left that half broken and
+-- silent.
+function ui.ShopDriver()
+    if ui.shopDriver then return ui.shopDriver end
+    local d = CreateFrame("Frame", nil, UIParent)
+    d:Hide()
+    d:SetScript("OnUpdate", function()
+        d:Hide()
+        -- Each surface checks for itself. Neither refresh assumes the other's
+        -- widgets exist: RefreshShopCartButton returns early without a button,
+        -- and the list is only repainted while it is actually up.
+        if ui.shopFrame and ui.shopFrame:IsVisible() then
+            ui.RefreshShopWindow()
+        end
+        ui.RefreshShopCartButton()
+    end)
+    ui.shopDriver = d
+    return d
+end
+
 function ui.BuildShopWindow()
     if ui.shopFrame then return ui.shopFrame end
     local f = CreateFrame("Frame", "AegisExchangeShopList", UIParent)
@@ -16145,22 +16184,9 @@ function ui.BuildShopWindow()
         i = i + 1
     end
 
-    -- BAG_UPDATE STORMS, so this is a flag and a Show and nothing else. The
-    -- rebuild is a walk of every tracked recipe's reagents, which is exactly
-    -- the shape HARD RULE 16 forbids inside a handler -- and it is doubly so
-    -- here, because a merchant window is open and the player is buying.
-    ui.shopDriver = CreateFrame("Frame", nil, f)
-    ui.shopDriver:Hide()
-    ui.shopDriver:SetScript("OnUpdate", function()
-        ui.shopDriver:Hide()
-        if ui.shopFrame and ui.shopFrame:IsVisible() then
-            ui.RefreshShopWindow()
-        end
-        -- The badge follows the same flush. It is behind the same dirty flag
-        -- for the same reason: counting the list is a walk, and BAG_UPDATE
-        -- storms hardest while a merchant is open.
-        ui.RefreshShopCartButton()
-    end)
+    -- The flush is SHARED and outlives this window -- see ui.ShopDriver. Asked
+    -- for here so a list built before any merchant was opened still has one.
+    ui.ShopDriver()
     return f
 end
 
@@ -16308,13 +16334,19 @@ A.RegisterEvent("MERCHANT_CLOSED", function()
     end
 end)
 
--- O(1): a flag and a Show. See ui.shopDriver.
+-- O(1): a flag and a Show. See ui.ShopDriver.
+--
+-- EITHER SURFACE IS ENOUGH, and they are checked together rather than in two
+-- statements, because the two have separate lifetimes and either one alone is
+-- a reason to flush: the list so it repaints, the cart so its badge follows
+-- what you buy.
 A.RegisterEvent("BAG_UPDATE", function()
-    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end
-    -- ...and while the cart is on screen, so its badge follows what you buy.
-    -- Still only a flag and a Show.
-    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then
-        ui.shopDriver:Show()
+    if (ui.shopFrame and ui.shopFrame:IsVisible())
+        or (ui.shopCartBtn and ui.shopCartBtn:IsVisible()) then
+        -- ui.ShopDriver() is O(1) after the first call and creates one frame
+        -- on it, which is why asking here rather than indexing a field that
+        -- may not have been filled yet is still within HARD RULE 16.
+        ui.ShopDriver():Show()
     end
 end)
 

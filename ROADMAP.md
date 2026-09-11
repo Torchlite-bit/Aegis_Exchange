@@ -2390,6 +2390,44 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### A flush that belonged to the wrong thing — v1.53.16
+
+**`attempt to index field 'shopDriver' (a nil value)`, once per BAG_UPDATE, at
+a merchant.** Reported from a live client.
+
+**The nil was the symptom; the ownership was the bug.** One once-per-frame
+flush drives two surfaces -- the shopping list and the cart button on the
+merchant frame -- and it was created inside `ui.BuildShopWindow`. Those two
+have DIFFERENT LIFETIMES: the cart is attached from the merchant handler
+whenever a vendor opens, while the window is built only when something actually
+shows it, and the auto-popup returns early twice before it gets there (setting
+off, nothing left to buy). The second of those is the common case, because most
+characters track no recipes at all. So the ordinary path -- walk up to any
+vendor -- produced a visible cart and no driver, and then BAG_UPDATE storms.
+
+**A nil guard would have "fixed" it and left half of it broken silently.** A
+frame whose PARENT is hidden does not run its OnUpdate. The driver hung off the
+list, so even with the crash guarded, the badge would have stopped refreshing
+in exactly the case it exists for: list closed, cart on screen, player buying.
+Reparenting to UIParent is not tidying -- it is the other half of the fix.
+**When the error is "this field is nil", ask what owns the field before
+reaching for `if x then`.**
+
+**The test RUNS the handler; it does not read it.** The suite already had three
+source checks over this exact handler and all three passed while it crashed on
+a real client, because "does the handler mention the driver" was always true.
+The regression check loads the handler, puts the addon in the reported state --
+cart visible, list never built -- and calls it. Four sabotages: the ownership
+restored, the parent moved back onto the list, the memo dropped, and the cart
+taken off the arming condition.
+
+**And two source checks were anchored on text that moved.** One keyed on the
+handler's first body line, which changed when the two visibility tests were
+folded into one condition; it now anchors on the handler's own comment, which
+is the only thing unique to it among the file's four BAG_UPDATE registrations.
+A length guard that failed at 721 characters against a 600 cap was raised --
+after checking it was the comment that grew, not the extraction that ran away.
+
 ### The addon already knew this, and I did not ask it — v1.53.15
 
 **A red box where every shopping-list icon should have been.** Two mistakes

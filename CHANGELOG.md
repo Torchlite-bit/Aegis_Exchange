@@ -18,6 +18,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.16]
+
+### Fixed
+- **A merchant with nothing on your shopping list threw an error on every bag
+  update.** Reported as `frame.lua:16317: attempt to index field 'shopDriver'`,
+  repeating — which is what it does, because the event behind it storms hardest
+  while you are standing at a vendor buying things.
+
+  The shopping list and the cart button on the merchant frame share one
+  once-per-frame flush, and that flush was created as part of the **list**. But
+  the two have different lifetimes: the cart is attached whenever a merchant
+  opens, while the list is only built when something actually shows it — and
+  the automatic popup skips that when you have turned it off or have nothing
+  left to buy. That is the common case, since most characters track no recipes.
+  So an ordinary trip to a vendor left a visible cart button and no flush.
+
+  The flush now stands on its own rather than belonging to the window. It also
+  no longer hangs off the list, which matters beyond the error: a frame whose
+  parent is hidden never runs, so the badge would have stopped counting down
+  in exactly the situation it exists for — list closed, cart on screen, buying.
+
+
 ## [1.53.15]
 
 ### Fixed
@@ -5497,6 +5519,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
