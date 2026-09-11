@@ -2177,6 +2177,26 @@ if A.RegisterEvent then
     -- immediate return when there is none -- which is every other time this
     -- fires, and it fires for every copper the player earns or spends.
     A.RegisterEvent("PLAYER_MONEY", function()
-        sell.SettleDepositWatch(GetMoney and GetMoney() or nil)
+        local coin = GetMoney and GetMoney() or nil
+        sell.SettleDepositWatch(coin)
+        -- ...and remember what this character is carrying, so the other
+        -- characters can be counted. O(1) -- a compare and a table write, see
+        -- db.SetCharMoney. This event fires for every copper the player earns,
+        -- spends, loots or is mailed, so it is the one handler in the file
+        -- that has no room at all for a walk.
+        if coin and A.db and A.db.SetCharMoney then A.db.SetCharMoney(coin) end
+    end)
+    -- The purse, on arrival. PLAYER_MONEY only fires when the figure CHANGES,
+    -- so a character you log in on and do nothing with would never record what
+    -- it is carrying -- the same gap that made the account-wide inventory read
+    -- as "only shows the character I am on" until v1.53.1.
+    --
+    -- Unlike the bag snapshot this needs no settle: GetMoney is answered from
+    -- the login packet and has nothing to resolve, so there is no partial
+    -- reading of it to wait out.
+    A.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+        if A.db and A.db.SetCharMoney and GetMoney then
+            A.db.SetCharMoney(GetMoney())
+        end
     end)
 end

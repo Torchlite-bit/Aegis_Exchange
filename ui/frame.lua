@@ -11444,8 +11444,16 @@ local HISTL = {
     -- Inside the chart box: the heading and legend above the plot, and the
     -- axis labels below it.
     plot_top   = 34,
-    plot_bot   = 30,
+    -- Room under the plot for the x labels AND the stats strip.
+    plot_bot   = 52,
     plot_side  = 10,
+    -- The y-axis labels live to the LEFT of the drawing area, the way the
+    -- reference chart has them -- so the plot starts this far in.
+    y_gutter   = 46,
+    -- How many rules and labels the y axis carries. Three was the top, the
+    -- middle and the baseline, which on a tall plot leaves the eye nothing to
+    -- measure against.
+    y_lines    = 5,
     -- One column of the rasterised line. FOUR PIXELS is the whole compromise
     -- described above: one per data point is a staircase, one per pixel is
     -- hundreds of textures.
@@ -11528,24 +11536,51 @@ function ui.HistBuckets(led, now, secs, n)
     return income, spend, from, step
 end
 
--- The top of the y axis: the largest value in either series, or 0.
+-- The y-axis range a set of series needs. Returns lo, hi.
 --
--- BOTH SERIES SHARE ONE SCALE. Two axes on one chart is two charts drawn on
--- top of each other, and the whole question this one answers -- am I earning
--- more than I am spending -- is only legible if the two lines are comparable.
-function ui.SeriesMax(a, b)
-    local m = 0
+-- EVERY SERIES SHARES ONE RANGE. Two axes on one chart is two charts drawn on
+-- top of each other, and the question this chart answers -- am I earning more
+-- than I am spending, is this alt ahead of that one -- is only legible if the
+-- lines are comparable.
+--
+-- ZERO IS ALWAYS INSIDE IT, which matters the moment a series can go negative.
+-- A cumulative balance that never climbs above zero is a chart about how far
+-- BELOW it went; an axis starting at the series minimum would draw that as a
+-- line rising off the baseline, which is the opposite of what happened.
+--
+-- `list` is an array of series, so one caller can hand over two lines or four.
+function ui.SeriesRange(list)
+    local lo, hi = 0, 0
     local i = 1
-    while i <= table.getn(a or {}) do
-        if (a[i] or 0) > m then m = a[i] end
+    while i <= table.getn(list or {}) do
+        local ser = list[i]
+        local j = 1
+        while j <= table.getn(ser or {}) do
+            local v = ser[j] or 0
+            if v < lo then lo = v end
+            if v > hi then hi = v end
+            j = j + 1
+        end
         i = i + 1
     end
-    i = 1
-    while i <= table.getn(b or {}) do
-        if (b[i] or 0) > m then m = b[i] end
-        i = i + 1
-    end
-    return m
+    return lo, hi
+end
+
+-- Where the chart's three rules sit, as fractions of the plot height measured
+-- from its bottom.
+--
+-- ALWAYS INCLUDING ZERO when zero is inside the range. On a signed chart the
+-- one line that has to be findable is the one you are above or below, and a
+-- rule at the halfway point of an axis running from -40g to +120g marks 40g,
+-- which is nothing in particular.
+function ui.GridFractions(lo, hi)
+    local span = (hi or 0) - (lo or 0)
+    if span <= 0 then return { 0, 0.5, 1 } end
+    local zero = (0 - lo) / span
+    -- Zero ON an edge is already drawn by the edge rule, and a third rule on
+    -- top of it is a brighter line that means nothing extra.
+    if zero <= 0 or zero >= 1 then return { 0, 0.5, 1 } end
+    return { 0, zero, 1 }
 end
 
 -- The value of `values` at a FRACTIONAL 1-based index, interpolated.
@@ -11572,16 +11607,21 @@ end
 -- Every rectangle is inside the plot. A span clipped by the top or bottom is
 -- shortened rather than allowed to hang out: these are textures on the chart
 -- frame, and nothing clips a texture that overruns it.
-function ui.PlotColumns(values, max, w, h, colW, thick)
+function ui.PlotColumns(values, lo, hi, w, h, colW, thick)
     local out = {}
     local n = table.getn(values or {})
     w = w or 0; h = h or 0
     colW = colW or HISTL.col_w
     thick = thick or HISTL.line_h
     if n < 1 or w <= 0 or h <= 0 or colW <= 0 then return out end
+    lo = lo or 0
+    local span = (hi or 0) - lo
     local function yAt(v)
-        if not max or max <= 0 then return 0 end
-        local y = (v or 0) / max * h
+        -- NO SPAN IS NOT AN ERROR. An empty period, or one where nothing moved,
+        -- has lo == hi; dividing by that is how a chart becomes a Lua error
+        -- inside a repaint. Everything sits on the baseline instead.
+        if span <= 0 then return 0 end
+        local y = ((v or 0) - lo) / span * h
         if y < 0 then y = 0 end
         if y > h then y = h end
         return y
@@ -11627,12 +11667,175 @@ end
 -- frame is never the answer here.
 function ui.HistPlotSizeAt(winW, winH)
     local _, graphW = ui.HistWidthsAt(winW)
-    local w = graphW - HISTL.plot_side * 2
+    local w = graphW - HISTL.plot_side * 2 - HISTL.y_gutter
     local h = ui.PanelHeightAt(winH) - LISTBOX.hist.top - LISTBOX.hist.bot
               - HISTL.plot_top - HISTL.plot_bot
     if w < 1 then w = 1 end
     if h < 1 then h = 1 end
     return w, h
+end
+
+-- The four things the chart can show, and the order the dropdown offers them.
+--
+-- ONE TABLE, because the dropdown's options, the painter's dispatch and the
+-- legend all have to agree about what a view is called and what it is keyed
+-- by -- three copies of that list is how a menu entry starts drawing a
+-- different chart from the one it names.
+local HISTVIEWS = {
+    { key = "inout", text = "In / out" },
+    { key = "gold",  text = "Account gold" },
+    { key = "net",   text = "Cumulative" },
+    { key = "chars", text = "By character" },
+}
+
+-- How many character lines the chart will draw at once. Eight lines on a
+-- 300px plot is a colour wheel, not a chart, and "which alt is making the
+-- money" is answered by the top few.
+local HIST_CHAR_LINES = 4
+
+-- A running total over the same buckets: what the period had netted BY THE END
+-- of each one.
+--
+-- IT CAN GO NEGATIVE, which is the whole reason ui.SeriesRange keeps zero
+-- inside the axis. A week where you spent more than you earned is a line below
+-- the rule, and clamping it to the baseline would report breaking even.
+function ui.CumulativeSeries(income, spend)
+    local out, run = {}, 0
+    local i = 1
+    while i <= table.getn(income or {}) do
+        run = run + (income[i] or 0) - ((spend and spend[i]) or 0)
+        out[i] = run
+        i = i + 1
+    end
+    return out
+end
+
+-- One cumulative line per character, over the same buckets.
+--
+-- Returns an array of { name, values, final } and how many were left out.
+-- Biggest mover first BY ABSOLUTE final position: a character who lost 200g is
+-- as interesting as one who made 200g, and sorting by the signed figure buries
+-- them at the bottom of the list.
+--
+-- ENTRIES WITH NO CHARACTER ARE SKIPPED, not pinned on whoever is logged in.
+-- Ledger history from before v1.53.7 carries no name and there is no way to
+-- recover it; db.LedgerByChar reports that separately so the tab can say so.
+function ui.CharSeries(led, from, step, n, cap)
+    cap = cap or HIST_CHAR_LINES
+    n = n or 0
+    local byChar, order = {}, {}
+    if not from or not step or step <= 0 then return {}, 0 end
+    local i = 1
+    while i <= table.getn(led or {}) do
+        local e = led[i]
+        local who = (e.who and e.who ~= "") and e.who or nil
+        if who and e.t and e.t >= from and (e.amount or 0) > 0 then
+            local b = math.floor((e.t - from) / step) + 1
+            if b < 1 then b = 1 end
+            if b > n then b = n end
+            local ser = byChar[who]
+            if not ser then
+                ser = {}
+                local k = 1
+                while k <= n do ser[k] = 0; k = k + 1 end
+                byChar[who] = ser
+                table.insert(order, who)
+            end
+            if e.kind == "sale" then ser[b] = ser[b] + e.amount
+            elseif e.kind == "buy" then ser[b] = ser[b] - e.amount end
+        end
+        i = i + 1
+    end
+    local out = {}
+    local oi = 1
+    while oi <= table.getn(order) do
+        local who = order[oi]
+        local ser, run = byChar[who], 0
+        local k = 1
+        while k <= n do run = run + ser[k]; ser[k] = run; k = k + 1 end
+        table.insert(out, { name = who, values = ser, final = run })
+        oi = oi + 1
+    end
+    table.sort(out, function(a, b)
+        local aa = a.final; if aa < 0 then aa = -aa end
+        local bb = b.final; if bb < 0 then bb = -bb end
+        if aa ~= bb then return aa > bb end
+        return a.name < b.name
+    end)
+    local dropped = 0
+    while table.getn(out) > cap do
+        table.remove(out)
+        dropped = dropped + 1
+    end
+    return out, dropped
+end
+
+-- The AREA UNDER the line, as one rectangle per column.
+--
+-- Same columns as ui.PlotColumns, each run down to the chart's zero line
+-- instead of only covering the line's own thickness -- so the two agree
+-- column for column by construction and the fill cannot drift off the line it
+-- belongs to.
+--
+-- ZERO, NOT THE BOTTOM OF THE PLOT. On a signed chart a value below the line
+-- fills DOWNWARD from zero, which is what makes a losing week read as a
+-- losing week rather than as a slightly shorter winning one.
+--
+-- Returns the same { x, y, w, h } plot coordinates, so the painter anchors
+-- them BOTTOMLEFT exactly as it does the line.
+function ui.FillColumns(values, lo, hi, w, h, colW)
+    local out = {}
+    local cols = ui.PlotColumns(values, lo, hi, w, h, colW, 0)
+    local n = table.getn(cols)
+    if n < 1 then return out end
+    local span = (hi or 0) - (lo or 0)
+    local base = 0
+    if span > 0 then
+        base = (0 - lo) / span * h
+        if base < 0 then base = 0 end
+        if base > h then base = h end
+    end
+    local i = 1
+    while i <= n do
+        local c = cols[i]
+        -- The column already spans the line's y range; the fill runs from the
+        -- far end of it to the baseline.
+        local top, bot = c.y + c.h, c.y
+        local y, hh
+        if bot >= base then y, hh = base, top - base
+        elseif top <= base then y, hh = bot, base - bot
+        else y, hh = bot, top - bot end
+        if hh < 1 then hh = 1 end
+        if y < 0 then y = 0 end
+        if y + hh > h then hh = h - y end
+        if hh < 1 then hh = 1 end
+        table.insert(out, { x = c.x, y = y, w = c.w, h = hh })
+        i = i + 1
+    end
+    return out
+end
+
+-- The y-axis marks: where each rule sits as a fraction of the plot height, and
+-- the value it stands for. Returns an array of { frac, value }.
+--
+-- EVENLY SPACED ACROSS THE RANGE, and the range already has zero inside it
+-- (ui.SeriesRange), so on a signed chart one of these lands on or beside zero
+-- rather than the axis pretending the line never crosses it.
+function ui.AxisMarks(lo, hi, count)
+    local out = {}
+    count = count or HISTL.y_lines
+    if count < 2 then count = 2 end
+    lo = lo or 0
+    local span = (hi or 0) - lo
+    local i = 1
+    while i <= count do
+        local frac = (i - 1) / (count - 1)
+        local v = 0
+        if span > 0 then v = lo + span * frac end
+        table.insert(out, { frac = frac, value = v })
+        i = i + 1
+    end
+    return out
 end
 
 -- How many spans a plot `w` wide can ever need, so the texture pool is built
@@ -11826,104 +12029,183 @@ function ui.BuildHistoryGraph(panel)
     ui.MakeWell(panel, box, 4)
     ui.histGraph = box
 
-    ui.histGraphTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.histGraphTitle:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -4)
-    ui.histGraphTitle:SetTextColor(C.header[1], C.header[2], C.header[3])
-    ui.histGraphTitle:SetText("Income vs spending")
+    -- WHAT THE CHART IS SHOWING, chosen here rather than assumed. The four
+    -- views answer four different questions off the same ledger and the same
+    -- period, and only one of them -- "In / out" -- is what this chart was
+    -- when it shipped.
+    ui.histView = "inout"
+    local dd = MakeDropdown(box, 122, function(v)
+        ui.histView = v or "inout"
+        ui.UpdateHistoryGraph()
+    end, true)
+    dd.button:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -2)
+    dd:SetOptions(ui.HistViewOptions())
+    dd:SetValue("inout", true)
+    ui.histViewDD = dd
 
-    -- The legend doubles as the key to the two line colours, which are the
-    -- same two the Type column uses on the table to the left.
-    local function swatch(colour, anchorTo, dx)
+    -- The legend is FOUR entries, not two. Two views draw two named series and
+    -- one draws up to four, so one pool that relabels is the only version that
+    -- cannot leave a stale swatch on screen.
+    ui.histLegend = {}
+    local li = 1
+    while li <= HIST_CHAR_LINES do
         local t = box:CreateTexture(nil, "ARTWORK")
-        t:SetTexture(colour[1], colour[2], colour[3])
         t:SetWidth(8); t:SetHeight(8)
-        t:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", dx, -20)
         local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         fs:SetPoint("LEFT", t, "RIGHT", 4, 0)
-        return fs
+        ui.histLegend[li] = { swatch = t, label = fs }
+        li = li + 1
     end
-    ui.histLegendIn = swatch(C.income, box, HISTL.plot_side)
-    ui.histLegendIn:SetTextColor(C.income[1], C.income[2], C.income[3])
-    ui.histLegendIn:SetText("in")
-    ui.histLegendOut = swatch(C.spend, box, HISTL.plot_side + 70)
-    ui.histLegendOut:SetTextColor(C.spend[1], C.spend[2], C.spend[3])
-    ui.histLegendOut:SetText("out")
 
     -- The plot itself: an empty frame whose rect IS the drawing area, so every
     -- span can be anchored BOTTOMLEFT to it and the arithmetic never has to
     -- know where the box's furniture ended.
     local plot = CreateFrame("Frame", nil, box)
-    plot:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -HISTL.plot_top)
+    plot:SetPoint("TOPLEFT", box, "TOPLEFT",
+                  HISTL.plot_side + HISTL.y_gutter, -HISTL.plot_top)
     plot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT",
                   -HISTL.plot_side, HISTL.plot_bot)
     ui.histPlot = plot
 
-    -- Three rules: the top of the scale, its middle, and the baseline. Drawn
-    -- on the plot in BACKGROUND so the lines sit over them.
+    -- THE FILL UNDER THE LINE, in its own pool BELOW the line's layer. Drawn
+    -- only when the chart shows ONE series: four translucent areas stacked on
+    -- one plot is mud, and the comparison those four lines exist for is
+    -- between the lines themselves.
+    ui.histFill = {}
+
+    -- Three rules. Drawn on the plot in BACKGROUND so the lines sit over them;
+    -- where they go is ui.GridFractions, because on a signed chart the middle
+    -- one is ZERO rather than the halfway point.
     ui.histGrid = {}
+    ui.histYLbl = {}
     local g = 1
-    while g <= 3 do
+    while g <= HISTL.y_lines do
         local t = plot:CreateTexture(nil, "BACKGROUND")
         t:SetTexture(C.grid[1], C.grid[2], C.grid[3])
         t:SetHeight(1)
-        t:SetPoint("LEFT", plot, "LEFT", 0, 0)
-        t:SetPoint("RIGHT", plot, "RIGHT", 0, 0)
         ui.histGrid[g] = t
+        -- ...and the figure it stands for, in the gutter to the LEFT of the
+        -- plot. RIGHT-justified against the axis so the digits line up under
+        -- one another however many of them there are.
+        local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetWidth(HISTL.y_gutter - 4)
+        fs:SetJustifyH("RIGHT")
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.histYLbl[g] = fs
         g = g + 1
     end
 
-    ui.histYTop = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histYTop:SetPoint("TOPRIGHT", plot, "TOPRIGHT", -2, 11)
-    ui.histYTop:SetJustifyH("RIGHT")
-    ui.histYTop:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-
     ui.histXFrom = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histXFrom:SetPoint("TOPLEFT", plot, "BOTTOMLEFT", 0, -4)
+    ui.histXFrom:SetPoint("TOPLEFT", plot, "BOTTOMLEFT", 0, -3)
     ui.histXFrom:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
+    ui.histXMid = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histXMid:SetPoint("TOP", plot, "BOTTOM", 0, -3)
+    ui.histXMid:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
     ui.histXTo = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histXTo:SetPoint("TOPRIGHT", plot, "BOTTOMRIGHT", 0, -4)
+    ui.histXTo:SetPoint("TOPRIGHT", plot, "BOTTOMRIGHT", 0, -3)
     ui.histXTo:SetJustifyH("RIGHT")
     ui.histXTo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.histXTo:SetText("now")
 
+    -- THE STATS STRIP, on the floor of the box under the x labels: the four
+    -- figures a chart cannot show precisely enough to read off. High and low
+    -- are the plotted line's own; earned, spent and net come from the same
+    -- ledger totals the table's heading uses, so the two halves of this tab
+    -- cannot disagree about the period.
+    ui.histStatL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
+    ui.histStatL:SetJustifyH("LEFT")
+    ui.histStatR = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 4)
+    ui.histStatR:SetJustifyH("RIGHT")
+
     ui.histEmpty = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.histEmpty:SetPoint("CENTER", plot, "CENTER", 0, 0)
     ui.histEmpty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.histEmpty:SetText("Nothing recorded in this period.")
     ui.histEmpty:Hide()
 
-    ui.histSpans = { income = {}, spend = {} }
+    ui.histSpans = {}
 end
 
--- Grow one series' texture pool to `n` spans. Textures, not frames -- they are
+-- What the chart's dropdown offers: the four views, then one entry per
+-- character who appears in the ledger.
+--
+-- ONE MENU, NOT TWO. The reference this was built from puts a player picker
+-- beside the title and the periods along the top; on a 300px panel a second
+-- dropdown costs more than it explains, and "which line am I looking at" is
+-- one question whether the answer is a view or a character. A character entry
+-- is keyed "char:Name" so the painter can tell them apart without a second
+-- field to keep in step.
+--
+-- REBUILT ON EVERY REPAINT, because the list of characters grows the first
+-- time an alt sells something and a menu that was correct when the tab was
+-- built would never notice.
+function ui.HistViewOptions()
+    local opts = {}
+    local i = 1
+    while i <= table.getn(HISTVIEWS) do
+        table.insert(opts, { text = HISTVIEWS[i].text, value = HISTVIEWS[i].key })
+        i = i + 1
+    end
+    local names = A.db.LedgerByChar()
+    local k = 1
+    while k <= table.getn(names) do
+        table.insert(opts, { text = names[k], value = "char:" .. names[k] })
+        k = k + 1
+    end
+    return opts
+end
+
+-- The character a view key names, or nil for one of the four fixed views.
+--
+-- string.find WITH A CAPTURE, never string.match -- Lua 5.0. See the hard
+-- rules; this is the exact family of call that does not exist on this client.
+function ui.HistViewChar(view)
+    if not view then return nil end
+    local _, _, who = string.find(view, "^char:(.+)$")
+    return who
+end
+
+-- The colours the chart draws lines in, in order. Read from the palette rather
+-- than invented here: the first two are the same green and orange the ledger
+-- table's Type column uses two inches to the left, which is what stops "Sold"
+-- and the income line reading as two different things.
+local HIST_LINE_C = { C.income, C.spend, C.gold, C.amber }
+
+-- Grow one line's texture pool to `n` spans. Textures, not frames -- they are
 -- draw objects on the plot rather than widgets, which is what makes a few
 -- hundred of them affordable.
-function ui.GrowPlotSpans(which, colour, n)
-    local pool = ui.histSpans and ui.histSpans[which]
-    if not pool or not ui.histPlot then return end
+--
+-- COLOURLESS AT CREATION. Slot 3 is the third character's line in one view and
+-- nothing at all in another, so the colour belongs to the paint, not the pool.
+function ui.GrowPlotSpans(slot, n)
+    if not ui.histPlot then return end
+    if not ui.histSpans[slot] then ui.histSpans[slot] = {} end
+    local pool = ui.histSpans[slot]
     local i = table.getn(pool) + 1
     while i <= n do
         local t = ui.histPlot:CreateTexture(nil, "ARTWORK")
-        t:SetTexture(colour[1], colour[2], colour[3])
         t:Hide()
         pool[i] = t
         i = i + 1
     end
 end
 
--- Paint one series. Every span is anchored BOTTOMLEFT to the plot, which is
--- why ui.PlotColumns returns y measured UP from the baseline.
-function ui.PaintSeries(which, colour, values, max, w, h)
-    local rects = ui.PlotColumns(values, max, w, h)
+-- Paint one line into `slot`. Every span is anchored BOTTOMLEFT to the plot,
+-- which is why ui.PlotColumns returns y measured UP from the baseline.
+function ui.PaintSeries(slot, colour, values, lo, hi, w, h)
+    local rects = ui.PlotColumns(values, lo, hi, w, h)
     local n = table.getn(rects)
-    ui.GrowPlotSpans(which, colour, n)
-    local pool = ui.histSpans[which]
+    ui.GrowPlotSpans(slot, n)
+    local pool = ui.histSpans[slot] or {}
     local i = 1
     while i <= table.getn(pool) do
         local t = pool[i]
         local r = rects[i]
-        if r then
+        if r and colour then
+            t:SetTexture(colour[1], colour[2], colour[3])
             t:SetWidth(r.w); t:SetHeight(r.h)
             t:ClearAllPoints()
             t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)
@@ -11933,6 +12215,147 @@ function ui.PaintSeries(which, colour, values, max, w, h)
         end
         i = i + 1
     end
+end
+
+-- Paint the area under a line. Same pool discipline as the spans above; the
+-- textures live in their own list so they can be hidden wholesale when a view
+-- draws more than one line.
+function ui.PaintFill(colour, values, lo, hi, w, h)
+    if not ui.histPlot then return end
+    local rects = (colour and ui.FillColumns(values, lo, hi, w, h)) or {}
+    local n = table.getn(rects)
+    local i = table.getn(ui.histFill) + 1
+    while i <= n do
+        local t = ui.histPlot:CreateTexture(nil, "BORDER")
+        t:SetAlpha(0.20)
+        t:Hide()
+        ui.histFill[i] = t
+        i = i + 1
+    end
+    i = 1
+    while i <= table.getn(ui.histFill) do
+        local t, r = ui.histFill[i], rects[i]
+        if r then
+            t:SetTexture(colour[1], colour[2], colour[3])
+            t:SetWidth(r.w); t:SetHeight(r.h)
+            t:ClearAllPoints()
+            t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)
+            t:Show()
+        else
+            t:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- Hide every span from `slot` upwards. A view with fewer lines than the last
+-- one must not leave the extras on screen.
+function ui.ClearPlotSeries(slot)
+    local i = slot
+    while ui.histSpans[i] do
+        local pool = ui.histSpans[i]
+        local j = 1
+        while j <= table.getn(pool) do pool[j]:Hide(); j = j + 1 end
+        i = i + 1
+    end
+end
+
+-- Label the legend. `entries` is an array of { name, colour }; anything past
+-- the end is hidden.
+function ui.PaintLegend(entries)
+    local i = 1
+    local prev = nil
+    while i <= HIST_CHAR_LINES do
+        local slot = ui.histLegend[i]
+        local e = entries[i]
+        if e then
+            slot.swatch:SetTexture(e.colour[1], e.colour[2], e.colour[3])
+            slot.swatch:ClearAllPoints()
+            if prev then
+                slot.swatch:SetPoint("LEFT", prev.label, "RIGHT", 10, 0)
+            else
+                slot.swatch:SetPoint("TOPLEFT", ui.histGraph, "TOPLEFT",
+                                     HISTL.plot_side + 126, -8)
+            end
+            slot.label:SetText(e.name)
+            slot.label:SetTextColor(e.colour[1], e.colour[2], e.colour[3])
+            slot.swatch:Show(); slot.label:Show()
+            prev = slot
+        else
+            slot.swatch:Hide(); slot.label:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- Build the lines for the current view. Returns series, legend, note.
+--
+-- `series` is an array of { values, colour }; `legend` the matching names;
+-- `note` an honest caveat for the view, or nil. Pure apart from the two reads
+-- of the DB, and separated from the painter because deciding WHAT to draw and
+-- deciding WHERE to draw it are two jobs that were one function once.
+function ui.HistViewSeries(view, income, spend, from, step, n)
+    local series, legend, note = {}, {}, nil
+    local only = ui.HistViewChar(view)
+    if only then
+        -- ONE CHARACTER. The same cumulative line the "By character" view
+        -- draws, on its own and filled -- which is the whole reason a single
+        -- series gets the area treatment.
+        local rows = ui.CharSeries(A.db.Ledger(), from, step, n, 999)
+        local i = 1
+        while i <= table.getn(rows) do
+            if rows[i].name == only then
+                table.insert(series, { values = rows[i].values,
+                                       colour = HIST_LINE_C[1] })
+                table.insert(legend, { name = only, colour = HIST_LINE_C[1] })
+            end
+            i = i + 1
+        end
+        -- A character selected and then nothing recorded for them in this
+        -- period is a real state, and an empty chart with their name on it is
+        -- the right answer to it.
+        if table.getn(series) == 0 then
+            table.insert(legend, { name = only, colour = HIST_LINE_C[1] })
+        end
+        return series, legend, note
+    end
+    if view == "gold" then
+        local gold = A.db.MoneySeries(from, step, n)
+        table.insert(series, { values = gold, colour = HIST_LINE_C[3] })
+        table.insert(legend, { name = "account", colour = HIST_LINE_C[3] })
+        -- SAID EVERY TIME, not once in a tooltip. 1.12 will only tell you what
+        -- the character you are on is carrying, so every other figure in this
+        -- line is a memory of the last time that character played.
+        note = "alts as last seen"
+    elseif view == "net" then
+        table.insert(series, { values = ui.CumulativeSeries(income, spend),
+                               colour = HIST_LINE_C[1] })
+        table.insert(legend, { name = "net", colour = HIST_LINE_C[1] })
+    elseif view == "chars" then
+        local rows, dropped = ui.CharSeries(A.db.Ledger(), from, step, n)
+        local i = 1
+        while i <= table.getn(rows) do
+            local c = HIST_LINE_C[i] or HIST_LINE_C[1]
+            table.insert(series, { values = rows[i].values, colour = c })
+            table.insert(legend, { name = rows[i].name, colour = c })
+            i = i + 1
+        end
+        local _, anon = A.db.LedgerByChar(from)
+        if dropped > 0 then note = "+" .. dropped .. " more" end
+        -- THE UNATTRIBUTED HALF HAS TO BE NAMED. Ledger history from before
+        -- this feature carries no character and cannot be given one, so a
+        -- breakdown that silently omitted it would not add up to the totals
+        -- on the left.
+        if anon then
+            note = (note and (note .. ", ") or "") .. "some unattributed"
+        end
+    else
+        table.insert(series, { values = income, colour = HIST_LINE_C[1] })
+        table.insert(series, { values = spend, colour = HIST_LINE_C[2] })
+        table.insert(legend, { name = "in", colour = HIST_LINE_C[1] })
+        table.insert(legend, { name = "out", colour = HIST_LINE_C[2] })
+    end
+    return series, legend, note
 end
 
 -- Place the two halves at the current window width, and draw the chart.
@@ -11948,41 +12371,121 @@ function ui.UpdateHistoryGraph()
 
     local period = HIST_PERIODS[ui.histPeriod or 2]
     local n = HISTL.buckets[ui.histPeriod or 2] or 30
-    local income, spend = ui.HistBuckets(A.db.Ledger(), time(), period.secs, n)
-    local max = ui.SeriesMax(income, spend)
+    local income, spend, from, step =
+        ui.HistBuckets(A.db.Ledger(), time(), period.secs, n)
+
+    -- The menu is rebuilt here rather than at build time: the list of
+    -- characters grows the first time an alt sells something.
+    if ui.histViewDD then ui.histViewDD:SetOptions(ui.HistViewOptions()) end
+
+    local series, legend, note =
+        ui.HistViewSeries(ui.histView or "inout", income, spend, from, step, n)
+
+    local values = {}
+    local si = 1
+    while si <= table.getn(series) do
+        table.insert(values, series[si].values)
+        si = si + 1
+    end
+    local lo, hi = ui.SeriesRange(values)
 
     local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())
 
-    -- The scale, and the rules that carry it. The middle rule is only honest
-    -- when there is a scale to halve, so on an empty period the axis says
-    -- nothing rather than "0".
-    if max > 0 then
-        ui.histYTop:SetText(util.FormatMoney(max, true))
-        ui.histEmpty:Hide()
-    else
-        ui.histYTop:SetText("")
+    local empty = not (hi > lo)
+    if empty then
+        ui.histEmpty:SetText("Nothing recorded in this period.")
         ui.histEmpty:Show()
+    else
+        ui.histEmpty:Hide()
     end
+
+    -- The axis: a rule and a figure at each mark. On an empty period the rules
+    -- still draw -- an empty chart with a frame reads as a chart with no data,
+    -- and one with nothing in it reads as broken -- but the figures do not,
+    -- because there is no scale to put against them.
+    local marks = ui.AxisMarks(lo, hi)
     local g = 1
-    while g <= 3 do
-        local frac = (g - 1) / 2       -- 0 at the baseline, 1 at the top
+    while g <= HISTL.y_lines do
+        local m = marks[g]
+        local y = math.floor((m and m.frac or 0) * ph)
         ui.histGrid[g]:ClearAllPoints()
-        ui.histGrid[g]:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", 0,
-                                math.floor(frac * ph))
-        ui.histGrid[g]:SetPoint("BOTTOMRIGHT", ui.histPlot, "BOTTOMRIGHT", 0,
-                                math.floor(frac * ph))
+        ui.histGrid[g]:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", 0, y)
+        ui.histGrid[g]:SetPoint("BOTTOMRIGHT", ui.histPlot, "BOTTOMRIGHT", 0, y)
+        ui.histYLbl[g]:ClearAllPoints()
+        ui.histYLbl[g]:SetPoint("BOTTOMRIGHT", ui.histPlot, "BOTTOMLEFT", -4,
+                                y - 5)
+        if empty then
+            ui.histYLbl[g]:SetText("")
+        elseif m.value < 0 then
+            ui.histYLbl[g]:SetText("-" .. util.FormatMoney(-m.value, true))
+        else
+            ui.histYLbl[g]:SetText(util.FormatMoney(m.value, true))
+        end
         g = g + 1
     end
 
     ui.histXFrom:SetText(period.secs > 0 and (period.label .. " ago") or "start")
+    ui.histXMid:SetText(ui.HistMidLabel(period, n, step))
+    ui.histXTo:SetText(note and ("now \226\128\162 " .. note) or "now")
 
-    if max > 0 then
-        ui.PaintSeries("income", C.income, income, max, pw, ph)
-        ui.PaintSeries("spend", C.spend, spend, max, pw, ph)
+    -- THE FILL, only when there is ONE line. Four translucent areas stacked on
+    -- one plot is mud, and the comparison those four lines exist for is
+    -- between the lines themselves.
+    if table.getn(series) == 1 and not empty then
+        ui.PaintFill(series[1].colour, series[1].values, lo, hi, pw, ph)
     else
-        ui.PaintSeries("income", C.income, {}, 0, pw, ph)
-        ui.PaintSeries("spend", C.spend, {}, 0, pw, ph)
+        ui.PaintFill(nil, nil, lo, hi, pw, ph)
     end
+
+    ui.PaintLegend(legend)
+    local i = 1
+    while i <= table.getn(series) do
+        ui.PaintSeries(i, series[i].colour, series[i].values, lo, hi, pw, ph)
+        i = i + 1
+    end
+    -- Anything the LAST view drew and this one does not. A stale line is worse
+    -- than a missing one: it is data from a chart nobody is looking at.
+    ui.ClearPlotSeries(table.getn(series) + 1)
+
+    -- The figures a chart cannot be read precisely enough to give you.
+    local since = (period.secs > 0) and (time() - period.secs) or nil
+    local earned, spent = A.db.LedgerTotals(since)
+    ui.histStatL:SetText(ui.StatLine("HIGH", hi, "LOW", lo))
+    ui.histStatR:SetText(ui.StatLine("IN", earned, "OUT", spent,
+                                     "NET", earned - spent))
+end
+
+-- The middle x-axis label: how far back the midpoint of the chart is.
+--
+-- DERIVED FROM THE BUCKETS, not from the period's own label, because "30d"
+-- covers thirty buckets and "All" covers however long you have been playing --
+-- halving a label is only correct for one of those.
+function ui.HistMidLabel(period, n, step)
+    if not period or not n or not step or step <= 0 then return "" end
+    local back = (n / 2) * step
+    if back < 3600 then return "" end
+    return util.FormatAgo(back)
+end
+
+-- "HIGH 12g  LOW 0c" -- pairs of caption and money, uppercase caption dimmed
+-- and the figure in the money colours, the way the reference chart reads.
+--
+-- Pure, and it takes its pairs as plain arguments rather than a table so the
+-- call site reads as the line it produces. Lua 5.0 has no `select`, so the
+-- varargs arrive in `arg` -- see HARD RULE 4.
+function ui.StatLine(...)
+    local out = ""
+    local i = 1
+    while i + 1 <= arg.n do
+        local cap, v = arg[i], arg[i + 1]
+        if out ~= "" then out = out .. "   " end
+        local money
+        if v and v < 0 then money = "-" .. util.FormatMoney(-v, true)
+        else money = util.FormatMoney(v or 0, true) end
+        out = out .. "|cff8c7a4e" .. cap .. "|r " .. money
+        i = i + 2
+    end
+    return out
 end
 
 function ui.RefreshHistory()

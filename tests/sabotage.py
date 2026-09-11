@@ -2671,6 +2671,180 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the account purse and the chart's views (v1.53.7) ---------------
+
+    # A sample appended for every money change instead of overwriting the
+    # hour. This is written from PLAYER_MONEY, which fires for every copper
+    # earned, spent, looted or mailed -- the history would grow without
+    # bound and tell the chart nothing it cannot already see.
+    ('purse-same-hour-appends', 'core/db.lua',
+     '    if rec.hours[hour] == nil then',
+     '    if true then',
+     'purse'),
+
+    # ...or never pruned at all.
+    ('purse-history-unbounded', 'core/db.lua',
+     '        while table.getn(rec.keys) > db.MONEY_SAMPLES_MAX do\n            local old = table.remove(rec.keys, 1)\n            rec.hours[old] = nil\n        end',
+     '        local _ = rec',
+     'purse'),
+
+    # Pruned from the key list and not from the table, which is a table that
+    # grows forever while reporting that it does not.
+    ('purse-prune-leaves-the-value', 'core/db.lua',
+     '            local old = table.remove(rec.keys, 1)\n            rec.hours[old] = nil',
+     '            table.remove(rec.keys, 1)',
+     'purse'),
+
+    # The character you are ON read from the stored figure rather than the
+    # live one. It is the only figure that can be exact, and a stale number
+    # where an exact one was available is inexcusable.
+    ('purse-live-figure-ignored', 'core/db.lua',
+     '        if who == me and live then\n            copper = live',
+     '        if false then\n            copper = live',
+     'purse'),
+
+    # A character with nothing stored left out of the total -- the fresh
+    # install case, where the one exact figure is the one that goes missing.
+    ('purse-fresh-character-uncounted', 'core/db.lua',
+     '    if me and live and not seededMe then',
+     '    if false then',
+     'purse'),
+
+    # Gold drawn into the PAST. A character with no sample before a bucket
+    # must contribute nothing there; back-filling its later figure shows the
+    # account holding gold it had not earned yet.
+    ('purse-series-backfills', 'core/db.lua',
+     '            local ki, held = 1, 0',
+     '            local ki, held = 1, (hours[keys[1]] or 0)',
+     'purse'),
+
+    # ...and the opposite: an alt that has not played since Monday dropped to
+    # zero for the rest of the week, which draws gold being spent that never
+    # left anyone's bag.
+    ('purse-series-does-not-carry-forward', 'core/db.lua',
+     '                    if v then held = v end',
+     '                    if v then held = 0 end',
+     'purse'),
+
+    # PLAYER_MONEY only fires when the figure CHANGES, so without the arrival
+    # snapshot a character you log in on and do nothing with never records
+    # what it is carrying -- the same gap that made the account-wide
+    # inventory read as 'only shows the character I am on'.
+    ('purse-not-recorded-on-arrival', 'core/sell.lua',
+     '    A.RegisterEvent("PLAYER_ENTERING_WORLD", function()\n        if A.db and A.db.SetCharMoney and GetMoney then\n            A.db.SetCharMoney(GetMoney())\n        end\n    end)',
+     '    local _ = A',
+     'purse'),
+
+    # ...and the figure never updated while you play.
+    ('purse-money-change-not-recorded', 'core/sell.lua',
+     '        if coin and A.db and A.db.SetCharMoney then A.db.SetCharMoney(coin) end',
+     '        local _ = coin',
+     'purse'),
+
+    # Ledger entries written with no character, so the per-character
+    # breakdown has nothing to break down.
+    ('ledger-txn-unattributed', 'core/db.lua',
+     '        amount = amount, id = itemId, who = db.CharKey() })',
+     '        amount = amount, id = itemId })',
+     'purse'),
+
+    # The unattributed entries not reported. History from before this feature
+    # carries no character and cannot be given one, so a breakdown that
+    # silently omits it does not add up to the totals beside it.
+    ('ledger-bychar-hides-the-unattributed', 'core/db.lua',
+     '            else\n                anon = true\n            end',
+     '            end',
+     'purse'),
+
+    # Zero no longer inside the axis. A cumulative balance that never climbs
+    # above zero is a chart about how far BELOW it went; an axis starting at
+    # the series minimum draws that as a line rising off the baseline.
+    ('range-drops-zero-from-the-axis', 'ui/frame.lua',
+     'function ui.SeriesRange(list)\n    local lo, hi = 0, 0',
+     'function ui.SeriesRange(list)\n    local lo, hi = 1/0, -1/0',
+     'histgraph'),
+
+    # The middle rule at the halfway point of a signed axis, which on a range
+    # of -40g to +120g marks 40g -- nothing in particular. The one line that
+    # has to be findable is the one you are above or below.
+    ('grid-middle-rule-is-not-zero', 'ui/frame.lua',
+     '    local zero = (0 - lo) / span',
+     '    local zero = 0.5',
+     'histgraph'),
+
+    # The rasteriser measuring from zero rather than from the bottom of the
+    # range, so everything below zero clamps onto the baseline and a losing
+    # week reads as breaking even.
+    ('plot-ignores-the-bottom-of-the-range', 'ui/frame.lua',
+     '        local y = ((v or 0) - lo) / span * h',
+     '        local y = (v or 0) / span * h',
+     'histgraph'),
+
+    # The area filled from the bottom of the PLOT rather than from zero, so a
+    # value below the line fills upward from the floor and a losing week
+    # reads as a slightly shorter winning one.
+    ('fill-runs-to-the-floor-not-to-zero', 'ui/frame.lua',
+     '        if bot >= base then y, hh = base, top - base\n        elseif top <= base then y, hh = bot, base - bot\n        else y, hh = bot, top - bot end',
+     '        y, hh = 0, top',
+     'histgraph'),
+
+    # Axis marks that never reach the top of the range, so the highest label
+    # names a value below the highest point of the line.
+    ('axis-marks-are-not-evenly-spaced', 'ui/frame.lua',
+     '        local frac = (i - 1) / (count - 1)',
+     '        local frac = (i - 1) / count',
+     'histgraph'),
+
+    # A label naming a value the chart does not reach.
+    ('axis-marks-invent-a-scale', 'ui/frame.lua',
+     '        local v = 0\n        if span > 0 then v = lo + span * frac end',
+     '        local v = lo + span * frac + 1',
+     'histgraph'),
+
+    # The running total counting only income, which cannot go negative and
+    # therefore reports every period as a winning one.
+    ('cumulative-ignores-spending', 'ui/frame.lua',
+     '        run = run + (income[i] or 0) - ((spend and spend[i]) or 0)',
+     '        run = run + (income[i] or 0)',
+     'histgraph'),
+
+    # Per-character lines left as per-bucket figures, so a line shows what a
+    # character did in one hour rather than where they stand.
+    ('charseries-not-cumulative', 'ui/frame.lua',
+     '        while k <= n do run = run + ser[k]; ser[k] = run; k = k + 1 end',
+     '        while k <= n do run = run + ser[k]; k = k + 1 end',
+     'histgraph'),
+
+    # Ledger history with no character pinned on a made-up one. It cannot be
+    # given an owner, and inventing one puts somebody else's gold on a line
+    # with a name against it.
+    ('charseries-attributes-the-unattributed', 'ui/frame.lua',
+     '        local who = (e.who and e.who ~= "") and e.who or nil',
+     '        local who = (e.who and e.who ~= "") and e.who or "?"',
+     'histgraph'),
+
+    # Characters sorted by signed position rather than by size, which buries
+    # the one who lost 200g at the bottom -- as interesting a fact as the one
+    # who made it.
+    ('charseries-sorts-by-sign', 'ui/frame.lua',
+     '        local aa = a.final; if aa < 0 then aa = -aa end\n        local bb = b.final; if bb < 0 then bb = -bb end',
+     '        local aa, bb = a.final, b.final',
+     'histgraph'),
+
+    # Every character drawn at once. Eight lines on a 300px plot is a colour
+    # wheel, not a chart, and the pool only has four colours.
+    ('charseries-uncapped', 'ui/frame.lua',
+     '    local dropped = 0\n    while table.getn(out) > cap do\n        table.remove(out)\n        dropped = dropped + 1\n    end',
+     '    local dropped = 0',
+     'histgraph'),
+
+    # The character name cut at the first non-letter, so an alt with a hyphen
+    # or an accent in their name selects nothing at all.
+    ('viewchar-uses-a-5.1-pattern-call', 'ui/frame.lua',
+     '    local _, _, who = string.find(view, "^char:(.+)$")',
+     '    local _, _, who = string.find(view, "^char:(%a+)$")',
+     'histgraph'),
+
     # ---- pressing Bid must place a BID (v1.53.6) -------------------------
 
     # THE BUG ITSELF, restored: buy.Bid noticing that the server would treat
@@ -2787,8 +2961,8 @@ end
     # charts drawn on top of each other, and both lines then peak at the top
     # however far apart they are.
     ("hist-series-do-not-share-a-scale", "ui/frame.lua",
-     "    i = 1\n    while i <= table.getn(b or {}) do\n        if (b[i] or 0) > m then m = b[i] end",
-     "    i = 1\n    while i <= table.getn(b or {}) do\n        if false then m = b[i] end",
+     "    while i <= table.getn(list or {}) do\n        local ser = list[i]",
+     "    while i <= 1 do\n        local ser = list[i]",
      "histgraph"),
 
     # The line read as a staircase: a column between two buckets snapping to
@@ -2833,8 +3007,8 @@ end
 
     # An empty period taken as a scale of zero and divided by.
     ("hist-empty-period-divides-by-zero", "ui/frame.lua",
-     "        if not max or max <= 0 then return 0 end",
-     "        local _ = max",
+     "        if span <= 0 then return 0 end",
+     "        local _ = span",
      "histgraph"),
 
     # The chart given the table's minimum width whatever the window, so it
@@ -2894,15 +3068,15 @@ end
     # Spare spans left showing, so the chart keeps the tail of whatever it drew
     # last time.
     ("hist-spare-spans-left-showing", "ui/frame.lua",
-     "        else\n            t:Hide()\n        end\n        i = i + 1\n    end\nend\n\n-- Place the two halves",
-     "        end\n        i = i + 1\n    end\nend\n\n-- Place the two halves",
+     "            t:Show()\n        else\n            t:Hide()\n        end\n        i = i + 1\n    end\nend\n\n-- Paint the area under a line",
+     "            t:Show()\n        end\n        i = i + 1\n    end\nend\n\n-- Paint the area under a line",
      "histgraph"),
 
     # Spans built as FRAMES rather than textures. A few hundred textures on
     # one frame is affordable; a few hundred frames is not.
     ("hist-spans-are-frames", "ui/frame.lua",
-     '        local t = ui.histPlot:CreateTexture(nil, "ARTWORK")\n        t:SetTexture(colour[1], colour[2], colour[3])',
-     '        local t = CreateFrame("Frame", nil, ui.histPlot)\n        local _ = colour',
+     '        local t = ui.histPlot:CreateTexture(nil, "ARTWORK")\n        t:Hide()\n        pool[i] = t',
+     '        local t = CreateFrame("Frame", nil, ui.histPlot)\n        t:Hide()\n        pool[i] = t',
      "histgraph"),
 
     # ---- the Auctions split: book value and bids (v1.53.4) ---------------
@@ -4307,6 +4481,7 @@ SUITES = {
     "bids": "tests/units/bids_test.lua",
     "histgraph": "tests/units/histgraph_test.lua",
     "bidpath": "tests/units/bidpath_test.lua",
+    "purse": "tests/units/purse_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

@@ -2390,6 +2390,63 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Account gold, and the chart's views — v1.53.7
+
+**What Bagshui does, since it was the reference.** `Components/Character.lua`
+registers a set of money events (`PLAYER_MONEY`, `PLAYER_TRADE_MONEY`,
+`SEND_MAIL_MONEY_CHANGED`, `SEND_MAIL_COD_CHANGED`, `TRADE_MONEY_CHANGED`) plus
+`PLAYER_ENTERING_WORLD`, and `Character:UpdateMoney` writes `GetMoney()` into
+that character's SavedVariables record. `Components/Catalog.lua` then totals it
+across characters by treating coin as **one more item** with a pseudo
+itemString, so the account total falls out of the same aggregation that totals
+Silk Cloth. Each character carries a `lastLogout` for ageing.
+
+That is the only shape available on this client — `GetMoney()` answers for you
+and nothing will tell you what an alt has — so an account total is necessarily
+a sum of REMEMBERED figures. We differ in two ways on purpose:
+
+- **Realm-scoped**, like `db.Inventories` and unlike Bagshui's catalog. Gold on
+  a character you cannot reach from here is not gold you can spend here; the
+  same argument already settled the inventory block.
+- **We keep a HISTORY.** Bagshui only needs "how much does this character
+  have". The chart needs "how much did the account have last Tuesday", which
+  cannot be recovered from one number per character. One sample per **hour**
+  per character — the resolution the 24h view wants, and coarse enough that a
+  day of trading is 24 numbers rather than one per transaction. A second change
+  inside the same hour overwrites it.
+
+**Two properties the series has to have, and each one draws a plausible line
+when it is wrong.** A character contributes **nothing** before its first
+sample — back-filling its earliest figure shows the account holding gold it had
+not earned yet. And it **carries its last figure forward** — an alt that has
+not played since Monday still has that gold, and a line dropping to zero draws
+it being spent.
+
+**The axis had to become signed.** `ui.SeriesMax` returned a maximum, which is
+enough while every series starts at zero; a cumulative balance crosses it.
+`ui.SeriesRange` returns lo and hi and **always keeps zero inside them**, and
+`ui.GridFractions` puts a rule ON zero rather than at the halfway point — on a
+range of -40g to +120g the midpoint marks 40g, which is nothing in particular.
+
+**A sabotage caught the same class of mistake in the rasteriser.** Every
+existing plot test ran from zero up, where "measure from lo" and "measure from
+zero" are the same arithmetic — so a version that ignored the bottom of the
+range passed all of them while flattening every signed chart onto the lower
+half of the plot. The suite now has one series that starts below zero, and that
+is the general lesson: a test whose inputs are all on one side of a boundary
+cannot see a rule about the boundary.
+
+**Two dead guards, found by sabotages that passed.** `seen` in
+`db.MoneySeries` was redundant because `held` already starts at zero — the flag
+was removed and the comment now names the zero as the anti-back-fill rule.
+That is the better fix than keeping a flag nothing can break.
+
+**Still not done, and the reference has it:** a gradient under the filled line
+rather than a flat alpha. `SetGradientAlpha` exists on 1.12 but applies per
+texture, and the fill is one texture per column — so each column would run the
+whole gradient over its own height rather than the plot's. It wants a real
+client and a look before it is worth doing.
+
 ### Pressing Bid bought the item — v1.53.6
 
 Reported from a live client: *"clicking bid didn't put a bid in but rather

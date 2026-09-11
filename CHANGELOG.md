@@ -18,6 +18,40 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.7]
+
+### Added
+- **The History chart tracks your account's gold, and the dropdown picks what
+  it shows.** Four views plus one entry per character in your ledger:
+  - **In / out** — income and spending per period, as before.
+  - **Account gold** — what every character on the realm is carrying, summed,
+    over time. Filled under the line.
+  - **Cumulative** — a running balance that **goes below zero** when you spent
+    more than you earned. The axis now keeps zero inside it and puts a rule on
+    it, so a losing week reads as a losing week.
+  - **By character** — up to four cumulative lines, biggest mover first *by
+    size*, so a character who lost 200g sorts alongside one who made it.
+  - **…or one character on their own**, filled, from the same menu.
+
+- **What every character is carrying in coin is now recorded.** 1.12 has one
+  money call and it answers for the character you are on, so an account total
+  is necessarily a sum of remembered figures — each as fresh as the last time
+  that character played, and the chart says so. Your own figure is always read
+  live. One sample per hour per character, capped at about a month.
+
+- **A stats strip under the chart**: HIGH and LOW of the plotted line, and IN /
+  OUT / NET for the period, from the same ledger totals the table's heading
+  uses — so the two halves of the tab cannot disagree about the period.
+
+- **A proper y axis.** Five labelled rules down the left of the plot instead of
+  three unlabelled ones, and three x labels instead of two.
+
+- **Ledger entries now record which character made them**, which is what the
+  per-character breakdown reads. **History from before this release has no
+  name and cannot be given one** — those entries are counted in the totals and
+  left out of the breakdown, and the chart says "some unattributed" rather than
+  pinning them on whoever is logged in.
+
 ## [1.53.6]
 
 ### Fixed
@@ -5211,6 +5245,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

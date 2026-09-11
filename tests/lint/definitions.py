@@ -43,6 +43,13 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.53.7. The chart gained views whose series can go NEGATIVE -- a
+    # cumulative balance below zero, a character down on the week -- so an
+    # axis described by its maximum alone stopped being enough. ui.SeriesRange
+    # returns lo AND hi and always keeps zero inside them, which is the only
+    # honest way to draw a line that crosses it.
+    "ui.SeriesMax": "v1.53.7 -- replaced by ui.SeriesRange, which returns a "
+                    "signed range rather than a maximum",
     "ui.RowsFor": "v1.23.0 -- measured a two-edge-anchored scroll frame, "
                   "which is the trap four separate bugs walked into; "
                   "replaced by ui.ListRowsAt",
