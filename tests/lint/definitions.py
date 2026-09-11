@@ -60,6 +60,10 @@ REMOVED_ON_PURPOSE = {
     "ui.CharSeries":       "v1.53.8 -- the dropdown picks a character and the "
                            "chart draws their GOLD, not their ledger",
     "ui.PaintLegend":      "v1.53.8 -- one line needs one name, not a key",
+    # v1.53.9. The x axis carries DATES now -- "30d ago" stops being placeable
+    # once the window is months long, which is why the reference chart labels
+    # months. ui.WhenLabel does all three labels.
+    "ui.HistMidLabel":     "v1.53.9 -- the x axis is dated by ui.WhenLabel",
     # ...and the bucketing that fed them. What survived is the window it
     # computed, which every version of this chart needed.
     "ui.HistBuckets":      "v1.53.8 -- split; ui.HistWindow is the half that "

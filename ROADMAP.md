@@ -2390,6 +2390,60 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### One field, two features — v1.53.9
+
+**Reported as "when I change lengths of time I have to go back and select the
+player for the graph to update as well", which is a precise description of a
+name collision.**
+
+`ui.histView` has been the History table's filtered ROW LIST since the tab was
+built. When the chart gained a selection in v1.53.7 it took the same field.
+Pressing a period button calls `ui.RefreshHistory`, which rebuilds that list —
+so the chart's selection became an array, the next repaint handed a table to
+`string.find`, the painter threw, and the chart kept whatever it had drawn
+last. Reselecting a player put a string back and it worked again, which is why
+it looked like the dropdown was the fix.
+
+**Nothing in the suite could have caught this**, because both features are
+correct in isolation and the collision only exists in the name. It is a source
+check now: the table's refresh must not mention `ui.histWho`, and the chart's
+painter must not mention `ui.histView`.
+
+**That check then failed for the wrong reason** — `ui.histView` is a *prefix*
+of the dropdown's field name, so a plain substring search matched
+`ui.histViewDD`. Two fixes: the field is `ui.histWhoDD` now, and the check is a
+pattern (`ui%.histView[^%w_]`) so no future `histViewAnything` can fool it.
+Fourth time a check has been fooled by a near-miss in this repo.
+
+**Multi-select, and the two rules that make it coherent.** The set is a set of
+NAMES and **empty means everyone**, from which both behaviours fall out: "All
+Players" CLEARS the set rather than ticking alongside the names (a chart
+showing the account total and Torchlite at once is the account total twice,
+with his gold in both lines), and unticking the LAST name goes back to everyone
+rather than leaving an empty chart. There is no state between "one character"
+and "all of them" worth being stuck in.
+
+`MakeDropdown` gained a `multi` flag: a click toggles and the menu STAYS OPEN,
+because picking two of six is two clicks and a menu that shut after each would
+be four. The control does not own the set — `dd:SetTicked` is handed what to
+draw — because the rule for what a selection MEANS is the caller's, and a
+widget guessing it is a widget the caller has to fight.
+
+**Two strings that can both grow cannot share a line.** The stat strip was
+`histStatL` anchored BOTTOMLEFT and `histStatR` anchored BOTTOMRIGHT, and on a
+narrow window they overlapped into "LOWN0g 14s 6c". Stacking them on two rows
+removes the collision rather than making it less likely — the same reasoning
+that keeps a FontString's width off it, since nothing on 1.12 clips one.
+
+**Still to do toward the reference:** faint vertical gridlines at each x label,
+the title and period buttons moved to sit with the chart, and a real gradient
+under the fill rather than flat alpha.
+
+**Tabled at the owner's request, to revisit:** the chart taking the whole tab
+with the ledger as a popover over it, the way the Aegis tab's category picker
+works. That is the shape that would make room for the reference's SALES /
+EXPENSES / PROFIT blocks, and it is a bigger change than anything above.
+
 ### The chart becomes gold-only — v1.53.8
 
 **The framing was wrong and one sentence from the owner settled it: "all gold

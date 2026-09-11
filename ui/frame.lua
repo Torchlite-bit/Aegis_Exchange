@@ -2799,10 +2799,19 @@ end
 -- Quality all want it -- "no filter" is a real choice there. Component does
 -- not: there is no such thing as "all components", and the row only offered
 -- a way to pick nothing.
-local function MakeDropdown(parent, width, onSelect, noAll)
+-- `multi` makes the list a set of TICKS rather than a radio: a click toggles
+-- one entry, the menu stays open, and `onSelect` fires with the value that was
+-- clicked so the caller can keep its own set. The control does not own that
+-- set -- dd.ticked is what it DRAWS, handed back by dd:SetTicked -- because
+-- the caller's rule for what a selection means (what does picking "All" do to
+-- the others?) is the caller's, and a widget guessing it is a widget the
+-- caller has to fight.
+local function MakeDropdown(parent, width, onSelect, noAll, multi)
     local dd = {}
     dd.options = {}
     dd.value = nil
+    dd.ticked = {}
+    dd.multi = multi and true or false
     dd.noAll = noAll and true or false
 
     local btn = ui.MakeButton(parent, "quiet")
@@ -2862,6 +2871,12 @@ local function MakeDropdown(parent, width, onSelect, noAll)
     function dd:Repaint()
         local text = dd.noAll and "" or "All"
         local colour = nil
+        if dd.multi and dd.tickLabel then
+            btn.aegisTextColor = nil
+            RepaintButton(btn)
+            ui.SetTextClipped(btn:GetFontString(), dd.tickLabel, width - 8)
+            return
+        end
         local i = 1
         while i <= table.getn(dd.options) do
             if dd.options[i].value == dd.value then
@@ -2897,6 +2912,15 @@ local function MakeDropdown(parent, width, onSelect, noAll)
     end
 
     function dd:GetValue() return dd.value end
+
+    -- What the list should DRAW as ticked, and what the button should say.
+    -- The caller owns the set; this is how it tells the control about it.
+    function dd:SetTicked(set, label)
+        dd.ticked = set or {}
+        dd.tickLabel = label
+        dd:Repaint()
+        if dd.list and dd.list:IsVisible() then dd:Open() end
+    end
 
     -- Resize after creation. `width` is not just the button's width -- it is
     -- also what Repaint clips the label to and what Open sizes the popup to --
@@ -2949,8 +2973,16 @@ local function MakeDropdown(parent, width, onSelect, noAll)
                 fs:SetJustifyH("LEFT")
                 row.label = fs
                 row:SetScript("OnClick", function()
-                    dd:SetValue(row.optValue)
-                    dd:Close()
+                    if dd.multi then
+                        -- STAYS OPEN. Picking two characters out of six is two
+                        -- clicks, and a menu that shut after each one would be
+                        -- four -- half of them spent reopening it.
+                        if onSelect then onSelect(row.optValue) end
+                        dd:Open()
+                    else
+                        dd:SetValue(row.optValue)
+                        dd:Close()
+                    end
                 end)
                 -- An option may carry `tip`, which is how a dimmed entry
                 -- explains why it is dimmed rather than leaving the user to
@@ -2975,7 +3007,17 @@ local function MakeDropdown(parent, width, onSelect, noAll)
             else
                 row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
             end
-            ui.SetTextClipped(row.label, entries[r].text, width - 12)
+            local text = entries[r].text
+            if dd.multi then
+                -- A TICK IN THE TEXT rather than a check box widget: these
+                -- rows are pooled Buttons with one FontString, and a texture
+                -- per row would have to be hidden again on every reuse. The
+                -- space keeps the labels on one left edge whether ticked or
+                -- not.
+                local on = dd.ticked[entries[r].value]
+                text = (on and "\226\136\154 " or "   ") .. text
+            end
+            ui.SetTextClipped(row.label, text, width - 12)
             row:Show()
             r = r + 1
         end
@@ -11401,8 +11443,12 @@ end
 -- cells and the sort all have to agree about them. They were three separate
 -- sets of numbers -- a local HCX for the headers, literal widths in the row
 -- builder, and no sort at all.
-local HCX = { when = 2, kind = 92, item = 176, amount = 470 }
-local HCW = { when = 86, kind = 80, item = 290, amount = 96 }
+-- NARROWER THAN THEY WERE (item 290 -> 236, amount from 470 -> 416), which
+-- buys the chart beside them 54px at every window width. The item column was
+-- the only one with slack: it held the longest name in the ledger with room to
+-- spare, and ui.SetTextClipped already handles the few that do not fit.
+local HCX = { when = 2, kind = 92, item = 176, amount = 416 }
+local HCW = { when = 86, kind = 80, item = 236, amount = 96 }
 local HIST_HEADER_DEFS = {
     { key = "when",   text = "When" },
     { key = "kind",   text = "Type" },
@@ -11438,14 +11484,26 @@ local HISTL = {
     -- The table's columns end at 566 plus the row padding and its scrollbar.
     -- Below this the Amount column starts running under the scrollbar, which
     -- is the clipping this number exists to prevent.
-    left_min   = 620,
+    -- The table's columns now end at 512 plus the row padding and its
+    -- scrollbar. Below this the Amount column starts running under the
+    -- scrollbar, which is the clipping this number exists to prevent.
+    left_min   = 566,
     graph_min  = 240,
-    graph_frac = 0.36,
+    -- Raised from 0.36. The chart was the half that had to hold an axis, a
+    -- legend, a line and two rows of figures in whatever was left over, and it
+    -- was the half that ran out.
+    graph_frac = 0.46,
     -- Inside the chart box: the heading and legend above the plot, and the
     -- axis labels below it.
     plot_top   = 34,
-    -- Room under the plot for the x labels AND the stats strip.
-    plot_bot   = 52,
+    -- Room under the plot for the x labels AND the two stat rows.
+    --
+    -- TWO ROWS, because one was two FontStrings anchored to opposite ends of
+    -- the same line and they ran into each other -- "LOW 9g 14s 6c" and "IN
+    -- 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window. Two strings
+    -- that can both grow cannot share a line; stacking them removes the
+    -- collision rather than making it less likely.
+    plot_bot   = 64,
     plot_side  = 10,
     -- The y-axis labels live to the LEFT of the drawing area, the way the
     -- reference chart has them -- so the plot starts this far in.
@@ -11834,7 +11892,7 @@ local HIST_PERIODS = {
     { label = "24h", secs = 86400 },
     { label = "7d",  secs = 7 * 86400 },
     { label = "30d", secs = 30 * 86400 },
-    { label = "3M",  secs = 90 * 86400 },
+    { label = "3m",  secs = 90 * 86400 },
     { label = "All", secs = 0 },
 }
 
@@ -12015,15 +12073,25 @@ function ui.BuildHistoryGraph(panel)
     -- views answer four different questions off the same ledger and the same
     -- period, and only one of them -- "In / out" -- is what this chart was
     -- when it shipped.
-    ui.histView = "inout"
-    local dd = MakeDropdown(box, 122, function(v)
-        ui.histView = v or "inout"
+    -- ui.histWho, NOT ui.histView.
+    --
+    -- THE BUG THIS NAME EXISTS FOR. ui.histView has been the ledger table's
+    -- filtered ROW LIST since long before there was a chart, and the chart's
+    -- selection borrowed the same field -- so pressing a period button, which
+    -- rebuilds that list, replaced the chart's selection with an array. The
+    -- next repaint handed a table to string.find, the painter threw, and the
+    -- chart silently kept whatever it had drawn last. It presented exactly as
+    -- reported: "I have to go back and select the player again for the graph
+    -- to update."
+    ui.histWho = { }
+    local dd = MakeDropdown(box, 128, function(v)
+        ui.HistToggleWho(v)
         ui.UpdateHistoryGraph()
-    end, true)
+    end, true, true)
     dd.button:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -2)
     dd:SetOptions(ui.HistViewOptions())
-    dd:SetValue("inout", true)
-    ui.histViewDD = dd
+    dd:SetValue(HIST_ALL_PLAYERS, true)
+    ui.histWhoDD = dd
 
     -- WHOSE GOLD, said beside the chart. One line means one name, and the
     -- dropdown already carries it -- this is the figure that goes with it:
@@ -12090,11 +12158,11 @@ function ui.BuildHistoryGraph(panel)
     -- ledger totals the table's heading uses, so the two halves of this tab
     -- cannot disagree about the period.
     ui.histStatL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
+    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)
     ui.histStatL:SetJustifyH("LEFT")
     ui.histStatR = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 4)
-    ui.histStatR:SetJustifyH("RIGHT")
+    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
+    ui.histStatR:SetJustifyH("LEFT")
 
     -- THE HOVER READOUT: a vertical rule under the cursor and the figure it
     -- crosses. Drawn in OVERLAY so it sits above the fill and the line.
@@ -12157,6 +12225,50 @@ function ui.HistViewOptions()
         k = k + 1
     end
     return opts
+end
+
+-- Toggle one entry in the chart's selection.
+--
+-- THE SET IS A SET OF NAMES, and empty means everyone. Two rules, and both
+-- exist because the alternative reads as the control being broken:
+--
+--   * "All Players" CLEARS the set rather than ticking alongside the names.
+--     A chart showing the account total and Torchlite at once is the account
+--     total twice, with his gold counted in both lines.
+--   * UNTICKING THE LAST NAME goes back to everyone, rather than leaving an
+--     empty chart nobody asked for. There is no state between "one character"
+--     and "all of them" that is worth being stuck in.
+function ui.HistToggleWho(value)
+    if not ui.histWho then ui.histWho = {} end
+    local who = ui.HistViewChar(value)
+    if not who then ui.histWho = {}; return ui.histWho end
+    if ui.histWho[who] then
+        ui.histWho[who] = nil
+    else
+        ui.histWho[who] = true
+    end
+    return ui.histWho
+end
+
+-- The names in the selection, sorted, and how many. Returns names, n.
+--
+-- SORTED, because the set has no order of its own and the label built from it
+-- would otherwise shuffle between repaints -- a title that reorders itself
+-- while you watch reads as the chart reloading.
+function ui.HistWhoList(set)
+    local names = {}
+    for who in pairs(set or {}) do table.insert(names, who) end
+    table.sort(names)
+    return names, table.getn(names)
+end
+
+-- What the dropdown button and the chart's title should say for a selection.
+function ui.HistWhoLabel(set, total)
+    local names, n = ui.HistWhoList(set)
+    if n == 0 then return "All Players (" .. (total or 0) .. ")" end
+    if n == 1 then return names[1] end
+    if n == 2 then return names[1] .. " + " .. names[2] end
+    return n .. " players"
 end
 
 -- The character a view key names, or nil for one of the four fixed views.
@@ -12263,22 +12375,39 @@ end
 -- ONE SERIES, ALWAYS. The chart shows gold held and nothing else -- see the
 -- note on HIST_ALL_PLAYERS -- which is what lets it be filled, hovered and
 -- read at a glance instead of being a key to four lines.
-function ui.HistGoldSeries(view, from, step, n)
-    local who = ui.HistViewChar(view)
-    if who then
-        local vals, seen = A.db.MoneySeries(from, step, n, who)
-        -- A character with no samples inside the window is a real state, not
-        -- an empty chart: they exist, we have simply never seen them here.
-        -- Saying so beats drawing them flat on the baseline.
-        return vals, who, (not seen) and "not seen in this period" or nil
-    end
-    local vals = A.db.MoneySeries(from, step, n)
+function ui.HistGoldSeries(set, from, step, n)
     local rows = A.db.PurseRows()
-    -- SAID EVERY TIME, not once in a tooltip. 1.12 will only tell you what the
-    -- character you are on is carrying, so every other figure in this line is a
-    -- memory of the last time that character played.
-    local note = (table.getn(rows) > 1) and "alts as last seen" or nil
-    return vals, "All Players (" .. table.getn(rows) .. ")", note
+    local names, picked = ui.HistWhoList(set)
+    local title = ui.HistWhoLabel(set, table.getn(rows))
+
+    if picked == 0 then
+        local vals = A.db.MoneySeries(from, step, n)
+        -- SAID EVERY TIME, not once in a tooltip. 1.12 will only tell you what
+        -- the character you are on is carrying, so every other figure in this
+        -- line is a memory of the last time that character played.
+        local note = (table.getn(rows) > 1) and "alts as last seen" or nil
+        return vals, title, note
+    end
+
+    -- SUMMED, not drawn as several lines. "Gold between just Torchlite and
+    -- Troglodyte" is one figure -- what those two hold together -- and two
+    -- lines would answer a different question that the account view already
+    -- answers better.
+    local out, seen = {}, false
+    local i = 1
+    while i <= n do out[i] = 0; i = i + 1 end
+    local k = 1
+    while k <= picked do
+        local vals, got = A.db.MoneySeries(from, step, n, names[k])
+        if got then seen = true end
+        local b = 1
+        while b <= n do out[b] = out[b] + (vals[b] or 0); b = b + 1 end
+        k = k + 1
+    end
+    -- A character with no samples inside the window is a real state, not an
+    -- empty chart: they exist, we have simply never seen them here. Saying so
+    -- beats drawing them flat on the baseline.
+    return out, title, (not seen) and "not seen in this period" or nil
 end
 
 -- Place the two halves at the current window width, and draw the chart.
@@ -12294,7 +12423,7 @@ function ui.UpdateHistoryGraph()
 
     -- The menu is rebuilt here rather than at build time: the list of
     -- characters grows the first time an alt is seen.
-    if ui.histViewDD then ui.histViewDD:SetOptions(ui.HistViewOptions()) end
+    if ui.histWhoDD then ui.histWhoDD:SetOptions(ui.HistViewOptions()) end
 
     local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())
     local period = HIST_PERIODS[ui.histPeriod or 2]
@@ -12304,11 +12433,14 @@ function ui.UpdateHistoryGraph()
     local from, step = ui.HistWindow(A.db.Ledger(), time(), period.secs, n)
 
     local values, title, note =
-        ui.HistGoldSeries(ui.histView or HIST_ALL_PLAYERS, from, step, n)
+        ui.HistGoldSeries(ui.histWho, from, step, n)
     local lo, hi = ui.SeriesRange({ values })
 
     ui.histNow:SetText(title or "")
     ui.histNow:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    if ui.histWhoDD then
+        ui.histWhoDD:SetTicked(ui.histWho, title)
+    end
 
     local empty = not (hi > lo)
     if empty then
@@ -12337,9 +12469,14 @@ function ui.UpdateHistoryGraph()
         g = g + 1
     end
 
-    ui.histXFrom:SetText(period.secs > 0 and (period.label .. " ago") or "start")
-    ui.histXMid:SetText(ui.HistMidLabel(period, n, step))
-    ui.histXTo:SetText(note and ("now \226\128\162 " .. note) or "now")
+    -- DATES ACROSS THE AXIS, which is what the reference chart has and what
+    -- "30d ago" stops being once the window is months long. The note moved off
+    -- this line entirely: it was appended to the right-hand label, where it
+    -- grew that label past the plot and into the one beside it.
+    local now = time()
+    ui.histXFrom:SetText(ui.WhenLabel(from, now))
+    ui.histXMid:SetText(ui.WhenLabel(from + (now - from) / 2, now))
+    ui.histXTo:SetText("now")
 
     -- FILLED, always, because there is always exactly one line. The fill is
     -- what makes a gold chart read as a level rather than as a trace.
@@ -12360,7 +12497,9 @@ function ui.UpdateHistoryGraph()
     -- The figures a chart cannot be read precisely enough to give you.
     local since = (period.secs > 0) and (time() - period.secs) or nil
     local earned, spent = A.db.LedgerTotals(since)
-    ui.histStatL:SetText(ui.StatLine("HIGH", hi, "LOW", lo))
+    local top = ui.StatLine("HIGH", hi, "LOW", lo)
+    if note then top = top .. "   |cff8c7a4e" .. note .. "|r" end
+    ui.histStatL:SetText(top)
     ui.histStatR:SetText(ui.StatLine("IN", earned, "OUT", spent,
                                      "NET", earned - spent))
 end
@@ -12391,18 +12530,6 @@ function ui.UpdateHistoryHover()
     ui.histCross:Show()
     ui.histHover:SetText(ui.HoverLabel(values, ui.histFrom, ui.histStep, b))
     ui.histHover:Show()
-end
-
--- The middle x-axis label: how far back the midpoint of the chart is.
---
--- DERIVED FROM THE BUCKETS, not from the period's own label, because "30d"
--- covers thirty buckets and "All" covers however long you have been playing --
--- halving a label is only correct for one of those.
-function ui.HistMidLabel(period, n, step)
-    if not period or not n or not step or step <= 0 then return "" end
-    local back = (n / 2) * step
-    if back < 3600 then return "" end
-    return util.FormatAgo(back)
 end
 
 -- "HIGH 12g  LOW 0c" -- pairs of caption and money, uppercase caption dimmed

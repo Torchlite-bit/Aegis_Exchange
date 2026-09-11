@@ -18,6 +18,41 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.9]
+
+### Fixed
+- **Changing the period did not redraw the chart** until you reselected a
+  player. `ui.histView` has been the ledger table's filtered row list since
+  long before there was a chart, and the chart's selection borrowed the same
+  field — so pressing a period button, which rebuilds that list, replaced the
+  selection with an array. The next repaint threw and the chart silently kept
+  what it had drawn last. The chart's field is `ui.histWho` now, and the suite
+  checks each feature only touches its own.
+- **The figures under the chart overlapped.** "LOW 9g 14s 6c" and "IN 37s 92c"
+  were two strings anchored to opposite ends of one line, and on a narrow
+  window they ran into each other. They are stacked on two rows now — two
+  strings that can both grow cannot share a line.
+- **The x-axis labels collided**, because the "alts as last seen" note was
+  appended to the right-hand one and grew it into its neighbour. The note sits
+  with the HIGH/LOW row now.
+
+### Added
+- **Pick more than one character.** Tick two names and the chart shows what
+  they hold **together** — one line, because "gold between Torchlite and
+  Troglodyte" is one figure. The menu stays open while you tick. **All
+  Players** clears the selection rather than ticking alongside the names
+  (otherwise the account total is drawn twice with one character's gold in
+  both), and unticking the last name goes back to everyone.
+
+### Changed
+- **The chart is wider.** The ledger table's Item column had the only slack in
+  it — it held the longest name with room to spare — so 54px moved across at
+  every window width, and the chart's share of what is left went from 36% to
+  46%.
+- **The x axis carries dates** rather than "30d ago", which stops being
+  placeable once the window is months long.
+- **`3M` is `3m`**, matching the other period labels.
+
 ## [1.53.8]
 
 ### Changed
@@ -5277,6 +5312,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

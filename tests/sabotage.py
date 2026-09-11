@@ -2671,6 +2671,77 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- multi-select, and the field two features shared (v1.53.9) -------
+
+    # THE BUG ITSELF: the chart reading the ledger table's filtered ROW LIST
+    # instead of its own selection. Pressing a period button rebuilds that
+    # list, so the chart gets an array where it expected a set -- it threw,
+    # and silently kept whatever it had drawn last. Reported as 'I have to go
+    # back and select the player for the graph to update as well'.
+    ('chart-selection-shares-the-tables-field', 'ui/frame.lua',
+     '        ui.HistGoldSeries(ui.histWho, from, step, n)',
+     '        ui.HistGoldSeries(ui.histView, from, step, n)',
+     'histgraph'),
+
+    # ...and the same collision from the other end: the ledger's refresh
+    # reaching over and clearing the chart's selection.
+    ('ledger-refresh-clears-the-chart', 'ui/frame.lua',
+     '    local led = A.db.Ledger()\n    ui.histView = {}',
+     '    local led = A.db.Ledger()\n    ui.histWho = {}\n    ui.histView = {}',
+     'histgraph'),
+
+    # 'All Players' ticking alongside the names instead of clearing them,
+    # which draws the account total AND one character -- his gold counted in
+    # both lines.
+    ('all-players-does-not-clear', 'ui/frame.lua',
+     '    if not who then ui.histWho = {}; return ui.histWho end',
+     '    if not who then return ui.histWho end',
+     'histgraph'),
+
+    # A name that can be ticked and never unticked, so there is no way back
+    # to the account view except through All Players.
+    ('unticking-the-last-name-empties-the-chart', 'ui/frame.lua',
+     '    if ui.histWho[who] then\n        ui.histWho[who] = nil',
+     '    if false then\n        ui.histWho[who] = nil',
+     'histgraph'),
+
+    # The selection's names left in pairs() order, which a set has no promise
+    # about -- so the title shuffles between repaints and reads as the chart
+    # reloading while you watch.
+    ('who-list-unsorted', 'ui/frame.lua',
+     '    table.sort(names)\n    return names, table.getn(names)',
+     '    return names, table.getn(names)',
+     'histgraph'),
+
+    # The count dropped from the All Players label, which is the one place
+    # the chart says how many characters it is summing.
+    ('who-label-never-counts', 'ui/frame.lua',
+     '    if n == 0 then return "All Players (" .. (total or 0) .. ")" end',
+     '    if n == 0 then return "All Players" end',
+     'histgraph'),
+
+    # Two characters selected and only the last one's gold drawn -- the sum
+    # replaced rather than accumulated, which is the whole point of picking
+    # two.
+    ('multi-select-draws-only-the-first', 'ui/frame.lua',
+     '        local b = 1\n        while b <= n do out[b] = out[b] + (vals[b] or 0); b = b + 1 end',
+     '        local b = 1\n        while b <= n do out[b] = (vals[b] or 0); b = b + 1 end',
+     'histgraph'),
+
+    # The two stat strings back on one line, anchored to opposite ends. Both
+    # can grow, so on a narrow window they overlapped into 'LOWN0g 14s 6c'.
+    ('stat-rows-share-a-line', 'ui/frame.lua',
+     '    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)\n    ui.histStatR:SetJustifyH("LEFT")',
+     '    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 18)\n    ui.histStatR:SetJustifyH("RIGHT")',
+     'histgraph'),
+
+    # The ledger table squeezed below its own columns, so the Amount column
+    # -- the rightmost thing in the window -- runs under the scrollbar.
+    ('table-columns-run-under-the-scrollbar', 'ui/frame.lua',
+     '    left_min   = 566,',
+     '    left_min   = 420,',
+     'histgraph'),
+
     # ---- gold-only chart, longer history (v1.53.8) -----------------------
 
     # Compaction keeping the FIRST sample of each day rather than the last.

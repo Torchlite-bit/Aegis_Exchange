@@ -112,6 +112,10 @@ for _, sig in ipairs({
     "function ui.WhenLabel(",
     "function ui.HoverLabel(",
     "function ui.HistWindow(",
+    "function ui.HistToggleWho(",
+    "function ui.HistWhoList(",
+    "function ui.HistWhoLabel(",
+    "function ui.HistGoldSeries(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -534,6 +538,62 @@ H.eq("...and one containing the prefix again",
 H.isNil("nothing selected names nobody", ui.HistViewChar(nil))
 H.isNil("...and neither does an empty name", ui.HistViewChar("char:"))
 
+-- ---- more than one at a time --------------------------------------------
+
+-- "I want to know gold accumulation between just Torchlite and Troglodyte, I
+-- can select just those 2." The set is a set of NAMES and EMPTY MEANS
+-- EVERYONE, which is the rule the two behaviours below fall out of.
+ui.histWho = {}
+ui.HistToggleWho("char:Torchlite")
+H.eq("ticking a name selects them", ui.histWho["Torchlite"], true)
+ui.HistToggleWho("char:Troglodyte")
+local _, picked = ui.HistWhoList(ui.histWho)
+H.eq("...and a second joins them", picked, 2)
+ui.HistToggleWho("char:Torchlite")
+H.isNil("ticking again unticks", ui.histWho["Torchlite"])
+H.eq("...leaving the other", ui.histWho["Troglodyte"], true)
+
+-- UNTICKING THE LAST NAME GOES BACK TO EVERYONE, rather than leaving an empty
+-- chart nobody asked for. There is no state between "one character" and "all
+-- of them" worth being stuck in.
+ui.HistToggleWho("char:Troglodyte")
+local _, none = ui.HistWhoList(ui.histWho)
+H.eq("unticking the last is everyone again", none, 0)
+
+-- "ALL PLAYERS" CLEARS THE SET rather than ticking alongside the names. A
+-- chart showing the account total AND Torchlite at once is the account total
+-- twice, with his gold counted in both lines.
+ui.HistToggleWho("char:Torchlite")
+ui.HistToggleWho("char:Osiris")
+ui.HistToggleWho("all")
+local _, cleared = ui.HistWhoList(ui.histWho)
+H.eq("All Players clears the selection", cleared, 0)
+
+-- SORTED, because a set has no order of its own and a title built from it
+-- would otherwise shuffle between repaints -- which reads as the chart
+-- reloading while you watch.
+ui.histWho = { Zed = true, Amy = true, Mike = true }
+local names = ui.HistWhoList(ui.histWho)
+H.eq("the names come back sorted", names[1], "Amy")
+H.eq("...in order", names[2], "Mike")
+H.eq("...all of them", names[3], "Zed")
+
+-- ---- what the control says ----------------------------------------------
+
+H.eq("nothing selected is everyone, counted",
+     ui.HistWhoLabel({}, 3), "All Players (3)")
+H.eq("...and a nil set is the same",
+     ui.HistWhoLabel(nil, 5), "All Players (5)")
+H.eq("one selected is their name",
+     ui.HistWhoLabel({ Torchlite = true }, 3), "Torchlite")
+H.eq("two are both named",
+     ui.HistWhoLabel({ Torchlite = true, Troglodyte = true }, 3),
+     "Torchlite + Troglodyte")
+-- Past two the names stop fitting the button, and a count is more use than
+-- the first two names with the rest silently missing.
+H.eq("three or more is a count",
+     ui.HistWhoLabel({ A = true, B = true, C = true }, 5), "3 players")
+
 -- ---------------------------------------------------------------------------
 H.section("the window the chart covers")
 -- ---------------------------------------------------------------------------
@@ -667,6 +727,129 @@ H.check("a moment in the future is not negative",
         ui.WhenLabel(NOW + 500, NOW))
 
 -- ---------------------------------------------------------------------------
+H.section("summing a selection")
+-- ---------------------------------------------------------------------------
+
+-- "I want to know gold accumulation between just Torchlite and Troglodyte."
+-- That is ONE figure -- what those two hold together -- not two lines. Two
+-- lines would answer a different question, and the account view answers it
+-- better.
+do
+    W.Reset()
+    A = W.LoadCore()
+    W.FireAddonLoaded(A)
+    local HR = 3600
+    local T = 2000 * HR
+
+    W.player = "Torchlite"
+    A.db.SetCharMoney(100, T)
+    W.player = "Troglodyte"
+    A.db.SetCharMoney(20, T)
+    W.player = "Subtilizer"
+    A.db.SetCharMoney(7, T)
+
+    local from, step, n = T - HR, HR, 3
+
+    local all, title = ui.HistGoldSeries({}, from, step, n)
+    H.eq("nothing selected sums the account", all[3], 127)
+    H.eq("...and says so", title, "All Players (3)")
+
+    local two, title2 = ui.HistGoldSeries(
+        { Torchlite = true, Troglodyte = true }, from, step, n)
+    -- ACCUMULATED, not replaced. A sum that assigns instead of adding gives
+    -- whichever character happened to be walked last, which is a plausible
+    -- number and the wrong one.
+    H.eq("two selected are SUMMED", two[3], 120)
+    H.check("...and neither of them alone",
+            two[3] ~= 100 and two[3] ~= 20, two[3])
+    H.eq("...and both are named", title2, "Torchlite + Troglodyte")
+
+    local one, title3 = ui.HistGoldSeries({ Subtilizer = true },
+                                          from, step, n)
+    H.eq("one selected is just theirs", one[3], 7)
+    H.eq("...titled with their name", title3, "Subtilizer")
+
+    -- A character we have never seen in this window is a real state and not
+    -- the same as one holding nothing.
+    local _, title4, note = ui.HistGoldSeries({ Ghost = true },
+                                              from, step, n)
+    H.eq("an unseen character is still named", title4, "Ghost")
+    H.check("...and said to be unseen", note ~= nil, tostring(note))
+
+    -- The account view carries its own caveat, every time: 1.12 will only tell
+    -- you what the character you are ON is carrying.
+    local _, _, allNote = ui.HistGoldSeries({}, from, step, n)
+    H.check("the account view says the alts are remembered",
+            allNote ~= nil and
+            string.find(allNote, "last seen", 1, true) ~= nil,
+            tostring(allNote))
+end
+
+-- ---------------------------------------------------------------------------
+H.section("the chart's selection is not the table's row list")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR, reported as "when I change lengths of time I have
+-- to go back and select the player for the graph to update as well".
+--
+-- ui.histView has been the ledger table's filtered ROW LIST since long before
+-- there was a chart, and the chart's selection borrowed the same field. So
+-- pressing a period button -- which rebuilds that list -- replaced the chart's
+-- selection with an array; the next repaint handed a table to string.find, the
+-- painter threw, and the chart silently kept whatever it had drawn last.
+-- Reselecting a player put a real value back and it worked again.
+--
+-- A name collision cannot be caught by a unit suite, so this reads the source.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    local function bodyOf(head)
+        local at = string.find(src, head, 1, true)
+        if not at then return "" end
+        local stop = string.find(src, "\nend\n", at, true)
+        return string.sub(src, at, stop or -1)
+    end
+    local function says(body, needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+
+    local refresh = bodyOf("function ui.RefreshHistory(")
+    H.check("the ledger refresh exists", refresh ~= "")
+    H.check("it still owns ui.histView", says(refresh, "ui.histView = {}"))
+    H.check("...and does not touch the chart's selection",
+            not says(refresh, "ui.histWho"),
+            "rebuilding the row list must not clear whose gold is shown")
+
+    local graph = bodyOf("function ui.UpdateHistoryGraph(")
+    H.check("the chart reads its OWN field",
+            says(graph, "ui.HistGoldSeries(ui.histWho,"))
+    -- A PATTERN, NOT A SUBSTRING. "ui.histView" is a prefix of the dropdown's
+    -- own field name, so a plain find matched ui.histWhoDD's predecessor and
+    -- failed for a reason that had nothing to do with the bug. The trailing
+    -- class is what makes it the whole identifier.
+    H.check("...and not the table's",
+            string.find(graph, "ui%.histView[^%w_]") == nil,
+            "one field, two features, is how this broke")
+
+    local list = bodyOf("function ui.UpdateHistoryList(")
+    H.check("the table still reads its own",
+            says(list, "ui.SortHistory(ui.histView or {}"))
+
+    -- TWO STRINGS THAT CAN BOTH GROW CANNOT SHARE A LINE. These were anchored
+    -- to opposite ends of one line and ran into each other -- "LOW 9g 14s 6c"
+    -- and "IN 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window.
+    -- Stacking removes the collision rather than making it less likely.
+    local build = bodyOf("function ui.BuildHistoryGraph(")
+    H.check("both stat rows hang off the same edge",
+            says(build, 'ui.histStatL:SetPoint("BOTTOMLEFT"')
+            and says(build, 'ui.histStatR:SetPoint("BOTTOMLEFT"'),
+            "opposite ends of one line is how they collided")
+    H.check("...and neither is right-justified into the other",
+            not says(build, 'ui.histStatR:SetJustifyH("RIGHT")'))
+end
+
+-- ---------------------------------------------------------------------------
 H.section("the drawing area is computed, never measured")
 -- ---------------------------------------------------------------------------
 
@@ -755,7 +938,7 @@ do
     -- grows the first time an alt sells something and a menu that was correct
     -- when the tab was built would never notice.
     H.check("the view menu is rebuilt each paint",
-            says(graph, "ui.histViewDD:SetOptions(ui.HistViewOptions())"))
+            says(graph, "ui.histWhoDD:SetOptions(ui.HistViewOptions())"))
 
     -- ALWAYS FILLED, because there is always exactly one line. The fill is
     -- what makes a gold chart read as a level rather than as a trace.
