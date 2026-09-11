@@ -57,6 +57,7 @@ ui = {}
 for _, sig in ipairs({
     "function ui.BuyTreeRows(",
     "function ui.ToggleBuyGroup(",
+    "function ui.BuyGrouped(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -274,5 +275,104 @@ local round = buy.ParseTerm(buy.ExactTerm("Black Lotus"))
 H.check("what a right-click writes, the parser reads", round.exact,
         "the two halves of exact-match disagree")
 H.eq("...as the same item", round.name, "Black Lotus")
+
+-- ---------------------------------------------------------------------------
+H.section("grouped, unless the search asked for one item")
+-- ---------------------------------------------------------------------------
+
+-- The flag is set from the TERM the engine ran, not from the search box: you
+-- can type over the box while the previous results are still on screen, and
+-- the rows have to keep matching the search that produced them.
+ui.buyExactRan = nil
+H.check("a broad search groups", ui.BuyGrouped(),
+        "a hundred rows of Mana Potion is not an answer to 'mana'")
+ui.buyExactRan = true
+H.check("an exact search does not", not ui.BuyGrouped(),
+        "asking for one item and getting it folded up is the opposite of the ask")
+ui.buyExactRan = nil
+
+-- BOTH SPELLINGS FLATTEN. `[Name]` is what a right-click writes and
+-- `/exact/Name` is what somebody types; grouping one and flattening the other
+-- would make the view depend on how the same request was phrased.
+H.check("the bracket form parses as exact",
+        buy.ParseTerm("[Black Lotus]").exact, "brackets did not mean exact")
+H.check("...and so does the slash form",
+        buy.ParseTerm("exact/Black Lotus").exact, "the slash form regressed")
+
+-- ---- and the paint dispatches on the row's kind -------------------------
+
+-- ONE POOL, TWO KINDS. A group parent and a listing are the same eight cells
+-- saying different things, so the fill has to be chosen per row -- a pool that
+-- always filled one way would put a seller name on a parent, or a listing
+-- count where a time left goes.
+do
+    local f = assert(io.open("ui/frame.lua", "r"),
+                     "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    -- THE FLAG COMES FROM PARSING THE TERM, not from looking for brackets in
+    -- the box. `[Name]` and `/exact/Name` are one request; matching on
+    -- punctuation would group the second and flatten the first, so the view
+    -- would depend on how somebody phrased the same thing.
+    H.check("the exact flag is decided by the parser",
+            string.find(src,
+                "local parsed = A.buy.ParseTerm and A.buy.ParseTerm(name) or nil",
+                1, true) ~= nil,
+            "the view would depend on the spelling, not the request")
+
+    H.check("a group row is filled as a group",
+            string.find(src, "ui.FillGroupRow(row, r)", 1, true) ~= nil,
+            "parents would be painted with the listing filler")
+    H.check("...chosen by the row's kind",
+            string.find(src, 'if r.kind == "group" then', 1, true) ~= nil,
+            "the two kinds are not being told apart")
+
+    -- RIGHT-CLICKS HAVE TO BE ASKED FOR. A Button runs OnClick for the left
+    -- button only until it is registered for more -- so without this the
+    -- exact-match right-click never fires, with no error and nothing to see.
+    -- COUNTED, not found. Three row pools in this file register for both
+    -- buttons, so a search that only asks "does this line exist anywhere"
+    -- passes with the results table's own registration deleted -- which is
+    -- what happened the first time this was written.
+    local function occurrences(needle)
+        local n, at = 0, 1
+        while true do
+            local found = string.find(src, needle, at, true)
+            if not found then break end
+            n = n + 1
+            at = found + 1
+        end
+        return n
+    end
+    -- TWO, and the receiver is part of the needle on purpose. A third pool
+    -- registers the same way through a variable called `r`; counting that one
+    -- too would make this number change for a reason that has nothing to do
+    -- with the results table.
+    H.eq("both `row` pools still ask for right-clicks",
+         occurrences('row:RegisterForClicks("LeftButtonUp", "RightButtonUp")'),
+         2)
+
+    -- The button arrives in the `arg1` GLOBAL, never as a handler argument.
+    -- HARD RULE 6, and getting it wrong here reads as "right-click selects".
+    -- BOTH branches read it, and both are counted for the same reason: a
+    -- group's right-click and a child's are separate tests, and fixing one
+    -- while breaking the other is a right-click that works until you expand.
+    H.eq("both branches read the button from the arg1 global",
+         occurrences('if arg1 == "RightButton" then'), 2)
+
+    -- Expanding must not re-query: the listings under a parent are already in
+    -- hand, which is what grouping them means.
+    H.check("toggling a row repaints rather than searching",
+            string.find(src, "    ui.ToggleBuyGroup(ui.buyExpanded, e.key)\n    ui.UpdateBuyList()",
+                        1, true) ~= nil,
+            "opening a group should not cost a trip through the query gate")
+
+    -- ...and a new search clears what was open. A key left over from the last
+    -- page would spring open a row nobody touched.
+    H.check("a new search forgets what was expanded",
+            string.find(src, "    ui.buyExpanded = {}\n\n    ui.buyResults = nil",
+                        1, true) ~= nil,
+            "stale expansion keys survive into the next page")
+end
 
 os.exit(H.report("buygroup"))

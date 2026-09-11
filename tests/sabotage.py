@@ -2575,6 +2575,68 @@ end
     end""",
      "rowchrome"),
 
+    # ---- the grouped Buy table's widgets (v1.53.2) -----------------------
+
+    # Grouping decided from the SEARCH BOX rather than from the term that ran.
+    # Type over the box while the previous results are on screen and the table
+    # changes shape under rows that did not come from what is now typed there.
+    ("buy-grouped-reads-the-box", "ui/frame.lua",
+     "    return not (ui.buyExactRan and true or false)",
+     "    local sb = ui.ActiveSearchBox()\n"
+     '    return not (sb and string.find(sb:GetText() or "", "[", 1, true))',
+     "buygroup"),
+
+    # ...and the flag pattern-matched for brackets instead of PARSED, so
+    # `/exact/Name` groups while `[Name]` flattens -- one request, two views,
+    # depending on how it was phrased.
+    ("buy-exact-flag-not-parsed", "ui/frame.lua",
+     "    local parsed = A.buy.ParseTerm and A.buy.ParseTerm(name) or nil\n"
+     "    ui.buyExactRan = (parsed and parsed.exact) and true or nil",
+     '    ui.buyExactRan = string.find(name, "[", 1, true) and true or nil',
+     "buygroup"),
+
+    # The paint always filling as a listing, so a parent gets a seller name and
+    # a bid belonging to whichever auction sorted first.
+    ("buy-group-painted-as-a-listing", "ui/frame.lua",
+     """            if r.kind == "group" then
+                ui.FillGroupRow(row, r)
+            else
+                ui.FillResultRow(row, r)
+            end""",
+     "            ui.FillResultRow(row, r)",
+     "buygroup"),
+
+    # Right-clicks never registered. A Button runs OnClick for the left button
+    # only until it is asked for more -- so exact-match would silently never
+    # fire, with no error and nothing on screen to see.
+    ("buy-rows-take-no-right-click", "ui/frame.lua",
+     '        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")',
+     "        local _ = row",
+     "buygroup"),
+
+    # The mouse button read as a handler ARGUMENT rather than the arg1 global.
+    # HARD RULE 6: on this client the script gets no arguments, so the test is
+    # always false and every click reads as a left-click.
+    ("buy-click-button-from-argument", "ui/frame.lua",
+     '    if e.kind == "group" then\n        if arg1 == "RightButton" then',
+     '    if e.kind == "group" then\n        if row.button == "RightButton" then',
+     "buygroup"),
+
+    # Expanding a group re-queries instead of repainting. The listings are
+    # already in hand -- that is what grouping them means -- and every search
+    # is a trip through the client's query gate.
+    ("buy-expand-researches", "ui/frame.lua",
+     "    ui.ToggleBuyGroup(ui.buyExpanded, e.key)\n    ui.UpdateBuyList()",
+     "    ui.ToggleBuyGroup(ui.buyExpanded, e.key)\n    ui.DoBuySearch()",
+     "buygroup"),
+
+    # A new search keeping the old expansion keys, so a fresh page springs open
+    # a row nobody touched.
+    ("buy-expansion-survives-a-search", "ui/frame.lua",
+     "    ui.buyExpanded = {}\n\n    ui.buyResults = nil",
+     "    ui.buyResults = nil",
+     "buygroup"),
+
     # ---- the account-wide inventory block (v1.53.1) ----------------------
 
     # Bags recorded only on the way OUT. An alt you have not banked or logged

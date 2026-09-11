@@ -18,6 +18,45 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.2]
+
+### Added
+- **Buy results group by item.** Search something broad and you get **one row
+  per item** — its name, how many auctions there are, and the lowest price you
+  can actually pay — instead of forty rows of Mana Potion.
+  - **Left-click a row to open it** and see the individual auctions underneath,
+    each with its seller, stack, time left and price. That is a repaint, not
+    another search: the listings are already in hand, which is what grouping
+    them means.
+  - **Right-click to search for that item alone.** The box fills with
+    `[Greater Mana Potion]` and the table goes flat. It is a real query, not a
+    filter over the page you have — asking for one item asks the server for
+    *all* of it, which is usually a longer list and the one you wanted.
+    Right-click works on a child row too, so you do not have to fold a group up
+    to reach its parent.
+  - **A group of one never opens.** There is nothing under it but the row you
+    are already looking at.
+  - The **count sits in the Time Left column** on a multi-auction parent,
+    because time left is genuinely undefined there — the auctions under it all
+    have different ones. A parent with a single auction shows its real time
+    left instead.
+  - **Groups sort with the listings**, for free: sorting by unit price puts each
+    item's cheapest auction first and therefore each group where that auction
+    sorted to, with the children already in the same order. One sort, not two
+    answers to the same question.
+  - A new search **forgets what was expanded** — a key left over from the last
+    page would spring open a row nobody touched.
+
+### Internal
+- The grouping flag is read from the **term the engine ran**, parsed, not from
+  the search box and not by looking for brackets: `[Name]` and `/exact/Name` are
+  one request, and the view must not depend on which spelling was used.
+- `buygroup_test.lua` to 67 checks, seven more sabotages. Two of them escaped
+  first because a second occurrence in the file rescued the check — the counts
+  are counted now, with the receiver in the needle.
+
+---
+
 ## [1.53.1]
 
 ### Fixed
@@ -5019,6 +5058,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -3483,18 +3483,205 @@ local function BuildResultRow(parent, scroll, store, i, rowH, selectable)
         ui.ShowListingTooltip(row, row.entry)
     end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    if selectable then
-        -- A Frame has no OnClick; OnMouseDown is the 1.12 equivalent once the
-        -- mouse is enabled (which it is, for the tooltip above).
-        row:SetScript("OnMouseDown", function()
-            if row.entry then ui.SelectBuyRow(row.entry) end
-        end)
+    -- `selectable` is remembered ON THE ROW rather than captured in the click
+    -- handler, because the handler now serves both kinds of row and the Buy
+    -- tab's two view modes. One flag the paint can read beats a closure that
+    -- was right when the row happened to be built.
+    row.aegisSelectable = selectable and true or nil
+    -- RIGHT-CLICKS HAVE TO BE ASKED FOR. A Button runs OnClick for the left
+    -- button only until it is registered for more, so without this the exact
+    -- -match right-click would simply never fire -- no error, nothing to see.
+    if row.RegisterForClicks then
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     end
+    row:SetScript("OnClick", function() ui.OnBuyRowClick(row) end)
     row:Hide()
     store[i] = row
     return row
 end
 
+
+
+-- Fill a result row as a GROUPED PARENT: one item, however many auctions.
+--
+-- The same widgets a listing uses, saying different things -- so every cell a
+-- group does not use is CLEARED, not left alone. One pool serves both kinds
+-- and the row above it may have been a listing; a stale seller or bid left in
+-- place reads as this item's, which is the worst kind of wrong number.
+--
+-- WHERE THE COUNT GOES. There is no Auctions column and inventing one would
+-- cost the Item column width it does not have to spare. `left` carries it,
+-- because on a parent with several listings TIME LEFT IS GENUINELY UNDEFINED
+-- -- they all have different ones -- so that cell is free. A parent with
+-- exactly ONE listing has a real time left, and shows it: there is nothing to
+-- summarise and the row is that auction.
+function ui.FillGroupRow(row, e)
+    row.entry = e
+    if row.selTex then row.selTex:Hide() end
+    if row.icon then
+        if e.texture then
+            row.icon:SetTexture(e.texture)
+            row.icon:SetVertexColor(1, 1, 1)
+            row.icon:SetAlpha(1)
+            row.icon:Show()
+        else
+            row.icon:Hide()
+        end
+    end
+
+    -- The expander is a mark in FRONT OF THE NAME, not a column of its own: a
+    -- ninth cell for a triangle would be empty on every child row.
+    local mark = ""
+    if e.expandable then
+        mark = e.expanded and "\226\150\190 " or "\226\150\184 "
+    end
+    row.name:SetText(mark .. (e.name or ""))
+    row.name:SetTextColor(ui.QualityColor(e.quality))
+    row.name:SetAlpha(1)
+
+    local DASH = "\226\128\148"
+    row.lvl:SetText((e.level and e.level > 0) and e.level or "")
+
+    -- The single listing behind a group of one. `entry` is the engine's first
+    -- row for this item, which for a group of one is its only row.
+    local one = (e.listings == 1) and e.entry or nil
+    if one then
+        local tl = ""
+        if one.timeLeft then
+            tl = getglobal("AUCTION_TIME_LEFT" .. one.timeLeft) or ""
+        end
+        row.left:SetText(tl)
+    else
+        row.left:SetText((e.listings or 0) .. " auctions")
+    end
+
+    -- A PARENT QUOTES ONE PRICE: the lowest you can actually pay. Bid is blank
+    -- for a real group because its auctions have different bids, and the
+    -- cheapest buyout is not necessarily the lowest bid -- either choice would
+    -- attach a number to the wrong auction.
+    if one then
+        local bidNow = (one.bidAmount and one.bidAmount > 0) and one.bidAmount
+                       or (one.minBid or 0)
+        row.bid:SetText(bidNow > 0 and util.FormatMoneyGold(bidNow) or DASH)
+        row.stack:SetText((one.buyout and one.buyout > 0)
+            and util.FormatMoneyGold(one.buyout) or DASH)
+    else
+        row.bid:SetText("")
+        row.stack:SetText("")
+    end
+
+    if e.low then
+        row.unit:SetText(util.FormatMoneyGold(e.low))
+    else
+        -- Nothing here is for sale outright. "bid only", the same words a
+        -- listing uses, rather than a zero -- a zero in the column somebody
+        -- buys from reads as free.
+        row.unit:SetText("bid only")
+    end
+
+    local market = e.itemId and A.db.MarketValue(e.itemId)
+    if market and market > 0 and e.low then
+        local pct = math.floor(e.low / market * 100)
+        row.pct:SetText(pct .. "%")
+        row.pct:SetTextColor(PctColorBuy(pct))
+    else
+        row.pct:SetText(DASH)
+        row.pct:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+
+    -- Nothing on a parent is dimmed or tickable: you cannot buy "an item", and
+    -- a group is not yours or anyone's.
+    local cells = { row.lvl, row.left, row.bid, row.stack, row.unit, row.pct }
+    local i = 1
+    while i <= table.getn(cells) do
+        cells[i]:SetAlpha(1)
+        i = i + 1
+    end
+    if row.check then row.check:Hide() end
+    if row.buyBtn then row.buyBtn:Hide() end
+    if row.bidBtn then row.bidBtn:Hide() end
+end
+
+
+-- Is the Buy table showing GROUPS right now?
+--
+-- Grouped unless the last search asked for ONE EXACT ITEM, which is the whole
+-- point of asking: a right-click puts `[Name]` in the box and gets a flat list
+-- of that item's auctions, with a seller and a time left on every row. A
+-- broader search gets one row per item, because a hundred rows of "Mana
+-- Potion" is not an answer to "mana".
+--
+-- Read off the TERM the engine actually ran, not off the box: somebody can
+-- type over the box while results are still on screen, and the rows have to
+-- keep matching the search that produced them.
+function ui.BuyGrouped()
+    return not (ui.buyExactRan and true or false)
+end
+
+-- Left-click a grouped parent: open or close it.
+--
+-- A REPAINT, NOT A RESEARCH. Nothing about the results changed, only which
+-- rows are listed -- the listings under this item are already in hand, which
+-- is what grouping them means.
+function ui.ToggleBuyRow(row)
+    local e = row and row.entry
+    if not e or e.kind ~= "group" or not e.expandable then return end
+    ui.ToggleBuyGroup(ui.buyExpanded, e.key)
+    ui.UpdateBuyList()
+end
+
+-- Right-click a grouped parent: search for that item and nothing else.
+--
+-- A REAL SEARCH, not a filter over what is on screen. The page in hand holds
+-- whatever the broad term matched; asking for one item asks the server for
+-- ALL of that item, which is a different and usually longer list -- and it is
+-- the list somebody right-clicking wants.
+--
+-- The box shows `[Name]` because that is what a person can read back, retype
+-- and save. `buy.ExactTerm` writes it and buy.ParseTerm reads it; the suite
+-- asserts the round trip, because a right-click and a typed query disagreeing
+-- is the failure nobody would think to check.
+function ui.ExactSearchFor(name)
+    local term = A.buy and A.buy.ExactTerm and A.buy.ExactTerm(name) or nil
+    if not term or term == "" then return end
+    local sb = ui.ActiveSearchBox()
+    if not sb then return end
+    sb:SetText(term)
+    -- The FLAT view is owned by the search, not by the click: set it here and
+    -- ui.DoBuySearch would overwrite it from the term it parses. Setting it
+    -- from the term is the one place that cannot disagree with what ran.
+    ui.DoBuySearch()
+end
+
+-- What a click on a Buy results row does, by what the row IS.
+--
+-- Buttons on 1.12 report which mouse button through the `arg1` GLOBAL inside
+-- OnClick -- never a handler argument (HARD RULE 6) -- and a row has to be
+-- registered for right-clicks or the script never runs for one.
+function ui.OnBuyRowClick(row)
+    local e = row and row.entry
+    if not e then return end
+    -- The CRAFTING tab's results come out of this same builder and are never
+    -- grouped: its rows carry their own Buy/Bid buttons and clicking the row
+    -- itself does nothing. Nothing here should start reaching into that tab.
+    if row.ct then return end
+    if e.kind == "group" then
+        if arg1 == "RightButton" then
+            ui.ExactSearchFor(e.name)
+        else
+            ui.ToggleBuyRow(row)
+        end
+        return
+    end
+    -- A listing: right-click means the same thing on a child, so somebody who
+    -- has already expanded a group can still ask for the full list without
+    -- folding it up again to reach the parent.
+    if arg1 == "RightButton" then
+        ui.ExactSearchFor(e.name)
+    elseif row.aegisSelectable then
+        ui.SelectBuyRow(e)
+    end
+end
 
 -- The Buy table's grouped view as ONE FLAT LIST of mixed rows.
 --
@@ -5038,6 +5225,9 @@ function ui.BuildBuyTab()
     local panel = ui.panels["Buy"]
     if not panel or ui.buyBuilt then return end
     ui.buyBuilt = true
+    -- Which grouped rows are open, keyed by the group's KEY -- its item id
+    -- where there is one. Never by index: a re-sort renumbers every row. See
+    -- ui.BuyTreeRows, and the sabotage that keys it wrongly.
     ui.buyExpanded = {}
 
     -- ===== Left column: the category tree (DEFAULT mode only) ===========
@@ -7559,6 +7749,22 @@ function ui.DoBuySearch()
     else
         name = A.buy.TermToQuery(ui.DefaultTerm())
     end
+    -- WHETHER THIS SEARCH ASKED FOR ONE EXACT ITEM, decided from the TERM and
+    -- recorded before the results land. That is what the table reads to know
+    -- whether to group -- see ui.BuyGrouped -- and reading it off the box
+    -- instead would change the view the moment somebody typed over it, while
+    -- the rows from the previous search were still on screen.
+    --
+    -- Parsed, not pattern-matched for brackets: `[Name]` and `/exact/Name`
+    -- are the same request, and the table must not group one and flatten the
+    -- other.
+    local parsed = A.buy.ParseTerm and A.buy.ParseTerm(name) or nil
+    ui.buyExactRan = (parsed and parsed.exact) and true or nil
+    -- Expanding is about the page in hand; a new page is a new set of items,
+    -- and a key left over from the last one would spring open a row nobody
+    -- touched.
+    ui.buyExpanded = {}
+
     ui.buyResults = nil
     ui.buySel = nil            -- the rows are about to be replaced
     ui.RefreshBuyActionBar()
@@ -7624,6 +7830,21 @@ function ui.UpdateBuyList()
     local dir = ui.buySortDir or "asc"
     local rows = ui.SortResults(all, sortKey, dir, maxUnit)
     ui.PaintSortHeaders(ui.buyHeaders, sortKey, dir)
+
+    -- GROUP AFTER SORTING, which puts the groups in the right order for free.
+    -- buy.GroupListings keeps first-seen order, so sorting the LISTINGS by
+    -- unit ascending puts each item's cheapest auction first and therefore
+    -- each group where its cheapest auction sorted to -- and the children
+    -- inside a group are already in that same order.
+    --
+    -- One sort, two jobs. Sorting the groups separately would be a second
+    -- answer to the same question, which is how two orderings drift apart.
+    if ui.BuyGrouped() then
+        ui.buyGroups = A.buy.GroupListings(rows)
+        rows = ui.BuyTreeRows(ui.buyGroups, ui.buyExpanded)
+    else
+        ui.buyGroups = nil
+    end
 
     local total = table.getn(rows)
     -- Row count comes from the same arithmetic that POSITIONS the box, not
@@ -7756,7 +7977,15 @@ function ui.UpdateBuyList()
         local row = ui.buyRows[i]
         local r = (i <= vis) and rows[i + offset] or nil
         if r then
-            ui.FillResultRow(row, r)
+            -- ONE POOL, TWO KINDS. A group parent and a listing are the same
+            -- eight cells saying different things; each fill clears what the
+            -- other uses, because the row above may have been the other kind.
+            if r.kind == "group" then
+                ui.FillGroupRow(row, r)
+            else
+                ui.FillResultRow(row, r)
+            end
+            row:Show()
         else
             row.entry = nil
             row:Hide()
