@@ -2167,10 +2167,47 @@ function buy.Buyout(row)
     buy.driver:Show()
     PlaceAuctionBid("list", row.index, row.buyout)
     buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)
+    -- ...AND THE LEDGER, here rather than in the caller. ui.DoBuyout used to
+    -- own this line, so the OTHER way into this function -- a bid that the
+    -- server would treat as a buyout -- spent the gold and never appeared in
+    -- History at all. One writer beside the session tally it has to agree
+    -- with; the batch path books its own per purchase and never comes
+    -- through here.
+    if A.db and A.db.RecordTxn then
+        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)
+    end
     return true
 end
 
+-- Would a bid of `amount` on `row` actually BUY it?
+--
+-- Pure, and deliberately separate from buy.Bid, because the UI has to be able
+-- to ask this BEFORE it puts a dialog on screen. The whole fault this exists
+-- for was a dialog that asked one question and performed another.
+function buy.BidIsBuyout(row, amount)
+    if not row then return false end
+    local out = row.buyout or 0
+    if out <= 0 then return false end
+    amount = amount or row.nextBid or 0
+    return amount >= out
+end
+
 -- Place a bid of `amount` (defaults to the minimum next bid) on `row`.
+--
+-- IT REFUSES TO BUY. On 1.12, PlaceAuctionBid with an amount at or above the
+-- buyout is not a bid -- the server sells you the item. This function used to
+-- notice that and quietly call buy.Buyout, so the dialog said "Bid on Meat
+-- Cleaver? bid 1g 99s 98c", the player pressed Bid, and 1g 99s 98c left the
+-- bag as a purchase.
+--
+-- It is not a rare corner. An auction posted with its start bid equal to its
+-- buyout has nextBid == buyout, which is an ordinary posting and exactly what
+-- our own Sell tab produces when both prices are set the same -- so on those
+-- listings the Bid button was a second Buy button.
+--
+-- The engine now says no and names the reason; the CALLER decides whether to
+-- offer the buyout, and asks the question it is actually going to perform.
+-- See ui.ConfirmBid.
 function buy.Bid(row, amount)
     if not row then return false, "No auction selected." end
     if row.mine then return false, "That's your own auction." end
@@ -2178,8 +2215,9 @@ function buy.Bid(row, amount)
     if not amount or amount < row.nextBid then
         return false, "Bid is below the minimum."
     end
-    if row.buyout > 0 and amount >= row.buyout then
-        return buy.Buyout(row)      -- a bid at/above buyout IS a buyout
+    if buy.BidIsBuyout(row, amount) then
+        return false,
+            "That is at or above the buyout \226\128\148 it would buy it outright."
     end
     if not buy.Verify(row) then
         return false, "Listing changed \226\128\148 search again."

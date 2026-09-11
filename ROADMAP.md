@@ -2390,6 +2390,50 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Pressing Bid bought the item — v1.53.6
+
+Reported from a live client: *"clicking bid didn't put a bid in but rather
+bought out the items."* Three faults on one path, and any one of them alone
+spends a player's gold.
+
+**1. The engine escalated silently.** On 1.12, `PlaceAuctionBid` with an amount
+at or above the buyout is not a bid — the server sells. `buy.Bid` detected that
+and called `buy.Buyout`, which is *arithmetically* right and *interactively*
+indefensible: the dialog had already asked "Bid on X? bid 1g 99s 98c" and the
+player had answered that question, not this one. It refuses now, and
+`buy.BidIsBuyout` is a separate pure predicate **precisely so the UI can ask
+before a dialog goes up** — the fault was a dialog that asked one thing and did
+another, so the test has to be available earlier than the action.
+
+The trigger is ordinary: a listing whose start bid equals its buyout has
+`nextBid == buyout`, so the *minimum* bid is already a purchase. Our own Sell
+tab produces exactly that when both price fields are set the same, which means
+Aegis was creating the listings that broke Aegis.
+
+**2. The Bid box was write-only.** `SetMoneyBox` filled it on selection;
+nothing ever read it. `ui.DoBid` sent `row.nextBid` unconditionally. A control
+that ignores what you type is worse than no control, and it is invisible in
+review because both halves look correct on their own.
+
+**3. The ledger write lived in the wrong layer.** `ui.DoBuyout` called
+`db.RecordTxn`, so the second route into `buy.Buyout` — the escalation above —
+spent gold and logged nothing. Moved beside `buy.RecordPurchase`, which is the
+number it has to agree with. The batch path books its own per purchase and does
+not come through `buy.Buyout`, so there is no double count.
+
+**The general lesson, and it is not about auctions.** When a function can
+decide to do something *more* than it was asked, that decision belongs to
+whoever framed the question. An engine that upgrades a bid to a purchase, a
+save that silently overwrites, a retry that changes the request — the caller
+asked for one thing and the user was shown that thing.
+
+**A harness collision found while fixing it.** `W.bids` had been this file's
+log of every `PlaceAuctionBid` call since long before v1.53.4 added a bidder
+list under the same name. `W.SetBids` wiped the purchase log and
+`PlaceAuctionBid` appended into the bidder list. Nothing broke, because no
+suite used both — which is the whole hazard: the first suite that did would get
+a confident wrong answer. Renamed to `W.bidderRows` / `W.SetBidderRows`.
+
 ### The History tab, split — with the charting spike — v1.53.5
 
 **Phase 3 asked for the design spike in writing before any of it was built.

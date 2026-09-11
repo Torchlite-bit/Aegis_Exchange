@@ -714,17 +714,23 @@ end
 -- your bid back to you would make that impossible to get wrong, and getting it
 -- wrong is how a tab tells a player they have gold committed that is already
 -- back in their purse.
-W.bids = {}
+-- NOT `W.bids`, which is this file's log of every PlaceAuctionBid call and
+-- has been since long before there was a bidder list to model. That collision
+-- shipped in v1.53.4: W.SetBids wiped the purchase log and PlaceAuctionBid
+-- appended a purchase record into the bidder list. Nothing broke, because no
+-- suite used both -- which is the whole hazard of a mock, since the first one
+-- that does gets a confident wrong answer.
+W.bidderRows = {}
 W.bidderPage = 0
 W.BIDDER_PAGE = 50
 
-function W.SetBids(rows) W.bids = rows or {}; W.bidderPage = 0 end
+function W.SetBidderRows(rows) W.bidderRows = rows or {}; W.bidderPage = 0 end
 
 local function bidderBatch()
     local out, first = {}, W.bidderPage * W.BIDDER_PAGE
     local i = 1
     while i <= W.BIDDER_PAGE do
-        local r = W.bids[first + i]
+        local r = W.bidderRows[first + i]
         if not r then break end
         table.insert(out, r)
         i = i + 1
@@ -741,7 +747,7 @@ function GetNumAuctionItems(list)
         return table.getn(ownerBatch()), table.getn(W.owned)
     end
     if list == "bidder" then
-        return table.getn(bidderBatch()), table.getn(W.bids)
+        return table.getn(bidderBatch()), table.getn(W.bidderRows)
     end
     if list ~= "list" then return 0, 0 end
     return table.getn(W.page), W.totalAuctions
@@ -889,7 +895,7 @@ function W.Reset()
     W.owned         = {}
     W.cancelled     = {}
     W.ownerPage     = 0
-    W.bids          = {}
+    W.bidderRows    = {}
     W.bidderPage    = 0
     W.tooltipLines  = {}
     W.money         = 500000

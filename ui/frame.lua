@@ -8137,7 +8137,11 @@ function ui.DoBatchBuyout()
     if not ok then ChatMsg("Aegis: " .. (err or "buyout failed.")) end
 end
 
-function ui.ConfirmBuyout(row)
+-- `why` is an extra line for the case where the player pressed BID and the
+-- server would treat it as a purchase. It is the whole point of routing that
+-- case here rather than performing it quietly: the dialog has to ask the
+-- question it is about to perform.
+function ui.ConfirmBuyout(row, why)
     if row.mine then ChatMsg("Aegis: that's your own auction."); return end
     if not (row.buyout and row.buyout > 0) then
         ChatMsg("Aegis: that auction has no buyout.")
@@ -8146,6 +8150,7 @@ function ui.ConfirmBuyout(row)
     ui.pendingBuy = row
     local detail = string.format("%d x %s \226\128\162 buyout %s",
         row.count, row.name, util.FormatMoney(row.buyout))
+    if why then detail = why .. "\n" .. detail end
     StaticPopup_Show("AEGIS_EXCHANGE_BUYOUT",
         row.name .. " (x" .. row.count .. ")", detail)
 end
@@ -8158,31 +8163,77 @@ function ui.DoBuyout()
     if not ok then
         ChatMsg("Aegis: " .. (err or "buyout failed."))
     else
-        -- Log the spend for the History tab.
-        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)
+        -- The ledger entry is booked inside buy.Buyout now, beside the session
+        -- tally it has to agree with. It used to be written HERE, which is why
+        -- the other way into that function -- a bid the server treats as a
+        -- purchase -- spent the gold and never reached History.
         ChatMsg("Aegis: bought " .. row.name .. " x" .. row.count .. ".")
         if ui.selectedSubTab == "History" then ui.RefreshHistory() end
     end
 end
 
+-- What a Bid press should actually send.
+--
+-- THE TYPED FIGURE WINS. The Bid box was filled with the minimum whenever a
+-- row was selected and then read by NOTHING -- ui.DoBid always sent
+-- row.nextBid -- so a player who typed a higher bid got the minimum instead
+-- and was told nothing about it. A box that ignores what you type is worse
+-- than no box at all.
+--
+-- A typed figure BELOW the minimum is not a bid the server will accept, so the
+-- minimum stands in. buy.Bid refuses anything lower anyway; this keeps that
+-- refusal out of the ordinary case of an empty box.
+--
+-- Pure: two numbers in, one out.
+function ui.BidAmountFor(row, typed)
+    local least = (row and row.nextBid) or (row and row.minBid) or 0
+    if not typed or typed < least then return least end
+    return typed
+end
+
 function ui.ConfirmBid(row)
     if row.mine then ChatMsg("Aegis: that's your own auction."); return end
+    -- The box belongs to the Buy tab's SELECTED row. Every other Bid button in
+    -- the window (the Crafting tab's rows) has no box of its own, and reading
+    -- a figure typed against a different auction is the wrong kind of helpful.
+    local typed = nil
+    if ui.buyBidBox and row == ui.buySel then
+        typed = ReadMoneyBox(ui.buyBidBox)
+    end
+    local amount = ui.BidAmountFor(row, typed)
+
+    -- AT OR ABOVE THE BUYOUT, 1.12 DOES NOT BID -- IT SELLS. Ask the question
+    -- that is actually going to be performed rather than the one the button
+    -- was labelled with. This used to escalate silently inside buy.Bid, which
+    -- is how pressing Bid spent a full buyout.
+    if A.buy.BidIsBuyout(row, amount) then
+        ui.ConfirmBuyout(row,
+            "A bid of " .. util.FormatMoney(amount)
+            .. " is at or above the buyout, so this BUYS it.")
+        return
+    end
+
     ui.pendingBid = row
+    ui.pendingBidAmount = amount
     local detail = string.format("%d x %s \226\128\162 bid %s",
-        row.count, row.name, util.FormatMoney(row.nextBid))
+        row.count, row.name, util.FormatMoney(amount))
     StaticPopup_Show("AEGIS_EXCHANGE_BID",
         row.name .. " (x" .. row.count .. ")", detail)
 end
 
 function ui.DoBid()
     local row = ui.pendingBid
-    ui.pendingBid = nil
+    local amount = ui.pendingBidAmount
+    ui.pendingBid, ui.pendingBidAmount = nil, nil
     if not row or not A.buy then return end
-    local ok, err = A.buy.Bid(row, row.nextBid)
+    -- THE AMOUNT THE DIALOG QUOTED, not a figure recomputed here. Recomputing
+    -- is how the number on screen and the number sent come apart.
+    local ok, err = A.buy.Bid(row, amount)
     if not ok then
         ChatMsg("Aegis: " .. (err or "bid failed."))
     else
-        ChatMsg("Aegis: bid on " .. row.name .. ".")
+        ChatMsg("Aegis: bid " .. util.FormatMoney(amount) .. " on "
+            .. row.name .. ".")
     end
 end
 

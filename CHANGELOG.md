@@ -18,6 +18,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.6]
+
+### Fixed
+- **Pressing Bid could buy the item outright.** Reported from a live client,
+  and it was three faults on one path.
+
+  On 1.12, `PlaceAuctionBid` with an amount **at or above the buyout is not a
+  bid** — the server sells you the item. Aegis noticed that and quietly turned
+  the bid into a purchase. So the dialog said *"Bid on Meat Cleaver? • bid
+  1g 99s 98c"*, you pressed **Bid**, and 1g 99s 98c left your bag as a buyout.
+
+  It was not a rare corner. An auction posted with its **start bid equal to its
+  buyout** has a minimum bid that already *is* the buyout — an ordinary posting,
+  and exactly what Aegis's own Sell tab produces when both prices are set the
+  same. On every one of those listings the Bid button was a second Buy button.
+
+  Now the engine refuses, and the tab asks the question it is actually going to
+  perform: you get the **buyout** confirmation, saying in words that a bid of
+  that size buys it. Press it or don't — but you are told first.
+
+- **The Bid box did nothing.** It was filled with the minimum whenever you
+  selected a row and then read by nothing at all — every Bid press sent the
+  minimum. Type a figure and that is what gets bid now. Type one below the
+  minimum and the minimum stands in, because the server will not take less.
+
+- **A bid that became a purchase never reached History.** The ledger entry for
+  a buyout was written by the Buy tab's own buyout handler, so the other route
+  into the same function — the silent escalation above — spent the gold and
+  logged nothing. It is written by the engine now, beside the session tally it
+  has to agree with, so both routes are covered. This matters twice over now
+  the History chart reads that ledger.
+
 ## [1.53.5]
 
 ### Added
@@ -5179,6 +5211,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

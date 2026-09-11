@@ -2671,6 +2671,80 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- pressing Bid must place a BID (v1.53.6) -------------------------
+
+    # THE BUG ITSELF, restored: buy.Bid noticing that the server would treat
+    # the amount as a purchase and quietly performing one. The dialog says
+    # "Bid on Meat Cleaver? bid 1g 99s 98c" and 1g 99s 98c leaves the bag.
+    ('bid-escalates-to-a-buyout', 'core/buy.lua',
+     '    if buy.BidIsBuyout(row, amount) then\n        return false,\n            "That is at or above the buyout \\226\\128\\148 it would buy it outright."\n    end',
+     '    if buy.BidIsBuyout(row, amount) then return buy.Buyout(row) end',
+     'bidpath'),
+
+    # ...and the test the caller uses to ask the question BEFORE the dialog
+    # goes up, answering no on the posting that broke it: a start bid equal
+    # to the buyout, where the minimum bid is already a purchase.
+    ('bid-buyout-test-misses-the-boundary', 'core/buy.lua',
+     '    return amount >= out',
+     '    return amount > out',
+     'bidpath'),
+
+    # ...or answering it about a bid-only auction, which has no buyout to
+    # reach at any price.
+    ('bid-buyout-test-ignores-a-missing-buyout', 'core/buy.lua',
+     '    if out <= 0 then return false end',
+     '    if out < 0 then return false end',
+     'bidpath'),
+
+    # The Bid box read and then thrown away -- the half that did nothing at
+    # all. A player who types a higher bid gets the minimum, silently.
+    ('bid-box-typed-figure-ignored', 'ui/frame.lua',
+     '    if not typed or typed < least then return least end\n    return typed',
+     '    local _ = typed\n    return least',
+     'bidpath'),
+
+    # ...or used below the minimum, which the server refuses outright.
+    ('bid-box-allows-under-the-minimum', 'ui/frame.lua',
+     '    if not typed or typed < least then return least end',
+     '    if not typed then return least end',
+     'bidpath'),
+
+    # ...or read for a row the box does not belong to. The Crafting tab's
+    # rows have a Bid button and no box of their own.
+    ('bid-box-read-for-the-wrong-row', 'ui/frame.lua',
+     '    if ui.buyBidBox and row == ui.buySel then',
+     '    if ui.buyBidBox then',
+     'bidpath'),
+
+    # The dialog asking "Bid?" and performing a purchase, because the caller
+    # stopped asking the engine what the amount would really do.
+    ('bid-dialog-does-not-check-for-a-purchase', 'ui/frame.lua',
+     '    if A.buy.BidIsBuyout(row, amount) then',
+     '    if false then',
+     'bidpath'),
+
+    # The quoted amount recomputed after the dialog instead of sent as shown,
+    # which is how the number on screen and the number sent come apart.
+    ('bid-sends-a-different-amount-than-it-quoted', 'ui/frame.lua',
+     '    local ok, err = A.buy.Bid(row, amount)',
+     '    local ok, err = A.buy.Bid(row, row.nextBid)',
+     'bidpath'),
+
+    # The ledger write for a purchase back in the UI handler, so the other
+    # route into buy.Buyout spends the gold and never reaches History --
+    # which the graph on that tab now reads.
+    ('buyout-ledger-write-left-to-the-caller', 'core/buy.lua',
+     '    if A.db and A.db.RecordTxn then\n        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)\n    end',
+     '    local _ = row',
+     'bidpath'),
+
+    # ...or booked for a purchase that was REFUSED, which is a number the
+    # player cannot reconcile against their own bag.
+    ('buyout-books-a-refused-purchase', 'core/buy.lua',
+     '    if not row.buyout or row.buyout <= 0 then return false, "No buyout price." end',
+     '    if false then return false end',
+     'bidpath'),
+
     # ---- the History graph (v1.53.5) -------------------------------------
 
     # An entry from OUTSIDE the window clamped into the first bucket instead
@@ -4232,6 +4306,7 @@ SUITES = {
     "buygroup": "tests/units/buygroup_test.lua",
     "bids": "tests/units/bids_test.lua",
     "histgraph": "tests/units/histgraph_test.lua",
+    "bidpath": "tests/units/bidpath_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

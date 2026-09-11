@@ -77,7 +77,7 @@ H.section("reading the bidder list")
 W.AddItem(4306, { name = "Silk Cloth", quality = 1 })
 W.AddItem(12360, { name = "Arcanite Bar", quality = 1 })
 
-W.SetBids({
+W.SetBidderRows({
     { name = "Silk Cloth", count = 20, quality = 1, link = W.items[4306].link,
       minBid = 1000, minIncrement = 50, buyout = 5000, bidAmount = 1200,
       highBidder = 1, timeLeft = 2, owner = "Someone" },
@@ -109,7 +109,7 @@ H.eq("an outbid row still reports the price to beat", bids[2].bid, 92000)
 H.eq("no buyout is zero, not nil", bids[2].buyout, 0)
 
 -- An auction whose name has not resolved is skipped rather than guessed at.
-W.SetBids({ { count = 1, bidAmount = 5 } })
+W.SetBidderRows({ { count = 1, bidAmount = 5 } })
 H.eq("a row with no name yet is left out",
      table.getn(sell.BidderAuctions()), 0)
 
@@ -153,7 +153,7 @@ while i <= 62 do
                          highBidder = 1, link = W.items[4306].link })
     i = i + 1
 end
-W.SetBids(many)
+W.SetBidderRows(many)
 
 local page, pages, total = sell.BidderPageInfo()
 H.eq("the total is every bid, not the batch", total, 62)
@@ -168,7 +168,7 @@ H.eq("...and it holds the remainder",
      table.getn(sell.BidderAuctions()), 12)
 
 -- The page you were on can stop existing while you look at it: bids resolve.
-W.SetBids({ { name = "Silk Cloth", count = 1, bidAmount = 5, highBidder = 1,
+W.SetBidderRows({ { name = "Silk Cloth", count = 1, bidAmount = 5, highBidder = 1,
               link = W.items[4306].link } })
 sell.bidderPage = 1
 page, pages = sell.BidderPageInfo()
@@ -177,7 +177,7 @@ H.eq("...to the one page there is", pages, 1)
 
 -- No bids at all is one empty page, not zero pages -- a pageCount of 0 makes
 -- every "page 1 of N" line read as "page 1 of 0".
-W.SetBids({})
+W.SetBidderRows({})
 sell.bidderPage = 0
 page, pages, total = sell.BidderPageInfo()
 H.eq("no bids is still one page", pages, 1)
