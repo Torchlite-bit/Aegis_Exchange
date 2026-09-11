@@ -1882,6 +1882,22 @@ if A.RegisterEvent then
     -- Leaving the world: keep what this character is carrying, so the others
     -- can see it. PLAYER_LEAVING_WORLD covers logout, exit and a zone change.
     A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)
+    -- ...AND ARRIVING, which is the one that was missing.
+    --
+    -- Until now a character recorded what it was carrying only when it opened
+    -- a bank or left the world. An alt you have not played since installing
+    -- therefore had NO record -- and a character with no record is left out of
+    -- the inventory block entirely, so the whole account-wide feature read as
+    -- "only shows the character I am on". It was reported exactly that way.
+    --
+    -- Leaving is also the less reliable half: 1.12 clients are closed by
+    -- alt-F4 and they crash, and neither fires it. Arriving always does, so
+    -- one visit to an alt is now enough and it counts from the moment you get
+    -- there rather than when you remember to leave properly.
+    --
+    -- Fires per loading screen, not per frame, and sell.BagCounts walks bags
+    -- the player is already waiting on a loading screen for.
+    A.RegisterEvent("PLAYER_ENTERING_WORLD", function() sell.SnapshotBags() end)
     -- At a merchant: learn what it charges. Bounded, one fire per merchant.
     A.RegisterEvent("MERCHANT_SHOW", function() sell.ScanMerchant() end)
     -- Money moved. O(1): a subtraction against an armed watch, and an

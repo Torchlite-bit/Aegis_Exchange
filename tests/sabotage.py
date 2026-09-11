@@ -2575,6 +2575,40 @@ end
     end""",
      "rowchrome"),
 
+    # ---- the account-wide inventory block (v1.53.1) ----------------------
+
+    # Bags recorded only on the way OUT. An alt you have not banked or logged
+    # out cleanly on then has NO record, and a character with no record is
+    # omitted entirely -- so the account-wide block shows only the character
+    # you are on, which is exactly how it was reported. alt-F4 and a crash
+    # both skip the leaving event.
+    ("inventory-no-arrival-snapshot", "core/sell.lua",
+     '    A.RegisterEvent("PLAYER_ENTERING_WORLD", function() sell.SnapshotBags() end)',
+     "    local _ = sell",
+     "inventory"),
+
+    # ...and the departing one dropped, which loses everything picked up since
+    # you arrived.
+    ("inventory-no-departure-snapshot", "core/sell.lua",
+     '    A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)',
+     "    local _ = sell",
+     "inventory"),
+
+    # The lonely-block check answering true whenever there is one row, so an
+    # ALT holding some of the item gets told that other characters have not
+    # been seen -- while one is on screen saying otherwise.
+    ("inventory-lonely-ignores-whose-row", "core/db.lua",
+     "    return rows[1].you and true or false",
+     "    return true",
+     "inventory"),
+
+    # ...and answering true for an empty block, which draws nothing at all and
+    # would then be captioned.
+    ("inventory-lonely-counts-empty", "core/db.lua",
+     "    if n ~= 1 then return false end",
+     "    if n > 1 then return false end",
+     "inventory"),
+
     # ---- grouped Buy results (v1.53.0) -----------------------------------
 
     # Grouping by NAME. Two different items can share one on this client -- a

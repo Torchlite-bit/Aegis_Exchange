@@ -18,6 +18,34 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.1]
+
+### Fixed
+- **The account-wide inventory block was only ever showing the character you
+  are on**, and the reason was *when* a character gets recorded, not how it is
+  read. Bags were stored on **`BANKFRAME_OPENED`** and **`PLAYER_LEAVING_WORLD`**
+  and nowhere else — so an alt you had not banked on, and had not logged out of
+  cleanly, had no record at all. A character with no record is left out of the
+  block entirely (which is right — a tooltip listing every alt you have ever
+  played, most of them saying zero, is a worse answer), so the feature read as
+  never working.
+  - Leaving is also the less reliable half: 1.12 clients get closed with alt-F4
+    and they crash, and neither fires it.
+  - A character now records what it is carrying **on arrival** as well. One
+    visit to an alt is enough, and it counts from the moment you get there
+    rather than from remembering to leave properly.
+- **The block now says when it only knows about you** — *"other characters
+  appear once you log in on them"*. A character holding none of the item is
+  omitted, which made "nobody else has ever been seen" look exactly like
+  "nobody else has any". On a fresh install the first is true of every alt.
+
+### Internal
+- `db.InventoryOnlyYou` is pure and tested — one row, and it is yours. Four
+  sabotages: each snapshot point removed, the check ignoring *whose* row it is
+  (which would caption an alt's own row), and it counting an empty block.
+
+---
+
 ## [1.53.0]
 
 The 1.52 line merged. This starts the next body of work: grouped Buy results,
@@ -4991,6 +5019,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.52.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

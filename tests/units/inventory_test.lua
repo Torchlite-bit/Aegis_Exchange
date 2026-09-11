@@ -391,4 +391,53 @@ H.eq("...", accRows[3].class, "DRUID")
 -- plus a bank snapshot.
 H.check("an alt's row is aged", accRows[2].oldest ~= nil)
 
+-- ---------------------------------------------------------------------------
+H.section("when the block only knows about you")
+-- ---------------------------------------------------------------------------
+
+-- A character holding none of the item is left out, which is right -- and it
+-- makes "no other character has ever been seen" look exactly like "no other
+-- character has any". On a fresh install the first is true of EVERY alt, and
+-- that is how the account-wide block came to be reported as only ever showing
+-- the character you are on.
+
+H.check("one row, and it is you", db.InventoryOnlyYou({ { you = true } }),
+        "the block cannot tell you it has nothing else to show")
+H.check("one row that is NOT you is not the lonely case",
+        not db.InventoryOnlyYou({ { you = nil, name = "Alt" } }),
+        "an alt holding some is a real answer, not an empty one")
+H.check("two rows is not the lonely case",
+        not db.InventoryOnlyYou({ { you = true }, { you = nil } }),
+        "it knows about somebody else")
+H.check("no rows is not the lonely case either",
+        not db.InventoryOnlyYou({}),
+        "an empty block draws nothing at all, so it says nothing")
+H.check("...and nil is not", not db.InventoryOnlyYou(nil),
+        "nil rows must not claim to be a one-character answer")
+
+-- ---------------------------------------------------------------------------
+H.section("a character records what it carries on ARRIVAL")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THIS EXISTS FOR. Bags were stored only on BANKFRAME_OPENED and
+-- PLAYER_LEAVING_WORLD, so an alt you had not banked or logged out cleanly on
+-- had NO record -- and a character with no record is omitted entirely. Leaving
+-- is also the less reliable half: alt-F4 and a crash both skip it.
+do
+    local f = assert(io.open("core/sell.lua", "r"),
+                     "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    H.check("arriving in the world snapshots the bags",
+            string.find(src,
+                'A.RegisterEvent("PLAYER_ENTERING_WORLD", function() sell.SnapshotBags() end)',
+                1, true) ~= nil,
+            "one visit to an alt has to be enough to record it")
+    H.check("...and leaving still does too",
+            string.find(src,
+                'A.RegisterEvent("PLAYER_LEAVING_WORLD", function() sell.SnapshotBags() end)',
+                1, true) ~= nil,
+            "the departing snapshot is what catches what you picked up")
+end
+
 os.exit(H.report("inventory"))

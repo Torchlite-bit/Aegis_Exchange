@@ -352,6 +352,21 @@ function db.SetInventoryBucket(bucket, counts, class)
     return rec
 end
 
+-- Does this answer cover ONLY the character you are on?
+--
+-- A character is left out of the block entirely when it holds none of the item
+-- -- which is right, and which makes "no other character has ever been seen"
+-- indistinguishable from "no other character has any". The first of those
+-- deserves a word on screen, because it is the state a fresh install is in for
+-- every alt, and without it the whole account-wide feature reads as broken.
+--
+-- Pure: rows in, boolean out.
+function db.InventoryOnlyYou(rows)
+    local n = table.getn(rows or {})
+    if n ~= 1 then return false end
+    return rows[1].you and true or false
+end
+
 -- How many of `itemId` each character on this realm holds, and where.
 --
 -- Returns rows, total. Each row is
