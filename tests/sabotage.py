@@ -2493,12 +2493,12 @@ end
     # REMOVES it, so the miss would not be cached and the sabotage would prove
     # nothing. It has to cache a real value to be the bug it claims to be.
     ("craft-quality-caches-the-miss", "ui/frame.lua",
-     """    if ok and quality then
-        ui.craftQuality[itemId] = quality
-        return quality
+     """    if info and info.quality then
+        ui.craftQuality[itemId] = info.quality
+        return info.quality
     end
     return nil""",
-     """    ui.craftQuality[itemId] = quality or 1
+     """    ui.craftQuality[itemId] = (info and info.quality) or 1
     return ui.craftQuality[itemId]""",
      "crafttree"),
 
@@ -4892,45 +4892,66 @@ end
      "    if not b then return false end",
      "external.buttons"),
 
-    # ---- the row icon (v1.53.14) ----------------------------------------
+    # ---- the row icon (v1.53.15) ----------------------------------------
 
-    # THE BUG THAT SHIPPED IN THE FIRST DRAFT. pcall puts `ok` in front of
-    # GetItemInfo's ten returns, so the texture is the ELEVENTH value back.
-    # Eight discards lands on equipSlot, which is nil for every reagent -- so
-    # every icon is blank and nothing errors, because a nil texture path is a
-    # perfectly legal thing to hand SetTexture.
-    ("craft-icon-reads-equip-slot", "ui/frame.lua",
-     "    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
-     "    local ok, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+    # THE BUG THAT SHIPPED. Indexing GetItemInfo by hand instead of going
+    # through util.ItemInfo. Position 10 is the texture on a "later" client and
+    # an APPENDED NUMBER on the real client that reported this -- and because
+    # SetTexture reads a number as an r, g, b triple rather than refusing it,
+    # every icon in the shopping list painted as a solid red box with no error
+    # anywhere. The suite runs all five shapes, so a fixed index fails on at
+    # least one of them whichever index is chosen.
+    ("craft-icon-hardcodes-the-position", "ui/frame.lua",
+     """    local info = util.ItemInfo(itemId)
+    local tex = info and info.texture""",
+     """    local _, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)""",
      "crafttree"),
 
-    # ...and one past it, which reads whatever an item's eleventh return is.
-    # Same symptom from the other side of the correct index, so the check has
-    # to pin the exact value and not merely "something non-nil".
-    ("craft-icon-reads-one-past", "ui/frame.lua",
-     "    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
-     "    local ok, _, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+    # ...and the index that is right on stock vanilla and wrong everywhere
+    # else, which is the other half of the same mistake.
+    ("craft-icon-hardcodes-vanilla", "ui/frame.lua",
+     """    local info = util.ItemInfo(itemId)
+    local tex = info and info.texture""",
+     """    local _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)""",
+     "crafttree"),
+
+    # The quality read by fixed position too. It survives more shapes than the
+    # texture does -- quality is position 3 and nothing moves it -- but the
+    # BARE ID does not: GetItemInfo wants a name, a link or an item string, and
+    # handing it a number is what cost the disenchant tooltip line its entire
+    # existence. util.ItemInfo builds the string.
+    ("craft-quality-passes-a-bare-id", "ui/frame.lua",
+     """    local info = util.ItemInfo(itemId)
+    if info and info.quality then
+        ui.craftQuality[itemId] = info.quality
+        return info.quality
+    end""",
+     """    local ok, _, _, quality = pcall(GetItemInfo, itemId)
+    if ok and quality then
+        ui.craftQuality[itemId] = quality
+        return quality
+    end""",
      "crafttree"),
 
     # The icon lookup never memoised. GetItemInfo is a per-item CLIENT QUERY
     # and both lists that read these rows repaint off a BAG_UPDATE flag, which
     # storms -- HARD RULE 16. Unmemoised it is a query per row per repaint.
     ("craft-icon-not-memoised", "ui/frame.lua",
-     """    if ok and tex then
+     """    if type(tex) == "string" and tex ~= "" then
         ui.craftIcon[itemId] = tex
         return tex
     end""",
-     """    if ok and tex then
+     """    if type(tex) == "string" and tex ~= "" then
         return tex
     end""",
      "crafttree"),
 
     # The MISS cached, so an item the client has not loaded yet stays without
     # an icon until logout. Caching a real value rather than `tex` itself,
-    # because assigning nil to a table key REMOVES it -- the lazy version
-    # would not be a bug at all and the sabotage would prove nothing.
+    # because assigning nil to a table key REMOVES it -- the lazy version would
+    # not be a bug at all and the sabotage would prove nothing.
     ("craft-icon-caches-the-miss", "ui/frame.lua",
-     """    if ok and tex then
+     """    if type(tex) == "string" and tex ~= "" then
         ui.craftIcon[itemId] = tex
         return tex
     end
