@@ -2700,15 +2700,15 @@ end
     # merchant window is open and the player is buying -- the shape HARD RULE
     # 16 exists for.
     ('cart-counts-inside-bag-update', 'ui/frame.lua',
-     '    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then\n        ui.shopDriver:Show()\n    end',
-     '    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then\n        ui.RefreshShopCartButton()\n    end',
+     '        ui.ShopDriver():Show()',
+     '        ui.RefreshShopCartButton()',
      'shoplist'),
 
     # ...and the other way: the flush stops refreshing it, so the badge keeps
     # whatever count it had when the merchant opened.
     ('cart-badge-never-flushed', 'ui/frame.lua',
-     '        ui.RefreshShopCartButton()\n    end)',
-     '    end)',
+     '        ui.RefreshShopCartButton()\n    end)\n    ui.shopDriver = d',
+     '    end)\n    ui.shopDriver = d',
      'shoplist'),
 
     # The cart left reading as pressed after the list is closed by its own X
@@ -2942,15 +2942,65 @@ end
     # doubly so here, because a merchant window is open and the player is
     # buying, which is exactly when that event storms.
     ('shop-rebuilds-inside-bag-update', 'ui/frame.lua',
-     '    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end',
-     '    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.RefreshShopWindow() end',
+     '        ui.ShopDriver():Show()\n    end\nend)',
+     '        ui.RefreshShopWindow()\n    end\nend)',
      'shoplist'),
 
     # The flush driver left running, so the list is rebuilt every frame for
     # the rest of the session.
     ('shop-driver-never-stops', 'ui/frame.lua',
-     '    ui.shopDriver:SetScript("OnUpdate", function()\n        ui.shopDriver:Hide()',
-     '    ui.shopDriver:SetScript("OnUpdate", function()',
+     '    d:SetScript("OnUpdate", function()\n        d:Hide()',
+     '    d:SetScript("OnUpdate", function()',
+     'shoplist'),
+
+    # ---- the nil driver (v1.53.16) --------------------------------------
+
+    # THE BUG AS REPORTED, put straight back: the driver owned by the window
+    # rather than by itself. The cart button is attached whenever a merchant
+    # opens; the window is built only when something shows it, which the
+    # auto-popup skips when the setting is off or there is nothing left to buy.
+    # So a merchant plus an empty shopping list -- the common case -- left a
+    # visible cart and a nil driver, and every BAG_UPDATE threw.
+    ('shop-driver-owned-by-the-window', 'ui/frame.lua',
+     '''function ui.ShopDriver()
+    if ui.shopDriver then return ui.shopDriver end
+    local d = CreateFrame("Frame", nil, UIParent)''',
+     '''function ui.ShopDriver()
+    if not ui.shopFrame then return ui.shopDriver end
+    if ui.shopDriver then return ui.shopDriver end
+    local d = CreateFrame("Frame", nil, UIParent)''',
+     'shoplist'),
+
+    # ...and the half a nil-guard alone would have left broken and silent: a
+    # frame whose PARENT is hidden does not run its OnUpdate, so a driver
+    # hanging off the list goes quiet in exactly the case the cart badge exists
+    # for -- list closed, cart on screen, player buying.
+    ('shop-driver-parented-to-the-list', 'ui/frame.lua',
+     '    local d = CreateFrame("Frame", nil, UIParent)',
+     '    local d = CreateFrame("Frame", nil, ui.shopFrame)',
+     'shoplist'),
+
+    # The memo dropped, so every bag update creates another frame with another
+    # OnUpdate -- a leak that compounds at the moment BAG_UPDATE storms.
+    ('shop-driver-not-memoised', 'ui/frame.lua',
+     '    if ui.shopDriver then return ui.shopDriver end',
+     '    if false then return ui.shopDriver end',
+     'shoplist'),
+
+    # Only the list arms the flush, so the cart badge stops counting down as
+    # you buy -- which is the entire point of the badge.
+    ('cart-does-not-arm-the-flush', 'ui/frame.lua',
+     '''    if (ui.shopFrame and ui.shopFrame:IsVisible())
+        or (ui.shopCartBtn and ui.shopCartBtn:IsVisible()) then''',
+     '''    if (ui.shopFrame and ui.shopFrame:IsVisible()) then''',
+     'shoplist'),
+
+    # ...and the flush armed unconditionally, which is a repaint every bag
+    # update for the whole session whether anything is on screen or not.
+    ('flush-armed-with-nothing-on-screen', 'ui/frame.lua',
+     '''    if (ui.shopFrame and ui.shopFrame:IsVisible())
+        or (ui.shopCartBtn and ui.shopCartBtn:IsVisible()) then''',
+     '''    if true then''',
      'shoplist'),
 
     # An empty frame popped over the merchant window every time you talk to a
