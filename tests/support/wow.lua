@@ -706,9 +706,42 @@ function CancelAuction(i)
     table.remove(W.owned, W.ownerPage * W.OWNER_PAGE + i)
 end
 
+-- ...AND THE ONES YOU HAVE BID ON. A third list, paged the same way, and the
+-- one whose values mean something different from the other two: `bidAmount` on
+-- a bidder row is THE AUCTION'S CURRENT BID, not necessarily yours. While
+-- highBidder is set it is yours; once it is not, the amount belongs to whoever
+-- outbid you and 1.12 will not tell you what you bid. A mock that reported
+-- your bid back to you would make that impossible to get wrong, and getting it
+-- wrong is how a tab tells a player they have gold committed that is already
+-- back in their purse.
+W.bids = {}
+W.bidderPage = 0
+W.BIDDER_PAGE = 50
+
+function W.SetBids(rows) W.bids = rows or {}; W.bidderPage = 0 end
+
+local function bidderBatch()
+    local out, first = {}, W.bidderPage * W.BIDDER_PAGE
+    local i = 1
+    while i <= W.BIDDER_PAGE do
+        local r = W.bids[first + i]
+        if not r then break end
+        table.insert(out, r)
+        i = i + 1
+    end
+    return out
+end
+
+function GetBidderAuctionItems(page)
+    W.bidderPage = page or 0
+end
+
 function GetNumAuctionItems(list)
     if list == "owner" then
         return table.getn(ownerBatch()), table.getn(W.owned)
+    end
+    if list == "bidder" then
+        return table.getn(bidderBatch()), table.getn(W.bids)
     end
     if list ~= "list" then return 0, 0 end
     return table.getn(W.page), W.totalAuctions
@@ -724,6 +757,13 @@ function GetAuctionItemInfo(list, i)
                nil, r.level or 1, r.minBid or 0, 0,
                r.buyout or 0, r.bidAmount or 0, r.highBidder, "me"
     end
+    if list == "bidder" then
+        local r = bidderBatch()[i]
+        if not r then return nil end
+        return r.name, r.texture or "icon", r.count or 1, r.quality or 1,
+               nil, r.level or 1, r.minBid or 0, r.minIncrement or 0,
+               r.buyout or 0, r.bidAmount or 0, r.highBidder, r.owner
+    end
     if list ~= "list" then return nil end
     local r = W.page[i]
     if not r then return nil end
@@ -736,14 +776,18 @@ end
 
 function GetAuctionItemLink(list, i)
     local r
-    if list == "owner" then r = ownerBatch()[i] else r = W.page[i] end
+    if list == "owner" then r = ownerBatch()[i]
+    elseif list == "bidder" then r = bidderBatch()[i]
+    else r = W.page[i] end
     return r and r.link or nil
 end
 
 -- 1-4 on 1.12, indexing AUCTION_TIME_LEFT1..4. Never a string.
 function GetAuctionItemTimeLeft(list, i)
     local r
-    if list == "owner" then r = ownerBatch()[i] else r = W.page[i] end
+    if list == "owner" then r = ownerBatch()[i]
+    elseif list == "bidder" then r = bidderBatch()[i]
+    else r = W.page[i] end
     return r and (r.timeLeft or 4) or nil
 end
 
@@ -845,6 +889,8 @@ function W.Reset()
     W.owned         = {}
     W.cancelled     = {}
     W.ownerPage     = 0
+    W.bids          = {}
+    W.bidderPage    = 0
     W.tooltipLines  = {}
     W.money         = 500000
     W.now           = 1700000000

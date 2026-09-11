@@ -2671,6 +2671,167 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the Auctions split: book value and bids (v1.53.4) ---------------
+
+    # A bid-only auction folded into the "if it all sells" total as though its
+    # MINIMUM BID were a buyout. One with a 1c minimum could fetch anything,
+    # and a guess averaged into a total makes the whole total a guess.
+    ("book-counts-the-minimum-bid", "core/sell.lua",
+     "            skipped = skipped + 1",
+     "            gross = gross + (r.minBid or 0)\n            skipped = skipped + 1",
+     "bids"),
+
+    # ...or counted as a real buyout of zero, which loses the count of how many
+    # could not be totalled -- so the line stops saying it left any out.
+    ("book-bid-only-counted-as-sold", "core/sell.lua",
+     "        if r.buyout and r.buyout > 0 then",
+     "        if r.buyout then",
+     "bids"),
+
+    # The consignment cut never taken, so every book reads 5% richer than it
+    # could ever pay.
+    ("book-forgets-the-cut", "core/sell.lua",
+     "    return gross, math.floor(gross * (1 - cut)), counted, skipped",
+     "    return gross, math.floor(gross), counted, skipped",
+     "bids"),
+
+    # The heading stating a certainty instead of a maximum. Same arithmetic,
+    # different claim, and only one of them is true.
+    ("book-line-states-a-certainty", "ui/frame.lua",
+     '    local s = "at most " .. util.FormatMoney(net or 0, true) .. " after the cut"',
+     '    local s = util.FormatMoney(net or 0, true)',
+     "bids"),
+
+    # ...and quietly leaving the uncountable ones out of the wording, which is
+    # a total nobody can check.
+    ("book-line-hides-the-uncounted", "ui/frame.lua",
+     '        s = s .. " (" .. skipped .. " bid-only not counted)"',
+     "        s = s",
+     "bids"),
+
+    # Gold you were OUTBID ON counted as committed. 1.12 takes the gold when
+    # you bid and mails it back the moment someone beats you, so those coins
+    # are in your purse -- counting them reports the same gold twice.
+    ("bid-total-counts-outbid-as-committed", "core/sell.lua",
+     "        if r.winning then\n            committed = committed + (r.bid or 0)",
+     "        if true then\n            committed = committed + (r.bid or 0)",
+     "bids"),
+
+    # highBidder ignored, so every row reads as one you are winning -- and the
+    # amount shown against it belongs to whoever beat you.
+    ("bid-winning-flag-ignored", "core/sell.lua",
+     "                winning  = (highBidder and highBidder ~= 0) and true or false,",
+     "                winning  = true,",
+     "bids"),
+
+    # The bids read from the OWNER list, which is the list of what you are
+    # selling. Every number would be real and none of it would be a bid.
+    ("bid-list-reads-the-owner-list", "core/sell.lua",
+     '    local n = GetNumAuctionItems("bidder")',
+     '    local n = GetNumAuctionItems("owner")',
+     "bids"),
+
+    # The page count allowed to be zero, so "page 1 of 0" and a next button
+    # that is enabled with nowhere to go.
+    ("bid-page-count-can-be-zero", "core/sell.lua",
+     "    local pages = math.ceil(total / sell.BIDDER_PAGE_SIZE)\n    if pages < 1 then pages = 1 end",
+     "    local pages = math.ceil(total / sell.BIDDER_PAGE_SIZE)",
+     "bids"),
+
+    # ...and the page never clamped, so a bid resolving while you look at page
+    # two leaves you on a page that no longer exists.
+    ("bid-page-never-clamped", "core/sell.lua",
+     "    if page > pages - 1 then page = pages - 1 end\n    return page, pages, total\nend\n\n-- The auctions you have bid on",
+     "    return page, pages, total\nend\n\n-- The auctions you have bid on",
+     "bids"),
+
+    # Blizzard's own Bidder frame left unseeded. Its handler is registered even
+    # though we replace the window, and it does arithmetic on a field its
+    # OnShow would have set -- the same throw the owner list produced.
+    ("bid-request-skips-blizzard-seed", "core/sell.lua",
+     "    if AuctionFrameBidder then AuctionFrameBidder.page = page end",
+     "    local _ = page",
+     "bids"),
+
+    # ---- the Auctions split: geometry (v1.53.4) --------------------------
+
+    # The bids half never collapsing, so a player who has never bid loses a
+    # third of their auctions table to an empty box.
+    ("split-bids-half-never-collapses", "ui/frame.lua",
+     "    if bids <= 0 then\n        return ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H, AUC_ROWS_MAX), 0\n    end",
+     "    if bids < 0 then\n        return ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H, AUC_ROWS_MAX), 0\n    end",
+     "geometry"),
+
+    # The open split measured against the COLLAPSED box, which is one band
+    # taller -- so both halves together ask for one more row than the panel
+    # has, and nothing clips a list row.
+    ("split-measures-the-collapsed-box", "ui/frame.lua",
+     "    local total = ui.ListRowsAt(h, LISTBOX.aucSplit, AUC_ROW_H,",
+     "    local total = ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H,",
+     "geometry"),
+
+    # The bids half taking the larger share, which reads as the bids being the
+    # point of the tab -- and the auctions half is the one that pages at 50.
+    ("split-bids-half-takes-the-larger-share", "ui/frame.lua",
+     "    split_frac = 0.58,",
+     "    split_frac = 0.32,",
+     "geometry"),
+
+    # Rows handed to the bids half that it has no bids to fill, which is space
+    # the auctions table wanted.
+    ("split-bids-half-keeps-empty-rows", "ui/frame.lua",
+     "    if bid > bids then auc = auc + (bid - bids); bid = bids end",
+     "    local _ = bids",
+     "geometry"),
+
+    # The pool ceilings dropped, so a window dragged past the cap asks a
+    # painter for a row that was never built.
+    ("split-forgets-the-auctions-cap", "ui/frame.lua",
+     "    if auc > AUC_ROWS_MAX then auc = AUC_ROWS_MAX end",
+     "    local _ = auc",
+     "geometry"),
+    ("split-forgets-the-bids-cap", "ui/frame.lua",
+     "    if bid > AUCL.bid_max then bid = AUCL.bid_max end",
+     "    local _ = bid",
+     "geometry"),
+
+    # The auctions list anchored at both ends again, the way every other list
+    # in this window is -- which discards SetHeight and puts the bids table on
+    # top of it.
+    ("split-auctions-list-anchored-at-both-ends", "ui/frame.lua",
+     '    scroll:SetPoint("TOPRIGHT", panel, "TOPRIGHT",\n                    -AUCL.scroll_r, -LISTBOX.auc.top)',
+     '    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -AUCL.scroll_r, 10)',
+     "geometry"),
+
+    # Re-anchored without clearing. SetPoint ADDS a point on 1.12, so the
+    # widget ends up pinned to its old position and its new one -- stretched
+    # rather than moved, and only after the first resize.
+    ("split-layout-does-not-clear-points", "ui/frame.lua",
+     "    ui.bidScroll:ClearAllPoints()\n    ui.bidScroll:SetPoint(\"TOPLEFT\", panel, \"TOPLEFT\", AUCL.row_left, -by)",
+     "    ui.bidScroll:SetPoint(\"TOPLEFT\", panel, \"TOPLEFT\", AUCL.row_left, -by)",
+     "geometry"),
+
+    # The painter sizing the two halves separately instead of taking the split
+    # once and handing it to both.
+    ("split-bids-half-sizes-itself", "ui/frame.lua",
+     "    ui.UpdateBidsList(bidVis)",
+     "    ui.UpdateBidsList()",
+     "geometry"),
+
+    # A refresh that asks for the owner list and not the bidder list, so the
+    # lower half sits empty on a tab that has just refreshed.
+    ("split-refresh-never-asks-for-bids", "ui/frame.lua",
+     "        A.sell.RequestBidderAuctions(0)",
+     "        local _ = A",
+     "geometry"),
+
+    # ...and the reply never listened for. The owner-list event does not fire
+    # for a bid.
+    ("split-bidder-reply-ignored", "ui/frame.lua",
+     'A.RegisterEvent("AUCTION_BIDDER_LIST_UPDATE", function()',
+     'A.RegisterEvent("AUCTION_BIDDER_LIST_UNUSED", function()',
+     "geometry"),
+
     # ---- the bags bucket erased by its own writer (v1.53.3) --------------
 
     # THE BUG ITSELF. An unanswered bag walk -- containers reporting no slots,
@@ -3909,6 +4070,7 @@ SUITES = {
     "craftqueue": "tests/units/craftqueue_test.lua",
     "crafttree": "tests/units/crafttree_test.lua",
     "buygroup": "tests/units/buygroup_test.lua",
+    "bids": "tests/units/bids_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

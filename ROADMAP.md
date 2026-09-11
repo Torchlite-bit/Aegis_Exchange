@@ -2390,6 +2390,61 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The Auctions tab, split — v1.53.4
+
+**A Bids tab or a split Auctions tab: the split, and the reason is that they
+are one question.** A bid is an outgoing commitment exactly the way a posted
+auction is an incoming one, and both are decided by the same clock. "What is my
+gold tied up in, and what resolves soon" is answered by seeing them together
+and answered badly by flipping between two tabs. A seventh sub-tab would also
+have been a seventh sub-tab.
+
+**Both new numbers are easy to state dishonestly, which is why both are
+functions with a suite rather than concatenation inside a painter.**
+
+`sell.BookValue(rows, cut)` returns gross, net, counted, **skipped**. The
+skipped count is not a footnote: a bid-only auction has no buyout, so there is
+nothing to add — it could fetch its minimum bid or ten times that. Averaging a
+guess in makes the total a guess, so they are counted separately and
+`ui.BookLine` names them. The cut comes off the sale, floored once, the same
+convention `ui.ListNet` uses.
+
+`sell.BidTotals(rows)` returns committed, winning, outbid, and **committed
+counts only the rows you are winning**. That is exact rather than cautious:
+1.12 takes the gold when you bid and mails it back the moment someone beats
+you, so an outbid row is money already in your purse. The subtlety underneath
+it is that `bidAmount` on a bidder row is **the auction's current bid, not
+yours** — while `highBidder` is set it is yours, and once it is not it belongs
+to whoever beat you and nothing in the 1.12 API will tell you what you bid. So
+an outbid row shows the price to beat, dimmed, and never a figure presented as
+yours.
+
+**The split itself is a ROW COUNT, taken once and handed to both painters.**
+List rows are not the scroll frame's scroll child, so nothing clips a row that
+hangs past the bottom of its half — it draws straight through the other table.
+`ui.AucSplitRows(h, bids)` is pure and returns both counts;
+`ui.LayoutAuctionsSplit` places both halves from them. Two properties worth
+keeping: **the bids half never takes more rows than you have bids**, and **no
+bids collapses it entirely** and hands every row back, which is the common case
+and the one where the split has to cost nothing.
+
+**Two anchoring traps, both of which compile and load.** The auctions scroll
+frame is now anchored by its two TOP corners with an explicit height, because a
+frame pinned top and bottom takes its height from its anchors and silently
+ignores `SetHeight` — every other list in this window is built the other way,
+which is exactly what makes it easy to "fix" back. And every widget the layout
+moves is `ClearAllPoints()`-ed first: `SetPoint` **adds** a point on 1.12, so
+re-anchoring without clearing stretches a widget rather than moving it, and
+only after the first resize. Both are asserted against the source in the
+geometry suite, because neither is reachable from a unit test.
+
+**Still open, and for the owner rather than the code:** `sell.TimeLeftText`
+prints the vanilla wordings ("< 30m", "< 2h", "< 12h", "> 12h") for the four
+time-left codes, and Turtle multiplies auction durations by three. If the
+server scales its bucket thresholds too, those four labels are wrong by 3x on
+both halves of this tab. It is pre-existing and unchanged here; it wants one
+measurement in game before anything is rewritten.
+
 ### The bags bucket erased by its own writer — v1.53.3
 
 Reported as a tooltip showing **two** characters where another addon showed

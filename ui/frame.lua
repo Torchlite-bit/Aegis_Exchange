@@ -4988,6 +4988,39 @@ function ui.CraftLabelW(rowW, indent, tail)
     return w
 end
 
+-- The Auctions panel is SPLIT: your auctions above, your bids below.
+--
+-- ONE TAB, NOT TWO, and the reason is that they are one question. A bid is an
+-- outgoing commitment exactly the way a posted auction is an incoming one, and
+-- both are decided by the same clock -- "what is my gold tied up in, and what
+-- resolves soon" is answered by looking at them together and is answered badly
+-- by flipping between two tabs. It also keeps the sub-tab strip at six.
+--
+-- These are the bands of the panel that are NOT list rows. The two lists share
+-- whatever is left; ui.AucSplitRows divides it.
+local AUCL = {
+    auc_top    = 70,   -- heading, buttons, status/page line, column headers
+    gap        = 12,   -- blank between the two halves
+    bid_head   = 20,   -- "Your bids", and what they add up to
+    bid_hdr    = 20,   -- the bids table's own column headers
+    bot        = 10,
+    -- How the leftover rows divide when you DO have bids. Weighted to the
+    -- auctions half because that is the one that pages at 50.
+    split_frac = 0.58,
+    auc_min    = 4,
+    bid_min    = 3,
+    bid_max    = 24,
+    -- Where both tables start inside the panel. Read by the builder AND by
+    -- ui.LayoutAuctionsSplit, which re-anchors the bids headers every time the
+    -- divide moves -- two different literals here would drift the bids headers
+    -- off their own columns and only once the window had been resized.
+    row_left   = 6,
+    -- ...and the gutter the FauxScrollFrame's scrollbar sits in, on the right
+    -- of both. Same reasoning: two literals drift, and the drift is one table
+    -- ending 28px short of the other.
+    scroll_r   = 28,
+}
+
 local LISTBOX = {
     -- The two Crafting panels READ their bands from CRAFTL rather than
     -- restating them: the geometry suite checks those four numbers against the
@@ -4995,7 +5028,16 @@ local LISTBOX = {
     -- here is a copy that can disagree with what was checked.
     craftSide = { top = CRAFTL.side_top, bot = CRAFTL.side_bot },
     craft     = { top = CRAFTL.mid_top,  bot = CRAFTL.mid_bot },
-    auc       = { top = 70,  bot = 10 },
+    -- THE AUCTIONS HALF WITH THE BIDS HALF COLLAPSED, which is what the tab
+    -- looks like whenever you have no bids -- the common case, and the one
+    -- where the split must cost nothing. All that survives below it is the
+    -- one line saying so.
+    auc       = { top = AUCL.auc_top,
+                  bot = AUCL.gap + AUCL.bid_head + AUCL.bot },
+    -- ...and with the bids half open, which costs one more band for its own
+    -- column headers. Both lists share what is left of this one.
+    aucSplit  = { top = AUCL.auc_top,
+                  bot = AUCL.gap + AUCL.bid_head + AUCL.bid_hdr + AUCL.bot },
     hist      = { top = 100, bot = 10 },
     -- Identical to sellList on purpose: both boxes start under the same
     -- header band and end on the same line, which is the whole point of
@@ -10268,6 +10310,106 @@ local AUC_HEADER_DEFS = {
     { key = "mkt",   text = "vs market" },
 }
 
+-- The bids table's own columns. ONE TABLE, not three file-scope locals: see
+-- the 32-upvalue note on BUYL. The x offsets deliberately match the auctions
+-- table above it as far as they can, so the two halves read as one design
+-- rather than as two tables that happen to share a panel.
+local BIDC = {
+    x = { name = 2, qty = 176, unit = 216, bid = 300, buyout = 392,
+          status = 488, time = 556 },
+    w = { name = 172, qty = 34, unit = 80, bid = 88, buyout = 88,
+          status = 62, time = 56 },
+    defs = {
+        { key = "name",   text = "Item" },
+        { key = "qty",    text = "Qty" },
+        { key = "unit",   text = "Unit" },
+        { key = "bid",    text = "Bid" },
+        { key = "buyout", text = "Buyout" },
+        { key = "status", text = "Status" },
+        { key = "time",   text = "Time" },
+    },
+}
+
+-- How many rows each half of the Auctions panel gets, at window height `h`,
+-- when the bids half has `bids` rows to show. Returns aucRows, bidRows.
+--
+-- ROWS, NOT PIXELS, for the reason ui.ListRowsAt exists: what has to come out
+-- whole is the row COUNT. These rows are not the scroll frame's scroll child,
+-- so nothing clips a row that hangs past the bottom of its list -- it simply
+-- draws over whatever is below, which here is the other table.
+--
+-- NO BIDS, NO HALF. Most of the time the bidder list is empty, and then the
+-- bottom half collapses to the single line that says so and hands every row
+-- back to the auctions table -- which is what this tab was before the split
+-- and what it should look like again whenever the split has nothing to add.
+function ui.AucSplitRows(h, bids)
+    bids = bids or 0
+    if bids <= 0 then
+        return ui.ListRowsAt(h, LISTBOX.auc, AUC_ROW_H, AUC_ROWS_MAX), 0
+    end
+    -- UNCAPPED HERE ON PURPOSE. The two clamps at the bottom are the ceilings
+    -- that matter, and they have to be the ones that bind: a cap applied to
+    -- the total instead would leave both of them unreachable, which is a guard
+    -- that cannot fire and cannot be tested either.
+    local total = ui.ListRowsAt(h, LISTBOX.aucSplit, AUC_ROW_H, nil)
+    if total < 2 then return 1, 1 end
+    local auc = math.floor(total * AUCL.split_frac)
+    -- The minima, in the order they are allowed to win: the auctions half
+    -- claims its floor first, and the bids half takes it back if that left it
+    -- under its own. A window too small for both is handled by the absolute
+    -- floors below rather than by letting either go to zero.
+    if auc < AUCL.auc_min then auc = AUCL.auc_min end
+    if total - auc < AUCL.bid_min then auc = total - AUCL.bid_min end
+    if auc < 1 then auc = 1 end
+    local bid = total - auc
+    if bid < 1 then bid, auc = 1, total - 1 end
+    -- ...and the bids half never needs more rows than you have bids. Ten empty
+    -- rows under three real ones is space the auctions half wanted.
+    if bid > bids then auc = auc + (bid - bids); bid = bids end
+    if auc > AUC_ROWS_MAX then auc = AUC_ROWS_MAX end
+    if bid > AUCL.bid_max then bid = AUCL.bid_max end
+    return auc, bid
+end
+
+-- "at most 412g 30s after the cut (2 bid-only not counted)", or "".
+--
+-- IT IS A MAXIMUM AND IT SAYS SO. Nothing here claims anything will sell, and
+-- the bid-only auctions are named rather than folded in: one with a 1c minimum
+-- bid could fetch anything, and a guess averaged into a total makes the whole
+-- total a guess. Pure, because the wording is the feature.
+function ui.BookLine(net, counted, skipped)
+    counted, skipped = counted or 0, skipped or 0
+    if counted <= 0 and skipped <= 0 then return "" end
+    if counted <= 0 then
+        return skipped .. " bid-only \226\128\148 no buyout to total"
+    end
+    local s = "at most " .. util.FormatMoney(net or 0, true) .. " after the cut"
+    if skipped > 0 then
+        s = s .. " (" .. skipped .. " bid-only not counted)"
+    end
+    return s
+end
+
+-- "Winning 2 -- 1g 20s committed, outbid on 1", or "No bids."
+--
+-- COMMITTED IS WHAT YOU ARE WINNING, and the wording has to carry that. 1.12
+-- takes the gold when you bid and mails it back the moment someone beats you,
+-- so an outbid row is money you already have -- see sell.BidTotals. Naming the
+-- outbid ones separately is what keeps "committed" from reading as "spent".
+function ui.BidLine(committed, winning, outbid)
+    winning, outbid = winning or 0, outbid or 0
+    if winning + outbid <= 0 then return "No bids." end
+    local s
+    if winning > 0 then
+        s = "Winning " .. winning .. " \226\128\148 "
+            .. util.FormatMoney(committed or 0, true) .. " committed"
+    else
+        s = "Nothing committed"
+    end
+    if outbid > 0 then s = s .. ", outbid on " .. outbid end
+    return s
+end
+
 function ui.BuildAuctionsTab()
     local panel = ui.panels["Auctions"]
     if not panel or ui.aucBuilt then return end
@@ -10341,14 +10483,22 @@ function ui.BuildAuctionsTab()
     -- pressed at all.
     ui.aucSortKey = "unit"
     ui.aucSortDir = "asc"
-    local rowLeft = 6
+    local rowLeft = AUCL.row_left
     ui.aucHeaders = ui.MakeSortHeaders(panel, rowLeft, -54, ACX, ACW,
         function(key) ui.SetAucSort(key) end, AUC_HEADER_DEFS)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeAucScroll",
         panel, "FauxScrollFrameTemplate")
+    -- TOP-ANCHORED ONLY, both corners, with the height set by the split.
+    -- It used to be anchored TOPLEFT and BOTTOMRIGHT, which is how every other
+    -- list in this window is built -- but a frame pinned at both ends takes
+    -- its height from its anchors and SILENTLY IGNORES SetHeight, so the bids
+    -- half would have been placed under a box that still ran to the bottom of
+    -- the panel and the two tables would have drawn through each other.
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.auc.top)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.auc.bot)
+    scroll:SetPoint("TOPRIGHT", panel, "TOPRIGHT",
+                    -AUCL.scroll_r, -LISTBOX.auc.top)
+    scroll:SetHeight(AUC_ROWS * AUC_ROW_H)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(AUC_ROW_H, ui.UpdateAuctionsList)
     end)
@@ -10434,6 +10584,182 @@ ui.GrowAucRows = function(n)
         end
     end
     ui.GrowAucRows(AUC_ROWS)
+    ui.BuildBidsHalf(panel, rowLeft)
+end
+
+-- The lower half: what you have bid on.
+--
+-- ITS OWN BUILDER because ui.BuildAuctionsTab was already a long function with
+-- a lot of file-scope locals in reach, and the 32-upvalue ceiling is a load
+-- failure rather than a warning -- see the BUYL note. Splitting the tab's
+-- widgets across two functions splits the upvalue count too.
+--
+-- Everything vertical here is anchored in ui.LayoutAuctionsSplit rather than
+-- at build time: how far down the bids half starts depends on how many rows
+-- the auctions half got, which depends on the window height.
+function ui.BuildBidsHalf(panel, rowLeft)
+    ui.bidSummary = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.bidSummary:SetJustifyH("LEFT")
+    ui.bidSummary:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    ui.bidSummary:SetText("Your bids")
+
+    -- Page navigation, for the same reason the owner list has it: the bidder
+    -- list is paged at 50 and GetNumAuctionItems hands back (BATCH, TOTAL).
+    -- The owner list read only page 0 for the addon's whole life; building the
+    -- second one without the lesson would be a choice.
+    local nextBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBidNextButton")
+    nextBtn:SetWidth(24); nextBtn:SetHeight(20)
+    nextBtn:SetText(">")
+    nextBtn:SetScript("OnClick", function() ui.BidStepPage(1) end)
+    ui.bidNextBtn = nextBtn
+
+    ui.bidPageText = panel:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlightSmall")
+    ui.bidPageText:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    local prevBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBidPrevButton")
+    prevBtn:SetWidth(24); prevBtn:SetHeight(20)
+    prevBtn:SetText("<")
+    prevBtn:SetScript("OnClick", function() ui.BidStepPage(-1) end)
+    ui.bidPrevBtn = prevBtn
+
+    ui.bidSortKey = "time"
+    ui.bidSortDir = "asc"
+    ui.bidHeaders = ui.MakeSortHeaders(panel, rowLeft, 0, BIDC.x, BIDC.w,
+        function(key) ui.SetBidSort(key) end, BIDC.defs)
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeBidScroll",
+        panel, "FauxScrollFrameTemplate")
+    -- Placed for real by ui.LayoutAuctionsSplit; this is only somewhere to
+    -- stand before the first paint. Two TOP anchors and an explicit height,
+    -- for the reason spelled out on the auctions scroll above.
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft,
+                    -LISTBOX.aucSplit.top)
+    scroll:SetPoint("TOPRIGHT", panel, "TOPRIGHT",
+                    -AUCL.scroll_r, -LISTBOX.aucSplit.top)
+    scroll:SetHeight(AUC_ROW_H)
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(AUC_ROW_H, ui.UpdateBidsList)
+    end)
+    ui.bidScroll = scroll
+
+    ui.bidRows = {}
+    ui.GrowBidRows(AUCL.bid_min)
+end
+
+-- The bids row pool. Same shape as the auctions pool above it, deliberately:
+-- the two halves are one table split in two and anything that makes them look
+-- like two designs is a bug.
+function ui.GrowBidRows(n)
+    if not ui.bidScroll then return end
+    if n > AUCL.bid_max then n = AUCL.bid_max end
+    n = ui.RowBudget(ui.bidRows, n)
+    local panel = ui.panels["Auctions"]
+    local i = table.getn(ui.bidRows) + 1
+    while i <= n do
+        local row = CreateFrame("Button", nil, panel)
+        row:SetHeight(AUC_ROW_H)
+        -- A LIST ROW, so pfUI must not plate it -- tests/lint/rowskin.py
+        -- enforces this on every Button that gets ui.AddRowChrome.
+        row.aegisNoSkin = true
+        ui.PlaceRow(row, ui.bidScroll, i, AUC_ROW_H, ROWPAD.l, ROWPAD.r)
+        ui.AddRowChrome(row, i)
+        local mk = function(cx, w, just)
+            local fs = row:CreateFontString(nil, "OVERLAY",
+                "GameFontHighlightSmall")
+            fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+            fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+            return fs
+        end
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(16); icon:SetHeight(16)
+        icon:SetPoint("LEFT", row, "LEFT", BIDC.x.name, 0)
+        row.icon = icon
+        row.name   = mk(BIDC.x.name + 20, BIDC.w.name - 20)
+        row.qty    = mk(BIDC.x.qty, BIDC.w.qty)
+        row.unit   = mk(BIDC.x.unit, BIDC.w.unit)
+        row.bid    = mk(BIDC.x.bid, BIDC.w.bid)
+        row.buyout = mk(BIDC.x.buyout, BIDC.w.buyout)
+        row.status = mk(BIDC.x.status, BIDC.w.status)
+        row.time   = mk(BIDC.x.time, BIDC.w.time)
+        -- RIGHT-CLICK PRICES THE ROW, exactly as it does on an auction row
+        -- above -- "what is this actually worth" is the same question whether
+        -- you are selling it or bidding on it.
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetScript("OnClick", function()
+            if arg1 == "RightButton" and row.entry then
+                ui.PriceAuctionRow(row.entry)
+            end
+        end)
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function()
+            local r = row.entry
+            if not r then return end
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            local shown = false
+            if r.index and GameTooltip.SetAuctionItem then
+                shown = pcall(function()
+                    GameTooltip:SetAuctionItem("bidder", r.index)
+                end)
+            end
+            if not shown then GameTooltip:SetText(r.name or "") end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:Hide()
+        ui.bidRows[i] = row
+        i = i + 1
+    end
+end
+
+-- Place both halves for a given split. Called from ui.UpdateAuctionsList, not
+-- from the builder: the divide moves with the window height and with whether
+-- you have any bids at all.
+--
+-- EVERY ANCHOR IS CLEARED FIRST. SetPoint ADDS a point on 1.12 rather than
+-- replacing one, so re-anchoring without clearing leaves a widget pinned to
+-- both its old position and its new one -- which stretches it instead of
+-- moving it, and only once the window has been resized.
+function ui.LayoutAuctionsSplit(aucRows, bidRows)
+    local panel = ui.panels["Auctions"]
+    if not panel or not ui.aucScroll or not ui.bidScroll then return end
+    ui.aucScroll:SetHeight(aucRows * AUC_ROW_H)
+
+    local y = AUCL.auc_top + aucRows * AUC_ROW_H + AUCL.gap
+    ui.bidSummary:ClearAllPoints()
+    ui.bidSummary:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -y)
+
+    ui.bidNextBtn:ClearAllPoints()
+    ui.bidNextBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -y + 4)
+    ui.bidPageText:ClearAllPoints()
+    ui.bidPageText:SetPoint("RIGHT", ui.bidNextBtn, "LEFT", -6, 0)
+    ui.bidPrevBtn:ClearAllPoints()
+    ui.bidPrevBtn:SetPoint("RIGHT", ui.bidPageText, "LEFT", -6, 0)
+
+    if bidRows <= 0 then
+        -- Collapsed: the heading line stays, because a player who has never
+        -- bid should still be told the half exists, and everything that would
+        -- be empty goes away.
+        for _, hb in pairs(ui.bidHeaders or {}) do hb:Hide() end
+        ui.bidScroll:Hide()
+        ui.bidPrevBtn:Hide(); ui.bidNextBtn:Hide()
+        ui.bidPageText:SetText("")
+        return
+    end
+
+    local hy = y + AUCL.bid_head
+    for key, hb in pairs(ui.bidHeaders or {}) do
+        hb:ClearAllPoints()
+        hb:SetPoint("TOPLEFT", panel, "TOPLEFT",
+                    AUCL.row_left + BIDC.x[key], -hy)
+        hb:Show()
+    end
+    local by = hy + AUCL.bid_hdr
+    ui.bidScroll:ClearAllPoints()
+    ui.bidScroll:SetPoint("TOPLEFT", panel, "TOPLEFT", AUCL.row_left, -by)
+    ui.bidScroll:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -AUCL.scroll_r, -by)
+    ui.bidScroll:SetHeight(bidRows * AUC_ROW_H)
+    ui.bidScroll:Show()
 end
 
 function ui.SetAucSort(key)
@@ -10495,8 +10821,22 @@ end
 -- Read the owner list into ui.aucAuctions; `request` also pings the server.
 function ui.RefreshAuctions(request, page)
     if not ui.aucBuilt then return end
-    if request then A.sell.RequestOwnerAuctions(page or 0) end
+    if request then
+        A.sell.RequestOwnerAuctions(page or 0)
+        -- ...and ask for the bids too. TWO REQUESTS, because they are two
+        -- server lists with two replies: GetOwnerAuctionItems answers with
+        -- AUCTION_OWNED_LIST_UPDATE and never mentions your bids. Asking only
+        -- for the first is how the lower half would sit empty on a tab that
+        -- had just refreshed.
+        A.sell.RequestBidderAuctions(0)
+    end
+    -- Both lists are read on every refresh, not only on the one we asked for.
+    -- Bounded: at most 50 rows each, and every read is of a page the client is
+    -- already holding -- no GetItemInfo, no tooltip, nothing that can join the
+    -- item-cache storm HARD RULE 16 exists for. On a player with no bids the
+    -- bidder walk does not run at all.
     ui.aucAuctions = A.sell.OwnerAuctions()
+    ui.bidAuctions = A.sell.BidderAuctions()
     ui.UpdateAuctionsList()
 end
 
@@ -10516,6 +10856,150 @@ function ui.AucStepPage(delta)
     ui.RefreshAuctions(true, want)
 end
 
+-- ---- the bids half ------------------------------------------------------
+
+function ui.SetBidSort(key)
+    ui.bidSortKey, ui.bidSortDir =
+        ui.NextSort(ui.bidSortKey, ui.bidSortDir, key)
+    ui.UpdateBidsList()
+end
+
+-- Order your bids by the chosen column.
+--
+-- `status` sorts by whether you are WINNING, not alphabetically -- the whole
+-- point of pressing it is to bring the ones you are losing together, and
+-- "outbid" sorting before "winning" because o comes before w is a coincidence
+-- that would stop being true the moment either word changed.
+function ui.SortBids(all, sortKey, dir)
+    local function keyOf(r)
+        if sortKey == "name" then return string.lower(r.name or "")
+        elseif sortKey == "qty" then return r.count
+        elseif sortKey == "bid" then return r.bid
+        elseif sortKey == "buyout" then
+            return (r.buyout and r.buyout > 0) and r.buyout or nil
+        elseif sortKey == "status" then return r.winning and 1 or 0
+        elseif sortKey == "time" then return r.timeLeft
+        end
+        return r.unit
+    end
+    return ui.SortByKey(all, keyOf, dir)
+end
+
+-- Read the bidder list into ui.bidAuctions; `request` also pings the server.
+function ui.RefreshBids(request, page)
+    if not ui.bidScroll then return end
+    if request then A.sell.RequestBidderAuctions(page or 0) end
+    ui.bidAuctions = A.sell.BidderAuctions()
+    ui.UpdateAuctionsList()
+end
+
+function ui.BidStepPage(delta)
+    local page, pages = A.sell.BidderPageInfo()
+    local want = page + delta
+    if want < 0 then want = 0 end
+    if want > pages - 1 then want = pages - 1 end
+    if want == page then return end
+    ui.RefreshBids(true, want)
+end
+
+-- Paint the bids table. Called from ui.UpdateAuctionsList AFTER the split has
+-- been decided, never on its own -- how many rows this half gets is the other
+-- half's business too.
+function ui.UpdateBidsList(bidRows)
+    if not ui.bidScroll then return end
+    local rows = ui.SortBids(ui.bidAuctions or {}, ui.bidSortKey or "time",
+                             ui.bidSortDir or "asc")
+    local total = table.getn(rows)
+    local committed, winning, outbid = A.sell.BidTotals(rows)
+    local page, pages = A.sell.BidderPageInfo()
+
+    ui.PaintSortHeaders(ui.bidHeaders, ui.bidSortKey, ui.bidSortDir)
+    -- 1.12 HAS NO COUNTDOWN. GetAuctionItemTimeLeft returns a 1-4 bucket and
+    -- nothing finer exists, so the Time column cannot say "4h 12m" and must
+    -- not look like it could. Said once, on the line above the table, rather
+    -- than as a caveat nobody reads in a settings tooltip.
+    local line = "Your bids \226\128\148 "
+        .. ui.BidLine(committed, winning, outbid)
+    if total > 0 then
+        line = line .. "   \226\128\162   time left is a bucket, not a countdown"
+    end
+    ui.bidSummary:SetText(line)
+
+    if ui.bidPageText then
+        if pages > 1 and total > 0 then
+            ui.bidPageText:SetText("Page " .. (page + 1) .. " / " .. pages)
+            ui.bidPrevBtn:Show(); ui.bidNextBtn:Show()
+            if page <= 0 then ui.bidPrevBtn:Disable()
+            else ui.bidPrevBtn:Enable() end
+            if page >= pages - 1 then ui.bidNextBtn:Disable()
+            else ui.bidNextBtn:Enable() end
+        else
+            ui.bidPageText:SetText("")
+            ui.bidPrevBtn:Hide(); ui.bidNextBtn:Hide()
+        end
+    end
+
+    -- REMEMBERED, because the scroll bar's own handler calls back in here
+    -- with no argument at all. Defaulting that to zero would hide every row
+    -- the moment anyone dragged the bids scrollbar.
+    if bidRows then ui.bidVis = bidRows end
+    local vis = ui.bidVis or 0
+    if vis > 0 then ui.GrowBidRows(vis) end
+    ui.SkinNewRows(ui.bidRows)
+    FauxScrollFrame_Update(ui.bidScroll, total, vis, AUC_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.bidScroll)
+    local i = 1
+    while i <= table.getn(ui.bidRows) do
+        local row = ui.bidRows[i]
+        local r = (i <= vis) and rows[i + offset] or nil
+        if r then
+            ui.FillBidRow(row, r)
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+function ui.FillBidRow(row, r)
+    row.entry = r
+    if row.icon then
+        if r.texture then
+            row.icon:SetTexture(r.texture); row.icon:Show()
+        else
+            row.icon:Hide()
+        end
+    end
+    row.name:SetText(r.name)
+    row.name:SetTextColor(ui.QualityColor(r.quality))
+    row.qty:SetText("x" .. r.count)
+    row.unit:SetText(r.unit and util.FormatMoney(r.unit, true) or "\226\128\148")
+    row.bid:SetText(util.FormatMoney(r.bid or 0, true))
+    if r.buyout and r.buyout > 0 then
+        row.buyout:SetText(util.FormatMoney(r.buyout, true))
+    else
+        row.buyout:SetText("bid only")
+    end
+    -- THE BID AMOUNT IS NOT NECESSARILY YOURS, so the status column carries
+    -- what it means. While you are the high bidder that figure is yours and it
+    -- has already left your purse; once you are not, it is whoever beat you
+    -- and your gold is on its way back. See sell.BidderAuctions.
+    if r.winning then
+        row.status:SetText("winning")
+        row.status:SetTextColor(0.30, 0.85, 0.30)
+        row.bid:SetTextColor(C.text[1], C.text[2], C.text[3])
+    else
+        row.status:SetText("outbid")
+        row.status:SetTextColor(0.90, 0.30, 0.30)
+        -- Dimmed, because it is somebody else's number sitting in a column
+        -- headed "Bid" -- the one place this table can mislead at a glance.
+        row.bid:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    end
+    row.time:SetText(A.sell.TimeLeftText(r.timeLeft))
+    row:Show()
+end
+
 function ui.UpdateAuctionsList()
     if not ui.aucScroll then return end
     local sortKey = ui.aucSortKey or "unit"
@@ -10529,7 +11013,20 @@ function ui.UpdateAuctionsList()
 
     -- The count is what you OWN, not what this page shows. Reading the batch
     -- here is what made a full book look like fifty auctions.
-    ui.aucSummary:SetText("Your auctions: " .. owned .. " / " .. cap)
+    --
+    -- ...and what it would PAY. Per page, like every other figure on this
+    -- half, because the client only holds one page and a total spanning pages
+    -- it cannot see would be a guess wearing a total's clothes. The wording
+    -- says "at most" and names the bid-only auctions it could not count; see
+    -- ui.BookLine.
+    local _, bookNet, bookN, bookSkip = A.sell.BookValue(rows)
+    local head = "Your auctions: " .. owned .. " / " .. cap
+    local book = ui.BookLine(bookNet, bookN, bookSkip)
+    if book ~= "" then
+        head = head .. "   \226\128\162   " .. book
+        if pages > 1 then head = head .. " on this page" end
+    end
+    ui.aucSummary:SetText(head)
 
     if ui.aucPageText then
         if pages > 1 then
@@ -10584,8 +11081,15 @@ function ui.UpdateAuctionsList()
             .. "  Right-click a row to price it against the market.")
     end
 
-    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.auc,
-        AUC_ROW_H, AUC_ROWS_MAX)
+    -- THE SPLIT. How many rows each half gets is one decision taken here and
+    -- handed to both painters, because the two halves share one panel: a bids
+    -- table that sized itself would overlap the auctions table above it the
+    -- moment either changed, and nothing clips a list row.
+    local nBids = table.getn(ui.bidAuctions or {})
+    local vis, bidVis = ui.AucSplitRows(ui.WindowH(), nBids)
+    ui.LayoutAuctionsSplit(vis, bidVis)
+    ui.UpdateBidsList(bidVis)
+
     ui.GrowAucRows(vis)
     ui.SkinNewRows(ui.aucRows)
     FauxScrollFrame_Update(ui.aucScroll, total, vis, AUC_ROW_H)
@@ -13847,6 +14351,17 @@ A.RegisterEvent("AUCTION_OWNED_LIST_UPDATE", function()
     -- State-gated, per HARD RULE 16: this does nothing at all unless a Cancel
     -- All is actually in flight, which is every other time the event fires.
     ui.ContinueCancelAll()
+end)
+
+-- The bidder list arrived. A SEPARATE EVENT from the owner list, and that is
+-- the whole reason the lower half exists as its own read: nothing about
+-- AUCTION_OWNED_LIST_UPDATE says anything about what you have bid on.
+--
+-- Bounded per fire: one walk of at most 50 bidder rows, and only while the
+-- tab has been built. No item queries and no tooltip reads, so it cannot join
+-- a cache storm -- HARD RULE 16.
+A.RegisterEvent("AUCTION_BIDDER_LIST_UPDATE", function()
+    if ui.aucBuilt then ui.RefreshBids(false) end
 end)
 
 -- The mailbox updated (opened one, or took mail): log any AH sale mail so the

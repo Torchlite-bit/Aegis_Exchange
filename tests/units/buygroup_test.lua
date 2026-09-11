@@ -344,13 +344,29 @@ do
         end
         return n
     end
-    -- TWO, and the receiver is part of the needle on purpose. A third pool
-    -- registers the same way through a variable called `r`; counting that one
-    -- too would make this number change for a reason that has nothing to do
-    -- with the results table.
-    H.eq("both `row` pools still ask for right-clicks",
-         occurrences('row:RegisterForClicks("LeftButtonUp", "RightButtonUp")'),
-         2)
+    -- SCOPED TO THE FUNCTION, not counted across the file.
+    --
+    -- This was a count -- "exactly two `row:RegisterForClicks` lines" -- which
+    -- passed for the right reason and then broke for the wrong one the moment
+    -- the Auctions tab grew a third row pool that registers the same way. A
+    -- check whose number moves when an unrelated table is built is a check
+    -- that will be edited without being read. Ask the one function instead.
+    local function bodyOf(head)
+        local at = string.find(src, head, 1, true)
+        if not at then return "" end
+        local stop = string.find(src, "\nend\n", at, true)
+        return string.sub(src, at, stop or -1)
+    end
+    local resultRow = bodyOf("local function BuildResultRow(")
+    H.check("the results row is built at all", resultRow ~= "")
+    H.check("the results row asks for right-clicks",
+            string.find(resultRow,
+                'row:RegisterForClicks("LeftButtonUp", "RightButtonUp")',
+                1, true) ~= nil,
+            "without this the exact-match right-click never fires")
+    local groupRow = bodyOf("function ui.FillGroupRow(")
+    H.check("...and so does the group row it shares a pool with",
+            resultRow ~= groupRow)
 
     -- The button arrives in the `arg1` GLOBAL, never as a handler argument.
     -- HARD RULE 6, and getting it wrong here reads as "right-click selects".

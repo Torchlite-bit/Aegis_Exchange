@@ -18,6 +18,52 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.4]
+
+### Added
+- **The Auctions tab is split: your auctions above, your bids below.**
+
+  You asked for a Bids tab *or* a split, and this is the split. They are one
+  question — a bid is an outgoing commitment exactly the way a posted auction
+  is an incoming one, and both are decided by the same clock, so "what is my
+  gold tied up in, and what resolves soon" is answered by seeing them together
+  and answered badly by flipping between two tabs. It also keeps the sub-tab
+  strip at six.
+
+- **"At most X after the cut" on the auctions half** — what this page of your
+  book would pay if every auction on it sold at buyout, less the 5% consignment
+  cut, which comes off the sale rather than off the profit.
+  - It is a **maximum** and it says so. Nothing here claims anything will sell.
+  - **Bid-only auctions are counted separately and named**, never averaged in.
+    One with a 1c minimum bid could fetch anything, and a guess folded into a
+    total makes the whole total a guess — so the line reads `at most 412g after
+    the cut (2 bid-only not counted)`.
+  - Per page, like every other figure on that half, because the client only
+    holds one page of your book at a time.
+
+- **The bids half: what you have bid on, what you are winning, and what it has
+  committed.** Item, stack, unit, bid, buyout, status and time left, with the
+  same sorting, right-click-to-price, hover tooltip and row chrome the auctions
+  table has — the two halves are one table split in two.
+  - **"Committed" counts only what you are winning**, and that is the exact
+    figure rather than a cautious one: 1.12 takes the gold when you bid and
+    mails it back the moment someone beats you, so an outbid row is money you
+    already have. Counting it would report the same gold twice.
+  - **An outbid row shows the price to beat, dimmed, never a figure presented
+    as yours.** `bidAmount` on a bidder row is the auction's *current* bid, and
+    once you have been outbid it belongs to whoever beat you — 1.12 will not
+    tell you what you bid.
+  - **Paged at 50, with its own controls**, because `GetNumAuctionItems` hands
+    back a batch and a total for the bidder list exactly as it does for the
+    owner list — which this addon read only page 0 of for its whole life.
+  - **Time left is the client's 1–4 bucket, not a countdown**, and the line
+    above the table says so. Nothing finer exists on 1.12.
+
+- **No bids, no half.** The bottom collapses to the single line saying so and
+  hands every row back to the auctions table — which is what the tab was before
+  the split, and what it should look like again whenever the split has nothing
+  to add. That is the common case, and the split costs nothing there.
+
 ## [1.53.3]
 
 ### Fixed
@@ -5093,6 +5139,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

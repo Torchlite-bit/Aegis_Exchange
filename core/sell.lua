@@ -742,6 +742,158 @@ function sell.CancelOwnerAuction(i)
 end
 
 -- ---------------------------------------------------------------------------
+-- What the book is worth, and what you have bid
+-- ---------------------------------------------------------------------------
+
+-- What this page of your auctions would pay IF EVERY ONE OF THEM SOLD AT
+-- BUYOUT. Returns gross, net, counted, skipped.
+--
+-- `skipped` is not a footnote. A bid-only auction has no buyout, so there is
+-- no figure to add -- it could fetch its minimum bid or ten times that, and
+-- averaging a guess into a total makes the whole total a guess. It is counted
+-- separately and the UI says how many, because "3,412g (2 bid-only auctions
+-- not counted)" is an answer a player can act on and "3,412g" alone is not.
+--
+-- THE CUT COMES OFF THE SALE. Five percent of what the buyer pays leaves
+-- before you ever see it, the same convention ui.ListNet uses on the Crafting
+-- tab -- one flooring at the end, not one per row, because the rounding of a
+-- hundred separate sales is noise next to the fact that this is a maximum.
+--
+-- And it IS a maximum: nothing here says anything will sell. Label it so.
+function sell.BookValue(rows, cut)
+    cut = cut or sell.CUT
+    local gross, counted, skipped = 0, 0, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 then
+            gross = gross + r.buyout
+            counted = counted + 1
+        else
+            skipped = skipped + 1
+        end
+        i = i + 1
+    end
+    return gross, math.floor(gross * (1 - cut)), counted, skipped
+end
+
+-- ---- your bids ----------------------------------------------------------
+
+-- The bidder list is paged exactly like the owner list, and for the same
+-- reason: the client holds one page and every index is an index into it.
+sell.BIDDER_PAGE_SIZE = 50
+
+-- Ask the server for one page of the auctions you have bid on (0-indexed).
+-- The reply arrives as AUCTION_BIDDER_LIST_UPDATE.
+--
+-- Seeds AuctionFrameBidder.page for the same reason RequestOwnerAuctions seeds
+-- AuctionFrameAuctions.page: we replace the stock AH window, so Blizzard's
+-- Bidder tab may never have been shown and its own handler does arithmetic on
+-- a field its OnShow would have set.
+function sell.RequestBidderAuctions(page)
+    if AuctionFrameBidder and AuctionFrameBidder.page == nil then
+        AuctionFrameBidder.page = 0
+    end
+    page = page or 0
+    if page < 0 then page = 0 end
+    sell.bidderPage = page
+    if AuctionFrameBidder then AuctionFrameBidder.page = page end
+    if GetBidderAuctionItems then GetBidderAuctionItems(page) end
+end
+
+-- Which page of bids the client holds, and how many there are.
+-- Returns page (0-indexed), pageCount, total.
+function sell.BidderPageInfo()
+    local total = 0
+    if GetNumAuctionItems then
+        local _, t = GetNumAuctionItems("bidder")
+        total = t or 0
+    end
+    local pages = math.ceil(total / sell.BIDDER_PAGE_SIZE)
+    if pages < 1 then pages = 1 end
+    local page = sell.bidderPage or 0
+    -- Bids resolve while you are looking at them, so the page you were on can
+    -- stop existing. Same clamp the owner list needs.
+    if page > pages - 1 then page = pages - 1 end
+    return page, pages, total
+end
+
+-- The auctions you have bid on, from the "bidder" list.
+--
+-- `bidAmount` IS THE AUCTION'S CURRENT BID, NOT YOURS. That is the whole
+-- subtlety of this list and it decides how every number below is labelled.
+-- While `highBidder` is set, the current bid is yours -- it is what you will
+-- pay and it has already left your purse. Once someone outbids you the client
+-- still reports a bid amount, but it is THEIRS; your gold is already on its
+-- way back by mail and nothing in the 1.12 API will tell you what you bid.
+-- So an outbid row shows the price to beat, never a figure presented as yours.
+function sell.BidderAuctions()
+    local rows = {}
+    if not GetNumAuctionItems or not GetAuctionItemInfo then return rows end
+    local n = GetNumAuctionItems("bidder")
+    local i = 1
+    while i <= (n or 0) do
+        local name, texture, count, quality, canUse, level, minBid, minInc,
+              buyout, bidAmount, highBidder, owner =
+              GetAuctionItemInfo("bidder", i)
+        if name then
+            count = count or 1
+            local itemId
+            if GetAuctionItemLink then
+                itemId = util.ItemIdFromLink(GetAuctionItemLink("bidder", i))
+            end
+            local timeLeft
+            if GetAuctionItemTimeLeft then
+                timeLeft = GetAuctionItemTimeLeft("bidder", i)
+            end
+            local bid = bidAmount or 0
+            table.insert(rows, {
+                index    = i,
+                name     = name,
+                texture  = texture,
+                count    = count,
+                quality  = quality,
+                bid      = bid,
+                unit     = (bid > 0) and math.floor(bid / count) or nil,
+                minBid   = minBid or 0,
+                minInc   = minInc or 0,
+                buyout   = buyout or 0,
+                winning  = (highBidder and highBidder ~= 0) and true or false,
+                timeLeft = timeLeft,
+                owner    = owner,
+                itemId   = itemId,
+            })
+        end
+        i = i + 1
+    end
+    return rows
+end
+
+-- What your bids add up to. Returns committed, winning, outbid.
+--
+-- COMMITTED COUNTS ONLY THE ROWS YOU ARE WINNING, and that is the exact figure
+-- rather than a cautious one: 1.12 takes the gold when you bid and mails it
+-- back the moment someone beats you, so an outbid row is money you already
+-- have. Adding those in would double-count gold sitting in your purse, and
+-- adding the price-to-beat instead would report a number you never agreed to
+-- pay.
+function sell.BidTotals(rows)
+    local committed, winning, outbid = 0, 0, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.winning then
+            committed = committed + (r.bid or 0)
+            winning = winning + 1
+        else
+            outbid = outbid + 1
+        end
+        i = i + 1
+    end
+    return committed, winning, outbid
+end
+
+-- ---------------------------------------------------------------------------
 -- Vendor list: bag items worth MORE at a vendor than on the AH
 -- ---------------------------------------------------------------------------
 

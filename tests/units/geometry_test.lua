@@ -808,6 +808,9 @@ loadTable("SELLL")
 -- BEFORE LISTBOX: the three Crafting bands live in CRAFTL and LISTBOX reads
 -- them, so loading LISTBOX first indexes a nil table.
 loadTable("CRAFTL")
+-- ...and AUCL for the same reason: the Auctions panel is split in two and
+-- LISTBOX derives BOTH of its auction boxes from AUCL's bands.
+loadTable("AUCL")
 loadTable("LISTBOX")
 
 do
@@ -846,8 +849,18 @@ do
     table.insert(LISTS, { name = "Crafting", box = LISTBOX.craft,
                           rowH = CRAFT_ROW_H, max = mx })
     _, h = pairConst("AUC_ROWS", "AUC_ROW_H")
+    AUC_ROW_H = h
+    AUC_ROWS_MAX = constant("AUC_ROWS_MAX")
+    -- BOTH auction boxes. The panel is split -- your auctions above, your bids
+    -- below -- and LISTBOX.auc is the box the top half gets when the bottom
+    -- half is COLLAPSED, which is what it looks like whenever you have no
+    -- bids. LISTBOX.aucSplit is the same box with the bids table's own column
+    -- headers taken out of it. Checking only one of them leaves the other free
+    -- to grow a band that pushes rows past the bottom of the panel.
     table.insert(LISTS, { name = "Auctions", box = LISTBOX.auc,
-                          rowH = h, max = constant("AUC_ROWS_MAX") })
+                          rowH = h, max = AUC_ROWS_MAX })
+    table.insert(LISTS, { name = "Auctions (split)", box = LISTBOX.aucSplit,
+                          rowH = h, max = AUC_ROWS_MAX })
     _, h = pairConst("HIST_ROWS", "HIST_ROW_H")
     table.insert(LISTS, { name = "History", box = LISTBOX.hist,
                           rowH = h, max = constant("HIST_ROWS_MAX") })
@@ -859,7 +872,7 @@ do
                           rowH = h, max = constant("LIST_ROWS_MAX") })
 end
 
-H.eq("every list is accounted for", table.getn(LISTS), 6)
+H.eq("every list is accounted for", table.getn(LISTS), 7)
 
 for _, L in ipairs(LISTS) do
     local function area(winH)
@@ -909,6 +922,173 @@ H.eq("...and so does a nonsense one",
      ui.ListRowsAt(-500, LISTBOX.auc, 21, 32), 1)
 H.eq("a missing box is survivable", ui.ListRowsAt(MAX_H, nil, 21, 32), 1)
 H.eq("...and a zero row height", ui.ListRowsAt(MAX_H, LISTBOX.auc, 0, 32), 1)
+
+-- ---------------------------------------------------------------------------
+H.section("the Auctions panel divides between two tables")
+-- ---------------------------------------------------------------------------
+
+-- ONE PANEL, TWO LISTS, and nothing clips a list row -- these rows are not the
+-- scroll frame's scroll child, so a row that hangs past the bottom of its half
+-- draws straight through the other table. So the divide is a ROW COUNT taken
+-- once and handed to both painters, never two lists each sizing themselves.
+do
+    local fn, err = loadstring(extract("function ui.AucSplitRows("),
+                               "AucSplitRows")
+    if not fn then error("will not compile: " .. tostring(err)) end
+    fn()
+end
+
+-- NO BIDS, NO HALF. This is the common case -- most players have never bid on
+-- anything -- and the split has to cost nothing there: the bottom collapses to
+-- the one line saying so and every row goes back to the auctions table.
+for _, winH in ipairs({ MIN_H, 600, 700, MAX_H }) do
+    local auc, bid = ui.AucSplitRows(winH, 0)
+    H.eq("no bids gives the bids half nothing at " .. winH, bid, 0)
+    H.eq("...and the auctions half everything at " .. winH, auc,
+         ui.ListRowsAt(winH, LISTBOX.auc, AUC_ROW_H, AUC_ROWS_MAX))
+end
+
+-- With bids, both halves get rows, neither gets none, and together they never
+-- ask for more rows than the panel has room for.
+for _, winH in ipairs({ MIN_H, 600, 700, MAX_H }) do
+    local auc, bid = ui.AucSplitRows(winH, 50)
+    local area = ui.PanelHeightAt(winH) - LISTBOX.aucSplit.top
+                 - LISTBOX.aucSplit.bot
+    H.check("the auctions half gets rows at " .. winH, auc >= 1, auc)
+    H.check("the bids half gets rows at " .. winH, bid >= 1, bid)
+    H.check("together they fit the panel at " .. winH,
+            (auc + bid) * AUC_ROW_H <= area,
+            (auc + bid) .. " x " .. AUC_ROW_H .. " > " .. area)
+    -- The auctions half is the one that pages at 50, so it takes the larger
+    -- share. A split that inverted would read as the bids being the point.
+    H.check("the auctions half is the larger at " .. winH, auc >= bid,
+            auc .. " vs " .. bid)
+end
+
+-- A taller window gives BOTH halves more, which is the assertion a return to
+-- measuring a two-corner-anchored frame fails.
+do
+    local a1, b1 = ui.AucSplitRows(MIN_H, 50)
+    local a2, b2 = ui.AucSplitRows(MAX_H, 50)
+    H.check("a taller window grows the auctions half", a2 > a1, a1 .. " -> " .. a2)
+    H.check("...and the bids half", b2 > b1, b1 .. " -> " .. b2)
+end
+
+-- THE BIDS HALF NEVER TAKES MORE ROWS THAN YOU HAVE BIDS. Ten empty rows under
+-- three real ones is space the auctions table wanted, and the auctions table
+-- is the one that runs to 120.
+do
+    local auc, bid = ui.AucSplitRows(MAX_H, 2)
+    H.eq("two bids get two rows", bid, 2)
+    local wide = ui.AucSplitRows(MAX_H, 50)
+    H.check("...and the auctions half keeps the rest", auc > wide,
+            auc .. " vs " .. wide)
+end
+
+-- The minima hold at the smallest window the addon allows, which is also the
+-- size it OPENS at on a fresh install.
+do
+    local auc, bid = ui.AucSplitRows(MIN_H, 50)
+    H.check("the auctions half keeps its floor at MIN_H", auc >= AUCL.auc_min,
+            auc)
+    H.check("...and the bids half keeps its own", bid >= AUCL.bid_min, bid)
+end
+
+-- Degenerate input, for the reason ui.ListRowsAt has the same section: this
+-- runs before UIParent has been measured on some logins, and a zero row count
+-- reads as a broken tab.
+do
+    local auc, bid = ui.AucSplitRows(0, 50)
+    H.check("an unmeasured window still shows an auctions row", auc >= 1, auc)
+    H.check("...and a bids row", bid >= 1, bid)
+    auc, bid = ui.AucSplitRows(-500, 50)
+    H.check("...and so does a nonsense one", auc >= 1 and bid >= 1,
+            auc .. "/" .. bid)
+    auc, bid = ui.AucSplitRows(MAX_H, nil)
+    H.eq("no bid count at all is no bids", bid, 0)
+end
+
+-- The pools are finite. A window dragged past the cap must not ask either
+-- painter for a row that was never built -- the rows are created on demand up
+-- to a ceiling, and asking for row 40 of a pool of 32 indexes nil.
+do
+    local auc, bid = ui.AucSplitRows(100000, 500)
+    H.check("the auctions pool ceiling holds", auc <= AUC_ROWS_MAX, auc)
+    H.check("the bids pool ceiling holds", bid <= AUCL.bid_max, bid)
+    -- ...and again after the bids half has handed its spare rows back, which
+    -- is the path that can push the auctions half over on its own.
+    auc, bid = ui.AucSplitRows(100000, 5)
+    H.check("the ceiling holds after the handback too", auc <= AUC_ROWS_MAX,
+            auc)
+    H.eq("...and the bids half still only takes what it can fill", bid, 5)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("...and the split is actually wired to the panel")
+-- ---------------------------------------------------------------------------
+
+-- The arithmetic above is testable; the anchoring is not, so these read the
+-- source. Each one is a fault that compiles, loads, and only shows as two
+-- tables drawn through each other on a window somebody has resized.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    local function bodyOf(head)
+        local at = string.find(src, head, 1, true)
+        if not at then return "" end
+        local stop = string.find(src, "\nend\n", at, true)
+        return string.sub(src, at, stop or -1)
+    end
+    local function says(body, needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+
+    -- A FRAME PINNED AT BOTH ENDS TAKES ITS HEIGHT FROM ITS ANCHORS AND
+    -- SILENTLY IGNORES SetHeight. Every other list in this window is anchored
+    -- TOPLEFT and BOTTOMRIGHT, which is exactly why this one is easy to
+    -- "fix" back -- and then the auctions box runs to the bottom of the panel
+    -- again with the bids table drawn on top of it.
+    local build = bodyOf("function ui.BuildAuctionsTab(")
+    H.check("the Auctions tab is built at all", build ~= "")
+    H.check("the auctions list is not anchored to the panel's bottom",
+            not says(build, 'scroll:SetPoint("BOTTOMRIGHT"'),
+            "its height IS the split; a bottom anchor discards SetHeight")
+
+    -- SetPoint ADDS a point on 1.12. Re-anchoring without clearing leaves a
+    -- widget pinned to its old position AND its new one, which stretches it
+    -- rather than moving it -- and only after the first resize.
+    local layout = bodyOf("function ui.LayoutAuctionsSplit(")
+    H.check("the split layout exists", layout ~= "")
+    for _, w in ipairs({ "ui.bidSummary", "ui.bidNextBtn", "ui.bidPageText",
+                         "ui.bidPrevBtn", "ui.bidScroll" }) do
+        H.check(w .. " is cleared before it is re-anchored",
+                says(layout, w .. ":ClearAllPoints()"), w)
+    end
+    H.check("...and so are the bids headers",
+            says(layout, "hb:ClearAllPoints()"))
+
+    -- ONE DECISION, HANDED TO BOTH PAINTERS. A bids table that sized itself
+    -- would overlap the auctions table the moment either changed.
+    local paint = bodyOf("function ui.UpdateAuctionsList(")
+    H.check("the painter asks for the split", says(paint, "ui.AucSplitRows("))
+    H.check("...places both halves with it",
+            says(paint, "ui.LayoutAuctionsSplit(vis, bidVis)"))
+    H.check("...and paints the bids half with the same number",
+            says(paint, "ui.UpdateBidsList(bidVis)"))
+
+    -- TWO LISTS, TWO REQUESTS, TWO REPLIES. Nothing about the owner list says
+    -- anything about what you have bid on, so asking only for the first is how
+    -- the lower half sits empty on a tab that has just refreshed.
+    local refresh = bodyOf("function ui.RefreshAuctions(")
+    H.check("a refresh asks for the bids too",
+            says(refresh, "A.sell.RequestBidderAuctions(0)"))
+    H.check("...and reads them back",
+            says(refresh, "ui.bidAuctions = A.sell.BidderAuctions()"))
+    H.check("the bidder reply repaints the tab",
+            says(src, 'A.RegisterEvent("AUCTION_BIDDER_LIST_UPDATE"'),
+            "the owner-list event never fires for a bid")
+end
 
 -- ---------------------------------------------------------------------------
 H.section("The window OPENS at a size it was designed for")
