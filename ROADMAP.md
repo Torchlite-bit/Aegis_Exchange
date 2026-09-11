@@ -2390,6 +2390,53 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The cart, and demo recipes — v1.53.13
+
+**The cart chains off the sell button rather than the frame.** v1.51.0 learned
+that the merchant frame's TABS are the only anchor that tracks pfUI -- pfUI
+moves the window but the tabs move with it, and every frame-relative offset
+tried before drifted between the two skins. The cart inherits that by hanging
+off `ui.merchantBtn`, which is already anchored there, rather than re-deriving
+an offset that would drift again.
+
+**It is the only one of our external buttons that is an icon.** The other three
+say what they do because what they do is a sentence ("sell 6 marked"); this one
+is a toggle for a window, sits beside a button that already carries a sentence,
+and has a count to show. A second wide text button would not fit that row at
+pfUI's narrower merchant frame. It sets `aegisNoSkin` for the reason list rows
+do: SkinButton draws its plate through the icon's own edge pixels.
+
+**Counting the list is a walk**, so the badge is refreshed from the same
+once-per-frame flush the window uses and never from `BAG_UPDATE` directly --
+which storms hardest while a merchant is open and the player is buying.
+
+**Demo recipes are chosen to exercise the list, not to fill it.** One of the
+four is a REAGENT of another, which is the only way the sub-reagent expansion
+runs at all; two reagents are vendor-sold so the source choice has something to
+choose. `craft.DEMO_HAVE` part-gathers some of them, because a list where every
+line reads 0 / 12 has no progress on it and the "12 / 42" a reagent row exists
+to show has nothing to show.
+
+**Three findings about the tests themselves, and all three are the test's
+fault rather than the code's.**
+
+**A body extractor that ran away.** `bodyOf` stopped at `"\nend\n"`, which an
+event handler does not have -- it closes with `end)`. Against one it found no
+terminator and returned THE REST OF THE FILE, so every check written against
+that body passed on text from somewhere else entirely. One failed loudly, which
+is the only reason the rest were not quietly meaningless: **a check that reads
+the whole file will find almost anything you ask it for.** The terminator is a
+parameter now and each extraction is followed by a length assertion.
+
+**A sabotage testing something no source check can see.** Planting
+`if true then return end` above a call leaves the call in the file; a text
+check cannot tell that it has become unreachable. Rewritten as a deletion.
+
+**A sabotage narrower than the property it attacked.** "Nothing gathered"
+blanked one of five entries in `DEMO_HAVE`, and the other four went on proving
+the property -- so it went unnoticed. **Sabotage granularity has to match the
+property the check states.**
+
 ### A pcall that succeeds is not a call that worked — v1.53.12
 
 **The gradient came out a solid block of green.** `SetGradientAlpha` was

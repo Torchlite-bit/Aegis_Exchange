@@ -578,4 +578,129 @@ do
             db.DemoSeed("Corvid") ~= db.DemoSeed("Divroc"))
 end
 
+-- ---------------------------------------------------------------------------
+H.section("demo mode reaches the Crafting tab too")
+-- ---------------------------------------------------------------------------
+
+-- SAME DISCIPLINE AS THE GOLD: consulted instead of the store, never written
+-- to it. A recipe list is the other half of what the demo is for -- the
+-- shopping list and the crafting tree have nothing to draw on a fresh install
+-- either.
+do
+    local craft = A.craft
+    W.Reset()
+    A = W.LoadCore()
+    W.FireAddonLoaded(A)
+    db, craft = A.db, A.craft
+
+    H.eq("no recipes to begin with", table.getn(craft.Projects()), 0)
+
+    db.demo = true
+    local demo = craft.Projects()
+    H.check("demo mode has recipes", table.getn(demo) > 0, table.getn(demo))
+    H.eq("...the ones it defines",
+         table.getn(demo), table.getn(craft.DEMO_PROJECTS))
+
+    db.demo = nil
+    H.eq("turning it off puts them away", table.getn(craft.Projects()), 0)
+
+    -- NOTHING IS WRITTEN. The store is the same as it was.
+    craft.AddProject({ name = "Real Thing", itemId = 1, reagents = {} })
+    H.eq("a real recipe is still the only stored one",
+         table.getn(craft.Projects()), 1)
+    db.demo = true
+    H.check("...and demo mode does not add to it",
+            table.getn(craft.Projects()) == table.getn(craft.DEMO_PROJECTS))
+    db.demo = nil
+    H.eq("...nor take from it", craft.Projects()[1].name, "Real Thing")
+
+    -- ---- the shape of the generated recipes -----------------------------
+
+    -- EVERY ONE IS COMPLETE, or the shopping list divides by a nil somewhere.
+    local i = 1
+    while i <= table.getn(craft.DEMO_PROJECTS) do
+        local p = craft.DEMO_PROJECTS[i]
+        H.check("demo recipe " .. i .. " is named",
+                p.name and p.name ~= "", tostring(p.name))
+        H.check("...has an item id", p.itemId ~= nil, p.name)
+        H.check("...wants a real number", (p.want or 0) >= 1, p.name)
+        H.check("...and has reagents", table.getn(p.reagents or {}) > 0, p.name)
+        local r = 1
+        while r <= table.getn(p.reagents) do
+            local g = p.reagents[r]
+            H.check(p.name .. " reagent " .. r .. " is named",
+                    g.name and g.name ~= "")
+            H.check("...has an id", g.itemId ~= nil, g.name)
+            H.check("...and a count", (g.count or 0) >= 1, g.name)
+            r = r + 1
+        end
+        i = i + 1
+    end
+
+    -- CHOSEN TO EXERCISE THE LIST, not just to fill it. One of the recipes is
+    -- also a REAGENT of another, which is the sub-reagent expansion -- without
+    -- it the demo never reaches the branch that turns "short of a Bolt" into
+    -- "buy the Linen Cloth to make one".
+    do
+        local made = {}
+        local k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            made[craft.DEMO_PROJECTS[k].itemId] = true
+            k = k + 1
+        end
+        local nested = false
+        k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            local rs = craft.DEMO_PROJECTS[k].reagents
+            local r = 1
+            while r <= table.getn(rs) do
+                if made[rs[r].itemId] then nested = true end
+                r = r + 1
+            end
+            k = k + 1
+        end
+        H.check("one demo recipe is a reagent of another", nested,
+                "without it the sub-reagent expansion is never exercised")
+    end
+
+    -- SOME OF EACH, NOT ALL AND NOT NONE. A list where every line reads 0 / 12
+    -- has no progress on it, and the "12 / 42" a reagent row exists to show is
+    -- the thing worth looking at.
+    do
+        -- ASKED OF THE RECIPES, not of the table. Counting entries in
+        -- DEMO_HAVE only proves the table is not empty -- it stays green with
+        -- every id in it pointing at something no recipe wants, which is a
+        -- demo where every line still reads 0 / n.
+        local anyGathered = false
+        local k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            local rs = craft.DEMO_PROJECTS[k].reagents
+            local r = 1
+            while r <= table.getn(rs) do
+                if (craft.DEMO_HAVE[rs[r].itemId] or 0) > 0 then
+                    anyGathered = true
+                end
+                r = r + 1
+            end
+            k = k + 1
+        end
+        H.check("a reagent the recipes actually want is part-gathered",
+                anyGathered,
+                "counting DEMO_HAVE's own entries proves nothing about them")
+        local allCovered = true
+        local k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            local rs = craft.DEMO_PROJECTS[k].reagents
+            local r = 1
+            while r <= table.getn(rs) do
+                if not craft.DEMO_HAVE[rs[r].itemId] then allCovered = false end
+                r = r + 1
+            end
+            k = k + 1
+        end
+        H.check("...but not all of them, so there is something to buy",
+                not allCovered)
+    end
+end
+
 os.exit(H.report("purse"))

@@ -2671,6 +2671,89 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the cart, and demo recipes (v1.53.13) ---------------------------
+
+    # The cart placed by a frame-relative offset instead of chained off the
+    # button that is anchored to the TABS. pfUI moves the merchant window but
+    # the tabs move with it -- every frame-relative offset tried before
+    # drifted between the two skins.
+    ('cart-anchored-to-the-frame-edge', 'ui/frame.lua',
+     '        ui.SetExternalPoint(b, "LEFT", ui.merchantBtn, "RIGHT", 4, 0)',
+     '        ui.SetExternalPoint(b, "TOPRIGHT", MerchantFrame, "TOPRIGHT", -40, -40)',
+     'shoplist'),
+
+    # ...or never attached at all, so the merchant frame has no cart on it.
+    ('cart-attached-before-the-sell-button', 'ui/frame.lua',
+     '        ui.merchantBtn = b\n        if A.skin then A.skin.ApplyExternal() end\n    end\n    ui.AttachShopCartButton()',
+     '        ui.merchantBtn = b\n        if A.skin then A.skin.ApplyExternal() end\n    end',
+     'shoplist'),
+
+    # The cart left to pfUI's SkinButton, which draws its plate through the
+    # icon's own edge pixels -- the same fault list rows opt out of.
+    ('cart-is-plated-by-pfui', 'ui/frame.lua',
+     '    b.aegisNoSkin = true\n\n    local icon = b:CreateTexture(nil, "ARTWORK")',
+     '    local icon = b:CreateTexture(nil, "ARTWORK")',
+     'shoplist'),
+
+    # The badge counted inside the BAG_UPDATE handler. Counting the list walks
+    # every tracked recipe's reagents, and that event storms hardest while a
+    # merchant window is open and the player is buying -- the shape HARD RULE
+    # 16 exists for.
+    ('cart-counts-inside-bag-update', 'ui/frame.lua',
+     '    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then\n        ui.shopDriver:Show()\n    end',
+     '    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then\n        ui.RefreshShopCartButton()\n    end',
+     'shoplist'),
+
+    # ...and the other way: the flush stops refreshing it, so the badge keeps
+    # whatever count it had when the merchant opened.
+    ('cart-badge-never-flushed', 'ui/frame.lua',
+     '        ui.RefreshShopCartButton()\n    end)',
+     '    end)',
+     'shoplist'),
+
+    # The cart left reading as pressed after the list is closed by its own X
+    # button, because only the cart's own click path told it.
+    # A DELETION, not an early return. The first version of this planted
+    # `if true then return end` above the call -- which leaves the line in the
+    # file, and a check that reads source text structurally cannot see that it
+    # has become unreachable. The sabotage was testing something no source
+    # check could catch, which is the sabotage's fault and not the suite's.
+    ('cart-does-not-follow-the-window', 'ui/frame.lua',
+     '    -- The cart reads as pressed while the list is up, so it has to be told\n    -- when the list goes down -- including by its own X button.\n    ui.RefreshShopCartButton()',
+     '    local _ = ui',
+     'shoplist'),
+
+    # Demo mode no longer substituting the recipe list, so the Crafting tab
+    # and the shopping list have nothing to draw -- which is half of what the
+    # mode exists for.
+    ('demo-recipes-written-to-the-store', 'core/buy.lua',
+     '    if A.db and A.db.demo then return craft.DEMO_PROJECTS end',
+     '    local _ = A',
+     'purse'),
+
+    # ...and the one recipe that is ALSO a reagent of another stripped, which
+    # takes the sub-reagent expansion out of the demo entirely -- the branch
+    # that turns "short of a Bolt" into "buy the Linen Cloth to make one".
+    ('demo-recipes-have-no-reagents', 'core/buy.lua',
+     '    { name = "Bolt of Linen Cloth", itemId = 2996, want = 2, reagents = {\n        { name = "Linen Cloth", itemId = 2589, count = 2 },\n    } },',
+     '    { name = "Bolt of Linen Cloth", itemId = 2996, want = 2, reagents = {} },',
+     'purse'),
+
+    # Nothing part-gathered, so every reagent line reads 0 / n and the
+    # "12 / 42" progress a reagent row exists to show has nothing to show.
+    # THE WHOLE TABLE, not one entry. The property is "some progress exists",
+    # so blanking one of five leaves the other four proving it and the
+    # sabotage proves nothing -- it went unnoticed for exactly that reason.
+    # Sabotage granularity has to match the property the check states.
+    ('demo-has-nothing-gathered', 'core/buy.lua',
+     '''    [2589] = 14,     -- Linen Cloth
+    [2996] = 5,      -- Bolt of Linen Cloth
+    [2320] = 2,      -- Coarse Thread
+    [3355] = 3,      -- Wild Steelbloom
+    [3860] = 4,      -- Mithril Bar''',
+     '    [999999] = 14,   -- nothing any recipe wants',
+     'purse'),
+
     # ---- demo data, and the gradient that could not work (v1.53.12) ------
 
     # The wash under the line drawn solid. It is the same colour as the line,

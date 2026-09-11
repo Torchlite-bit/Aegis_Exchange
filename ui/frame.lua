@@ -8978,6 +8978,13 @@ end
 -- bank half is whatever the last visit stored.
 function ui.CraftHaveOf(itemId, live)
     if not itemId or not A.db or not A.db.InventoryRows then return 0 end
+    -- Demo mode answers for itself, for the reason db.DemoSeries does: the
+    -- generated numbers are consulted instead of the real ones and never
+    -- written anywhere. Without it every reagent reads 0 / n and the progress
+    -- a reagent row exists to show has nothing to show.
+    if A.db.demo then
+        return (A.craft and A.craft.DEMO_HAVE and A.craft.DEMO_HAVE[itemId]) or 0
+    end
     return ui.OwnedFromRows(A.db.InventoryRows(itemId, live))
 end
 
@@ -14632,7 +14639,113 @@ function ui.AttachMerchantButton()
         ui.merchantBtn = b
         if A.skin then A.skin.ApplyExternal() end
     end
+    ui.AttachShopCartButton()
     ui.RefreshMerchantButton()
+end
+
+-- The shopping-list button on the merchant frame.
+--
+-- AN ICON, NOT A LABEL, and it is the only one of our external buttons that
+-- is. The other three say what they do because what they do is a sentence
+-- ("sell 6 marked"); this one is a toggle for a window, sits beside a button
+-- that already carries a sentence, and has a count to show. A second wide text
+-- button in that row would not fit next to the first at pfUI's narrower
+-- merchant frame.
+--
+-- 1.12 HAS NO SHOPPING-CART ICON. The closest thing in the stock art is a bag,
+-- which is also what the game itself uses for "things you are carrying", so
+-- that is what this is.
+function ui.AttachShopCartButton()
+    if not MerchantFrame or ui.shopCartBtn then return end
+    local b = CreateFrame("Button", "AegisExchangeShopCartButton",
+                          MerchantFrame)
+    b:SetWidth(26); b:SetHeight(26)
+    -- NOT SKINNED. It is our own art in a 26px square; pfUI's SkinButton draws
+    -- its plate through the icon's own edge pixels, which is the same fault
+    -- ui.AddRowChrome rows opt out of.
+    b.aegisNoSkin = true
+
+    local icon = b:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", b, "TOPLEFT", 2, -2)
+    icon:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
+    icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_08")
+    b.icon = icon
+
+    local edge = b:CreateTexture(nil, "BACKGROUND")
+    edge:SetAllPoints(b)
+    edge:SetTexture(C.border[1], C.border[2], C.border[3], 0.85)
+    b.edge = edge
+
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+
+    -- HOW MANY ARE LEFT TO BUY, on the icon. The whole reason to notice this
+    -- button at a vendor is that there is something on the list; a button that
+    -- looks identical whether the list has nine items or none is one you stop
+    -- looking at.
+    local count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+    count:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, 2)
+    count:SetTextColor(1, 1, 1)
+    b.count = count
+
+    -- Beside the sell button, which is already anchored to the TABS -- the one
+    -- placement that tracks pfUI, because pfUI moves the merchant window but
+    -- the tabs move with it. Chaining off it inherits that rather than
+    -- re-deriving an offset that drifted between the two skins.
+    if ui.merchantBtn then
+        ui.SetExternalPoint(b, "LEFT", ui.merchantBtn, "RIGHT", 4, 0)
+    else
+        ui.SetExternalPoint(b, "TOP", MerchantFrame, "BOTTOM", 0, -6)
+    end
+    b:SetFrameStrata("HIGH")
+
+    b:SetScript("OnClick", function() ui.ToggleShopWindow() end)
+    b:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Aegis shopping list", 1, 1, 1)
+        local n = ui.ShopCartCount()
+        if n > 0 then
+            GameTooltip:AddLine(n .. " still to buy",
+                                C.income[1], C.income[2], C.income[3])
+        else
+            GameTooltip:AddLine("Nothing left to buy", 0.7, 0.7, 0.7)
+        end
+        GameTooltip:AddLine("Click to show or hide it. Also /aex shop.",
+                            C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    ui.shopCartBtn = b
+    ui.RefreshShopCartButton()
+end
+
+-- How many lines are still to buy. Its own function because both the button's
+-- badge and its tooltip ask, and because it is the one place that has to walk
+-- the list -- see the note on cost below.
+function ui.ShopCartCount()
+    ui.FlattenCraft()
+    return table.getn(ui.ShoppingShortRows(ui.craftFlat))
+end
+
+-- The badge, and whether the button reads as pressed.
+--
+-- CALLED FROM MERCHANT_SHOW AND FROM THE BAG FLUSH, never from BAG_UPDATE
+-- directly: ui.ShopCartCount rebuilds the whole shopping list, which is a walk
+-- of every tracked recipe's reagents. That is the shape HARD RULE 16 forbids
+-- in a handler, and a merchant window being open is exactly when that event
+-- storms.
+function ui.RefreshShopCartButton()
+    if not ui.shopCartBtn then return end
+    local n = ui.ShopCartCount()
+    ui.shopCartBtn.count:SetText(n > 0 and n or "")
+    -- Dimmed with nothing to buy rather than hidden: a button that vanishes is
+    -- one you cannot press to check, and "nothing left" is an answer worth
+    -- being able to ask for.
+    ui.shopCartBtn.icon:SetAlpha(n > 0 and 1 or 0.45)
+    local open = ui.shopFrame and ui.shopFrame:IsVisible()
+    ui.shopCartBtn.edge:SetTexture(
+        open and C.gold[1] or C.border[1],
+        open and C.gold[2] or C.border[2],
+        open and C.gold[3] or C.border[3], 0.85)
 end
 
 function ui.RefreshMerchantButton()
@@ -15913,6 +16026,10 @@ function ui.BuildShopWindow()
         if ui.shopFrame and ui.shopFrame:IsVisible() then
             ui.RefreshShopWindow()
         end
+        -- The badge follows the same flush. It is behind the same dirty flag
+        -- for the same reason: counting the list is a walk, and BAG_UPDATE
+        -- storms hardest while a merchant is open.
+        ui.RefreshShopCartButton()
     end)
     return f
 end
@@ -15954,10 +16071,14 @@ function ui.ShowShopWindow()
     ui.RestoreShopPoint()
     ui.shopFrame:Show()
     ui.RefreshShopWindow()
+    ui.RefreshShopCartButton()
 end
 
 function ui.HideShopWindow()
     if ui.shopFrame then ui.shopFrame:Hide() end
+    -- The cart reads as pressed while the list is up, so it has to be told
+    -- when the list goes down -- including by its own X button.
+    ui.RefreshShopCartButton()
 end
 
 function ui.ToggleShopWindow()
@@ -16045,6 +16166,11 @@ end)
 -- O(1): a flag and a Show. See ui.shopDriver.
 A.RegisterEvent("BAG_UPDATE", function()
     if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end
+    -- ...and while the cart is on screen, so its badge follows what you buy.
+    -- Still only a flag and a Show.
+    if ui.shopCartBtn and ui.shopCartBtn:IsVisible() then
+        ui.shopDriver:Show()
+    end
 end)
 
 SLASH_AEGISEXCHANGE1 = "/aex"
@@ -16235,16 +16361,24 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 .. " you can see what it looks like with a real history.")
             ChatMsg("  Nothing is saved and nothing real is touched. /aex demo"
                 .. " again, or a /reload, turns it off.")
+            ChatMsg("  The Crafting tab and the shopping list get four"
+                .. " made-up recipes too, with some reagents part-gathered.")
             ChatMsg("  The IN / OUT / NET row still reads your REAL ledger;"
-                .. " only the gold line is invented.")
+                .. " only the gold line and the recipes are invented.")
         else
             ChatMsg("Aegis: chart demo mode OFF.")
         end
-        -- The picker lists the demo characters while it is on, so the menu has
-        -- to be rebuilt rather than waiting for the next repaint.
+        -- Both tabs have to be told. The picker lists the demo characters
+        -- while it is on and the Crafting tab's whole tree changes, so neither
+        -- can wait for whatever repaint happens next.
         if ui.histBuilt then
             ui.histWho = {}
             ui.RefreshHistory()
+        end
+        if ui.craftBuilt then ui.RefreshCraft() end
+        ui.RefreshShopCartButton()
+        if ui.shopFrame and ui.shopFrame:IsVisible() then
+            ui.RefreshShopWindow()
         end
         return
     end

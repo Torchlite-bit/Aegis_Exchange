@@ -2269,7 +2269,52 @@ local function CStore()
     return A.db and A.db.account and A.db.account.crafting
 end
 
+-- Recipes for demo mode. See db.DemoSeries for the discipline: consulted
+-- INSTEAD of the store, never written to it, so nothing generated can reach a
+-- real save.
+--
+-- REAL ITEM IDS, so the client colours the names by quality and shows the
+-- icons it has cached -- a demo drawn from made-up ids is a demo of the "item
+-- not cached" path, which is not the path anyone wants to look at.
+--
+-- CHOSEN TO EXERCISE THE LIST, not just to fill it. Bolt of Linen Cloth is
+-- both a project AND a reagent of the Linen Bag above it, which is the
+-- sub-reagent expansion; Coarse Thread and Empty Vial are vendor-sold, so the
+-- shopping list has to pick a source for each line; and the quantities differ
+-- enough that the shortfall arithmetic has something to do.
+craft.DEMO_PROJECTS = {
+    { name = "Linen Bag", itemId = 4238, want = 4, reagents = {
+        { name = "Bolt of Linen Cloth", itemId = 2996, count = 3 },
+        { name = "Coarse Thread",       itemId = 2320, count = 1 },
+    } },
+    { name = "Bolt of Linen Cloth", itemId = 2996, want = 2, reagents = {
+        { name = "Linen Cloth", itemId = 2589, count = 2 },
+    } },
+    { name = "Elixir of Fortitude", itemId = 3825, want = 5, reagents = {
+        { name = "Wild Steelbloom", itemId = 3355, count = 1 },
+        { name = "Stranglekelp",    itemId = 3820, count = 1 },
+        { name = "Empty Vial",      itemId = 3371, count = 1 },
+    } },
+    { name = "Mithril Casing", itemId = 10561, want = 3, reagents = {
+        { name = "Mithril Bar", itemId = 3860, count = 3 },
+    } },
+}
+
+-- What demo mode pretends you are already carrying, by item id.
+--
+-- SOME OF EACH, NOT ALL AND NOT NONE. A list where every line reads 0 / 12 is
+-- a list with no progress on it, and the "12 / 42" a reagent row exists to
+-- show is the thing worth looking at.
+craft.DEMO_HAVE = {
+    [2589] = 14,     -- Linen Cloth
+    [2996] = 5,      -- Bolt of Linen Cloth
+    [2320] = 2,      -- Coarse Thread
+    [3355] = 3,      -- Wild Steelbloom
+    [3860] = 4,      -- Mithril Bar
+}
+
 function craft.Projects()
+    if A.db and A.db.demo then return craft.DEMO_PROJECTS end
     local s = CStore()
     return s and s.projects or {}
 end

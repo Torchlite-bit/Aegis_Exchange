@@ -177,12 +177,27 @@ do
     local f = assert(io.open(SRC, "r"), "run this from the repo root")
     local src = f:read("*a")
     f:close()
-    local function bodyOf(head)
+    -- THE TERMINATOR IS A PARAMETER, because these bodies do not all end the
+    -- same way: a top-level function closes with "\nend\n", an event handler
+    -- with "end)", and a SetScript closure with "end)" at whatever depth it is
+    -- nested at.
+    --
+    -- This was one helper assuming the first form. Against a handler it found
+    -- no terminator and returned THE REST OF THE FILE, so every check written
+    -- against that body passed on text from somewhere else entirely. One of
+    -- them failed loudly, which is the only reason the rest were not quietly
+    -- meaningless -- a check that reads the whole file will find almost
+    -- anything you ask it for.
+    --
+    -- The length assertion after each extraction is the guard against that
+    -- happening again: a body that ran away is a body that is far too long.
+    local function bodyTo(head, terminator)
         local at = string.find(src, head, 1, true)
         if not at then return "" end
-        local stop = string.find(src, "\nend\n", at, true)
+        local stop = string.find(src, terminator, at, true)
         return string.sub(src, at, stop or -1)
     end
+    local function bodyOf(head) return bodyTo(head, "\nend\n") end
     local function says(body, needle)
         return string.find(body, needle, 1, true) ~= nil
     end
@@ -203,8 +218,12 @@ do
     H.check("the bag handler only sets a flag",
             says(src, "if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end"),
             "a rebuild inside BAG_UPDATE is what froze Courier")
-    local driver = bodyOf("ui.shopDriver:SetScript(\"OnUpdate\"")
-    H.check("...and the driver stops itself", says(driver, "ui.shopDriver:Hide()"))
+    -- NESTED inside ui.BuildShopWindow, so its terminator carries the
+    -- indentation it closes at.
+    local driver = bodyTo("ui.shopDriver:SetScript(\"OnUpdate\"", "\n    end)")
+    H.check("the driver was found", driver ~= "" and string.len(driver) < 600,
+            string.len(driver))
+    H.check("...and it stops itself", says(driver, "ui.shopDriver:Hide()"))
 
     -- NOTHING TO BUY, NOTHING TO SHOW. Popping an empty frame over the
     -- merchant window every time you talk to a vendor is the behaviour that
@@ -220,6 +239,98 @@ do
             says(src, "if ui.shopAuto then"))
 
     H.check("it can be opened by hand", says(src, "ui.ToggleShopWindow()"))
+end
+
+-- ---------------------------------------------------------------------------
+H.section("the cart on the merchant frame")
+-- ---------------------------------------------------------------------------
+
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    -- THE TERMINATOR IS A PARAMETER, because these bodies do not all end the
+    -- same way: a top-level function closes with "\nend\n", an event handler
+    -- with "end)", and a SetScript closure with "end)" at whatever depth it is
+    -- nested at.
+    --
+    -- This was one helper assuming the first form. Against a handler it found
+    -- no terminator and returned THE REST OF THE FILE, so every check written
+    -- against that body passed on text from somewhere else entirely. One of
+    -- them failed loudly, which is the only reason the rest were not quietly
+    -- meaningless -- a check that reads the whole file will find almost
+    -- anything you ask it for.
+    --
+    -- The length assertion after each extraction is the guard against that
+    -- happening again: a body that ran away is a body that is far too long.
+    local function bodyTo(head, terminator)
+        local at = string.find(src, head, 1, true)
+        if not at then return "" end
+        local stop = string.find(src, terminator, at, true)
+        return string.sub(src, at, stop or -1)
+    end
+    local function bodyOf(head) return bodyTo(head, "\nend\n") end
+    local function says(body, needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+
+    local cart = bodyOf("function ui.AttachShopCartButton(")
+    H.check("the cart button is built", cart ~= "")
+    H.check("...and toggles the list", says(cart, "ui.ToggleShopWindow()"))
+
+    -- CHAINED OFF THE SELL BUTTON, which is itself anchored to the TABS -- the
+    -- one placement that tracks pfUI, because pfUI moves the merchant window
+    -- but the tabs move with it. Every frame-relative offset tried before
+    -- drifted between the two skins.
+    H.check("it is placed beside the button that already tracks pfUI",
+            says(cart, 'ui.SetExternalPoint(b, "LEFT", ui.merchantBtn, "RIGHT"'),
+            "a frame-relative offset drifts between the stock UI and pfUI")
+    H.check("...with a fallback when there is no sell button",
+            says(cart, 'ui.SetExternalPoint(b, "TOP", MerchantFrame, "BOTTOM"'))
+
+    -- OUR OWN ART IN A 26px SQUARE, so pfUI must not plate it -- SkinButton
+    -- draws its border through the icon's own edge pixels, the same fault list
+    -- rows opt out of.
+    H.check("it opts out of the skinner", says(cart, "b.aegisNoSkin = true"))
+
+    -- ...and it is attached from the merchant handler, after the sell button
+    -- exists, so the anchor above can never be the fallback by accident.
+    local attach = bodyOf("function ui.AttachMerchantButton(")
+    H.check("the merchant handler attaches it",
+            says(attach, "ui.AttachShopCartButton()"))
+    H.check("...after the sell button is made",
+            string.find(attach, "ui.merchantBtn = b", 1, true)
+                < string.find(attach, "ui.AttachShopCartButton()", 1, true))
+
+    -- COUNTING THE LIST IS A WALK of every tracked recipe's reagents, so the
+    -- badge is refreshed from the same once-per-frame flush the window uses --
+    -- never from BAG_UPDATE directly, which storms hardest while a merchant is
+    -- open and the player is buying.
+    -- AN EVENT HANDLER ENDS "end)", NOT "end". bodyOf stops at the latter, so
+    -- against a handler it found no terminator and returned the rest of the
+    -- FILE -- and every check against it then passed on text from somewhere
+    -- else entirely. The one below failed loudly, which is the only reason
+    -- the other three were not quietly meaningless.
+    local bag = bodyTo('A.RegisterEvent("BAG_UPDATE", function()\n    if ui.shopFrame',
+                       "\nend)\n")
+    H.check("the bag handler was found", bag ~= "" and string.len(bag) < 600,
+            string.len(bag))
+    H.check("the bag handler only sets a flag for the cart",
+            says(bag, "ui.shopDriver:Show()")
+            and not says(bag, "ui.RefreshShopCartButton()"),
+            "counting the list inside BAG_UPDATE is the shape that froze Courier")
+    local driver = bodyTo('ui.shopDriver:SetScript("OnUpdate"', "\n    end)")
+    H.check("...and the flush does the counting",
+            says(driver, "ui.RefreshShopCartButton()"))
+
+    -- The cart reads as pressed while the list is up, so it has to be told
+    -- when the list goes down -- including by the window's own X button.
+    H.check("hiding the list repaints the cart",
+            says(bodyOf("function ui.HideShopWindow("),
+                 "ui.RefreshShopCartButton()"))
+    H.check("...and showing it does too",
+            says(bodyOf("function ui.ShowShopWindow("),
+                 "ui.RefreshShopCartButton()"))
 end
 
 os.exit(H.report("shoplist"))

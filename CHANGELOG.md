@@ -18,6 +18,29 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.13]
+
+### Added
+- **A shopping-list button on the merchant frame.** A bag icon beside the
+  "sell marked" button — click it to show or hide the list, with a badge
+  showing how many lines are still to buy and a gold border while the list is
+  up. It dims rather than disappears when there is nothing left, because a
+  button that vanishes is one you cannot press to check.
+
+  *(1.12 has no shopping-cart icon in the stock art. A bag is the closest
+  thing, and is what the game itself uses for "things you are carrying".)*
+
+- **Demo mode reaches the Crafting tab.** `/aex demo` now also supplies four
+  made-up recipes with some of their reagents part-gathered, so the crafting
+  tree, the shopping list and the merchant badge all have something to show on
+  a character that has not tracked anything yet.
+
+  The recipes are picked to exercise the list rather than just fill it: one of
+  them is a **reagent of another**, so the sub-reagent expansion runs, and two
+  reagents are vendor-sold so the list has to choose a source per line. Same
+  discipline as the gold — consulted *instead of* your data, never written to
+  it, gone on `/reload`.
+
 ## [1.53.12]
 
 ### Added
@@ -5396,6 +5419,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
