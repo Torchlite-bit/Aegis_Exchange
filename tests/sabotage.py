@@ -2671,6 +2671,98 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the chart's own title bar and a real gradient (v1.53.11) --------
+
+    # THE BUG ITSELF: the menu handed the NAME-keyed selection while its own
+    # entries are keyed "char:Name". Every box draws empty while the title
+    # says a character is selected -- and a set lookup that misses returns
+    # nil rather than erroring, so nothing says so.
+    ('ticks-handed-the-wrong-key-space', 'ui/frame.lua',
+     '        ui.histWhoDD:SetTicked(ui.HistWhoTicks(ui.histWho), title)',
+     '        ui.histWhoDD:SetTicked(ui.histWho, title)',
+     'histgraph'),
+
+    # ...and the same fault inside the translation, which is where it is now
+    # possible to write it.
+    ('ticks-keyed-by-bare-name', 'ui/frame.lua',
+     '    while i <= n do out["char:" .. names[i]] = true; i = i + 1 end',
+     '    while i <= n do out[names[i]] = true; i = i + 1 end',
+     'histgraph'),
+
+    # Nothing ticked when nothing is selected, which says the chart is
+    # showing nothing -- never the state it is actually in.
+    ('all-players-never-ticks', 'ui/frame.lua',
+     '    if n == 0 then out[HIST_ALL_PLAYERS] = true end',
+     '    local _ = n',
+     'histgraph'),
+
+    # ...and the opposite: All Players ticked next to a character, which says
+    # the chart is drawing both.
+    ('all-players-ticks-alongside-a-name', 'ui/frame.lua',
+     '    if n == 0 then out[HIST_ALL_PLAYERS] = true end',
+     '    out[HIST_ALL_PLAYERS] = true',
+     'histgraph'),
+
+    # X marks that never reach the right edge, so the last rule and its date
+    # sit short of the end of the window the chart covers.
+    ('xaxis-marks-miss-the-right-edge', 'ui/frame.lua',
+     '        local frac = (i - 1) / (count - 1)\n        table.insert(out, { frac = frac, t = from + span * frac })',
+     '        local frac = (i - 1) / count\n        table.insert(out, { frac = frac, t = from + span * frac })',
+     'histgraph'),
+
+    # Every column handed the same gradient endpoints instead of the slice it
+    # occupies. 1.12's SetGradientAlpha applies per TEXTURE, so a short column
+    # runs the whole fade over five pixels and a tall one over a hundred and
+    # fifty -- the wash traces the line instead of sitting behind it.
+    ('fill-gradient-ignores-the-plot', 'ui/frame.lua',
+     '    local f = (y or 0) / h',
+     '    local f = 1',
+     'histgraph'),
+
+    # The fade inverted: strongest at the baseline and faint under the line,
+    # which reads as a solid block with a line sitting on top of it.
+    ('fill-gradient-upside-down', 'ui/frame.lua',
+     '    return a0 + (a1 - a0) * f',
+     '    return a1 + (a0 - a1) * f',
+     'histgraph'),
+
+    # An alpha extrapolated past its endpoints, which on a column clipped by
+    # the top of the plot is an alpha outside 0..1.
+    ('fill-alpha-not-clamped', 'ui/frame.lua',
+     '    if f < 0 then f = 0 end\n    if f > 1 then f = 1 end',
+     '    local _ = f',
+     'histgraph'),
+
+    # The flat fallback alpha left on after the gradient took. Texture alpha
+    # MULTIPLIES the gradient's, so the wash ends up the two together and
+    # barely visible.
+    ('fill-alpha-multiplied-twice', 'ui/frame.lua',
+     '            if ok then t:SetAlpha(1) end',
+     '            local _ = ok',
+     'histgraph'),
+
+    # ...and the other way: no flat wash set first, so a client that will not
+    # take a gradient gets a solid block of colour under the line.
+    ('fill-has-no-fallback', 'ui/frame.lua',
+     '            t:SetAlpha(HISTL.fill_flat)',
+     '            t:SetAlpha(1)',
+     'histgraph'),
+
+    # The period row anchored by its LEFT edge. The chart's width moves with
+    # the window and the buttons have to stay against its far side; anchored
+    # left they run straight through the heading.
+    ('periods-left-on-the-tab', 'ui/frame.lua',
+     '            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)',
+     '            b:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -5)',
+     'histgraph'),
+
+    # The chart's floor dropped below what its own title bar needs, so the
+    # period buttons run off the edge of the box.
+    ('chart-too-narrow-for-its-title-bar', 'ui/frame.lua',
+     '    graph_min  = 300,',
+     '    graph_min  = 200,',
+     'histgraph'),
+
     # ---- the shopping list, out on its own (v1.53.10) ---------------------
 
     # A line you can CRAFT put on the buy list. Its own reagents are already

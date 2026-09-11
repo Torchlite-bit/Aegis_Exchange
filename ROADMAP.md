@@ -2390,6 +2390,49 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The chart's own title bar, and a real gradient — v1.53.11
+
+**Two key spaces, one set.** The check boxes drew empty while the title said a
+character was selected. `ui.histWho` is keyed by NAME — that is what
+`db.MoneySeries` filters on — and the menu's entries are keyed `"char:Name"`,
+because that is what tells a character apart from "All Players". Handing the
+raw set to `dd:SetTicked` looked up a key that was never there.
+
+**The general shape, and it is the same one as v1.53.9's collision:** a lookup
+that misses returns nil rather than erroring, so a translation you forgot looks
+exactly like a selection nobody made. `ui.HistWhoTicks` is the translation, at
+the edge, in one place — the set stays name-keyed for the reader that wants
+names.
+
+**The period buttons belong to the chart.** They sat at the panel's top-left, a
+table's width away from what they change. Moved into the chart's own title bar
+beside a "Player Gold" heading, and built RIGHT TO LEFT because the row is
+anchored by its right edge — the chart's width moves with the window. The band
+they vacated dropped `LISTBOX.hist.top` from 100 to 70, which is a row back for
+the ledger table at every height.
+
+That makes the chart's minimum width a SUM rather than a taste: two side
+paddings, the heading, and every period button with its gaps. The geometry
+suite checks that sum, so adding a sixth period cannot quietly push the buttons
+off the edge. `HISTL.head_w` is a measurement written down — nothing in
+`tests/` can measure a FontString, so the fit check needs a number it can add
+up.
+
+**The gradient, and why it is per-column slices.** `SetGradientAlpha` exists on
+1.12 but applies per TEXTURE, and the fill is one texture per column. Handing
+every column the same endpoints makes a short column run the entire fade over
+five pixels and a tall one over a hundred and fifty — the wash traces the line
+instead of sitting behind it. `ui.FillAlphaAt` maps a height in the plot to an
+alpha, and each column gets its own bottom and top through it, so the slices
+stack into one continuous wash. Two details that would otherwise be invisible:
+the flat fallback alpha is set FIRST so a client that refuses the call keeps a
+fill rather than a solid block, and it comes back off when the call takes,
+because texture alpha MULTIPLIES the gradient's.
+
+**Still tabled, and still the right idea:** the chart taking the full tab with
+the ledger as a popover, which is the shape that would make room for the
+reference's SALES / EXPENSES / PROFIT blocks.
+
 ### The shopping list, out on its own — v1.53.10
 
 **The main window only opens at an auction house.** `AuctionFrame` is what it

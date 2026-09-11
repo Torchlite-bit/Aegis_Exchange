@@ -3041,7 +3041,12 @@ local function MakeDropdown(parent, width, onSelect, noAll, multi)
             -- last time it was used would keep it on a single-select list.
             local labelX = 3
             if dd.multi then
-                row.check:SetChecked(dd.ticked[entries[r].value] and true or false)
+                -- 1 OR NIL, the convention every other check box in this
+                -- file uses. 1.12's SetChecked predates booleans being
+                -- idiomatic here and the settings panel has always passed
+                -- these; a second convention is one more thing that can be
+                -- wrong for a reason nobody can see.
+                row.check:SetChecked(dd.ticked[entries[r].value] and 1 or nil)
                 row.check:Show()
                 labelX = 19
             else
@@ -5121,7 +5126,9 @@ local LISTBOX = {
     -- column headers. Both lists share what is left of this one.
     aucSplit  = { top = AUCL.auc_top,
                   bot = AUCL.gap + AUCL.bid_head + AUCL.bid_hdr + AUCL.bot },
-    hist      = { top = 100, bot = 10 },
+    -- Thirty pixels shallower than it was: the period buttons moved into the
+    -- chart's own title bar, and the band they occupied went to the table.
+    hist      = { top = 70, bot = 10 },
     -- Identical to sellList on purpose: both boxes start under the same
     -- header band and end on the same line, which is the whole point of
     -- giving the bag list a box at all. Two lists side by side that begin
@@ -11573,21 +11580,23 @@ local HIST_HEADER_DEFS = {
 local HISTL = {
     edge       = 10,
     gap        = 12,
-    -- The table's columns end at 566 plus the row padding and its scrollbar.
+    -- The table's columns end at 512 plus the row padding and its scrollbar.
     -- Below this the Amount column starts running under the scrollbar, which
     -- is the clipping this number exists to prevent.
-    -- The table's columns now end at 512 plus the row padding and its
-    -- scrollbar. Below this the Amount column starts running under the
-    -- scrollbar, which is the clipping this number exists to prevent.
     left_min   = 566,
-    graph_min  = 240,
+    -- WIDE ENOUGH FOR THE CHART'S OWN TITLE BAR, which is what it holds now:
+    -- two side paddings, the heading, and five period buttons with their gaps.
+    -- The geometry suite checks that sum rather than trusting this number, so
+    -- adding a sixth period cannot quietly push the buttons off the edge.
+    graph_min  = 300,
     -- Raised from 0.36. The chart was the half that had to hold an axis, a
     -- legend, a line and two rows of figures in whatever was left over, and it
     -- was the half that ran out.
     graph_frac = 0.46,
-    -- Inside the chart box: the heading and legend above the plot, and the
-    -- axis labels below it.
-    plot_top   = 34,
+    -- Inside the chart box: two rows of chrome above the plot -- the title
+    -- with the period buttons, then the character picker -- and the axis
+    -- labels below it.
+    plot_top   = 54,
     -- Room under the plot for the x labels AND the two stat rows.
     --
     -- TWO ROWS, because one was two FontStrings anchored to opposite ends of
@@ -11604,6 +11613,28 @@ local HISTL = {
     -- middle and the baseline, which on a tall plot leaves the eye nothing to
     -- measure against.
     y_lines    = 5,
+    -- ...and the same count across the bottom, each with a rule of its own.
+    -- The reference chart's vertical rules are what make a point on the line
+    -- placeable in time at a glance; without them the x labels are captions
+    -- for a band whose edges you have to estimate.
+    x_lines    = 5,
+    -- The fill's alpha at the BASELINE and at the TOP of the plot. It fades
+    -- downward, strongest just under the line, which is what the reference
+    -- does -- a wash that is uniform at the bottom reads as a solid block with
+    -- a line on top of it.
+    fill_a0    = 0.04,
+    fill_a1    = 0.42,
+    -- ...and the flat alpha used when the client will not take a gradient.
+    fill_flat  = 0.20,
+    -- The chart's own title bar: the heading, and the period buttons beside
+    -- it.
+    per_w      = 32,
+    per_h      = 18,
+    per_gap    = 3,
+    -- What "Player Gold" takes at GameFontNormal. A MEASUREMENT WRITTEN DOWN,
+    -- not a guess: nothing in tests/ can measure a FontString, so the fit
+    -- check needs a number it can add up. Generous by a few pixels on purpose.
+    head_w     = 80,
     -- One column of the rasterised line. FOUR PIXELS is the whole compromise
     -- described above: one per data point is a staircase, one per pixel is
     -- hundreds of textures.
@@ -11955,6 +11986,53 @@ function ui.HoverLabel(values, from, step, b, now)
         .. ui.WhenLabel(t, now) .. "|r"
 end
 
+-- Where the x-axis rules and labels go: a fraction across the plot and the
+-- moment each one stands for.
+--
+-- SHARES ITS SHAPE WITH ui.AxisMarks, deliberately -- five marks evenly
+-- spaced, first on the left edge and last on the right -- so the two axes are
+-- read the same way and a chart with a rule at one end and not the other does
+-- not happen.
+function ui.XAxisMarks(from, to, count)
+    local out = {}
+    count = count or HISTL.x_lines
+    if count < 2 then count = 2 end
+    from, to = from or 0, to or 0
+    local span = to - from
+    local i = 1
+    while i <= count do
+        local frac = (i - 1) / (count - 1)
+        table.insert(out, { frac = frac, t = from + span * frac })
+        i = i + 1
+    end
+    return out
+end
+
+-- The fill's alpha at height `y` in a plot `h` tall.
+--
+-- THE GRADIENT IS THE PLOT'S, NOT THE COLUMN'S, and this is the whole of what
+-- makes that true. 1.12's SetGradientAlpha applies per TEXTURE, and the fill
+-- is one texture per column -- so handing every column the same pair of
+-- endpoints makes a short column run the entire fade over five pixels and a
+-- tall one over a hundred and fifty. The result traces the line instead of
+-- sitting behind it.
+--
+-- Each column instead gets the SLICE of the plot-wide gradient it actually
+-- occupies: its own bottom and top mapped through here. Stack those slices and
+-- the wash is continuous across the whole plot.
+--
+-- Keyed off the plot floor rather than the zero line, which is the same thing
+-- on this chart -- gold held cannot be negative. A chart whose series crosses
+-- zero would want the distance from the zero rule instead.
+function ui.FillAlphaAt(y, h, a0, a1)
+    a0, a1 = a0 or HISTL.fill_a0, a1 or HISTL.fill_a1
+    if not h or h <= 0 then return a0 end
+    local f = (y or 0) / h
+    if f < 0 then f = 0 end
+    if f > 1 then f = 1 end
+    return a0 + (a1 - a0) * f
+end
+
 -- How many buckets a plot `w` pixels wide should be divided into.
 --
 -- DERIVED FROM THE PLOT, not fixed per period. A fixed thirty across a 300px
@@ -12032,46 +12110,26 @@ function ui.BuildHistoryTab()
     ui.histBuilt = true
     ui.histPeriod = 2   -- default to 7d
 
-    -- Period buttons.
-    local perLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    perLbl:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -14)
-    perLbl:SetText("Period:")
-    perLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
-
-    ui.histPerBtns = {}
-    local prev = nil
-    local pi = 1
-    while pi <= table.getn(HIST_PERIODS) do
-        local b = ui.MakeButton(panel, "quiet")
-        b:SetWidth(44); b:SetHeight(20)
-        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
-        else b:SetPoint("LEFT", perLbl, "RIGHT", 8, 0) end
-        b:SetText(HIST_PERIODS[pi].label)
-        b.idx = pi
-        b:SetScript("OnClick", function()
-            ui.histPeriod = b.idx
-            ui.RefreshHistory()
-        end)
-        ui.histPerBtns[pi] = b
-        prev = b
-        pi = pi + 1
-    end
-
+    -- THE PERIOD BUTTONS ARE THE CHART'S NOW -- see ui.BuildHistoryGraph. They
+    -- sat here, at the panel's top-left, a table's width away from the thing
+    -- they change, so nothing about the layout said they were connected. The
+    -- band they used to occupy is what LISTBOX.hist.top gave back to the
+    -- table.
     local clearBtn = ui.MakeButton(panel, "quiet")
     clearBtn:SetWidth(100); clearBtn:SetHeight(20)
-    clearBtn:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -12)
     clearBtn:SetText("Clear history")
     clearBtn:SetScript("OnClick", function()
         StaticPopup_Show("AEGIS_EXCHANGE_CLEARLEDGER")
     end)
+    ui.histClearBtn = clearBtn
 
     -- Totals line.
     ui.histTotals = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.histTotals:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -42)
+    ui.histTotals:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -12)
     ui.histTotals:SetJustifyH("LEFT")
 
     ui.histNote = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histNote:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -62)
+    ui.histNote:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -32)
     ui.histNote:SetJustifyH("LEFT")
     ui.histNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
@@ -12085,7 +12143,7 @@ function ui.BuildHistoryTab()
     local rowLeft = 6
     ui.histSortKey = "when"
     ui.histSortDir = "desc"
-    ui.histHeaders = ui.MakeSortHeaders(panel, rowLeft, -84, HCX, HCW,
+    ui.histHeaders = ui.MakeSortHeaders(panel, rowLeft, -54, HCX, HCW,
         function(key) ui.SetHistSort(key) end, HIST_HEADER_DEFS)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
@@ -12098,6 +12156,13 @@ function ui.BuildHistoryTab()
     scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,
                     LISTBOX.hist.bot)
     scroll:SetWidth(HISTL.left_min - HISTL.edge * 2)
+
+    -- ANCHORED TO THE TABLE, not to the panel. Clear history used to sit at
+    -- the panel's top-right, which is where the chart is now -- and the
+    -- table's right edge moves with the split, so the only anchor that follows
+    -- it is the table itself.
+    clearBtn:ClearAllPoints()
+    clearBtn:SetPoint("BOTTOMRIGHT", scroll, "TOPRIGHT", 0, 6)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -12175,12 +12240,52 @@ function ui.BuildHistoryGraph(panel)
     -- chart silently kept whatever it had drawn last. It presented exactly as
     -- reported: "I have to go back and select the player again for the graph
     -- to update."
+    -- ROW ONE: the chart's own heading, and the periods beside it.
+    --
+    -- THE PERIOD BUTTONS BELONG TO THE CHART, not to the tab. They sat at the
+    -- panel's top-left, a table's width away from the thing they change, so
+    -- nothing about the layout said they were connected -- and the reference
+    -- chart puts them in the chart's own title bar for exactly that reason.
+    -- The ledger table is filtered by them too, which is fine: one period, two
+    -- halves, said once.
+    local heading = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    heading:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -6)
+    heading:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    heading:SetText("Player Gold")
+
+    ui.histPerBtns = {}
+    local prev = nil
+    local pi = table.getn(HIST_PERIODS)
+    -- BUILT RIGHT TO LEFT, because the row is anchored by its right edge --
+    -- the chart's width moves with the window and the periods have to stay
+    -- against its far side.
+    while pi >= 1 do
+        local b = ui.MakeButton(box, "quiet")
+        b:SetWidth(HISTL.per_w); b:SetHeight(HISTL.per_h)
+        if prev then
+            b:SetPoint("RIGHT", prev, "LEFT", -HISTL.per_gap, 0)
+        else
+            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)
+        end
+        b:SetText(HIST_PERIODS[pi].label)
+        b.idx = pi
+        b:SetScript("OnClick", function()
+            ui.histPeriod = b.idx
+            ui.RefreshHistory()
+        end)
+        ui.histPerBtns[pi] = b
+        prev = b
+        pi = pi - 1
+    end
+
+    -- ROW TWO: whose gold. The picker's own button says which, so there is no
+    -- second label repeating it.
     ui.histWho = { }
     local dd = MakeDropdown(box, 128, function(v)
         ui.HistToggleWho(v)
         ui.UpdateHistoryGraph()
     end, true, true)
-    dd.button:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -2)
+    dd.button:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -26)
     dd:SetOptions(ui.HistViewOptions())
     dd:SetValue(HIST_ALL_PLAYERS, true)
     ui.histWhoDD = dd
@@ -12188,8 +12293,11 @@ function ui.BuildHistoryGraph(panel)
     -- WHOSE GOLD, said beside the chart. One line means one name, and the
     -- dropdown already carries it -- this is the figure that goes with it:
     -- what they are holding right now.
+    -- What the selection is holding RIGHT NOW, beside the picker. The chart
+    -- shows the shape; this is the one figure you would otherwise have to read
+    -- off the axis by eye.
     ui.histNow = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    ui.histNow:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -6)
+    ui.histNow:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -28)
     ui.histNow:SetJustifyH("RIGHT")
 
     -- The plot itself: an empty frame whose rect IS the drawing area, so every
@@ -12230,19 +12338,24 @@ function ui.BuildHistoryGraph(panel)
         g = g + 1
     end
 
-    ui.histXFrom = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histXFrom:SetPoint("TOPLEFT", plot, "BOTTOMLEFT", 0, -3)
-    ui.histXFrom:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-
-    ui.histXMid = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histXMid:SetPoint("TOP", plot, "BOTTOM", 0, -3)
-    ui.histXMid:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-
-    ui.histXTo = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histXTo:SetPoint("TOPRIGHT", plot, "BOTTOMRIGHT", 0, -3)
-    ui.histXTo:SetJustifyH("RIGHT")
-    ui.histXTo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    ui.histXTo:SetText("now")
+    -- THE VERTICAL RULES, one per x label. Without them the labels are
+    -- captions for a band whose edges you have to estimate, which is the
+    -- difference between a chart you can read a date off and one you cannot.
+    ui.histVGrid = {}
+    ui.histXLbl = {}
+    local x = 1
+    while x <= HISTL.x_lines do
+        local t = plot:CreateTexture(nil, "BACKGROUND")
+        t:SetTexture(C.grid[1], C.grid[2], C.grid[3])
+        t:SetWidth(1)
+        t:SetAlpha(0.55)      -- dimmer than the horizontal rules: the scale is
+                              -- the thing being read, the time is context
+        ui.histVGrid[x] = t
+        local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        ui.histXLbl[x] = fs
+        x = x + 1
+    end
 
     -- THE STATS STRIP, on the floor of the box under the x labels: the four
     -- figures a chart cannot show precisely enough to read off. High and low
@@ -12355,6 +12468,29 @@ function ui.HistWhoList(set)
 end
 
 -- What the dropdown button and the chart's title should say for a selection.
+-- The selection, keyed the way the MENU keys its entries.
+--
+-- THE BUG THIS EXISTS FOR: every box drew empty while the title said a
+-- character was selected. ui.histWho is keyed by NAME, because that is what
+-- db.MoneySeries filters on; the menu's entries are keyed "char:Name",
+-- because that is what tells a character apart from "All Players". Handing one
+-- straight to the other looks up a key that is never there -- and a set lookup
+-- that misses returns nil rather than erroring, so nothing said so.
+--
+-- One direction, in one place. The set stays name-keyed for the reader that
+-- wants names; this is the translation at the edge.
+function ui.HistWhoTicks(set)
+    local out = {}
+    local names, n = ui.HistWhoList(set)
+    local i = 1
+    while i <= n do out["char:" .. names[i]] = true; i = i + 1 end
+    -- EMPTY MEANS EVERYONE, so "All Players" is what is ticked then. A menu
+    -- with nothing ticked at all says the chart is showing nothing, which is
+    -- never the state it is in.
+    if n == 0 then out[HIST_ALL_PLAYERS] = true end
+    return out
+end
+
 function ui.HistWhoLabel(set, total)
     local names, n = ui.HistWhoList(set)
     if n == 0 then return "All Players (" .. (total or 0) .. ")" end
@@ -12426,7 +12562,6 @@ function ui.PaintFill(colour, values, lo, hi, w, h)
     local i = table.getn(ui.histFill) + 1
     while i <= n do
         local t = ui.histPlot:CreateTexture(nil, "BORDER")
-        t:SetAlpha(0.20)
         t:Hide()
         ui.histFill[i] = t
         i = i + 1
@@ -12439,6 +12574,21 @@ function ui.PaintFill(colour, values, lo, hi, w, h)
             t:SetWidth(r.w); t:SetHeight(r.h)
             t:ClearAllPoints()
             t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)
+            -- THE FLAT WASH FIRST, so a client that will not take a gradient
+            -- keeps the fill it had rather than a solid block of colour. The
+            -- gradient then supersedes it.
+            t:SetAlpha(HISTL.fill_flat)
+            local aBot = ui.FillAlphaAt(r.y, h)
+            local aTop = ui.FillAlphaAt(r.y + r.h, h)
+            local ok = pcall(function()
+                t:SetGradientAlpha("VERTICAL",
+                    colour[1], colour[2], colour[3], aBot,
+                    colour[1], colour[2], colour[3], aTop)
+            end)
+            -- Texture alpha MULTIPLIES the gradient's, so the flat value has
+            -- to come back off once the gradient is carrying it -- otherwise
+            -- the wash is the two multiplied together and barely visible.
+            if ok then t:SetAlpha(1) end
             t:Show()
         else
             t:Hide()
@@ -12528,10 +12678,11 @@ function ui.UpdateHistoryGraph()
         ui.HistGoldSeries(ui.histWho, from, step, n)
     local lo, hi = ui.SeriesRange({ values })
 
-    ui.histNow:SetText(title or "")
-    ui.histNow:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    -- The picker's own button carries the name; this is what they hold.
+    local held = values and values[table.getn(values)] or 0
+    ui.histNow:SetText(util.FormatMoney(held, true))
     if ui.histWhoDD then
-        ui.histWhoDD:SetTicked(ui.histWho, title)
+        ui.histWhoDD:SetTicked(ui.HistWhoTicks(ui.histWho), title)
     end
 
     local empty = not (hi > lo)
@@ -12561,14 +12712,40 @@ function ui.UpdateHistoryGraph()
         g = g + 1
     end
 
-    -- DATES ACROSS THE AXIS, which is what the reference chart has and what
-    -- "30d ago" stops being once the window is months long. The note moved off
-    -- this line entirely: it was appended to the right-hand label, where it
-    -- grew that label past the plot and into the one beside it.
+    -- DATES ACROSS THE AXIS, each with a rule of its own. "30d ago" stops
+    -- being placeable once the window is months long, and a label with no rule
+    -- under it is a caption for a band whose edges you have to estimate.
     local now = time()
-    ui.histXFrom:SetText(ui.WhenLabel(from, now))
-    ui.histXMid:SetText(ui.WhenLabel(from + (now - from) / 2, now))
-    ui.histXTo:SetText("now")
+    local xm = ui.XAxisMarks(from, now)
+    local x = 1
+    while x <= HISTL.x_lines do
+        local m = xm[x]
+        local px = math.floor((m and m.frac or 0) * pw)
+        ui.histVGrid[x]:ClearAllPoints()
+        ui.histVGrid[x]:SetPoint("TOPLEFT", ui.histPlot, "TOPLEFT", px, 0)
+        ui.histVGrid[x]:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", px, 0)
+        local fs = ui.histXLbl[x]
+        fs:ClearAllPoints()
+        -- The end labels hang INWARD from their own edge and the rest are
+        -- centred on their rule. A centred label at either end would run past
+        -- the plot -- off the box on the left, into the scrollbar on the right.
+        if x == 1 then
+            fs:SetJustifyH("LEFT")
+            fs:SetPoint("TOPLEFT", ui.histPlot, "BOTTOMLEFT", 0, -3)
+        elseif x == HISTL.x_lines then
+            fs:SetJustifyH("RIGHT")
+            fs:SetPoint("TOPRIGHT", ui.histPlot, "BOTTOMRIGHT", 0, -3)
+        else
+            fs:SetJustifyH("CENTER")
+            fs:SetPoint("TOP", ui.histPlot, "BOTTOMLEFT", px, -3)
+        end
+        if x == HISTL.x_lines then
+            fs:SetText("now")
+        else
+            fs:SetText(ui.WhenLabel(m.t, now))
+        end
+        x = x + 1
+    end
 
     -- FILLED, always, because there is always exactly one line. The fill is
     -- what makes a gold chart read as a level rather than as a trace.

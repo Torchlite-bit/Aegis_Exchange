@@ -89,8 +89,24 @@ local function constant(name)
     return v
 end
 
+-- ...and the same for a quoted string constant. HIST_ALL_PLAYERS is one, and
+-- it is read out of the source rather than copied here for the reason the
+-- number reader exists: a copy keeps passing after the real one moves.
+local function strConstant(name)
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local v
+    for line in f:lines() do
+        local _, _, got = string.find(line, '^local ' .. name .. '%s*=%s*"([^"]*)"')
+        if got then v = got; break end
+    end
+    f:close()
+    if not v then error("did not find: local " .. name) end
+    return v
+end
+
 ui = {}
 util = A.util
+HIST_ALL_PLAYERS = strConstant("HIST_ALL_PLAYERS")
 PANEL_H_INSET = 40
 PANEL_V_INSET = 108
 LISTBOX = { hist = { top = 100, bot = 10 } }
@@ -115,7 +131,10 @@ for _, sig in ipairs({
     "function ui.HistToggleWho(",
     "function ui.HistWhoList(",
     "function ui.HistWhoLabel(",
+    "function ui.HistWhoTicks(",
     "function ui.HistGoldSeries(",
+    "function ui.XAxisMarks(",
+    "function ui.FillAlphaAt(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -526,7 +545,8 @@ end
 -- which question. "All Players" is the default and a character entry is keyed
 -- "char:Name" so the painter can tell them apart without a second field to
 -- keep in step.
-H.isNil("the all-players entry names no character", ui.HistViewChar("all"))
+H.isNil("the all-players entry names no character",
+        ui.HistViewChar(HIST_ALL_PLAYERS))
 H.eq("a character entry names one", ui.HistViewChar("char:Torchlite"),
      "Torchlite")
 -- Names with punctuation in them, because a hyphenated or accented name is
@@ -577,6 +597,40 @@ local names = ui.HistWhoList(ui.histWho)
 H.eq("the names come back sorted", names[1], "Amy")
 H.eq("...in order", names[2], "Mike")
 H.eq("...all of them", names[3], "Zed")
+
+-- ---- what the MENU draws as ticked --------------------------------------
+
+-- THE BUG THIS EXISTS FOR: every box drew empty while the title said a
+-- character was selected. ui.histWho is keyed by NAME, because that is what
+-- db.MoneySeries filters on; the menu's entries are keyed "char:Name", because
+-- that is what tells a character apart from "All Players". Handing one set
+-- straight to the other looks up a key that is never there -- and a set lookup
+-- that misses returns nil rather than erroring, so nothing said so.
+do
+    local ticks = ui.HistWhoTicks({ Torchlite = true })
+    H.eq("a selected name ticks its MENU entry", ticks["char:Torchlite"], true)
+    H.isNil("...not the bare name", ticks["Torchlite"])
+    H.isNil("...and nobody else", ticks["char:Osiris"])
+
+    ticks = ui.HistWhoTicks({ Torchlite = true, Osiris = true })
+    H.eq("two selected tick two", ticks["char:Torchlite"], true)
+    H.eq("...both of them", ticks["char:Osiris"], true)
+
+    -- EMPTY MEANS EVERYONE, so "All Players" is what is ticked then. A menu
+    -- with nothing ticked at all says the chart is showing nothing, which is
+    -- never the state it is in.
+    ticks = ui.HistWhoTicks({})
+    H.eq("nothing selected ticks All Players",
+         ticks[HIST_ALL_PLAYERS], true)
+    ticks = ui.HistWhoTicks(nil)
+    H.eq("...and so does a nil set", ticks[HIST_ALL_PLAYERS], true)
+
+    -- ...and All Players is NOT ticked alongside a character, which would say
+    -- the chart is drawing both.
+    ticks = ui.HistWhoTicks({ Torchlite = true })
+    H.isNil("a character selected unticks All Players",
+            ticks[HIST_ALL_PLAYERS])
+end
 
 -- ---- what the control says ----------------------------------------------
 
@@ -651,6 +705,107 @@ end
 
 H.check("a zero bucket count is survivable",
         ({ ui.HistWindow(LED, NOW, DAY, 0) })[2] > 0)
+
+-- ---------------------------------------------------------------------------
+H.section("the chart's own title bar fits")
+-- ---------------------------------------------------------------------------
+
+-- THE PERIOD BUTTONS LIVE IN THE CHART NOW, beside its heading. They sat at
+-- the panel's top-left, a table's width away from the thing they change, so
+-- nothing about the layout said they were connected.
+--
+-- That makes the chart's minimum width a SUM rather than a taste: two side
+-- paddings, the heading, and every period button with its gaps. Checked here
+-- rather than trusted, so adding a sixth period cannot quietly push the
+-- buttons off the edge of the box.
+do
+    local n = 5     -- 24h, 7d, 30d, 3m, All
+    local need = HISTL.plot_side * 2 + HISTL.head_w
+                 + HISTL.per_w * n + HISTL.per_gap * (n - 1)
+    H.check("the chart's floor holds its own title bar",
+            HISTL.graph_min >= need,
+            HISTL.graph_min .. " < " .. need)
+    -- ...and at every real window width, not just the floor.
+    for _, winW in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
+        local _, gw = ui.HistWidthsAt(winW)
+        H.check("the title bar fits at " .. winW, gw >= need, gw)
+    end
+end
+
+-- ---- the x axis ---------------------------------------------------------
+
+-- SAME SHAPE AS THE Y AXIS, deliberately -- five marks evenly spaced, first on
+-- the left edge and last on the right -- so the two are read the same way and
+-- a chart with a rule at one end and not the other does not happen.
+do
+    local NOWX = 1000
+    local marks = ui.XAxisMarks(NOWX - 100, NOWX, 5)
+    H.eq("five marks", table.getn(marks), 5)
+    H.eq("the first is the left edge", marks[1].frac, 0)
+    H.eq("...at the start of the window", marks[1].t, NOWX - 100)
+    H.eq("the last is the right edge", marks[5].frac, 1)
+    H.eq("...at the end of it", marks[5].t, NOWX)
+    H.eq("evenly spaced", marks[3].frac, 0.5)
+    H.eq("...with the moment to match", marks[3].t, NOWX - 50)
+
+    -- EVERY MARK IS INSIDE THE WINDOW. One past the end is a rule drawn off
+    -- the plot and a date the chart does not cover.
+    local i = 1
+    while i <= 5 do
+        H.check("mark " .. i .. " is inside the window",
+                marks[i].t >= NOWX - 100 and marks[i].t <= NOWX, marks[i].t)
+        i = i + 1
+    end
+
+    H.eq("a count below two is raised to two",
+         table.getn(ui.XAxisMarks(0, 100, 1)), 2)
+    H.eq("a zero-length window still gives marks",
+         table.getn(ui.XAxisMarks(NOWX, NOWX, 5)), 5)
+    H.eq("...all at the same moment", ui.XAxisMarks(NOWX, NOWX, 5)[3].t, NOWX)
+    H.eq("nil bounds are survivable", table.getn(ui.XAxisMarks(nil, nil, 5)), 5)
+end
+
+-- ---- the gradient under the fill ----------------------------------------
+
+-- THE GRADIENT IS THE PLOT'S, NOT THE COLUMN'S. 1.12's SetGradientAlpha
+-- applies per TEXTURE and the fill is one texture per column, so handing every
+-- column the same endpoints makes a short column run the whole fade over five
+-- pixels and a tall one over a hundred and fifty -- tracing the line instead
+-- of sitting behind it. Each column gets the SLICE it occupies.
+do
+    local A0, A1 = HISTL.fill_a0, HISTL.fill_a1
+    H.eq("the baseline is the low end", ui.FillAlphaAt(0, 100), A0)
+    H.eq("the top of the plot is the high end", ui.FillAlphaAt(100, 100), A1)
+    H.eq("halfway is halfway", ui.FillAlphaAt(50, 100), A0 + (A1 - A0) / 2)
+
+    -- IT FADES UPWARD, strongest just under the line. A wash that is uniform
+    -- at the bottom reads as a solid block with a line on top of it.
+    H.check("it is dimmer at the baseline than at the top",
+            ui.FillAlphaAt(0, 100) < ui.FillAlphaAt(100, 100))
+
+    -- TWO COLUMNS OF DIFFERENT HEIGHTS MEET. A short column's top and a tall
+    -- column's middle at the same height must have the same alpha -- that is
+    -- what makes the slices stack into one continuous wash rather than a row
+    -- of separately-faded blocks.
+    H.eq("the same height is the same alpha whatever column it is in",
+         ui.FillAlphaAt(30, 100), ui.FillAlphaAt(30, 100))
+    H.check("...and a tall column is brighter at its top than a short one",
+            ui.FillAlphaAt(90, 100) > ui.FillAlphaAt(20, 100))
+
+    -- Out of the plot is clamped, not extrapolated past the endpoints.
+    H.eq("below the plot is the low end", ui.FillAlphaAt(-50, 100), A0)
+    H.eq("above it is the high end", ui.FillAlphaAt(500, 100), A1)
+    H.eq("a plot with no height is the low end", ui.FillAlphaAt(10, 0), A0)
+    H.eq("...and a nil one", ui.FillAlphaAt(10, nil), A0)
+
+    -- Every alpha it can produce is a legal one.
+    local y = -20
+    while y <= 120 do
+        local a = ui.FillAlphaAt(y, 100)
+        H.check("alpha at " .. y .. " is in range", a >= 0 and a <= 1, a)
+        y = y + 20
+    end
+end
 
 -- ---------------------------------------------------------------------------
 H.section("the hover readout")
@@ -844,6 +999,12 @@ do
     H.check("the menu is built at all", dropdown ~= "")
     H.check("a multi-select row carries a check box",
             says(dropdown, "row.check = ui.MakeCheckBox(row, 12)"))
+    -- 1 OR NIL, the convention every other check box in this file uses. A
+    -- second convention is one more thing that can be wrong for a reason
+    -- nobody can see.
+    H.check("...set the way every other box in this file is set",
+            says(dropdown,
+                 "row.check:SetChecked(dd.ticked[entries[r].value] and 1 or nil)"))
     -- DISPLAY, NOT A CONTROL: the ROW takes every click, so the whole line
     -- toggles and there is no dead strip beside the box that looks clickable.
     H.check("...which does not take the click itself",
@@ -960,6 +1121,11 @@ do
     -- when the tab was built would never notice.
     H.check("the view menu is rebuilt each paint",
             says(graph, "ui.histWhoDD:SetOptions(ui.HistViewOptions())"))
+    -- TRANSLATED AT THE EDGE. The set is name-keyed for the reader that wants
+    -- names; the menu is value-keyed. Handing it the raw set is what made
+    -- every box draw empty.
+    H.check("the menu is ticked in ITS key space",
+            says(graph, "ui.histWhoDD:SetTicked(ui.HistWhoTicks(ui.histWho), title)"))
 
     -- ALWAYS FILLED, because there is always exactly one line. The fill is
     -- what makes a gold chart read as a level rather than as a trace.
@@ -984,6 +1150,37 @@ do
     H.check("the bucket count comes from the plot",
             says(graph, "ui.HistBucketCount(pw)"),
             "a fixed count is what made the line a staircase")
+
+    -- THE PERIOD BUTTONS ARE THE CHART'S. Built right-to-left because the row
+    -- is anchored by its RIGHT edge -- the chart's width moves with the window
+    -- and the periods have to stay against its far side.
+    local gbuild = bodyOf("function ui.BuildHistoryGraph(")
+    H.check("the chart owns the period buttons",
+            says(gbuild, "ui.histPerBtns[pi] = b"),
+            "they sat a table's width away from what they change")
+    H.check("...anchored against the chart's right edge",
+            says(gbuild, 'b:SetPoint("TOPRIGHT", box, "TOPRIGHT"'))
+    H.check("...and the tab no longer builds its own",
+            not says(bodyOf("function ui.BuildHistoryTab("),
+                     "ui.histPerBtns[pi] = b"))
+
+    -- The flat wash is set FIRST, so a client that will not take a gradient
+    -- keeps a fill rather than a solid block of colour -- and the texture
+    -- alpha comes back off once the gradient is carrying it, because the two
+    -- multiply.
+    local fill = bodyOf("function ui.PaintFill(")
+    H.check("the fill falls back to a flat wash",
+            says(fill, "t:SetAlpha(HISTL.fill_flat)"))
+    H.check("...before the gradient is tried", says(fill, "t:SetGradientAlpha("))
+    H.check("...inside a pcall, because 1.12 clients differ",
+            says(fill, "local ok = pcall(function()"))
+    H.check("...and the flat alpha comes back off when it took",
+            says(fill, "if ok then t:SetAlpha(1) end"))
+    -- Each column gets the SLICE of the plot-wide gradient it occupies.
+    H.check("each column takes its own slice of the gradient",
+            says(fill, "local aBot = ui.FillAlphaAt(r.y, h)")
+            and says(fill, "local aTop = ui.FillAlphaAt(r.y + r.h, h)"),
+            "one pair of endpoints for every column traces the line")
 
     local grow = bodyOf("function ui.GrowPlotSpans(")
     H.check("spans are textures on the plot",

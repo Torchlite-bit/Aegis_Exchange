@@ -18,6 +18,34 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.11]
+
+### Fixed
+- **The check boxes never ticked.** Selecting a name worked — the chart and the
+  title both followed it — but the box beside it stayed empty. The selection is
+  keyed by **name** because that is what filters the series; the menu's entries
+  are keyed `char:Name` because that is what tells a character apart from *All
+  Players*. Handing one straight to the other looked up a key that was never
+  there, and a set lookup that misses returns nil rather than erroring, so
+  nothing said so.
+
+### Changed
+- **The chart has its own title bar.** "Player Gold" on the left, the **period
+  buttons on the right** — they used to sit at the panel's top-left, a table's
+  width away from the thing they change, so nothing about the layout said they
+  were connected. The character picker sits below them with what that selection
+  is holding right now beside it.
+- **The band the periods used to occupy went to the ledger table**, which now
+  shows another row at every window height.
+- **Vertical gridlines**, one under each of five dated x labels. Without them a
+  label is a caption for a band whose edges you have to estimate.
+- **A real gradient under the line**, fading downward from just under it. 1.12's
+  `SetGradientAlpha` applies per *texture* and the fill is one texture per
+  column, so each column takes the **slice** of the plot-wide gradient it
+  actually occupies — one pair of endpoints for every column would make a short
+  column run the whole fade in five pixels and trace the line instead of
+  sitting behind it. A client that refuses the call keeps the flat wash.
+
 ## [1.53.10]
 
 ### Added
@@ -5337,6 +5365,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
