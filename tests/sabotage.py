@@ -2671,6 +2671,166 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the History graph (v1.53.5) -------------------------------------
+
+    # An entry from OUTSIDE the window clamped into the first bucket instead
+    # of dropped. A month of trading piled onto day 1 of a 7-day chart is a
+    # spike that never happened.
+    ("hist-clamps-old-entries-in", "ui/frame.lua",
+     "        if e.t and e.t >= from and (e.amount or 0) > 0 then",
+     "        if e.t and (e.amount or 0) > 0 then",
+     "histgraph"),
+
+    # ...and the newest entry, which sits exactly on `now`, falling off the far
+    # end instead of into the last bucket.
+    ("hist-newest-entry-falls-off-the-end", "ui/frame.lua",
+     "            if b > n then b = n end",
+     "            if b > n then b = 0 end",
+     "histgraph"),
+
+    # "All time" starting at the epoch rather than at the oldest transaction,
+    # which is one flat line against the right-hand edge.
+    ("hist-all-time-starts-at-the-epoch", "ui/frame.lua",
+     "            if t and t < from then from = t end",
+     "            if t and t > from then from = t end",
+     "histgraph"),
+
+    # ...and the guard against a zero span, which is a division by zero in a
+    # repaint on any account with an empty ledger.
+    ("hist-zero-span-divides-by-zero", "ui/frame.lua",
+     "        if from >= now then from = now - 86400 end",
+     "        local _ = now",
+     "histgraph"),
+
+    # A purchase counted as income, which inverts the one comparison the chart
+    # exists to make.
+    ("hist-buys-counted-as-income", "ui/frame.lua",
+     '            elseif e.kind == "buy" then spend[b] = spend[b] + e.amount end',
+     '            elseif e.kind == "buy" then income[b] = income[b] + e.amount end',
+     "histgraph"),
+
+    # Each series scaled to its own maximum. Two axes on one chart is two
+    # charts drawn on top of each other, and both lines then peak at the top
+    # however far apart they are.
+    ("hist-series-do-not-share-a-scale", "ui/frame.lua",
+     "    i = 1\n    while i <= table.getn(b or {}) do\n        if (b[i] or 0) > m then m = b[i] end",
+     "    i = 1\n    while i <= table.getn(b or {}) do\n        if false then m = b[i] end",
+     "histgraph"),
+
+    # The line read as a staircase: a column between two buckets snapping to
+    # the bucket it started in instead of taking the height the line has there.
+    ("hist-line-is-a-staircase", "ui/frame.lua",
+     "    return a + (b - a) * f",
+     "    return a",
+     "histgraph"),
+
+    # A span allowed past the top of the plot. These are textures on the chart
+    # frame and nothing clips one that overruns -- it draws over the axis
+    # labels and over the table in the other half.
+    ("hist-span-overruns-the-plot", "ui/frame.lua",
+     "        if hh > h - y then hh = h - y end",
+     "        local _ = h",
+     "histgraph"),
+
+    # ...and below the baseline, which is the same fault at the other end.
+    ("hist-span-hangs-below-the-baseline", "ui/frame.lua",
+     "        if y < 0 then hh = hh + y; y = 0 end",
+     "        local _ = y",
+     "histgraph"),
+
+    # A span with no height at all, which is a line with gaps in it.
+    ("hist-span-can-be-invisible", "ui/frame.lua",
+     "        if hh < 1 then hh = 1 end",
+     "        local _ = hh",
+     "histgraph"),
+
+    # Columns that do not touch, which draws a dashed line rather than a line.
+    ("hist-columns-leave-gaps", "ui/frame.lua",
+     "        push(c * colW, lo, hi, colW)",
+     "        push(c * colW, lo, hi, colW - 1)",
+     "histgraph"),
+
+    # A single bucket drawing nothing, which reads as a broken chart on the
+    # real state "one day of data".
+    ("hist-one-point-draws-nothing", "ui/frame.lua",
+     "    if n == 1 then\n        local y = yAt(values[1])\n        push(0, y, y, w)\n        return out\n    end",
+     "    if n == 1 then\n        return out\n    end",
+     "histgraph"),
+
+    # An empty period taken as a scale of zero and divided by.
+    ("hist-empty-period-divides-by-zero", "ui/frame.lua",
+     "        if not max or max <= 0 then return 0 end",
+     "        local _ = max",
+     "histgraph"),
+
+    # The chart given the table's minimum width whatever the window, so it
+    # never grows -- and the panel's two halves stop adding up.
+    ("hist-split-does-not-follow-the-window", "ui/frame.lua",
+     "    local graph = math.floor(inner * HISTL.graph_frac)",
+     "    local graph = HISTL.graph_min",
+     "histgraph"),
+
+    # The CHART winning the squeeze instead of the table. The table's columns
+    # are fixed and its Amount column is the rightmost thing that can be
+    # clipped.
+    ("hist-table-loses-the-squeeze", "ui/frame.lua",
+     "    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end",
+     "    local _ = inner",
+     "histgraph"),
+
+    # The plot measured off a two-corner-anchored frame, which reports the size
+    # it was created at -- so the chart keeps its first width however far the
+    # window is dragged. This trap has taken five other things in this file.
+    ("hist-plot-measures-a-stale-frame", "ui/frame.lua",
+     "    local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())",
+     "    local pw, ph = ui.histPlot:GetWidth(), ui.histPlot:GetHeight()",
+     "histgraph"),
+
+    # The table anchored corner to corner again -- the way every other list in
+    # this window is built, and so the easy thing to "fix" it back to. It runs
+    # the table under the chart.
+    ("hist-table-anchored-under-the-chart", "ui/frame.lua",
+     '    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,\n                    LISTBOX.hist.bot)',
+     '    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.hist.bot)',
+     "histgraph"),
+
+    # The chart never repainted with the table, so it keeps whichever period
+    # was selected when the tab was built.
+    ("hist-chart-not-repainted", "ui/frame.lua",
+     "    ui.UpdateHistoryGraph()\nend",
+     "end",
+     "histgraph"),
+
+    # Spans anchored from the TOP of the plot, which inverts the whole chart --
+    # ui.PlotColumns returns y measured up from the baseline precisely so the
+    # painter never has to think about the sign.
+    ("hist-spans-anchored-upside-down", "ui/frame.lua",
+     '            t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)',
+     '            t:SetPoint("TOPLEFT", ui.histPlot, "TOPLEFT", r.x, r.y)',
+     "histgraph"),
+
+    # Re-anchored without clearing. SetPoint ADDS a point on 1.12, so a span
+    # ends up pinned to its old position and its new one -- stretched rather
+    # than moved, and only once the data has changed.
+    ("hist-spans-not-cleared", "ui/frame.lua",
+     "            t:ClearAllPoints()\n            t:SetPoint(\"BOTTOMLEFT\", ui.histPlot",
+     "            t:SetPoint(\"BOTTOMLEFT\", ui.histPlot",
+     "histgraph"),
+
+    # Spare spans left showing, so the chart keeps the tail of whatever it drew
+    # last time.
+    ("hist-spare-spans-left-showing", "ui/frame.lua",
+     "        else\n            t:Hide()\n        end\n        i = i + 1\n    end\nend\n\n-- Place the two halves",
+     "        end\n        i = i + 1\n    end\nend\n\n-- Place the two halves",
+     "histgraph"),
+
+    # Spans built as FRAMES rather than textures. A few hundred textures on
+    # one frame is affordable; a few hundred frames is not.
+    ("hist-spans-are-frames", "ui/frame.lua",
+     '        local t = ui.histPlot:CreateTexture(nil, "ARTWORK")\n        t:SetTexture(colour[1], colour[2], colour[3])',
+     '        local t = CreateFrame("Frame", nil, ui.histPlot)\n        local _ = colour',
+     "histgraph"),
+
     # ---- the Auctions split: book value and bids (v1.53.4) ---------------
 
     # A bid-only auction folded into the "if it all sells" total as though its
@@ -4071,6 +4231,7 @@ SUITES = {
     "crafttree": "tests/units/crafttree_test.lua",
     "buygroup": "tests/units/buygroup_test.lua",
     "bids": "tests/units/bids_test.lua",
+    "histgraph": "tests/units/histgraph_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

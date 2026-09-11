@@ -56,6 +56,15 @@ local C = {
     -- should not be: on a pfUI backdrop the warm version sat close enough to
     -- the surrounding tan to be hard to pick out, which was the report.
     input   = { 1.00, 1.00, 1.00 },
+    -- The two directions money moves. ONE pair, read by the History table's
+    -- Type column AND by the graph beside it: a green line next to a
+    -- differently-green "Sold" two inches away reads as two different things,
+    -- and these were literals in the painter until the graph needed them too.
+    income  = { 0.30, 0.85, 0.30 },
+    spend   = { 0.90, 0.55, 0.35 },
+    -- Chart furniture: the horizontal rules behind the lines. Dim enough to
+    -- sit behind data and bright enough to be read as a scale.
+    grid    = { 0.34, 0.29, 0.19 },
 }
 
 -- Last scan older than this is "stale" and rendered amber.
@@ -11350,6 +11359,239 @@ local HIST_HEADER_DEFS = {
     { key = "amount", text = "Amount", just = "RIGHT" },
 }
 
+-- The History panel is SPLIT left/right: the ledger table, and a chart of the
+-- same numbers beside it.
+--
+-- THE DESIGN SPIKE, because 1.12 has no charting primitive and ROADMAP Phase 3
+-- asked for the answer in writing before any of it was built:
+--
+--   * A GRID OF PIXELS. One texture per plotted pixel. A 340x150 plot is
+--     51,000 textures. Not a candidate; recorded so nobody re-proposes it.
+--   * A BAR PER BUCKET. Cheap -- thirty textures a series -- and it is a bar
+--     chart, not the line graph that was asked for.
+--   * ROTATED SEGMENTS. 1.12 has no Texture:SetRotation (3.x) and the
+--     eight-argument SetTexCoord shear that fakes one is real but fiddly, and
+--     nothing in tests/ can see whether it came out straight. Rejected for
+--     being untestable rather than for being impossible.
+--   * A THIN VERTICAL SPAN PER COLUMN -- what this builds. Every rectangle is
+--     axis-aligned, so it needs only SetWidth/SetHeight/SetPoint, and four
+--     pixels of column is narrow enough that consecutive spans overlap in y
+--     and read as a continuous line. A 500px plot costs ~125 textures per
+--     series, which is a list of rows' worth of draw objects on ONE frame.
+--
+-- Widths only: the vertical bands are the table's own and are unchanged, which
+-- is why LISTBOX.hist is untouched.
+local HISTL = {
+    edge       = 10,
+    gap        = 12,
+    -- The table's columns end at 566 plus the row padding and its scrollbar.
+    -- Below this the Amount column starts running under the scrollbar, which
+    -- is the clipping this number exists to prevent.
+    left_min   = 620,
+    graph_min  = 240,
+    graph_frac = 0.36,
+    -- Inside the chart box: the heading and legend above the plot, and the
+    -- axis labels below it.
+    plot_top   = 34,
+    plot_bot   = 30,
+    plot_side  = 10,
+    -- One column of the rasterised line. FOUR PIXELS is the whole compromise
+    -- described above: one per data point is a staircase, one per pixel is
+    -- hundreds of textures.
+    col_w      = 4,
+    line_h     = 2,
+    -- How many buckets each period is divided into. Hourly for a day, daily
+    -- for a week and a month; "All" gets the same thirty and stretches them.
+    buckets    = { 24, 7, 30, 30 },
+}
+
+-- The two halves of the History panel at window width `w`. Returns tableW,
+-- graphW -- both in panel pixels, and they plus the edges and gap are the
+-- whole panel.
+--
+-- THE TABLE WINS THE SQUEEZE. Its columns are fixed and its Amount column is
+-- the rightmost thing in the window that can be clipped; the chart has no
+-- fixed content and degrades to a narrower chart gracefully.
+function ui.HistWidthsAt(w)
+    local inner = ui.PanelWidthAt(w) - HISTL.edge * 2 - HISTL.gap
+    if inner < 2 then inner = 2 end
+    local graph = math.floor(inner * HISTL.graph_frac)
+    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end
+    if graph < HISTL.graph_min then graph = HISTL.graph_min end
+    -- ...but never to the point of taking the table away entirely. At a window
+    -- narrower than both minima together something has to give, and a chart
+    -- with no table beside it is not the History tab.
+    if graph > inner - 60 then graph = inner - 60 end
+    if graph < 1 then graph = 1 end
+    return inner - graph, graph
+end
+
+-- Bucket the ledger for the chart. Returns income[], spend[], from, step.
+--
+-- Pure: the ledger, a clock and a window in, two arrays out. Every entry in
+-- the window lands in exactly one bucket, and entries outside it are dropped
+-- rather than clamped into the end buckets -- a month of trading piled onto
+-- day 1 of a 7-day chart is a spike that never happened.
+--
+-- "ALL TIME" SPANS FROM THE OLDEST TRANSACTION, not from the epoch. A chart
+-- whose x axis starts in 1970 is one flat line against the right-hand edge.
+function ui.HistBuckets(led, now, secs, n)
+    n = n or 30
+    if n < 1 then n = 1 end
+    local income, spend = {}, {}
+    local i = 1
+    while i <= n do income[i] = 0; spend[i] = 0; i = i + 1 end
+    local count = table.getn(led or {})
+    now = now or 0
+    local from
+    if secs and secs > 0 then
+        from = now - secs
+    else
+        from = now
+        local k = 1
+        while k <= count do
+            local t = led[k].t
+            if t and t < from then from = t end
+            k = k + 1
+        end
+        -- Nothing recorded, or everything recorded in this same second. Either
+        -- way there is no span to divide, and a zero step divides by zero.
+        if from >= now then from = now - 86400 end
+    end
+    local step = (now - from) / n
+    if step <= 0 then step = 1 end
+    local k = 1
+    while k <= count do
+        local e = led[k]
+        if e.t and e.t >= from and (e.amount or 0) > 0 then
+            local b = math.floor((e.t - from) / step) + 1
+            -- The newest entry sits exactly on `now` and would land in bucket
+            -- n+1. It belongs in the last one, not off the end of the chart.
+            if b < 1 then b = 1 end
+            if b > n then b = n end
+            if e.kind == "sale" then income[b] = income[b] + e.amount
+            elseif e.kind == "buy" then spend[b] = spend[b] + e.amount end
+        end
+        k = k + 1
+    end
+    return income, spend, from, step
+end
+
+-- The top of the y axis: the largest value in either series, or 0.
+--
+-- BOTH SERIES SHARE ONE SCALE. Two axes on one chart is two charts drawn on
+-- top of each other, and the whole question this one answers -- am I earning
+-- more than I am spending -- is only legible if the two lines are comparable.
+function ui.SeriesMax(a, b)
+    local m = 0
+    local i = 1
+    while i <= table.getn(a or {}) do
+        if (a[i] or 0) > m then m = a[i] end
+        i = i + 1
+    end
+    i = 1
+    while i <= table.getn(b or {}) do
+        if (b[i] or 0) > m then m = b[i] end
+        i = i + 1
+    end
+    return m
+end
+
+-- The value of `values` at a FRACTIONAL 1-based index, interpolated.
+--
+-- This is what makes the line a line rather than a staircase: a column that
+-- falls between two buckets takes the height the line would have there.
+function ui.SeriesAt(values, p)
+    local n = table.getn(values or {})
+    if n < 1 then return 0 end
+    if not p or p <= 1 then return values[1] or 0 end
+    if p >= n then return values[n] or 0 end
+    local i = math.floor(p)
+    local f = p - i
+    local a, b = values[i] or 0, values[i + 1] or 0
+    return a + (b - a) * f
+end
+
+-- Rasterise one series as a run of thin vertical spans -- the line graph.
+--
+-- Returns { x, y, w, h } rectangles in PLOT COORDINATES: x from the plot's
+-- left edge, y UP from its baseline, so the caller anchors each one BOTTOMLEFT
+-- and never has to think about the sign.
+--
+-- Every rectangle is inside the plot. A span clipped by the top or bottom is
+-- shortened rather than allowed to hang out: these are textures on the chart
+-- frame, and nothing clips a texture that overruns it.
+function ui.PlotColumns(values, max, w, h, colW, thick)
+    local out = {}
+    local n = table.getn(values or {})
+    w = w or 0; h = h or 0
+    colW = colW or HISTL.col_w
+    thick = thick or HISTL.line_h
+    if n < 1 or w <= 0 or h <= 0 or colW <= 0 then return out end
+    local function yAt(v)
+        if not max or max <= 0 then return 0 end
+        local y = (v or 0) / max * h
+        if y < 0 then y = 0 end
+        if y > h then y = h end
+        return y
+    end
+    local function push(x, lo, hi, cw)
+        local y = lo - thick / 2
+        local hh = (hi - lo) + thick
+        if y < 0 then hh = hh + y; y = 0 end
+        if y > h - 1 then y = h - 1 end
+        if hh > h - y then hh = h - y end
+        if hh < 1 then hh = 1 end
+        table.insert(out, { x = x, y = y, w = cw, h = hh })
+    end
+    -- ONE bucket is a point, and a point has no direction. A flat run across
+    -- the plot is the honest drawing of "one day of data"; drawing nothing
+    -- reads as a broken chart.
+    if n == 1 then
+        local y = yAt(values[1])
+        push(0, y, y, w)
+        return out
+    end
+    local cols = math.floor(w / colW)
+    if cols < 1 then cols = 1 end
+    local c = 0
+    while c < cols do
+        local y1 = yAt(ui.SeriesAt(values, c / cols * (n - 1) + 1))
+        local y2 = yAt(ui.SeriesAt(values, (c + 1) / cols * (n - 1) + 1))
+        local lo, hi = y1, y2
+        if lo > hi then lo, hi = hi, lo end
+        push(c * colW, lo, hi, colW)
+        c = c + 1
+    end
+    return out
+end
+
+-- The DRAWING AREA, in pixels, at a given window size.
+--
+-- ARITHMETIC, NOT GetWidth(). The plot frame is anchored by two corners, so
+-- GetWidth reports the size it was last LAID OUT at -- the window's creation
+-- size -- and the chart would keep its first width however far the window was
+-- dragged. That trap has now taken the Buy table, the Advanced widths, the
+-- Saved Searches columns and all six list row counts; measuring a two-corner
+-- frame is never the answer here.
+function ui.HistPlotSizeAt(winW, winH)
+    local _, graphW = ui.HistWidthsAt(winW)
+    local w = graphW - HISTL.plot_side * 2
+    local h = ui.PanelHeightAt(winH) - LISTBOX.hist.top - LISTBOX.hist.bot
+              - HISTL.plot_top - HISTL.plot_bot
+    if w < 1 then w = 1 end
+    if h < 1 then h = 1 end
+    return w, h
+end
+
+-- How many spans a plot `w` wide can ever need, so the texture pool is built
+-- once to its ceiling instead of growing during a drag.
+function ui.PlotColumnCount(w)
+    local n = math.floor((w or 0) / HISTL.col_w)
+    if n < 1 then n = 1 end
+    return n
+end
+
 local HIST_ROWS, HIST_ROW_H = 10, 26
 local HIST_ROWS_MAX = 34
 -- Period options: label + window seconds (0 = all time).
@@ -11462,8 +11704,14 @@ function ui.BuildHistoryTab()
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
         panel, "FauxScrollFrameTemplate")
+    -- ANCHORED DOWN THE LEFT, not corner to corner. The panel is split now
+    -- and the table is its left half, so the width is set from
+    -- ui.HistWidthsAt rather than taken from a right-hand anchor -- a
+    -- BOTTOMRIGHT anchor here would put the table under the chart.
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.hist.top)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.hist.bot)
+    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,
+                    LISTBOX.hist.bot)
+    scroll:SetWidth(HISTL.left_min - HISTL.edge * 2)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -11509,6 +11757,181 @@ ui.GrowHistRows = function(n)
         end
     end
     ui.GrowHistRows(HIST_ROWS)
+    ui.BuildHistoryGraph(panel)
+end
+
+-- The right-hand half: income and spending over the selected period.
+--
+-- ITS OWN BUILDER, like ui.BuildBidsHalf, and for the same reason -- see the
+-- BUYL note on the 32-upvalue ceiling, which is a load failure rather than a
+-- warning. Splitting a tab's widgets across two functions splits its upvalue
+-- count too.
+function ui.BuildHistoryGraph(panel)
+    local box = CreateFrame("Frame", nil, panel)
+    box:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -HISTL.edge, -LISTBOX.hist.top)
+    box:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
+                 -HISTL.edge, LISTBOX.hist.bot)
+    box:SetWidth(HISTL.graph_min)
+    ui.MakeWell(panel, box, 4)
+    ui.histGraph = box
+
+    ui.histGraphTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.histGraphTitle:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -4)
+    ui.histGraphTitle:SetTextColor(C.header[1], C.header[2], C.header[3])
+    ui.histGraphTitle:SetText("Income vs spending")
+
+    -- The legend doubles as the key to the two line colours, which are the
+    -- same two the Type column uses on the table to the left.
+    local function swatch(colour, anchorTo, dx)
+        local t = box:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(colour[1], colour[2], colour[3])
+        t:SetWidth(8); t:SetHeight(8)
+        t:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", dx, -20)
+        local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", t, "RIGHT", 4, 0)
+        return fs
+    end
+    ui.histLegendIn = swatch(C.income, box, HISTL.plot_side)
+    ui.histLegendIn:SetTextColor(C.income[1], C.income[2], C.income[3])
+    ui.histLegendIn:SetText("in")
+    ui.histLegendOut = swatch(C.spend, box, HISTL.plot_side + 70)
+    ui.histLegendOut:SetTextColor(C.spend[1], C.spend[2], C.spend[3])
+    ui.histLegendOut:SetText("out")
+
+    -- The plot itself: an empty frame whose rect IS the drawing area, so every
+    -- span can be anchored BOTTOMLEFT to it and the arithmetic never has to
+    -- know where the box's furniture ended.
+    local plot = CreateFrame("Frame", nil, box)
+    plot:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -HISTL.plot_top)
+    plot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT",
+                  -HISTL.plot_side, HISTL.plot_bot)
+    ui.histPlot = plot
+
+    -- Three rules: the top of the scale, its middle, and the baseline. Drawn
+    -- on the plot in BACKGROUND so the lines sit over them.
+    ui.histGrid = {}
+    local g = 1
+    while g <= 3 do
+        local t = plot:CreateTexture(nil, "BACKGROUND")
+        t:SetTexture(C.grid[1], C.grid[2], C.grid[3])
+        t:SetHeight(1)
+        t:SetPoint("LEFT", plot, "LEFT", 0, 0)
+        t:SetPoint("RIGHT", plot, "RIGHT", 0, 0)
+        ui.histGrid[g] = t
+        g = g + 1
+    end
+
+    ui.histYTop = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histYTop:SetPoint("TOPRIGHT", plot, "TOPRIGHT", -2, 11)
+    ui.histYTop:SetJustifyH("RIGHT")
+    ui.histYTop:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.histXFrom = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histXFrom:SetPoint("TOPLEFT", plot, "BOTTOMLEFT", 0, -4)
+    ui.histXFrom:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.histXTo = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histXTo:SetPoint("TOPRIGHT", plot, "BOTTOMRIGHT", 0, -4)
+    ui.histXTo:SetJustifyH("RIGHT")
+    ui.histXTo:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    ui.histXTo:SetText("now")
+
+    ui.histEmpty = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histEmpty:SetPoint("CENTER", plot, "CENTER", 0, 0)
+    ui.histEmpty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    ui.histEmpty:SetText("Nothing recorded in this period.")
+    ui.histEmpty:Hide()
+
+    ui.histSpans = { income = {}, spend = {} }
+end
+
+-- Grow one series' texture pool to `n` spans. Textures, not frames -- they are
+-- draw objects on the plot rather than widgets, which is what makes a few
+-- hundred of them affordable.
+function ui.GrowPlotSpans(which, colour, n)
+    local pool = ui.histSpans and ui.histSpans[which]
+    if not pool or not ui.histPlot then return end
+    local i = table.getn(pool) + 1
+    while i <= n do
+        local t = ui.histPlot:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(colour[1], colour[2], colour[3])
+        t:Hide()
+        pool[i] = t
+        i = i + 1
+    end
+end
+
+-- Paint one series. Every span is anchored BOTTOMLEFT to the plot, which is
+-- why ui.PlotColumns returns y measured UP from the baseline.
+function ui.PaintSeries(which, colour, values, max, w, h)
+    local rects = ui.PlotColumns(values, max, w, h)
+    local n = table.getn(rects)
+    ui.GrowPlotSpans(which, colour, n)
+    local pool = ui.histSpans[which]
+    local i = 1
+    while i <= table.getn(pool) do
+        local t = pool[i]
+        local r = rects[i]
+        if r then
+            t:SetWidth(r.w); t:SetHeight(r.h)
+            t:ClearAllPoints()
+            t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)
+            t:Show()
+        else
+            t:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- Place the two halves at the current window width, and draw the chart.
+function ui.UpdateHistoryGraph()
+    if not ui.histGraph or not ui.histScroll then return end
+    local tableW, graphW = ui.HistWidthsAt(ui.WindowW())
+    -- The table is anchored top and bottom, so its WIDTH is what moves. The
+    -- opposite of the Auctions split, and for the opposite reason: there the
+    -- height was the variable, so the frame could not be anchored at both
+    -- ends; here the height is fixed and the width is set.
+    ui.histScroll:SetWidth(tableW - HISTL.edge * 2)
+    ui.histGraph:SetWidth(graphW)
+
+    local period = HIST_PERIODS[ui.histPeriod or 2]
+    local n = HISTL.buckets[ui.histPeriod or 2] or 30
+    local income, spend = ui.HistBuckets(A.db.Ledger(), time(), period.secs, n)
+    local max = ui.SeriesMax(income, spend)
+
+    local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())
+
+    -- The scale, and the rules that carry it. The middle rule is only honest
+    -- when there is a scale to halve, so on an empty period the axis says
+    -- nothing rather than "0".
+    if max > 0 then
+        ui.histYTop:SetText(util.FormatMoney(max, true))
+        ui.histEmpty:Hide()
+    else
+        ui.histYTop:SetText("")
+        ui.histEmpty:Show()
+    end
+    local g = 1
+    while g <= 3 do
+        local frac = (g - 1) / 2       -- 0 at the baseline, 1 at the top
+        ui.histGrid[g]:ClearAllPoints()
+        ui.histGrid[g]:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", 0,
+                                math.floor(frac * ph))
+        ui.histGrid[g]:SetPoint("BOTTOMRIGHT", ui.histPlot, "BOTTOMRIGHT", 0,
+                                math.floor(frac * ph))
+        g = g + 1
+    end
+
+    ui.histXFrom:SetText(period.secs > 0 and (period.label .. " ago") or "start")
+
+    if max > 0 then
+        ui.PaintSeries("income", C.income, income, max, pw, ph)
+        ui.PaintSeries("spend", C.spend, spend, max, pw, ph)
+    else
+        ui.PaintSeries("income", C.income, {}, 0, pw, ph)
+        ui.PaintSeries("spend", C.spend, {}, 0, pw, ph)
+    end
 end
 
 function ui.RefreshHistory()
@@ -11589,11 +12012,11 @@ function ui.UpdateHistoryList()
             row.when:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
             if e.kind == "sale" then
                 row.kind:SetText("Sold")
-                row.kind:SetTextColor(0.30, 0.85, 0.30)
+                row.kind:SetTextColor(C.income[1], C.income[2], C.income[3])
                 row.amount:SetText("+" .. util.FormatMoney(e.amount, true))
             else
                 row.kind:SetText("Bought")
-                row.kind:SetTextColor(0.90, 0.55, 0.35)
+                row.kind:SetTextColor(C.spend[1], C.spend[2], C.spend[3])
                 row.amount:SetText("-" .. util.FormatMoney(e.amount, true))
             end
             -- DELIBERATELY NOT QUALITY-COLOURED, unlike every other table's
@@ -11617,6 +12040,10 @@ function ui.UpdateHistoryList()
     else
         ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
     end
+    -- The chart reads the SAME ledger and the SAME period, from the same
+    -- repaint. Driving it from its own path is how the two halves of one tab
+    -- come to disagree about what week it is.
+    ui.UpdateHistoryGraph()
 end
 
 StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {

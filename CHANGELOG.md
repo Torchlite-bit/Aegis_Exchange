@@ -18,6 +18,46 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.5]
+
+### Added
+- **The History tab is split: the ledger on the left, a line graph on the
+  right.** Income in green, spending in orange — the same two colours the Type
+  column has always used, which are now one pair in the palette rather than a
+  literal in each painter.
+  - **The period buttons drive both halves.** 24h is plotted hourly, 7d daily,
+    30d daily, and **All spans from your oldest transaction** rather than from
+    the epoch — a chart whose x axis starts in 1970 is one flat line jammed
+    against the right-hand edge.
+  - **Both lines share one scale**, because the question the chart answers is
+    whether one is above the other, and two axes on one chart is two charts
+    drawn on top of each other.
+  - **A quiet period says so** instead of drawing an empty box.
+  - The table keeps every column it had. It wins the squeeze when the window is
+    narrow: its columns are fixed and its Amount column is the rightmost thing
+    in the window that can be clipped, so the chart narrows and the table does
+    not.
+
+### Notes
+- **How you draw a line graph on a client with no charting primitive**, since
+  it is the part most likely to be "improved" later:
+  - A texture per plotted **pixel** is 51,000 textures for one chart. Not a
+    candidate.
+  - A bar per **bucket** is cheap and is a bar chart, not a line.
+  - **Rotated segments** would give true diagonals, but 1.12 has no
+    `Texture:SetRotation` (that is 3.x) and the eight-argument `SetTexCoord`
+    shear that fakes one cannot be checked by anything in `tests/`. Rejected
+    for being untestable, not for being impossible.
+  - **A thin vertical span per column** is what ships. Every rectangle is
+    axis-aligned, four pixels wide, and takes the height the line actually has
+    across those four pixels — so consecutive spans overlap and read as one
+    continuous line. A 500px plot costs about 125 textures per series, on one
+    frame.
+  - The drawing area is **computed, not measured**. The plot frame is anchored
+    by two corners, and `GetWidth` on one of those reports the size it was
+    created at — the trap that has already taken the Buy table, the Advanced
+    widths, the Saved Searches columns and all six list row counts.
+
 ## [1.53.4]
 
 ### Added
@@ -5139,6 +5179,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

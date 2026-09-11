@@ -2390,6 +2390,64 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The History tab, split — with the charting spike — v1.53.5
+
+**Phase 3 asked for the design spike in writing before any of it was built.
+Here it is, and the answer it reached is in `HISTL`'s header comment so the
+next person to open that file finds it there rather than here.**
+
+1.12 has no charting primitive at all. Four candidates:
+
+| approach | cost | verdict |
+| --- | --- | --- |
+| one texture per plotted **pixel** | 340×150 = 51,000 textures | never |
+| one bar per **bucket** | ~30 per series | cheap, and it is a bar chart |
+| **rotated segments** (8-arg `SetTexCoord` shear) | ~30 per series | true diagonals, but nothing in `tests/` can see whether it came out straight |
+| **a thin vertical span per column** | ~125 per series at 500px | ships |
+
+`Texture:SetRotation` is 3.x, so the third option means the eight-argument
+`SetTexCoord` affine trick. It works on 1.12 and vanilla addons used it. It was
+rejected for being **untestable**, not for being impossible — and that is the
+reasoning to revisit if anyone ever wants real diagonals, with a real client
+and a person looking at it.
+
+**What ships is a polyline rasterised as vertical spans.** Every rectangle is
+axis-aligned, so it needs only `SetWidth` / `SetHeight` / `SetPoint`. A column
+four pixels wide takes the height the line actually has across those four
+pixels — `ui.SeriesAt` interpolates between buckets, which is the difference
+between a line and a staircase — so consecutive spans overlap in y and read as
+continuous. The suite asserts that: no gaps horizontally, none vertically, and
+every span inside the plot, because these are textures on the chart frame and
+nothing clips one that overruns.
+
+**`ui.PlotColumns` returns y measured UP from the baseline** and the painter
+anchors `BOTTOMLEFT`. That is the whole reason the rasteriser has no sign
+handling in it.
+
+**The drawing area is arithmetic.** `ui.HistPlotSizeAt(winW, winH)` computes
+it; the plot frame is anchored by two corners and `GetWidth` on one of those
+reports the size it was laid out at — the trap that has now taken the Buy
+table, the Advanced widths, the Saved Searches columns and all six list row
+counts. Six instances, and the seventh was avoided by writing the function
+before the bug.
+
+**Two things worth keeping in mind about the data.** An entry outside the
+window is **dropped, not clamped** into an end bucket — a month of trading
+piled onto day 1 of a 7-day chart is a spike that never happened. And the
+newest entry sits exactly on `now`, which divides into bucket n+1 of n; it
+belongs in the last one.
+
+**One nan trap, found by a sabotage that passed.** An empty period has a scale
+of zero, and `0/0` is nan. Every comparison against nan is false, so a nan
+rectangle passes "is it inside the plot", "is it tall enough" and "is it too
+wide" at once — the assertion had to ask whether the number equals itself. Any
+geometry check in this repo that can receive a zero scale wants the same line.
+
+**Still to do on this tab, and deliberately not done here:** the chart plots
+per-bucket totals, not a cumulative balance. "What did I take in and pay out
+each day" and "how has my gold moved" are different questions and the second
+wants its own series and its own toggle. Nobody has asked for it yet.
+
 ### The Auctions tab, split — v1.53.4
 
 **A Bids tab or a split Auctions tab: the split, and the reason is that they
