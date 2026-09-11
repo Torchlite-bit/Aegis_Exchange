@@ -2671,6 +2671,140 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- gold-only chart, longer history (v1.53.8) -----------------------
+
+    # Compaction keeping the FIRST sample of each day rather than the last.
+    # The series reader carries the last known figure forward, so a day has
+    # to be represented by what you went to bed with -- keeping the morning's
+    # reports it for the whole of the next day.
+    ('money-compaction-keeps-the-days-first', 'core/db.lua',
+     '        if k > cutoff or not nxt or db.MoneyDayOf(nxt) ~= db.MoneyDayOf(k) then',
+     '        if k > cutoff or not nxt or db.MoneyDayOf(nxt) == db.MoneyDayOf(k) then',
+     'purse'),
+
+    # The recent hours thinned along with the old ones, which flattens the
+    # 24h view -- the one place the hourly detail is the whole point.
+    ('money-compaction-thins-the-fine-window', 'core/db.lua',
+     '        if k > cutoff or not nxt or',
+     '        if false or not nxt or',
+     'purse'),
+
+    # The hard cap behind the compaction removed, so a character played across
+    # more days than it allows grows without bound.
+    ('money-compaction-never-caps', 'core/db.lua',
+     '    while table.getn(keep) > db.MONEY_SAMPLES_MAX do\n        local old = table.remove(keep, 1)\n        rec.hours[old] = nil\n        dropped = dropped + 1\n    end',
+     '    local _ = keep',
+     'purse'),
+
+    # Compacted out of the key list and left in the table, which is a table
+    # that grows forever while reporting that it does not.
+    ('money-compaction-leaves-the-value', 'core/db.lua',
+     '            rec.hours[k] = nil\n            dropped = dropped + 1',
+     '            dropped = dropped + 1',
+     'purse'),
+
+    # Compaction on EVERY write. It is a walk of the key list and this runs
+    # from PLAYER_MONEY, which fires for every copper -- the exact shape
+    # HARD RULE 16 forbids. Amortised it is free.
+    ('money-compaction-runs-every-write', 'core/db.lua',
+     '        if table.getn(rec.keys) > db.MONEY_SAMPLES_MAX then\n            db.CompactMoney(rec, now)\n        end',
+     '        db.CompactMoney(rec, now)',
+     'purse'),
+
+    # The per-character filter dropped, so picking one character in the
+    # dropdown draws the whole account's gold under their name.
+    ('money-series-ignores-the-character-filter', 'core/db.lua',
+     '      if not who or name == who then',
+     '      if true then',
+     'purse'),
+
+    # A character with no samples in the window reported the same as one
+    # holding nothing -- so an alt you have never seen is drawn flat on the
+    # baseline instead of saying so.
+    ('money-series-cannot-tell-empty-from-absent', 'core/db.lua',
+     '                    if v then held = v; seen = true end',
+     '                    if v then held = v end',
+     'purse'),
+
+    # The all-time window starting at the NEWEST sample rather than the
+    # oldest, which is a chart with nothing on it.
+    ('oldest-money-takes-the-newest', 'core/db.lua',
+     '        local k = rec.keys and rec.keys[1]',
+     '        local k = rec.keys and rec.keys[table.getn(rec.keys or {})]',
+     'purse'),
+
+    # THE STAIRCASE ITSELF: a fixed bucket count instead of one derived from
+    # the plot. Thirty points across a 300px plot is one every ten pixels,
+    # and no amount of narrowing the columns rescues that.
+    ('buckets-fixed-not-from-the-plot', 'ui/frame.lua',
+     '    local n = math.floor((w or 0) / HISTL.bucket_px)',
+     '    local n = 30',
+     'histgraph'),
+
+    # ...and the floor removed, so an unmeasured window draws a line from no
+    # points at all.
+    ('buckets-not-clamped', 'ui/frame.lua',
+     '    if n < HISTL.bucket_min then n = HISTL.bucket_min end',
+     '    local _ = n',
+     'histgraph'),
+
+    # ...and the ceiling, which is arithmetic nobody can see the result of.
+    ('buckets-uncapped', 'ui/frame.lua',
+     '    if n > HISTL.bucket_max then n = HISTL.bucket_max end',
+     '    local _ = n',
+     'histgraph'),
+
+    # Columns wider than the gap between data points, so the interpolation is
+    # wasted -- two points inside one column is one of them thrown away.
+    ('columns-wider-than-a-bucket', 'ui/frame.lua',
+     '    col_w      = 2,',
+     '    col_w      = 8,',
+     'histgraph'),
+
+    # The readout clamped to the ends instead of going away when the cursor
+    # leaves the plot, so it keeps showing the first or last figure while you
+    # point at the table beside it -- which reads as a chart that has frozen.
+    ('hover-clamps-off-the-plot', 'ui/frame.lua',
+     '    if rel < 0 or rel > w then return nil end',
+     '    local _ = rel',
+     'histgraph'),
+
+    # The right edge divides to n+1 exactly, the same off-by-one the bucketing
+    # has at `now`. Unclamped it indexes past the end of the series.
+    ('hover-off-by-one-at-the-right-edge', 'ui/frame.lua',
+     '    if b > n then b = n end\n    return b',
+     '    return b',
+     'histgraph'),
+
+    # The readout dated from the bucket's leading edge rather than its middle,
+    # so it reports a moment half a bucket before the pixel under the cursor.
+    ('hover-labels-the-bucket-edge', 'ui/frame.lua',
+     '    local t = (from or 0) + (b - 0.5) * (step or 0)',
+     '    local t = (from or 0) + (b - 1) * (step or 0)',
+     'histgraph'),
+
+    # All-time measured from the first TRANSACTION only, which clips a gold
+    # history that predates any trading -- the common case for a character
+    # who levelled before they ever used the auction house.
+    ('window-all-time-ignores-the-coin-history', 'ui/frame.lua',
+     '        local coin = A.db.OldestMoney and A.db.OldestMoney()\n        if coin and coin < from then from = coin end',
+     '        local _ = from',
+     'histgraph'),
+
+    # The axis label falling back to the full figure, which is longer than the
+    # plot is tall and defeats the point of a label beside a chart.
+    ('shortmoney-is-not-short', 'core/util.lua',
+     '        return sign .. math.floor(gold) .. "g"',
+     '        return sign .. util.FormatMoney(copper)',
+     'util'),
+
+    # The sign dropped, so an axis running below zero labels its negative
+    # marks as though they were positive.
+    ('shortmoney-loses-the-sign', 'core/util.lua',
+     '    if copper < 0 then sign = "-"; copper = -copper end',
+     '    if copper < 0 then copper = -copper end',
+     'util'),
+
     # ---- the account purse and the chart's views (v1.53.7) ---------------
 
     # A sample appended for every money change instead of overwriting the
@@ -2682,18 +2816,7 @@ end
      '    if true then',
      'purse'),
 
-    # ...or never pruned at all.
-    ('purse-history-unbounded', 'core/db.lua',
-     '        while table.getn(rec.keys) > db.MONEY_SAMPLES_MAX do\n            local old = table.remove(rec.keys, 1)\n            rec.hours[old] = nil\n        end',
-     '        local _ = rec',
-     'purse'),
 
-    # Pruned from the key list and not from the table, which is a table that
-    # grows forever while reporting that it does not.
-    ('purse-prune-leaves-the-value', 'core/db.lua',
-     '            local old = table.remove(rec.keys, 1)\n            rec.hours[old] = nil',
-     '            table.remove(rec.keys, 1)',
-     'purse'),
 
     # The character you are ON read from the stored figure rather than the
     # live one. It is the only figure that can be exact, and a stale number
@@ -2722,8 +2845,8 @@ end
     # zero for the rest of the week, which draws gold being spent that never
     # left anyone's bag.
     ('purse-series-does-not-carry-forward', 'core/db.lua',
-     '                    if v then held = v end',
-     '                    if v then held = 0 end',
+     '                    if v then held = v; seen = true end',
+     '                    if v then held = 0; seen = true end',
      'purse'),
 
     # PLAYER_MONEY only fires when the figure CHANGES, so without the arrival
@@ -2801,42 +2924,10 @@ end
      '        local v = lo + span * frac + 1',
      'histgraph'),
 
-    # The running total counting only income, which cannot go negative and
-    # therefore reports every period as a winning one.
-    ('cumulative-ignores-spending', 'ui/frame.lua',
-     '        run = run + (income[i] or 0) - ((spend and spend[i]) or 0)',
-     '        run = run + (income[i] or 0)',
-     'histgraph'),
 
-    # Per-character lines left as per-bucket figures, so a line shows what a
-    # character did in one hour rather than where they stand.
-    ('charseries-not-cumulative', 'ui/frame.lua',
-     '        while k <= n do run = run + ser[k]; ser[k] = run; k = k + 1 end',
-     '        while k <= n do run = run + ser[k]; k = k + 1 end',
-     'histgraph'),
 
-    # Ledger history with no character pinned on a made-up one. It cannot be
-    # given an owner, and inventing one puts somebody else's gold on a line
-    # with a name against it.
-    ('charseries-attributes-the-unattributed', 'ui/frame.lua',
-     '        local who = (e.who and e.who ~= "") and e.who or nil',
-     '        local who = (e.who and e.who ~= "") and e.who or "?"',
-     'histgraph'),
 
-    # Characters sorted by signed position rather than by size, which buries
-    # the one who lost 200g at the bottom -- as interesting a fact as the one
-    # who made it.
-    ('charseries-sorts-by-sign', 'ui/frame.lua',
-     '        local aa = a.final; if aa < 0 then aa = -aa end\n        local bb = b.final; if bb < 0 then bb = -bb end',
-     '        local aa, bb = a.final, b.final',
-     'histgraph'),
 
-    # Every character drawn at once. Eight lines on a 300px plot is a colour
-    # wheel, not a chart, and the pool only has four colours.
-    ('charseries-uncapped', 'ui/frame.lua',
-     '    local dropped = 0\n    while table.getn(out) > cap do\n        table.remove(out)\n        dropped = dropped + 1\n    end',
-     '    local dropped = 0',
-     'histgraph'),
 
     # The character name cut at the first non-letter, so an alt with a hyphen
     # or an accent in their name selects nothing at all.
@@ -2921,20 +3012,7 @@ end
 
     # ---- the History graph (v1.53.5) -------------------------------------
 
-    # An entry from OUTSIDE the window clamped into the first bucket instead
-    # of dropped. A month of trading piled onto day 1 of a 7-day chart is a
-    # spike that never happened.
-    ("hist-clamps-old-entries-in", "ui/frame.lua",
-     "        if e.t and e.t >= from and (e.amount or 0) > 0 then",
-     "        if e.t and (e.amount or 0) > 0 then",
-     "histgraph"),
 
-    # ...and the newest entry, which sits exactly on `now`, falling off the far
-    # end instead of into the last bucket.
-    ("hist-newest-entry-falls-off-the-end", "ui/frame.lua",
-     "            if b > n then b = n end",
-     "            if b > n then b = 0 end",
-     "histgraph"),
 
     # "All time" starting at the epoch rather than at the oldest transaction,
     # which is one flat line against the right-hand edge.
@@ -2950,12 +3028,6 @@ end
      "        local _ = now",
      "histgraph"),
 
-    # A purchase counted as income, which inverts the one comparison the chart
-    # exists to make.
-    ("hist-buys-counted-as-income", "ui/frame.lua",
-     '            elseif e.kind == "buy" then spend[b] = spend[b] + e.amount end',
-     '            elseif e.kind == "buy" then income[b] = income[b] + e.amount end',
-     "histgraph"),
 
     # Each series scaled to its own maximum. Two axes on one chart is two
     # charts drawn on top of each other, and both lines then peak at the top

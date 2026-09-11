@@ -68,21 +68,79 @@ H.eq("zero gold is a real answer and IS recorded",
 
 -- ---- the history is bounded ---------------------------------------------
 
+-- TWO RESOLUTIONS IN ONE TABLE, which is how a three-month chart costs the
+-- same SavedVariables as the old one-month one. Every sample starts hourly;
+-- once it falls outside the fine window all but the day's LAST survive.
 do
     W.player = "Hoarder"
+    local last = db.MONEY_SAMPLES_MAX + 50
     local h = 1
-    while h <= db.MONEY_SAMPLES_MAX + 50 do
+    while h <= last do
         db.SetCharMoney(h, h * HOUR)
         h = h + 1
     end
     local hoarder = db.Purses()["Hoarder"]
-    H.eq("the sample list is capped",
-         table.getn(hoarder.keys), db.MONEY_SAMPLES_MAX)
+    H.check("the sample list is thinned, not just capped",
+            table.getn(hoarder.keys) < db.MONEY_SAMPLES_MAX,
+            table.getn(hoarder.keys))
+
+    -- FULL DETAIL INSIDE THE FINE WINDOW. The recent hours are the ones the
+    -- 24h view draws, and thinning them would flatten it.
+    local fine = 0
+    local i = 1
+    while i <= table.getn(hoarder.keys) do
+        if hoarder.keys[i] > last - db.MONEY_FINE_HOURS then fine = fine + 1 end
+        i = i + 1
+    end
+    H.eq("every hour inside the fine window survives",
+         fine, db.MONEY_FINE_HOURS)
+
+    -- ...and ONE A DAY outside it.
+    --
+    -- COMPACTED EXPLICITLY FIRST, because the real thing is AMORTISED: it runs
+    -- only when the cap is exceeded, so between runs there is a tail of hourly
+    -- samples that have aged out of the window and not yet been thinned. That
+    -- is the whole point -- this is called from PLAYER_MONEY, which fires for
+    -- every copper, and a walk on every write is the shape HARD RULE 16
+    -- forbids. The rule is tested here; the amortisation is tested above.
+    H.check("compaction drops something",
+            db.CompactMoney(hoarder, last * HOUR) > 0)
+    local days, twice = {}, nil
+    i = 1
+    while i <= table.getn(hoarder.keys) do
+        local k = hoarder.keys[i]
+        if k <= last - db.MONEY_FINE_HOURS then
+            local d = db.MoneyDayOf(k)
+            if days[d] then twice = d end
+            days[d] = true
+        end
+        i = i + 1
+    end
+    H.isNil("no day outside the window keeps two samples", twice)
+
+    -- ...and it is the day's CLOSING figure, because the series reader carries
+    -- the last known value forward -- keeping the morning's would report it
+    -- for the whole of the next day.
+    local dayEnd = 24 * 3 - 1        -- hour 71, the last of day 2
+    H.eq("the sample kept is the day's last", hoarder.hours[dayEnd], dayEnd)
+    H.isNil("...and not one from earlier that day", hoarder.hours[dayEnd - 1])
+
     -- PRUNED FROM BOTH SIDES. Dropping the key and leaving the value behind is
     -- a table that grows forever while reporting that it does not.
-    H.isNil("...and the pruned sample is really gone", hoarder.hours[1])
-    H.eq("...while the newest is kept",
-         hoarder.hours[db.MONEY_SAMPLES_MAX + 50], db.MONEY_SAMPLES_MAX + 50)
+    H.eq("the newest is always kept", hoarder.hours[last], last)
+
+    -- The hard cap still exists behind the compaction, for a character played
+    -- across more days than it allows.
+    W.player = "Ancient"
+    local d = 1
+    while d <= db.MONEY_SAMPLES_MAX + 100 do
+        db.SetCharMoney(d, d * 24 * HOUR)     -- one sample a day, for years
+        d = d + 1
+    end
+    H.check("a history longer than the cap is still capped",
+            table.getn(db.Purses()["Ancient"].keys) <= db.MONEY_SAMPLES_MAX,
+            table.getn(db.Purses()["Ancient"].keys))
+    H.isNil("...from the oldest end", db.Purses()["Ancient"].hours[24])
 end
 
 -- ---------------------------------------------------------------------------
@@ -203,6 +261,52 @@ H.eq("a zero step is survivable",
 H.eq("...and returns zeroes", db.MoneySeries(from, 0, 4)[1], 0)
 H.eq("a nil origin is survivable",
      table.getn(db.MoneySeries(nil, step, 4)), 4)
+
+-- ---- one character on their own -----------------------------------------
+
+-- THE DROPDOWN PICKS WHOSE GOLD, so the series has to be able to answer for
+-- one character rather than for the account.
+do
+    local one = db.MoneySeries(from, step, n, "Early")
+    H.eq("a filtered series has the same shape", table.getn(one), 6)
+    H.eq("...and only that character's figures", one[6], 200)
+    local other = db.MoneySeries(from, step, n, "Late")
+    H.eq("...and the other's are their own", other[6], 50)
+    H.eq("the two add up to the account total", one[6] + other[6], series[6])
+end
+
+-- A CHARACTER WITH NO SAMPLES IN THE WINDOW is a real state and not the same
+-- as one holding nothing: they exist, we have simply never seen them here.
+-- Drawing them flat on the baseline says they are broke.
+do
+    local vals, seen = db.MoneySeries(from, step, n, "Early")
+    H.eq("a character we have seen says so", seen, true)
+    vals, seen = db.MoneySeries(from, step, n, "Nobody")
+    H.eq("one we have not says so too", seen, false)
+    H.eq("...and their series is still the right shape", table.getn(vals), 6)
+    -- ...and the account-wide call answers it as well, for an install with
+    -- nothing recorded at all.
+    local _, anySeen = db.MoneySeries(from, step, n)
+    H.eq("the account-wide call answers it too", anySeen, true)
+end
+
+-- ---- where "all time" starts --------------------------------------------
+
+-- THE OLDEST SAMPLE, not the newest and not the epoch. A window starting at
+-- the epoch is one flat line jammed against the right-hand edge; one starting
+-- at the newest sample is a chart with nothing on it.
+H.eq("the oldest sample is found", db.OldestMoney(), T0)
+do
+    W.player = "Earlier"
+    db.SetCharMoney(1, T0 - 100 * HOUR)
+    H.eq("...across every character", db.OldestMoney(), T0 - 100 * HOUR)
+end
+
+W.Reset()
+A = W.LoadCore()
+W.FireAddonLoaded(A)
+db = A.db
+H.isNil("nothing recorded has no oldest", db.OldestMoney())
 
 -- ---------------------------------------------------------------------------
 H.section("the money events actually write it")

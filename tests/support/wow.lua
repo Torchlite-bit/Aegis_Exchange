@@ -967,6 +967,12 @@ end
 -- the price DB buckets its dailies by.
 W.uptime = 1000
 function GetTime() return W.uptime end
+
+-- 1.12 exposes Lua's os.date as the global `date`. Modelled rather than
+-- stubbed away, because the chart's axis labels change SHAPE past a day -- a
+-- relative "9d ago" inside one, a calendar date beyond it -- and a mock that
+-- did not answer would silently exercise only the fallback.
+date = os.date
 function W.Advance(seconds) W.uptime = W.uptime + seconds end
 
 -- True while a spell is waiting for the player to click an item -- what

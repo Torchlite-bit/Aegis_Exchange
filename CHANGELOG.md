@@ -18,6 +18,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.8]
+
+### Changed
+- **The History chart shows one thing: gold held, over time.** The four views
+  are gone. Income and spending are what the **table beside it** answers —
+  exactly, line by line, with the item names attached — and what a chart is
+  good at and a table is not is a shape over time. So the dropdown now picks
+  **whose** gold, not which question: **All Players (N)** or any one character.
+
+- **The line is much smoother.** The cause was not the column width — bucket
+  counts were fixed per period, and thirty data points across a 300px plot is
+  one every ten pixels. The count now comes from the **plot width** (a point
+  every three pixels at any window size) and columns are 2px instead of 4.
+
+- **Three months of history, for the same SavedVariables.** Samples start
+  hourly and are **compacted** once they age out of a four-day window: all but
+  each day's closing figure is dropped. 96 hourly samples plus ~800 daily ones
+  reaches back about two years; hourly for two years would have been 17,000
+  numbers per character, written out as Lua source on every logout.
+
+### Added
+- **A 3M period button**, and "All" now reaches back to the oldest thing known
+  — the earlier of your first transaction and your first coin sample, so a
+  character who levelled before they ever used the auction house still gets
+  their whole gold history.
+- **Hover the chart** for what was held at that point and when. A vertical
+  crosshair follows the cursor and the figure reads out above the plot; past a
+  day it is dated rather than "9d ago", which stops being placeable once the
+  window is months long.
+- **Short axis labels** (`84s`, `12g`, `4.2kg`) via `util.ShortMoney`, because
+  `1,240g 17s 3c` is longer than the plot is tall.
+
 ## [1.53.7]
 
 ### Added
@@ -5245,6 +5277,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

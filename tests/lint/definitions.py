@@ -50,6 +50,20 @@ REMOVED_ON_PURPOSE = {
     # honest way to draw a line that crosses it.
     "ui.SeriesMax": "v1.53.7 -- replaced by ui.SeriesRange, which returns a "
                     "signed range rather than a maximum",
+    # v1.53.8. The chart shows ONE thing now -- gold held over time -- because
+    # income and spending are what the TABLE beside it answers, line by line,
+    # with the item names attached. These four served the views that framing
+    # replaced.
+    "ui.HistViewSeries":   "v1.53.8 -- one view left; ui.HistGoldSeries",
+    "ui.CumulativeSeries": "v1.53.8 -- the ledger-balance view is gone; the "
+                           "table beside the chart answers that exactly",
+    "ui.CharSeries":       "v1.53.8 -- the dropdown picks a character and the "
+                           "chart draws their GOLD, not their ledger",
+    "ui.PaintLegend":      "v1.53.8 -- one line needs one name, not a key",
+    # ...and the bucketing that fed them. What survived is the window it
+    # computed, which every version of this chart needed.
+    "ui.HistBuckets":      "v1.53.8 -- split; ui.HistWindow is the half that "
+                           "is still used",
     "ui.RowsFor": "v1.23.0 -- measured a two-edge-anchored scroll frame, "
                   "which is the trap four separate bugs walked into; "
                   "replaced by ui.ListRowsAt",

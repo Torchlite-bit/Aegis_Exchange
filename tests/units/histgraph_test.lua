@@ -24,7 +24,10 @@ local W = require("wow")
 local H = require("harness")
 
 W.Reset()
-local A = W.LoadCore()
+-- A GLOBAL here, not a local: ui.HistWindow is extracted out of ui/frame.lua
+-- where `A` is the addon namespace at file scope, so it resolves as a global
+-- once the function is loaded on its own.
+A = W.LoadCore()
 W.FireAddonLoaded(A)
 
 -- The UI half lives in ui/frame.lua, which no suite loads. Extracted at run
@@ -88,7 +91,6 @@ end
 
 ui = {}
 util = A.util
-HIST_CHAR_LINES = constant("HIST_CHAR_LINES")
 PANEL_H_INSET = 40
 PANEL_V_INSET = 108
 LISTBOX = { hist = { top = 100, bot = 10 } }
@@ -98,7 +100,7 @@ for _, sig in ipairs({
     "function ui.PanelHeightAt(",
     "function ui.HistWidthsAt(",
     "function ui.HistPlotSizeAt(",
-    "function ui.HistBuckets(",
+    "function ui.HistBucketCount(",
     "function ui.SeriesRange(",
     "function ui.GridFractions(",
     "function ui.SeriesAt(",
@@ -106,8 +108,10 @@ for _, sig in ipairs({
     "function ui.FillColumns(",
     "function ui.AxisMarks(",
     "function ui.PlotColumnCount(",
-    "function ui.CumulativeSeries(",
-    "function ui.CharSeries(",
+    "function ui.HoverBucket(",
+    "function ui.WhenLabel(",
+    "function ui.HoverLabel(",
+    "function ui.HistWindow(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -118,83 +122,41 @@ local NOW = 1000000
 local DAY = 86400
 
 -- ---------------------------------------------------------------------------
-H.section("bucketing the ledger")
+H.section("how many buckets the line is drawn from")
 -- ---------------------------------------------------------------------------
 
-local LED = {
-    { t = NOW - 6 * DAY, kind = "sale", amount = 100 },
-    { t = NOW - 6 * DAY, kind = "sale", amount = 50 },
-    { t = NOW - 3 * DAY, kind = "buy",  amount = 400 },
-    { t = NOW - 1 * DAY, kind = "sale", amount = 700 },
-    { t = NOW,           kind = "buy",  amount = 25 },
-}
+-- DERIVED FROM THE PLOT, not fixed per period.
+--
+-- THE BUG THIS EXISTS FOR was reported as "the line needs to be much
+-- smoother", and the cause was not the column width. Buckets were a fixed
+-- count per period -- thirty across a 300px plot is one data point every ten
+-- pixels, and no amount of narrowing the columns makes a line drawn between
+-- points that far apart look like anything but a staircase.
+H.check("a wider plot gets more buckets",
+        ui.HistBucketCount(600) > ui.HistBucketCount(300),
+        ui.HistBucketCount(300) .. " -> " .. ui.HistBucketCount(600))
+H.check("a point every few pixels at the narrowest plot",
+        ui.HistBucketCount(240) >= 240 / 4,
+        ui.HistBucketCount(240))
+H.check("...and at the widest", ui.HistBucketCount(460) >= 460 / 4,
+        ui.HistBucketCount(460))
 
-local income, spend, from, step = ui.HistBuckets(LED, NOW, 7 * DAY, 7)
-H.eq("one bucket per day", table.getn(income), 7)
-H.eq("...for both series", table.getn(spend), 7)
-H.eq("the window starts a week back", from, NOW - 7 * DAY)
-H.eq("...divided evenly", step, DAY)
+-- Clamped at both ends: too few is the staircase again, and too many is
+-- arithmetic nobody can see the result of.
+H.check("an unmeasured plot still gets buckets",
+        ui.HistBucketCount(0) >= HISTL.bucket_min, ui.HistBucketCount(0))
+H.check("...and a nonsense one", ui.HistBucketCount(-500) >= HISTL.bucket_min,
+        ui.HistBucketCount(-500))
+H.check("...and a nil one", ui.HistBucketCount(nil) >= HISTL.bucket_min,
+        ui.HistBucketCount(nil))
+H.eq("an absurd plot is capped", ui.HistBucketCount(100000),
+     HISTL.bucket_max)
 
--- Two sales on the same day are ONE bucket, summed. Six days back in a
--- seven-day window is the SECOND bucket, not the first: bucket 1 is the
--- seventh day back, the one the window opens on.
-H.eq("same-day sales are summed", income[2], 150)
-H.eq("a quiet day is zero, not nil", income[1], 0)
-H.eq("a purchase lands in the spend series", spend[5], 400)
-H.eq("...and not in the income one", income[5], 0)
-H.eq("a later sale lands later", income[7], 700)
-
--- THE NEWEST ENTRY SITS EXACTLY ON `now`, which divides to bucket 8 of 7. It
--- belongs in the last bucket, not off the end of the chart.
-H.eq("an entry at this instant is in the LAST bucket", spend[7], 25)
-
--- ...and an entry OUTSIDE the window is dropped, never clamped inward. A month
--- of trading piled onto day 1 of a 7-day chart is a spike that never happened.
-local old = { { t = NOW - 40 * DAY, kind = "sale", amount = 999999 } }
-local oi = ui.HistBuckets(old, NOW, 7 * DAY, 7)
-H.eq("an entry before the window is dropped", oi[1], 0)
-H.eq("...and does not reappear at the end", oi[7], 0)
-
--- A zero or negative amount is not a transaction.
-local junk = { { t = NOW, kind = "sale", amount = 0 },
-               { t = NOW, kind = "sale" } }
-local ji = ui.HistBuckets(junk, NOW, DAY, 4)
-H.eq("a zero-amount entry adds nothing", ji[4], 0)
-
--- A kind we do not know is neither income nor spend rather than silently one.
-local weird = { { t = NOW, kind = "transfer", amount = 500 } }
-local wi, ws = ui.HistBuckets(weird, NOW, DAY, 4)
-H.eq("an unknown kind is not income", wi[4], 0)
-H.eq("...and not spend either", ws[4], 0)
-
--- ---- "all time" ---------------------------------------------------------
-
--- IT SPANS FROM THE OLDEST TRANSACTION, not from the epoch. A chart whose x
--- axis starts in 1970 is one flat line against the right-hand edge.
-local _, _, allFrom = ui.HistBuckets(LED, NOW, 0, 10)
-H.eq("all-time starts at the oldest entry", allFrom, NOW - 6 * DAY)
-
--- ...and with nothing recorded there is no span to divide, which would be a
--- division by zero.
-local ei, es, eFrom, eStep = ui.HistBuckets({}, NOW, 0, 10)
-H.eq("an empty ledger still gives buckets", table.getn(ei), 10)
-H.eq("...all zero", ei[1] + ei[10] + es[1] + es[10], 0)
-H.check("...over a real span", eStep > 0, eStep)
-H.check("...ending now", eFrom < NOW, eFrom)
-
--- Everything in one instant is the same trap from the other side.
-local _, _, iFrom, iStep = ui.HistBuckets(
-    { { t = NOW, kind = "sale", amount = 5 } }, NOW, 0, 10)
-H.check("one instant still gives a span", iStep > 0, iStep)
-H.check("...that ends now", iFrom < NOW, iFrom)
-
--- Degenerate bucket counts.
-H.eq("a zero bucket count is one bucket",
-     table.getn((ui.HistBuckets(LED, NOW, DAY, 0))), 1)
-H.eq("...and so is a negative one",
-     table.getn((ui.HistBuckets(LED, NOW, DAY, -5))), 1)
-H.eq("a nil ledger is survivable",
-     table.getn((ui.HistBuckets(nil, NOW, DAY, 4))), 4)
+-- THE COLUMNS HAVE TO BE NARROWER THAN THE GAP BETWEEN POINTS, or the
+-- interpolation is wasted: two data points inside one column is one of them
+-- thrown away.
+H.check("a column is no wider than a bucket",
+        HISTL.col_w <= HISTL.bucket_px, HISTL.col_w .. " vs " .. HISTL.bucket_px)
 
 -- ---------------------------------------------------------------------------
 H.section("the scale, shared by every series")
@@ -417,7 +379,7 @@ end
 
 -- The pool is built to its ceiling once, rather than grown during a drag.
 H.eq("the span ceiling follows the plot width",
-     ui.PlotColumnCount(400), 100)
+     ui.PlotColumnCount(400), math.floor(400 / HISTL.col_w))
 H.check("...and is never zero", ui.PlotColumnCount(0) >= 1,
         ui.PlotColumnCount(0))
 
@@ -547,107 +509,7 @@ do
 end
 
 -- ---------------------------------------------------------------------------
-H.section("the cumulative view")
--- ---------------------------------------------------------------------------
-
-do
-    local run = ui.CumulativeSeries({ 100, 0, 50 }, { 0, 30, 0 })
-    H.eq("it is a running total", run[1], 100)
-    H.eq("...less what was spent", run[2], 70)
-    H.eq("...carried forward", run[3], 120)
-
-    -- IT CAN GO NEGATIVE, which is the whole reason the axis keeps zero inside
-    -- it. A week where you spent more than you earned is a line below the
-    -- rule; clamping it to the baseline would report breaking even.
-    local down = ui.CumulativeSeries({ 0, 10 }, { 500, 0 })
-    H.eq("spending more than you earned goes below zero", down[1], -500)
-    H.eq("...and climbs back from there", down[2], -490)
-
-    H.eq("an empty period is an empty series",
-         table.getn(ui.CumulativeSeries({}, {})), 0)
-    H.eq("no spend series at all is survivable",
-         ui.CumulativeSeries({ 5, 5 }, nil)[2], 10)
-end
-
--- ---------------------------------------------------------------------------
-H.section("the per-character view")
--- ---------------------------------------------------------------------------
-
-local T0 = 1000000
-local HOUR = 3600
-local LED = {
-    { t = T0 + 1 * HOUR, kind = "sale", amount = 500, who = "Torchlite" },
-    { t = T0 + 2 * HOUR, kind = "buy",  amount = 100, who = "Torchlite" },
-    { t = T0 + 2 * HOUR, kind = "sale", amount = 900, who = "Osiris" },
-    { t = T0 + 3 * HOUR, kind = "sale", amount = 5,   who = "Newbie" },
-    -- No `who` at all: ledger history from before this feature. It cannot be
-    -- given one, and pinning it on whoever is logged in would be a lie.
-    { t = T0 + 1 * HOUR, kind = "sale", amount = 9999 },
-}
-
-do
-    local rows, dropped = ui.CharSeries(LED, T0, HOUR, 4)
-    H.eq("one line per character", table.getn(rows), 3)
-    H.eq("none dropped", dropped, 0)
-
-    -- BIGGEST MOVER FIRST, by ABSOLUTE final position: a character who lost
-    -- 200g is as interesting as one who made 200g.
-    H.eq("the biggest mover is first", rows[1].name, "Osiris")
-    H.eq("...then the next", rows[2].name, "Torchlite")
-    H.eq("...then the smallest", rows[3].name, "Newbie")
-
-    -- Cumulative, so a line shows where a character stands rather than what
-    -- they did in one hour.
-    local tor
-    for i = 1, 3 do if rows[i].name == "Torchlite" then tor = rows[i] end end
-    H.eq("nothing before their first entry", tor.values[1], 0)
-    H.eq("their sale lands", tor.values[2], 500)
-    H.eq("...and their purchase comes off it", tor.values[3], 400)
-    H.eq("...carried forward", tor.values[4], 400)
-    H.eq("the final figure is the last bucket", tor.final, 400)
-
-    -- THE UNATTRIBUTED ENTRY IS NOT DRAWN and not attributed. 9999 is bigger
-    -- than anything here, so if it were pinned on anyone it would be obvious.
-    local i, biggest = 1, 0
-    while i <= 3 do
-        if rows[i].final > biggest then biggest = rows[i].final end
-        i = i + 1
-    end
-    H.eq("the unattributed entry went to nobody", biggest, 900)
-end
-
-do
-    -- A character down on the period sorts by SIZE, not by sign.
-    local losses = {
-        { t = T0 + HOUR, kind = "buy", amount = 5000, who = "Spender" },
-        { t = T0 + HOUR, kind = "sale", amount = 10, who = "Tiny" },
-    }
-    local rows = ui.CharSeries(losses, T0, HOUR, 3)
-    H.eq("the big loser sorts above the small winner", rows[1].name, "Spender")
-    H.check("...and their line is below zero", rows[1].final < 0, rows[1].final)
-end
-
-do
-    -- CAPPED. Eight lines on a 300px plot is a colour wheel, not a chart.
-    local many = {}
-    for i = 1, 9 do
-        table.insert(many, { t = T0 + HOUR, kind = "sale", amount = i * 100,
-                             who = "Char" .. i })
-    end
-    local rows, dropped = ui.CharSeries(many, T0, HOUR, 3, 4)
-    H.eq("only the cap is drawn", table.getn(rows), 4)
-    H.eq("...and the rest are counted", dropped, 5)
-    H.eq("the biggest survives", rows[1].name, "Char9")
-end
-
-H.eq("an empty ledger is no lines",
-     table.getn(ui.CharSeries({}, T0, HOUR, 4)), 0)
-H.eq("...and a nil one", table.getn(ui.CharSeries(nil, T0, HOUR, 4)), 0)
-H.eq("a zero step is survivable",
-     table.getn(ui.CharSeries(LED, T0, 0, 4)), 0)
-
--- ---------------------------------------------------------------------------
-H.section("picking a view, or a character")
+H.section("picking whose gold")
 -- ---------------------------------------------------------------------------
 
 do
@@ -656,20 +518,153 @@ do
     fn()
 end
 
--- ONE MENU, holding both. A character entry is keyed "char:Name" so the
--- painter can tell them apart without a second field to keep in step.
-H.isNil("a fixed view names no character", ui.HistViewChar("inout"))
-H.isNil("...nor the gold one", ui.HistViewChar("gold"))
+-- THE CHART SHOWS ONE THING -- gold held -- so the dropdown picks WHOSE, not
+-- which question. "All Players" is the default and a character entry is keyed
+-- "char:Name" so the painter can tell them apart without a second field to
+-- keep in step.
+H.isNil("the all-players entry names no character", ui.HistViewChar("all"))
 H.eq("a character entry names one", ui.HistViewChar("char:Torchlite"),
      "Torchlite")
--- Names with punctuation in them, because a realm-qualified or accented name
--- is still a name and `.+` has to take all of it.
+-- Names with punctuation in them, because a hyphenated or accented name is
+-- still a name and `.+` has to take all of it.
 H.eq("...including one with a hyphen", ui.HistViewChar("char:Jean-Luc"),
      "Jean-Luc")
 H.eq("...and one containing the prefix again",
      ui.HistViewChar("char:char:Odd"), "char:Odd")
 H.isNil("nothing selected names nobody", ui.HistViewChar(nil))
 H.isNil("...and neither does an empty name", ui.HistViewChar("char:"))
+
+-- ---------------------------------------------------------------------------
+H.section("the window the chart covers")
+-- ---------------------------------------------------------------------------
+
+local NOW = 1000000
+local DAY = 86400
+local LED = {
+    { t = NOW - 6 * DAY, kind = "sale", amount = 100 },
+    { t = NOW - 1 * DAY, kind = "buy",  amount = 400 },
+}
+
+do
+    local from, step = ui.HistWindow(LED, NOW, 7 * DAY, 7)
+    H.eq("a fixed period starts that far back", from, NOW - 7 * DAY)
+    H.eq("...divided evenly", step, DAY)
+end
+
+-- "ALL TIME" SPANS FROM THE OLDEST THING WE KNOW, which is the earlier of the
+-- first transaction and the first coin sample. A window starting at the epoch
+-- is one flat line jammed against the right-hand edge.
+do
+    local from = ui.HistWindow(LED, NOW, 0, 10)
+    H.eq("all-time starts at the oldest transaction", from, NOW - 6 * DAY)
+end
+
+-- ...AND THE COIN HISTORY COUNTS. A character who levelled before they ever
+-- used the auction house has gold recorded from long before their first
+-- transaction, and a window that ignored it would clip the chart.
+do
+    W.player = "Old"
+    A.db.SetCharMoney(500, NOW - 40 * DAY)
+    local from = ui.HistWindow(LED, NOW, 0, 10)
+    H.check("all-time reaches back to the oldest COIN sample",
+            from <= NOW - 40 * DAY + 3600, from)
+    -- The transaction is still counted when IT is the earlier of the two.
+    local from2 = ui.HistWindow(
+        { { t = NOW - 100 * DAY, kind = "sale", amount = 1 } }, NOW, 0, 10)
+    H.check("...and the transaction wins when it is older",
+            from2 <= NOW - 100 * DAY, from2)
+end
+
+-- Nothing recorded, or everything in the same second: there is no span to
+-- divide, and a zero step divides by zero inside a repaint.
+do
+    W.Reset()
+    A = W.LoadCore()
+    W.FireAddonLoaded(A)
+    local from, step = ui.HistWindow({}, NOW, 0, 10)
+    H.check("an empty install still has a span", step > 0, step)
+    H.check("...ending now", from < NOW, from)
+    from, step = ui.HistWindow({ { t = NOW, kind = "sale", amount = 5 } },
+                               NOW, 0, 10)
+    H.check("one instant still has a span", step > 0, step)
+end
+
+H.check("a zero bucket count is survivable",
+        ({ ui.HistWindow(LED, NOW, DAY, 0) })[2] > 0)
+
+-- ---------------------------------------------------------------------------
+H.section("the hover readout")
+-- ---------------------------------------------------------------------------
+
+-- ONE PIECE OF ARITHMETIC between a mouse position and a figure on screen, so
+-- it is a function rather than three lines inside an OnUpdate.
+--
+-- `x` and `left` must already be in the SAME coordinate space, which they are
+-- not to begin with: GetCursorPosition returns screen pixels and GetLeft
+-- returns UI units. The caller divides the cursor by the effective scale;
+-- getting that wrong reads as a crosshair tracking at the wrong speed, which
+-- is invisible in a screenshot.
+H.eq("the left edge is the first bucket",
+     ui.HoverBucket(100, 100, 200, 10), 1)
+H.eq("halfway across is the middle bucket",
+     ui.HoverBucket(200, 100, 200, 10), 6)
+-- The far right edge divides to n+1 exactly, the same off-by-one the bucketing
+-- has at `now`.
+H.eq("the right edge is the LAST bucket, not one past it",
+     ui.HoverBucket(300, 100, 200, 10), 10)
+H.eq("just inside it, too", ui.HoverBucket(299, 100, 200, 10), 10)
+
+-- OFF THE PLOT IS NOT A BUCKET. Clamping instead would leave the readout
+-- showing the first or last figure while the cursor is over the table beside
+-- it, which reads as a chart that has frozen.
+H.isNil("left of the plot is nothing", ui.HoverBucket(99, 100, 200, 10))
+H.isNil("right of it is nothing", ui.HoverBucket(301, 100, 200, 10))
+
+H.isNil("no cursor is nothing", ui.HoverBucket(nil, 100, 200, 10))
+H.isNil("no plot is nothing", ui.HoverBucket(150, nil, 200, 10))
+H.isNil("a zero-width plot is nothing", ui.HoverBucket(150, 100, 0, 10))
+H.isNil("no buckets is nothing", ui.HoverBucket(150, 100, 200, 0))
+
+-- ---- what it says -------------------------------------------------------
+
+local VALS = { 100, 200, 300, 400 }
+local HR = 3600
+
+-- THE MIDDLE OF THE BUCKET, because that is the moment the column stands for.
+-- Labelling its leading edge reports a figure half a bucket before the pixel
+-- the cursor is on -- which is exactly half a bucket of drift, invisible on a
+-- wide window and obvious on a narrow one.
+do
+    -- A window ending now, four buckets of an hour each. Bucket 4's middle is
+    -- half an hour back; its leading edge is a full hour back.
+    local from = NOW - 4 * HR
+    local said = ui.HoverLabel(VALS, from, HR, 4, NOW)
+    H.check("it names the figure", string.find(said, "4s", 1, true) ~= nil,
+            said)
+    H.check("...dated from the MIDDLE of the bucket",
+            string.find(said, "30m ago", 1, true) ~= nil,
+            "the leading edge would say 1h: " .. said)
+    said = ui.HoverLabel(VALS, from, HR, 1, NOW)
+    H.check("...and an earlier bucket is further back",
+            string.find(said, "3h", 1, true) ~= nil, said)
+end
+
+H.eq("no series says nothing", ui.HoverLabel(nil, 0, HR, 1, NOW), "")
+H.eq("no bucket says nothing", ui.HoverLabel(VALS, 0, HR, nil, NOW), "")
+H.eq("a bucket past the end says nothing",
+     ui.HoverLabel(VALS, 0, HR, 99, NOW), "")
+
+-- A DATE PAST A DAY. "9d ago" stops being a thing anyone can place once the
+-- window is months long, which is why the reference chart labels months.
+H.check("inside a day it is relative",
+        string.find(ui.WhenLabel(NOW - 2 * HR, NOW), "ago", 1, true) ~= nil,
+        ui.WhenLabel(NOW - 2 * HR, NOW))
+H.check("...beyond it, it is a date",
+        string.find(ui.WhenLabel(NOW - 9 * DAY, NOW), "ago", 1, true) == nil,
+        ui.WhenLabel(NOW - 9 * DAY, NOW))
+H.check("a moment in the future is not negative",
+        string.find(ui.WhenLabel(NOW + 500, NOW), "-", 1, true) == nil,
+        ui.WhenLabel(NOW + 500, NOW))
 
 -- ---------------------------------------------------------------------------
 H.section("the drawing area is computed, never measured")
@@ -745,7 +740,8 @@ do
     H.check("the chart exists", graph ~= "")
     H.check("...reads the same period the table does",
             says(graph, "HIST_PERIODS[ui.histPeriod"))
-    H.check("...and the same ledger", says(graph, "A.db.Ledger()"))
+    H.check("...and the same ledger for its window",
+            says(graph, "ui.HistWindow(A.db.Ledger()"))
     H.check("...sized by arithmetic, not by measuring a frame",
             says(graph, "ui.HistPlotSizeAt(") and not says(graph, ":GetWidth()"),
             "a two-corner-anchored frame reports its creation size")
@@ -761,16 +757,29 @@ do
     H.check("the view menu is rebuilt each paint",
             says(graph, "ui.histViewDD:SetOptions(ui.HistViewOptions())"))
 
-    -- THE FILL ONLY WHEN THERE IS ONE LINE. Four translucent areas stacked on
-    -- one plot is mud, and the comparison those four lines exist for is
-    -- between the lines themselves.
-    H.check("the area fill is drawn for a single series",
-            says(graph, "if table.getn(series) == 1 and not empty then"))
-    H.check("...and cleared when there are several",
+    -- ALWAYS FILLED, because there is always exactly one line. The fill is
+    -- what makes a gold chart read as a level rather than as a trace.
+    H.check("the line is filled",
+            says(graph, "ui.PaintFill(C.income, values, lo, hi, pw, ph)"))
+    H.check("...and the fill is cleared on an empty period",
             says(graph, "ui.PaintFill(nil, nil, lo, hi, pw, ph)"))
-    -- A view with fewer lines than the last one must not leave the extras up.
-    H.check("lines the last view drew are cleared",
-            says(graph, "ui.ClearPlotSeries(table.getn(series) + 1)"))
+    -- Nothing beyond the one line may be left showing -- a stale span is data
+    -- from a chart nobody is looking at.
+    H.check("no second line survives a repaint",
+            says(graph, "ui.ClearPlotSeries(2)"))
+    H.check("...and none at all on an empty period",
+            says(graph, "ui.ClearPlotSeries(1)"))
+
+    -- The hover readout reads the SAME numbers the line was drawn from,
+    -- rather than recomputing them at the cursor.
+    H.check("the painted series is remembered", says(graph, "ui.histSeries = values"))
+    H.check("...with the window it was drawn over",
+            says(graph, "ui.histFrom, ui.histStep, ui.histN = from, step, n"))
+
+    -- BUCKETS FROM THE PLOT WIDTH, which is the whole smoothness fix.
+    H.check("the bucket count comes from the plot",
+            says(graph, "ui.HistBucketCount(pw)"),
+            "a fixed count is what made the line a staircase")
 
     local grow = bodyOf("function ui.GrowPlotSpans(")
     H.check("spans are textures on the plot",

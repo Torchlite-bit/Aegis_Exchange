@@ -398,4 +398,45 @@ H.eq("two links in one string yields the FIRST name",
 -- link is.
 H.eq("...and the id comes off the same link", util.ItemIdFromLink(LINK), 2589)
 
+-- ---------------------------------------------------------------------------
+H.section("money, said as short as it can be")
+-- ---------------------------------------------------------------------------
+
+-- FOR AN AXIS, where the whole figure has to fit a narrow gutter and the exact
+-- copper is noise. util.FormatMoney's "1,240g 17s 3c" is longer than the plot
+-- is tall, which defeats the point of a label beside a chart: which order of
+-- magnitude the line is at.
+H.eq("copper stays copper", util.ShortMoney(7), "7c")
+H.eq("...right up to a silver", util.ShortMoney(99), "99c")
+H.eq("a silver is silver", util.ShortMoney(100), "1s")
+H.eq("...and stays so under a gold", util.ShortMoney(9999), "99s")
+H.eq("a gold is gold", util.ShortMoney(10000), "1g")
+H.eq("...rounded DOWN, never up past what the line reached",
+     util.ShortMoney(19999), "1g")
+H.eq("hundreds of gold stay gold", util.ShortMoney(999 * 10000), "999g")
+
+-- ONE significant fraction digit above a thousand gold, none below it: 4.2kg
+-- is a different number from 4.3kg at a glance and 4.23kg is not.
+H.eq("a thousand gold becomes kilogold", util.ShortMoney(1000 * 10000), "1.0kg")
+H.eq("...with one decimal", util.ShortMoney(4249 * 10000), "4.2kg")
+-- Rounded by string.format, which is C's printf -- so an exact half goes to
+-- the EVEN digit (4.25 -> 4.2), not always up. Asserted as it behaves rather
+-- than as anyone would guess.
+H.eq("...rounded", util.ShortMoney(4260 * 10000), "4.3kg")
+H.eq("...with an exact half going to even", util.ShortMoney(4250 * 10000),
+     "4.2kg")
+
+-- The axis runs below zero whenever what it plots can, so the label has to.
+H.eq("negative keeps its sign", util.ShortMoney(-10000), "-1g")
+H.eq("...at every scale", util.ShortMoney(-5), "-5c")
+
+H.eq("nothing is nothing", util.ShortMoney(0), "0c")
+H.eq("...and so is nil", util.ShortMoney(nil), "0c")
+
+-- SHORTER THAN THE LONG FORM, which is the entire reason it exists.
+H.check("it is shorter than the full figure",
+        string.len(util.ShortMoney(1234 * 10000 + 5678))
+            < string.len(util.FormatMoney(1234 * 10000 + 5678)),
+        util.ShortMoney(1234 * 10000 + 5678))
+
 os.exit(H.report("util"))

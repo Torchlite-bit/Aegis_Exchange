@@ -11457,11 +11457,20 @@ local HISTL = {
     -- One column of the rasterised line. FOUR PIXELS is the whole compromise
     -- described above: one per data point is a staircase, one per pixel is
     -- hundreds of textures.
-    col_w      = 4,
+    col_w      = 2,
     line_h     = 2,
-    -- How many buckets each period is divided into. Hourly for a day, daily
-    -- for a week and a month; "All" gets the same thirty and stretches them.
-    buckets    = { 24, 7, 30, 30 },
+    -- HOW WIDE ONE BUCKET IS, in pixels -- not how many there are.
+    --
+    -- This was a fixed count per period (24, 7, 30, 30), and thirty data
+    -- points across a 300px plot is one every ten pixels, which is what made
+    -- the line read as a staircase however narrow the columns got. Deriving
+    -- the count from the plot instead gives a point every few pixels at any
+    -- window size, and costs nothing in accuracy: db.MoneySeries carries the
+    -- last known figure forward, so extra buckets interpolate rather than
+    -- invent.
+    bucket_px  = 3,
+    bucket_min = 8,
+    bucket_max = 400,
 }
 
 -- The two halves of the History panel at window width `w`. Returns tableW,
@@ -11485,55 +11494,41 @@ function ui.HistWidthsAt(w)
     return inner - graph, graph
 end
 
--- Bucket the ledger for the chart. Returns income[], spend[], from, step.
+-- The time window the chart covers, divided into `n` buckets.
 --
--- Pure: the ledger, a clock and a window in, two arrays out. Every entry in
--- the window lands in exactly one bucket, and entries outside it are dropped
--- rather than clamped into the end buckets -- a month of trading piled onto
--- day 1 of a 7-day chart is a spike that never happened.
+-- Returns from, step. This was ui.HistBuckets, which also bucketed the ledger
+-- into income and spending -- the two series the chart no longer draws. What
+-- survived is the part every view needed: where the x axis starts and how wide
+-- one bucket is.
 --
--- "ALL TIME" SPANS FROM THE OLDEST TRANSACTION, not from the epoch. A chart
--- whose x axis starts in 1970 is one flat line against the right-hand edge.
-function ui.HistBuckets(led, now, secs, n)
+-- "ALL TIME" SPANS FROM THE OLDEST THING WE KNOW, which is the earlier of the
+-- first transaction and the first coin sample. A window starting at the epoch
+-- is one flat line jammed against the right-hand edge; one starting at the
+-- first transaction would clip a gold history that predates any trading.
+function ui.HistWindow(led, now, secs, n)
     n = n or 30
     if n < 1 then n = 1 end
-    local income, spend = {}, {}
-    local i = 1
-    while i <= n do income[i] = 0; spend[i] = 0; i = i + 1 end
-    local count = table.getn(led or {})
     now = now or 0
     local from
     if secs and secs > 0 then
         from = now - secs
     else
         from = now
-        local k = 1
-        while k <= count do
-            local t = led[k].t
+        local i = 1
+        while i <= table.getn(led or {}) do
+            local t = led[i].t
             if t and t < from then from = t end
-            k = k + 1
+            i = i + 1
         end
+        local coin = A.db.OldestMoney and A.db.OldestMoney()
+        if coin and coin < from then from = coin end
         -- Nothing recorded, or everything recorded in this same second. Either
         -- way there is no span to divide, and a zero step divides by zero.
         if from >= now then from = now - 86400 end
     end
     local step = (now - from) / n
     if step <= 0 then step = 1 end
-    local k = 1
-    while k <= count do
-        local e = led[k]
-        if e.t and e.t >= from and (e.amount or 0) > 0 then
-            local b = math.floor((e.t - from) / step) + 1
-            -- The newest entry sits exactly on `now` and would land in bucket
-            -- n+1. It belongs in the last one, not off the end of the chart.
-            if b < 1 then b = 1 end
-            if b > n then b = n end
-            if e.kind == "sale" then income[b] = income[b] + e.amount
-            elseif e.kind == "buy" then spend[b] = spend[b] + e.amount end
-        end
-        k = k + 1
-    end
-    return income, spend, from, step
+    return from, step
 end
 
 -- The y-axis range a set of series needs. Returns lo, hi.
@@ -11675,100 +11670,19 @@ function ui.HistPlotSizeAt(winW, winH)
     return w, h
 end
 
--- The four things the chart can show, and the order the dropdown offers them.
+-- THE CHART SHOWS ONE THING: GOLD HELD, over time, for every character on the
+-- realm or for one of them.
 --
--- ONE TABLE, because the dropdown's options, the painter's dispatch and the
--- legend all have to agree about what a view is called and what it is keyed
--- by -- three copies of that list is how a menu entry starts drawing a
--- different chart from the one it names.
-local HISTVIEWS = {
-    { key = "inout", text = "In / out" },
-    { key = "gold",  text = "Account gold" },
-    { key = "net",   text = "Cumulative" },
-    { key = "chars", text = "By character" },
-}
-
--- How many character lines the chart will draw at once. Eight lines on a
--- 300px plot is a colour wheel, not a chart, and "which alt is making the
--- money" is answered by the top few.
-local HIST_CHAR_LINES = 4
-
--- A running total over the same buckets: what the period had netted BY THE END
--- of each one.
+-- It used to offer four views -- income and spending per period, a cumulative
+-- ledger balance, a line per character -- and that was the wrong framing.
+-- Income and spending are what the TABLE beside it is for, and it answers them
+-- exactly, line by line, with the item names attached. What a chart is good at
+-- and a table is not is a shape over time, and the shape worth seeing is how
+-- much gold the account actually has.
 --
--- IT CAN GO NEGATIVE, which is the whole reason ui.SeriesRange keeps zero
--- inside the axis. A week where you spent more than you earned is a line below
--- the rule, and clamping it to the baseline would report breaking even.
-function ui.CumulativeSeries(income, spend)
-    local out, run = {}, 0
-    local i = 1
-    while i <= table.getn(income or {}) do
-        run = run + (income[i] or 0) - ((spend and spend[i]) or 0)
-        out[i] = run
-        i = i + 1
-    end
-    return out
-end
-
--- One cumulative line per character, over the same buckets.
---
--- Returns an array of { name, values, final } and how many were left out.
--- Biggest mover first BY ABSOLUTE final position: a character who lost 200g is
--- as interesting as one who made 200g, and sorting by the signed figure buries
--- them at the bottom of the list.
---
--- ENTRIES WITH NO CHARACTER ARE SKIPPED, not pinned on whoever is logged in.
--- Ledger history from before v1.53.7 carries no name and there is no way to
--- recover it; db.LedgerByChar reports that separately so the tab can say so.
-function ui.CharSeries(led, from, step, n, cap)
-    cap = cap or HIST_CHAR_LINES
-    n = n or 0
-    local byChar, order = {}, {}
-    if not from or not step or step <= 0 then return {}, 0 end
-    local i = 1
-    while i <= table.getn(led or {}) do
-        local e = led[i]
-        local who = (e.who and e.who ~= "") and e.who or nil
-        if who and e.t and e.t >= from and (e.amount or 0) > 0 then
-            local b = math.floor((e.t - from) / step) + 1
-            if b < 1 then b = 1 end
-            if b > n then b = n end
-            local ser = byChar[who]
-            if not ser then
-                ser = {}
-                local k = 1
-                while k <= n do ser[k] = 0; k = k + 1 end
-                byChar[who] = ser
-                table.insert(order, who)
-            end
-            if e.kind == "sale" then ser[b] = ser[b] + e.amount
-            elseif e.kind == "buy" then ser[b] = ser[b] - e.amount end
-        end
-        i = i + 1
-    end
-    local out = {}
-    local oi = 1
-    while oi <= table.getn(order) do
-        local who = order[oi]
-        local ser, run = byChar[who], 0
-        local k = 1
-        while k <= n do run = run + ser[k]; ser[k] = run; k = k + 1 end
-        table.insert(out, { name = who, values = ser, final = run })
-        oi = oi + 1
-    end
-    table.sort(out, function(a, b)
-        local aa = a.final; if aa < 0 then aa = -aa end
-        local bb = b.final; if bb < 0 then bb = -bb end
-        if aa ~= bb then return aa > bb end
-        return a.name < b.name
-    end)
-    local dropped = 0
-    while table.getn(out) > cap do
-        table.remove(out)
-        dropped = dropped + 1
-    end
-    return out, dropped
-end
+-- So the dropdown picks WHOSE gold, not WHICH question. `HISTVIEWS` and
+-- ui.CumulativeSeries went with the views they served.
+local HIST_ALL_PLAYERS = "all"
 
 -- The AREA UNDER the line, as one rectangle per column.
 --
@@ -11838,6 +11752,73 @@ function ui.AxisMarks(lo, hi, count)
     return out
 end
 
+-- Which bucket the cursor is over, or nil when it is not over the plot.
+--
+-- Pure: four numbers in, an index out, so the one piece of arithmetic between
+-- a mouse position and a figure on screen can be tested without a client.
+--
+-- `x` and `left` must already be in the SAME coordinate space. They are not to
+-- begin with: GetCursorPosition returns screen pixels and GetLeft returns UI
+-- units, so the caller divides the cursor by the frame's effective scale.
+-- Getting that wrong reads as a crosshair that tracks at the wrong speed and
+-- is off by a factor nobody can see in a screenshot.
+function ui.HoverBucket(x, left, w, n)
+    if not x or not left or not w or w <= 0 or not n or n < 1 then return nil end
+    local rel = x - left
+    if rel < 0 or rel > w then return nil end
+    local b = math.floor(rel / w * n) + 1
+    -- The far right edge divides to n+1 exactly, the same off-by-one the
+    -- bucketing has at `now`.
+    if b < 1 then b = 1 end
+    if b > n then b = n end
+    return b
+end
+
+-- When a bucket was, as a label. "4h 12m ago" inside a day, a date beyond it.
+--
+-- A DATE PAST A DAY, because "9d ago" stops being a thing anyone can place
+-- once the window is months long -- the reference chart labels its axis with
+-- months for exactly this reason. `date` is guarded: it is a stock 1.12 global
+-- but it is also one a server or another addon can have replaced.
+function ui.WhenLabel(t, now)
+    now = now or time()
+    local ago = now - (t or 0)
+    if ago < 0 then ago = 0 end
+    if ago < 86400 then return util.FormatAgo(ago) end
+    if date then
+        local ok, out = pcall(date, "%b %d", t)
+        if ok and out and out ~= "" then return out end
+    end
+    return util.FormatAgo(ago)
+end
+
+-- The hover readout: what was held at `b`, and when that was.
+function ui.HoverLabel(values, from, step, b, now)
+    if not values or not b then return "" end
+    local v = values[b]
+    if not v then return "" end
+    -- The MIDDLE of the bucket, because that is the moment the column stands
+    -- for -- labelling its leading edge reports a figure half a bucket before
+    -- the pixel the cursor is on.
+    local t = (from or 0) + (b - 0.5) * (step or 0)
+    return util.FormatMoney(v, true) .. "   |cff8c7a4e"
+        .. ui.WhenLabel(t, now) .. "|r"
+end
+
+-- How many buckets a plot `w` pixels wide should be divided into.
+--
+-- DERIVED FROM THE PLOT, not fixed per period. A fixed thirty across a 300px
+-- plot is one data point every ten pixels, and no amount of narrowing the
+-- columns makes a line drawn between points that far apart look like anything
+-- but a staircase. Clamped at both ends: too few is the staircase again, and
+-- too many is arithmetic nobody can see the result of.
+function ui.HistBucketCount(w)
+    local n = math.floor((w or 0) / HISTL.bucket_px)
+    if n < HISTL.bucket_min then n = HISTL.bucket_min end
+    if n > HISTL.bucket_max then n = HISTL.bucket_max end
+    return n
+end
+
 -- How many spans a plot `w` wide can ever need, so the texture pool is built
 -- once to its ceiling instead of growing during a drag.
 function ui.PlotColumnCount(w)
@@ -11853,6 +11834,7 @@ local HIST_PERIODS = {
     { label = "24h", secs = 86400 },
     { label = "7d",  secs = 7 * 86400 },
     { label = "30d", secs = 30 * 86400 },
+    { label = "3M",  secs = 90 * 86400 },
     { label = "All", secs = 0 },
 }
 
@@ -12043,19 +12025,12 @@ function ui.BuildHistoryGraph(panel)
     dd:SetValue("inout", true)
     ui.histViewDD = dd
 
-    -- The legend is FOUR entries, not two. Two views draw two named series and
-    -- one draws up to four, so one pool that relabels is the only version that
-    -- cannot leave a stale swatch on screen.
-    ui.histLegend = {}
-    local li = 1
-    while li <= HIST_CHAR_LINES do
-        local t = box:CreateTexture(nil, "ARTWORK")
-        t:SetWidth(8); t:SetHeight(8)
-        local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        fs:SetPoint("LEFT", t, "RIGHT", 4, 0)
-        ui.histLegend[li] = { swatch = t, label = fs }
-        li = li + 1
-    end
+    -- WHOSE GOLD, said beside the chart. One line means one name, and the
+    -- dropdown already carries it -- this is the figure that goes with it:
+    -- what they are holding right now.
+    ui.histNow = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    ui.histNow:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -6)
+    ui.histNow:SetJustifyH("RIGHT")
 
     -- The plot itself: an empty frame whose rect IS the drawing area, so every
     -- span can be anchored BOTTOMLEFT to it and the arithmetic never has to
@@ -12121,6 +12096,33 @@ function ui.BuildHistoryGraph(panel)
     ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 4)
     ui.histStatR:SetJustifyH("RIGHT")
 
+    -- THE HOVER READOUT: a vertical rule under the cursor and the figure it
+    -- crosses. Drawn in OVERLAY so it sits above the fill and the line.
+    ui.histCross = plot:CreateTexture(nil, "OVERLAY")
+    ui.histCross:SetTexture(C.gold[1], C.gold[2], C.gold[3])
+    ui.histCross:SetWidth(1)
+    ui.histCross:SetAlpha(0.55)
+    ui.histCross:Hide()
+
+    ui.histHover = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histHover:SetPoint("TOPLEFT", plot, "TOPLEFT", 2, 12)
+    ui.histHover:SetJustifyH("LEFT")
+    ui.histHover:Hide()
+
+    -- MOUSE ON THE PLOT, and the readout driven from an OnUpdate while the
+    -- cursor is inside it. 1.12 has no OnMouseMove, so a per-frame read of the
+    -- cursor is the only way -- and it costs nothing when nobody is hovering,
+    -- because the script is only installed on the plot and only does work
+    -- between OnEnter and OnLeave.
+    plot:EnableMouse(true)
+    plot:SetScript("OnEnter", function() ui.histHovering = true end)
+    plot:SetScript("OnLeave", function()
+        ui.histHovering = false
+        ui.histCross:Hide()
+        ui.histHover:Hide()
+    end)
+    plot:SetScript("OnUpdate", function() ui.UpdateHistoryHover() end)
+
     ui.histEmpty = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     ui.histEmpty:SetPoint("CENTER", plot, "CENTER", 0, 0)
     ui.histEmpty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
@@ -12143,16 +12145,15 @@ end
 -- time an alt sells something and a menu that was correct when the tab was
 -- built would never notice.
 function ui.HistViewOptions()
-    local opts = {}
-    local i = 1
-    while i <= table.getn(HISTVIEWS) do
-        table.insert(opts, { text = HISTVIEWS[i].text, value = HISTVIEWS[i].key })
-        i = i + 1
-    end
-    local names = A.db.LedgerByChar()
+    local rows = A.db.PurseRows()
+    local opts = {
+        { text = "All Players (" .. table.getn(rows) .. ")",
+          value = HIST_ALL_PLAYERS },
+    }
     local k = 1
-    while k <= table.getn(names) do
-        table.insert(opts, { text = names[k], value = "char:" .. names[k] })
+    while k <= table.getn(rows) do
+        table.insert(opts, { text = rows[k].name,
+                             value = "char:" .. rows[k].name })
         k = k + 1
     end
     return opts
@@ -12167,12 +12168,6 @@ function ui.HistViewChar(view)
     local _, _, who = string.find(view, "^char:(.+)$")
     return who
 end
-
--- The colours the chart draws lines in, in order. Read from the palette rather
--- than invented here: the first two are the same green and orange the ledger
--- table's Type column uses two inches to the left, which is what stops "Sold"
--- and the income line reading as two different things.
-local HIST_LINE_C = { C.income, C.spend, C.gold, C.amber }
 
 -- Grow one line's texture pool to `n` spans. Textures, not frames -- they are
 -- draw objects on the plot rather than widgets, which is what makes a few
@@ -12260,102 +12255,30 @@ function ui.ClearPlotSeries(slot)
     end
 end
 
--- Label the legend. `entries` is an array of { name, colour }; anything past
--- the end is hidden.
-function ui.PaintLegend(entries)
-    local i = 1
-    local prev = nil
-    while i <= HIST_CHAR_LINES do
-        local slot = ui.histLegend[i]
-        local e = entries[i]
-        if e then
-            slot.swatch:SetTexture(e.colour[1], e.colour[2], e.colour[3])
-            slot.swatch:ClearAllPoints()
-            if prev then
-                slot.swatch:SetPoint("LEFT", prev.label, "RIGHT", 10, 0)
-            else
-                slot.swatch:SetPoint("TOPLEFT", ui.histGraph, "TOPLEFT",
-                                     HISTL.plot_side + 126, -8)
-            end
-            slot.label:SetText(e.name)
-            slot.label:SetTextColor(e.colour[1], e.colour[2], e.colour[3])
-            slot.swatch:Show(); slot.label:Show()
-            prev = slot
-        else
-            slot.swatch:Hide(); slot.label:Hide()
-        end
-        i = i + 1
-    end
-end
-
--- Build the lines for the current view. Returns series, legend, note.
+-- The gold line for whoever the dropdown has selected.
 --
--- `series` is an array of { values, colour }; `legend` the matching names;
--- `note` an honest caveat for the view, or nil. Pure apart from the two reads
--- of the DB, and separated from the painter because deciding WHAT to draw and
--- deciding WHERE to draw it are two jobs that were one function once.
-function ui.HistViewSeries(view, income, spend, from, step, n)
-    local series, legend, note = {}, {}, nil
-    local only = ui.HistViewChar(view)
-    if only then
-        -- ONE CHARACTER. The same cumulative line the "By character" view
-        -- draws, on its own and filled -- which is the whole reason a single
-        -- series gets the area treatment.
-        local rows = ui.CharSeries(A.db.Ledger(), from, step, n, 999)
-        local i = 1
-        while i <= table.getn(rows) do
-            if rows[i].name == only then
-                table.insert(series, { values = rows[i].values,
-                                       colour = HIST_LINE_C[1] })
-                table.insert(legend, { name = only, colour = HIST_LINE_C[1] })
-            end
-            i = i + 1
-        end
-        -- A character selected and then nothing recorded for them in this
-        -- period is a real state, and an empty chart with their name on it is
-        -- the right answer to it.
-        if table.getn(series) == 0 then
-            table.insert(legend, { name = only, colour = HIST_LINE_C[1] })
-        end
-        return series, legend, note
+-- Returns values, title, note. `title` names whose gold it is; `note` is an
+-- honest caveat, or nil.
+--
+-- ONE SERIES, ALWAYS. The chart shows gold held and nothing else -- see the
+-- note on HIST_ALL_PLAYERS -- which is what lets it be filled, hovered and
+-- read at a glance instead of being a key to four lines.
+function ui.HistGoldSeries(view, from, step, n)
+    local who = ui.HistViewChar(view)
+    if who then
+        local vals, seen = A.db.MoneySeries(from, step, n, who)
+        -- A character with no samples inside the window is a real state, not
+        -- an empty chart: they exist, we have simply never seen them here.
+        -- Saying so beats drawing them flat on the baseline.
+        return vals, who, (not seen) and "not seen in this period" or nil
     end
-    if view == "gold" then
-        local gold = A.db.MoneySeries(from, step, n)
-        table.insert(series, { values = gold, colour = HIST_LINE_C[3] })
-        table.insert(legend, { name = "account", colour = HIST_LINE_C[3] })
-        -- SAID EVERY TIME, not once in a tooltip. 1.12 will only tell you what
-        -- the character you are on is carrying, so every other figure in this
-        -- line is a memory of the last time that character played.
-        note = "alts as last seen"
-    elseif view == "net" then
-        table.insert(series, { values = ui.CumulativeSeries(income, spend),
-                               colour = HIST_LINE_C[1] })
-        table.insert(legend, { name = "net", colour = HIST_LINE_C[1] })
-    elseif view == "chars" then
-        local rows, dropped = ui.CharSeries(A.db.Ledger(), from, step, n)
-        local i = 1
-        while i <= table.getn(rows) do
-            local c = HIST_LINE_C[i] or HIST_LINE_C[1]
-            table.insert(series, { values = rows[i].values, colour = c })
-            table.insert(legend, { name = rows[i].name, colour = c })
-            i = i + 1
-        end
-        local _, anon = A.db.LedgerByChar(from)
-        if dropped > 0 then note = "+" .. dropped .. " more" end
-        -- THE UNATTRIBUTED HALF HAS TO BE NAMED. Ledger history from before
-        -- this feature carries no character and cannot be given one, so a
-        -- breakdown that silently omitted it would not add up to the totals
-        -- on the left.
-        if anon then
-            note = (note and (note .. ", ") or "") .. "some unattributed"
-        end
-    else
-        table.insert(series, { values = income, colour = HIST_LINE_C[1] })
-        table.insert(series, { values = spend, colour = HIST_LINE_C[2] })
-        table.insert(legend, { name = "in", colour = HIST_LINE_C[1] })
-        table.insert(legend, { name = "out", colour = HIST_LINE_C[2] })
-    end
-    return series, legend, note
+    local vals = A.db.MoneySeries(from, step, n)
+    local rows = A.db.PurseRows()
+    -- SAID EVERY TIME, not once in a tooltip. 1.12 will only tell you what the
+    -- character you are on is carrying, so every other figure in this line is a
+    -- memory of the last time that character played.
+    local note = (table.getn(rows) > 1) and "alts as last seen" or nil
+    return vals, "All Players (" .. table.getn(rows) .. ")", note
 end
 
 -- Place the two halves at the current window width, and draw the chart.
@@ -12369,31 +12292,27 @@ function ui.UpdateHistoryGraph()
     ui.histScroll:SetWidth(tableW - HISTL.edge * 2)
     ui.histGraph:SetWidth(graphW)
 
-    local period = HIST_PERIODS[ui.histPeriod or 2]
-    local n = HISTL.buckets[ui.histPeriod or 2] or 30
-    local income, spend, from, step =
-        ui.HistBuckets(A.db.Ledger(), time(), period.secs, n)
-
     -- The menu is rebuilt here rather than at build time: the list of
-    -- characters grows the first time an alt sells something.
+    -- characters grows the first time an alt is seen.
     if ui.histViewDD then ui.histViewDD:SetOptions(ui.HistViewOptions()) end
 
-    local series, legend, note =
-        ui.HistViewSeries(ui.histView or "inout", income, spend, from, step, n)
-
-    local values = {}
-    local si = 1
-    while si <= table.getn(series) do
-        table.insert(values, series[si].values)
-        si = si + 1
-    end
-    local lo, hi = ui.SeriesRange(values)
-
     local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())
+    local period = HIST_PERIODS[ui.histPeriod or 2]
+    -- BUCKETS FROM THE PLOT WIDTH. See ui.HistBucketCount: a fixed count is
+    -- what made the line a staircase at any column width.
+    local n = ui.HistBucketCount(pw)
+    local from, step = ui.HistWindow(A.db.Ledger(), time(), period.secs, n)
+
+    local values, title, note =
+        ui.HistGoldSeries(ui.histView or HIST_ALL_PLAYERS, from, step, n)
+    local lo, hi = ui.SeriesRange({ values })
+
+    ui.histNow:SetText(title or "")
+    ui.histNow:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     local empty = not (hi > lo)
     if empty then
-        ui.histEmpty:SetText("Nothing recorded in this period.")
+        ui.histEmpty:SetText(note or "Nothing recorded in this period.")
         ui.histEmpty:Show()
     else
         ui.histEmpty:Hide()
@@ -12414,13 +12333,7 @@ function ui.UpdateHistoryGraph()
         ui.histYLbl[g]:ClearAllPoints()
         ui.histYLbl[g]:SetPoint("BOTTOMRIGHT", ui.histPlot, "BOTTOMLEFT", -4,
                                 y - 5)
-        if empty then
-            ui.histYLbl[g]:SetText("")
-        elseif m.value < 0 then
-            ui.histYLbl[g]:SetText("-" .. util.FormatMoney(-m.value, true))
-        else
-            ui.histYLbl[g]:SetText(util.FormatMoney(m.value, true))
-        end
+        ui.histYLbl[g]:SetText(empty and "" or util.ShortMoney(m.value))
         g = g + 1
     end
 
@@ -12428,24 +12341,21 @@ function ui.UpdateHistoryGraph()
     ui.histXMid:SetText(ui.HistMidLabel(period, n, step))
     ui.histXTo:SetText(note and ("now \226\128\162 " .. note) or "now")
 
-    -- THE FILL, only when there is ONE line. Four translucent areas stacked on
-    -- one plot is mud, and the comparison those four lines exist for is
-    -- between the lines themselves.
-    if table.getn(series) == 1 and not empty then
-        ui.PaintFill(series[1].colour, series[1].values, lo, hi, pw, ph)
-    else
+    -- FILLED, always, because there is always exactly one line. The fill is
+    -- what makes a gold chart read as a level rather than as a trace.
+    if empty then
         ui.PaintFill(nil, nil, lo, hi, pw, ph)
+        ui.ClearPlotSeries(1)
+    else
+        ui.PaintFill(C.income, values, lo, hi, pw, ph)
+        ui.PaintSeries(1, C.income, values, lo, hi, pw, ph)
+        ui.ClearPlotSeries(2)
     end
 
-    ui.PaintLegend(legend)
-    local i = 1
-    while i <= table.getn(series) do
-        ui.PaintSeries(i, series[i].colour, series[i].values, lo, hi, pw, ph)
-        i = i + 1
-    end
-    -- Anything the LAST view drew and this one does not. A stale line is worse
-    -- than a missing one: it is data from a chart nobody is looking at.
-    ui.ClearPlotSeries(table.getn(series) + 1)
+    -- Remembered for the hover readout, which reads the same numbers the line
+    -- was drawn from rather than recomputing them at the cursor.
+    ui.histSeries = values
+    ui.histFrom, ui.histStep, ui.histN = from, step, n
 
     -- The figures a chart cannot be read precisely enough to give you.
     local since = (period.secs > 0) and (time() - period.secs) or nil
@@ -12453,6 +12363,34 @@ function ui.UpdateHistoryGraph()
     ui.histStatL:SetText(ui.StatLine("HIGH", hi, "LOW", lo))
     ui.histStatR:SetText(ui.StatLine("IN", earned, "OUT", spent,
                                      "NET", earned - spent))
+end
+
+-- Track the cursor across the plot. Called every frame the plot is shown; it
+-- returns immediately unless the cursor is actually inside it.
+--
+-- READS THE SERIES THE LINE WAS DRAWN FROM, remembered by the painter, rather
+-- than recomputing at the cursor. Two answers to "what was held here" is one
+-- too many, and the one on screen has to be the one under the line.
+function ui.UpdateHistoryHover()
+    if not ui.histHovering or not ui.histPlot then return end
+    local values, n = ui.histSeries, ui.histN
+    if not values or not n then return end
+    local pw, ph = ui.HistPlotSizeAt(ui.WindowW(), ui.WindowH())
+    local scale = ui.histPlot:GetEffectiveScale()
+    if not scale or scale <= 0 then return end
+    local x = GetCursorPosition() / scale
+    local b = ui.HoverBucket(x, ui.histPlot:GetLeft(), pw, n)
+    if not b then
+        ui.histCross:Hide(); ui.histHover:Hide()
+        return
+    end
+    ui.histCross:ClearAllPoints()
+    ui.histCross:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT",
+                          math.floor((b - 0.5) / n * pw), 0)
+    ui.histCross:SetHeight(ph)
+    ui.histCross:Show()
+    ui.histHover:SetText(ui.HoverLabel(values, ui.histFrom, ui.histStep, b))
+    ui.histHover:Show()
 end
 
 -- The middle x-axis label: how far back the midpoint of the chart is.

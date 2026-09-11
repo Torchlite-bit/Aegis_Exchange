@@ -34,6 +34,38 @@ function util.MoneyParts(copper)
     return gold, silver, cop
 end
 
+-- A copper amount as SHORT as it can be said: "0", "84s", "12g", "4.2kg".
+--
+-- FOR AN AXIS, where the whole figure has to fit a narrow gutter and the exact
+-- copper is noise -- the point of a label beside a chart is which order of
+-- magnitude the line is at, and util.FormatMoney's "1,240g 17s 3c" defeats
+-- that by being longer than the plot is tall.
+--
+-- ONE significant fraction digit above a thousand gold, none below it: "4.2kg"
+-- is a different number from "4.3kg" at a glance and "4.23kg" is not.
+--
+-- Negative amounts keep their sign, because the chart's axis runs below zero
+-- whenever what it plots can.
+function util.ShortMoney(copper)
+    copper = copper or 0
+    local sign = ""
+    if copper < 0 then sign = "-"; copper = -copper end
+    if copper < COPPER_PER_SILVER then
+        return sign .. math.floor(copper) .. "c"
+    end
+    if copper < COPPER_PER_GOLD then
+        return sign .. math.floor(copper / COPPER_PER_SILVER) .. "s"
+    end
+    local gold = copper / COPPER_PER_GOLD
+    if gold < 1000 then
+        return sign .. math.floor(gold) .. "g"
+    end
+    -- string.format is C's printf, so an exact half rounds to the EVEN digit
+    -- (4250g is 4.2kg, not 4.3kg). That is fine for an axis label and it is
+    -- asserted as it behaves rather than as anyone would guess.
+    return sign .. string.format("%.1f", gold / 1000) .. "kg"
+end
+
 -- Format a copper amount as a compact string like "12g 34s 56c". Leading zero
 -- denominations are dropped, but copper is always shown when the total is
 -- under one silver. Pass `colored` = true for WoW color escape codes.

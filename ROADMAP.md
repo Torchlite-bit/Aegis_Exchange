@@ -2390,6 +2390,60 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The chart becomes gold-only — v1.53.8
+
+**The framing was wrong and one sentence from the owner settled it: "all gold
+is cumulative — the graph is simply tracking the toon's gold and the gold
+across the rest of your characters."** Income-and-spending, a ledger balance
+and a line per character were four answers to questions the TABLE beside the
+chart already answers exactly, line by line, with the item names attached.
+What a chart is good at and a table is not is a shape over time. So the
+dropdown picks WHOSE gold, not which question, and `HISTVIEWS`,
+`ui.CumulativeSeries`, `ui.CharSeries`, `ui.HistViewSeries` and
+`ui.PaintLegend` went with the views they served.
+
+**"The line needs to be much smoother", and the cause was not the columns.**
+`HISTL.buckets` was a fixed count per period. Thirty data points across a 300px
+plot is one every ten pixels, and `ui.SeriesAt` interpolating between points
+that far apart draws long straight runs however narrow the columns get.
+`ui.HistBucketCount` derives the count from the plot instead — a point every
+`HISTL.bucket_px` (3) at any window size — and `col_w` came down to 2. The
+suite now asserts `col_w <= bucket_px`, because a column wider than the gap
+between points throws one of them away.
+
+**Three months for the same SavedVariables, via two resolutions in one table.**
+Every sample starts hourly; `db.CompactMoney` thins anything outside a four-day
+window down to each day's **closing** figure — the right one to keep, because
+`db.MoneySeries` carries the last known value forward, so keeping the morning's
+would report it for the whole of the next day. 96 hourly + ~800 daily reaches
+back about two years. Hourly for two years is 17,000 numbers per character,
+written out as Lua source on every logout.
+
+Compaction is **amortised** — it runs only when the cap is exceeded, because
+the caller is a `PLAYER_MONEY` handler and a walk per write is exactly the
+shape HARD RULE 16 forbids. That has a testing consequence worth recording:
+between runs there is a tail of hourly samples that have aged out and not yet
+been thinned, so the suite compacts explicitly before asserting the rule and
+tests the amortisation separately. An assertion that demanded the invariant at
+every instant would have been demanding the bug.
+
+**The hover readout dates from the MIDDLE of a bucket**, not its leading edge —
+half a bucket of drift, invisible on a wide window and obvious on a narrow one.
+And `ui.HoverBucket` takes the cursor and the plot edge in the SAME coordinate
+space, which they are not to begin with: `GetCursorPosition` returns screen
+pixels and `GetLeft` returns UI units, so the caller divides by the effective
+scale. Getting that wrong reads as a crosshair tracking at the wrong speed,
+which does not show up in a screenshot.
+
+**A mock gap closed:** the harness had no `date`, so `ui.WhenLabel`'s
+past-a-day branch could only ever exercise its fallback. Sixth time a gap in
+the simulated client certified something.
+
+**Still to do toward the reference:** faint vertical gridlines at each x label,
+calendar dates along the x axis rather than "30d ago", the title and period
+buttons moved to sit with the chart, and a real gradient under the fill rather
+than flat alpha.
+
 ### Account gold, and the chart's views — v1.53.7
 
 **What Bagshui does, since it was the reference.** `Components/Character.lua`

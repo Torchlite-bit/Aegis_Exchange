@@ -995,12 +995,73 @@ end
 -- chart wants, and coarse enough that a day of trading is 24 numbers rather
 -- than one per transaction. A second change inside the same hour overwrites
 -- that hour rather than appending.
-db.MONEY_SAMPLES_MAX = 800    -- ~33 days of hourly samples, per character
+-- TWO RESOLUTIONS IN ONE TABLE, which is how a 3-month chart costs the same
+-- SavedVariables as the old 33-day one.
+--
+-- Every sample starts as an hourly one. Once it falls outside the fine window
+-- it is COMPACTED: all but the last sample of each day is dropped, and the
+-- survivor is that day's closing figure -- which is exactly the right one to
+-- keep, because db.MoneySeries carries the last known figure forward anyway.
+--
+-- The arithmetic: 96 hourly samples covers four days at full detail, and the
+-- remaining ~800 daily ones reach back about two years. Hourly for two years
+-- would have been 17,000 numbers per character, written out as Lua source on
+-- every logout.
+db.MONEY_FINE_HOURS  = 96     -- keep every hour for this long
+db.MONEY_SAMPLES_MAX = 900    -- total samples per character, both resolutions
 
 -- The hour a timestamp falls in. The bucket key, and the whole reason the
 -- history does not grow with the number of transactions.
 function db.MoneyHour(t)
     return math.floor((t or 0) / 3600)
+end
+
+-- The day an HOUR key falls in. Compaction keys off this.
+function db.MoneyDayOf(hour)
+    return math.floor((hour or 0) / 24)
+end
+
+-- Thin the history: full detail inside the fine window, one closing figure a
+-- day outside it, and the oldest dropped if it is still over the cap.
+--
+-- Returns the number of samples dropped, so a test can see it did something
+-- rather than only that the result is small enough.
+--
+-- IT KEEPS THE LAST SAMPLE OF EACH DAY, not the first. The series reader
+-- carries the last known figure forward, so a day is represented by what you
+-- went to bed with -- keeping the first would report the morning's figure for
+-- the whole of the following day.
+--
+-- Called only when the cap is exceeded, so its walk is amortised across
+-- hundreds of writes and the PLAYER_MONEY handler stays O(1).
+function db.CompactMoney(rec, now)
+    if not rec or not rec.keys or not rec.hours then return 0 end
+    local cutoff = db.MoneyHour(now or time()) - db.MONEY_FINE_HOURS
+    local keep, dropped = {}, 0
+    local n = table.getn(rec.keys)
+    local i = 1
+    while i <= n do
+        local k = rec.keys[i]
+        local nxt = rec.keys[i + 1]
+        -- Inside the fine window, or the last sample this side of a day
+        -- boundary. `nxt` nil means this is the newest sample there is.
+        if k > cutoff or not nxt or db.MoneyDayOf(nxt) ~= db.MoneyDayOf(k) then
+            table.insert(keep, k)
+        else
+            rec.hours[k] = nil
+            dropped = dropped + 1
+        end
+        i = i + 1
+    end
+    -- Still over? Drop from the oldest end, which is the only end where losing
+    -- a sample costs nothing anyone is looking at.
+    while table.getn(keep) > db.MONEY_SAMPLES_MAX do
+        local old = table.remove(keep, 1)
+        rec.hours[old] = nil
+        dropped = dropped + 1
+    end
+    rec.keys = keep
+    return dropped
 end
 
 -- The current realm's per-character coin records, created on demand.
@@ -1039,9 +1100,12 @@ function db.SetCharMoney(copper, now)
     -- in order by construction, so the oldest is always its first element.
     if rec.hours[hour] == nil then
         table.insert(rec.keys, hour)
-        while table.getn(rec.keys) > db.MONEY_SAMPLES_MAX do
-            local old = table.remove(rec.keys, 1)
-            rec.hours[old] = nil
+        -- ONLY WHEN OVER THE CAP. Compaction is a walk of the key list, and
+        -- this runs from PLAYER_MONEY -- which fires for every copper. Doing
+        -- it on every write would be the exact shape HARD RULE 16 forbids;
+        -- doing it once every few hundred writes is free.
+        if table.getn(rec.keys) > db.MONEY_SAMPLES_MAX then
+            db.CompactMoney(rec, now)
         end
     end
     rec.hours[hour] = copper
@@ -1104,13 +1168,36 @@ end
 --
 -- `from` and `step` come from ui.HistBuckets, so the chart's two series line up
 -- bucket for bucket. Returns an array of n copper figures.
-function db.MoneySeries(from, step, n)
-    local out = {}
+-- The earliest moment any character's coin was recorded, or nil.
+--
+-- What "all time" means for the chart: a window starting at the epoch is one
+-- flat line jammed against the right-hand edge.
+function db.OldestMoney()
+    local purses = db.account and db.Purses()
+    if not purses then return nil end
+    local oldest = nil
+    for _, rec in pairs(purses) do
+        local k = rec.keys and rec.keys[1]
+        if k then
+            local t = k * 3600
+            if not oldest or t < oldest then oldest = t end
+        end
+    end
+    return oldest
+end
+
+-- `who` (optional) narrows it to ONE character. Returns the series and
+-- whether anything was found for them at all -- a character with no samples
+-- in the window is a real state and deserves to be told apart from one
+-- holding nothing.
+function db.MoneySeries(from, step, n, who)
+    local out, seen = {}, false
     local i = 1
     while i <= (n or 0) do out[i] = 0; i = i + 1 end
     local purses = db.account and db.Purses()
-    if not purses or not from or not step or step <= 0 then return out end
-    for _, rec in pairs(purses) do
+    if not purses or not from or not step or step <= 0 then return out, seen end
+    for name, rec in pairs(purses) do
+      if not who or name == who then
         local hours, keys = rec.hours, rec.keys
         if hours and keys then
             -- One walk per character, in order, carrying the last figure
@@ -1129,15 +1216,16 @@ function db.MoneySeries(from, step, n)
                 local edge = from + b * step
                 while ki <= nk and (keys[ki] * 3600) < edge do
                     local v = hours[keys[ki]]
-                    if v then held = v end
+                    if v then held = v; seen = true end
                     ki = ki + 1
                 end
                 out[b] = out[b] + held
                 b = b + 1
             end
         end
+      end
     end
-    return out
+    return out, seen
 end
 
 -- ---------------------------------------------------------------------------
