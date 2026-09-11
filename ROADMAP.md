@@ -2390,6 +2390,52 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The shopping list, out on its own — v1.53.10
+
+**The main window only opens at an auction house.** `AuctionFrame` is what it
+replaces, and hiding that frame is what ends the session — so everything in the
+window is unreachable anywhere else. But a good part of any reagent list is
+sold by a vendor, and the moment you want to read it is while standing at one.
+
+So: a small independent frame holding the same rows, opened by `/aex shop` or
+automatically at a merchant. **It shares `ui.FlattenCraft` with the Crafting
+tab** rather than computing its own — two lists that can disagree about what
+you need is worse than no second list at all, and that is asserted rather than
+intended.
+
+**Three rules that make it a BUY list rather than a plan.** Craftable lines are
+off it (their own reagents are already on it, so listing them says buy
+something you do not need and counts its cost twice); covered lines are off it;
+and it is sorted by NAME, because a shopping list is read against a merchant's
+inventory or a search box and cost order re-shuffles it every time a price is
+learned.
+
+**HARD RULE 16, doubly.** The rebuild walks every tracked recipe's reagents, and
+the handler is `BAG_UPDATE` — which storms, and storms *hardest* while a
+merchant window is open and the player is buying. Flag, driver, one flush,
+driver hides itself.
+
+**Two sabotages aimed at `ui.ShoppingTotal` silently started landing somewhere
+else**, and that is the finding worth keeping. `ui.ShoppingShortRows` had
+costed its own rows with the same four lines, so `sabotage.py`'s text
+replacement hit the new copy — where nothing tested it — and the old entries
+went green while proving nothing. **Duplicated arithmetic does not only drift;
+it moves what a test is pointing at.** The filter delegates to
+`ui.ShoppingTotal` now, and the two duplicate sabotage entries were deleted
+rather than re-pointed.
+
+**A note on the recovery:** the first attempt to delete those entries produced a
+broken `sabotage.py`, and `git checkout tests/sabotage.py` then reverted the
+whole file — losing every sabotage added for this release. Both were re-applied
+from the scratch script. Reverting a whole file to fix one hunk is a wide tool
+for a narrow problem.
+
+**Check boxes in the multi-select menu.** `MakeCheckBox` is the same control
+the Aegis tab's settings use; the box has `EnableMouse(false)` so the ROW takes
+every click and there is no dead strip beside it that looks clickable. Both
+`Show` and `Hide` run on every pass because the rows are pooled — a row that
+carried a box would otherwise keep it on a single-select list.
+
 ### One field, two features — v1.53.9
 
 **Reported as "when I change lengths of time I have to go back and select the

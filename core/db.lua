@@ -212,6 +212,13 @@ local SETTING_DEFAULTS = {
     -- Ask before posting an auction. Off = post on the first click, which is
     -- what you want when relisting a stack at a time.
     confirmPost    = true,
+    -- Pop the shopping list up when you open a merchant.
+    --
+    -- The list is only useful where you can ACT on it, and a vendor is one of
+    -- the two places that is true (the auction house being the other, where
+    -- the Crafting tab already has it). On by default because a player who
+    -- tracked a recipe has already said they intend to buy its reagents.
+    shopAtMerchant = true,
     -- After posting, keep any REMAINING items of the same type in the sell
     -- slot at the same price, so the leftover stack can go straight out. Off
     -- clears the slot, which is what you want when posting one thing at a

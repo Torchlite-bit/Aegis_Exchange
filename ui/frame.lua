@@ -2105,9 +2105,20 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setConfirmPost = cpChk
 
+    -- Pop the shopping list up at a merchant. The list is only useful where
+    -- you can act on it, and a vendor is one of the two places that is true --
+    -- see the note above ui.BuildShopWindow.
+    local smChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetShopAtMerchant")
+    smChk:SetPoint("TOPLEFT", cpChk, "BOTTOMLEFT", 0, -6)
+    smChk:SetLabel("Show the shopping list at a merchant", C.text)
+    smChk:SetScript("OnClick", function()
+        A.db.SetSetting("shopAtMerchant", smChk:GetChecked() and true or false)
+    end)
+    ui.setShopAtMerchant = smChk
+
     -- Keep leftovers in the slot after posting? Same shape again.
     local klChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetKeepLeftovers")
-    klChk:SetPoint("TOPLEFT", cpChk, "BOTTOMLEFT", 0, -6)
+    klChk:SetPoint("TOPLEFT", smChk, "BOTTOMLEFT", 0, -6)
     klChk:SetLabel("Keep leftovers ready to post", C.text)
     klChk:SetScript("OnClick", function()
         A.db.SetSetting("keepLeftovers", klChk:GetChecked() and true or false)
@@ -2260,6 +2271,10 @@ function ui.RefreshSettings()
     if ui.setConfirmCancel then
         ui.setConfirmCancel:SetChecked(
             A.db.Setting("confirmCancel") ~= false and 1 or nil)
+    end
+    if ui.setShopAtMerchant then
+        ui.setShopAtMerchant:SetChecked(
+            A.db.Setting("shopAtMerchant") ~= false and 1 or nil)
     end
     if ui.setKeepLeftovers then
         ui.setKeepLeftovers:SetChecked(
@@ -2967,6 +2982,20 @@ local function MakeDropdown(parent, width, onSelect, noAll, multi)
                 row:SetHighlightTexture(
                     "Interface\\QuestFrame\\UI-QuestTitleHighlight")
                 row.aegisNoSkin = true
+                -- A REAL TICK BOX on a multi-select list, the same one the
+                -- Aegis tab's settings and the Buy tab's batch column use.
+                -- A check box reads as "several of these" at a glance; a tick
+                -- character in the label reads as decoration until you have
+                -- clicked one and watched it change.
+                --
+                -- MOUSE OFF. It is display, not a control: the ROW takes every
+                -- click, so the whole line toggles and there is no dead strip
+                -- beside the box that looks clickable and is not.
+                row.check = ui.MakeCheckBox(row, 12)
+                row.check:SetPoint("LEFT", row, "LEFT", 3, 0)
+                row.check:EnableMouse(false)
+                row.check:Hide()
+
                 local fs = row:CreateFontString(nil, "OVERLAY",
                     "GameFontHighlightSmall")
                 fs:SetPoint("LEFT", row, "LEFT", 3, 0)
@@ -3007,17 +3036,20 @@ local function MakeDropdown(parent, width, onSelect, noAll, multi)
             else
                 row.label:SetTextColor(C.text[1], C.text[2], C.text[3])
             end
-            local text = entries[r].text
+            -- The box and the label's left edge move together, and BOTH are
+            -- set on every pass. Rows are pooled, so a row that carried a box
+            -- last time it was used would keep it on a single-select list.
+            local labelX = 3
             if dd.multi then
-                -- A TICK IN THE TEXT rather than a check box widget: these
-                -- rows are pooled Buttons with one FontString, and a texture
-                -- per row would have to be hidden again on every reuse. The
-                -- space keeps the labels on one left edge whether ticked or
-                -- not.
-                local on = dd.ticked[entries[r].value]
-                text = (on and "\226\136\154 " or "   ") .. text
+                row.check:SetChecked(dd.ticked[entries[r].value] and true or false)
+                row.check:Show()
+                labelX = 19
+            else
+                row.check:Hide()
             end
-            ui.SetTextClipped(row.label, text, width - 12)
+            row.label:ClearAllPoints()
+            row.label:SetPoint("LEFT", row, "LEFT", labelX, 0)
+            ui.SetTextClipped(row.label, entries[r].text, width - labelX - 9)
             row:Show()
             r = r + 1
         end
@@ -9199,6 +9231,66 @@ function ui.FlattenCraft()
     -- runs once per REBUILD, the paint runs per visible row per repaint, and
     -- the repaint is driven by a BAG_UPDATE flag that storms. HARD RULE 16.
     ui.StampCraftQuality(projects, rows)
+end
+
+-- What is still to BUY, out of the whole shopping list.
+--
+-- Returns rows, total, complete -- the rows you are short on, what filling
+-- them costs at the cheaper of vendor and market, and whether every line had a
+-- price. Pure over the engine's aggregated list.
+--
+-- CRAFTABLE LINES ARE LEFT OUT. A reagent you can make from things you already
+-- have is not something to buy, and putting it on a list you are reading at a
+-- vendor is telling you to purchase something you do not need. The Crafting
+-- tab shows them because it is showing the whole plan; this is a buy list.
+--
+-- Sorted by NAME, not by cost or shortfall. A shopping list is read against
+-- what is in front of you -- a merchant's inventory, an auction search box --
+-- and alphabetical is the order that makes "is X on here" answerable. Cost
+-- order re-shuffles the list every time a price is learned.
+function ui.ShoppingShortRows(flat)
+    local out = {}
+    local i = 1
+    while i <= table.getn(flat or {}) do
+        local r = flat[i]
+        if r.short and r.short > 0 and not r.craftable then
+            table.insert(out, r)
+        end
+        i = i + 1
+    end
+    table.sort(out, function(a, b)
+        return string.lower(a.name or "") < string.lower(b.name or "")
+    end)
+    -- COSTED BY ui.ShoppingTotal, not here.
+    --
+    -- It was costed here, with the same four lines, and two sabotages aimed at
+    -- ShoppingTotal silently started landing on THIS copy instead -- where
+    -- nothing tested them. Duplicated arithmetic does not only drift; it moves
+    -- what a test is pointing at. One costing function, and the filter above
+    -- hands it exactly the rows it already selects for anyway.
+    local total, complete = ui.ShoppingTotal(out)
+    return out, total, complete
+end
+
+-- Where a shopping line should be bought, as a short label and a colour key.
+--
+-- Returns text, key. `key` is "vendor", "ah" or "unknown", so the caller picks
+-- the colour from the palette rather than this function inventing one.
+--
+-- THE CHEAPER SOURCE WINS AND IT IS NAMED. A list that only shows a price
+-- leaves you to remember which items the vendor sells, and the whole reason to
+-- read this at a merchant is that some of them are standing in front of you.
+function ui.ShoppingSourceLabel(r)
+    if not r then return "\226\128\148", "unknown" end
+    -- THE ENGINE ALREADY CHOSE. craft.CheaperSource compares the vendor price
+    -- against the market one and puts the winner in `source` with its price in
+    -- `unit`; picking again here would be a second opinion that can disagree
+    -- with the total the same rows were costed at.
+    if r.unit and r.source then
+        local where = (r.source == "vendor") and "vendor" or "AH"
+        return where .. " " .. util.FormatMoney(r.unit, true), r.source
+    end
+    return "no price yet", "unknown"
 end
 
 -- What the whole list costs to fill: every shortfall at its cheaper source.
@@ -15516,6 +15608,257 @@ end
 -- Deliberately NOT "/aegis": other addons in the user's Aegis series (Aegis:
 -- Rally Power) already own that slash, and when two addons register the same
 -- slash text the client resolves it to only ONE of them.
+-- ---------------------------------------------------------------------------
+-- The shopping list, out on its own
+-- ---------------------------------------------------------------------------
+--
+-- WHY IT EXISTS SEPARATELY FROM THE CRAFTING TAB. The main window only opens
+-- at an auction house -- AuctionFrame is what it replaces, and hiding that
+-- frame is what ends the session -- so everything in it is unreachable
+-- anywhere else. But half the shopping list is not an auction house problem:
+-- a good part of any reagent list is sold by a vendor, and the moment you want
+-- to read it is while you are standing at one.
+--
+-- So this is a small independent frame holding the same rows, opened by
+-- `/aex shop` or automatically at a merchant. It shares ui.FlattenCraft with
+-- the Crafting tab rather than computing its own list -- two lists that can
+-- disagree about what you need is worse than no second list at all.
+local SHOPL = {
+    w = 260, row_h = 18, rows_max = 14,
+    top = 44,       -- title bar and the total line
+    bot = 8,
+    pad = 8,
+}
+
+function ui.BuildShopWindow()
+    if ui.shopFrame then return ui.shopFrame end
+    local f = CreateFrame("Frame", "AegisExchangeShopList", UIParent)
+    f:SetWidth(SHOPL.w)
+    f:SetHeight(SHOPL.top + SHOPL.bot + SHOPL.row_h * 6)
+    f:SetPoint("CENTER", UIParent, "CENTER", 260, 0)
+    f:SetFrameStrata("DIALOG")
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.panelBG[1], C.panelBG[2], C.panelBG[3], 0.95)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function() f:StartMoving() end)
+    f:SetScript("OnDragStop", function()
+        f:StopMovingOrSizing()
+        ui.SaveShopPoint()
+    end)
+    f:Hide()
+    ui.shopFrame = f
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", SHOPL.pad, -8)
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Shopping list")
+
+    local close = ui.MakeButton(f, "quiet")
+    close:SetWidth(20); close:SetHeight(18)
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -SHOPL.pad, -8)
+    close:SetText("X")
+    close:SetScript("OnClick", function() ui.HideShopWindow() end)
+
+    ui.shopTotal = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.shopTotal:SetPoint("TOPLEFT", f, "TOPLEFT", SHOPL.pad, -26)
+    ui.shopTotal:SetJustifyH("LEFT")
+    ui.shopTotal:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.shopRows = {}
+    local i = 1
+    while i <= SHOPL.rows_max do
+        local row = CreateFrame("Button", nil, f)
+        row:SetHeight(SHOPL.row_h)
+        row.aegisNoSkin = true
+        row:SetPoint("TOPLEFT", f, "TOPLEFT",
+                     SHOPL.pad, -(SHOPL.top + (i - 1) * SHOPL.row_h))
+        row:SetPoint("TOPRIGHT", f, "TOPRIGHT",
+                     -SHOPL.pad, -(SHOPL.top + (i - 1) * SHOPL.row_h))
+        ui.AddRowChrome(row, i)
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.name:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.name:SetJustifyH("LEFT")
+        row.need = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.need:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        row.need:SetJustifyH("RIGHT")
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function()
+            local e = row.entry
+            if not e then return end
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            GameTooltip:SetText(e.name or "", 1, 1, 1)
+            local where = ui.ShoppingSourceLabel(e)
+            GameTooltip:AddLine(where, 0.8, 0.8, 0.8)
+            -- WHICH RECIPES WANT IT. The aggregated line says "40 Linen
+            -- Cloth" and nothing about why, which is the one question a list
+            -- read away from the Crafting tab cannot answer any other way.
+            local fi = 1
+            while fi <= table.getn(e.from or {}) do
+                GameTooltip:AddLine("for " .. e.from[fi],
+                                    C.goldDim[1], C.goldDim[2], C.goldDim[3])
+                fi = fi + 1
+            end
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:Hide()
+        ui.shopRows[i] = row
+        i = i + 1
+    end
+
+    -- BAG_UPDATE STORMS, so this is a flag and a Show and nothing else. The
+    -- rebuild is a walk of every tracked recipe's reagents, which is exactly
+    -- the shape HARD RULE 16 forbids inside a handler -- and it is doubly so
+    -- here, because a merchant window is open and the player is buying.
+    ui.shopDriver = CreateFrame("Frame", nil, f)
+    ui.shopDriver:Hide()
+    ui.shopDriver:SetScript("OnUpdate", function()
+        ui.shopDriver:Hide()
+        if ui.shopFrame and ui.shopFrame:IsVisible() then
+            ui.RefreshShopWindow()
+        end
+    end)
+    return f
+end
+
+function ui.SaveShopPoint()
+    if not ui.shopFrame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    local ok, point, _, relPoint, x, y = pcall(function()
+        return ui.shopFrame:GetPoint(1)
+    end)
+    if not ok or not point then return end
+    -- All four, for the reason ui.SaveWindowPoint spells out: a pair of
+    -- offsets means nothing without the point they are measured from.
+    s.shopPoint, s.shopRel = point, relPoint or point
+    s.shopX, s.shopY = math.floor(x or 0), math.floor(y or 0)
+end
+
+function ui.RestoreShopPoint()
+    if not ui.shopFrame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s or not s.shopPoint then return end
+    -- Checked the same way the main window's is, and for the same reason: a
+    -- point saved on a large screen and restored on a small one lands with the
+    -- title bar -- the only drag handle -- off the edge.
+    local sw = UIParent and UIParent:GetWidth() or 0
+    local sh = UIParent and UIParent:GetHeight() or 0
+    if not ui.PointIsReachable(s.shopPoint, s.shopRel, s.shopX, s.shopY,
+                               sw, sh, SHOPL.w,
+                               ui.shopFrame:GetHeight() or 0) then
+        return
+    end
+    ui.shopFrame:ClearAllPoints()
+    ui.shopFrame:SetPoint(s.shopPoint, UIParent, s.shopRel, s.shopX, s.shopY)
+end
+
+function ui.ShowShopWindow()
+    ui.BuildShopWindow()
+    ui.RestoreShopPoint()
+    ui.shopFrame:Show()
+    ui.RefreshShopWindow()
+end
+
+function ui.HideShopWindow()
+    if ui.shopFrame then ui.shopFrame:Hide() end
+end
+
+function ui.ToggleShopWindow()
+    ui.BuildShopWindow()
+    if ui.shopFrame:IsVisible() then ui.HideShopWindow() else ui.ShowShopWindow() end
+end
+
+function ui.RefreshShopWindow()
+    if not ui.shopFrame or not ui.shopFrame:IsVisible() then return end
+    ui.FlattenCraft()
+    local rows, total, complete = ui.ShoppingShortRows(ui.craftFlat)
+    local n = table.getn(rows)
+    if n > SHOPL.rows_max then n = SHOPL.rows_max end
+
+    -- SIZED TO WHAT IT HOLDS. A fixed-height list with two lines in it is
+    -- mostly empty frame sitting over the merchant window you are trying to
+    -- read -- and this one is deliberately small because it is meant to sit
+    -- beside something else.
+    local show = n
+    if show < 1 then show = 1 end
+    ui.shopFrame:SetHeight(SHOPL.top + SHOPL.bot + show * SHOPL.row_h)
+
+    if table.getn(rows) == 0 then
+        ui.shopTotal:SetText("Nothing left to buy.")
+    else
+        local t = table.getn(rows) .. " to buy \226\128\162 "
+            .. util.FormatMoney(total, true)
+        -- "and some more" rather than a total that silently leaves things out,
+        -- the same wording ui.ShoppingTotal's `complete` exists for.
+        if not complete then t = t .. " + more" end
+        if table.getn(rows) > SHOPL.rows_max then
+            t = t .. "  (showing " .. SHOPL.rows_max .. ")"
+        end
+        ui.shopTotal:SetText(t)
+    end
+
+    ui.SkinNewRows(ui.shopRows)
+    local i = 1
+    while i <= SHOPL.rows_max do
+        local row = ui.shopRows[i]
+        local e = rows[i]
+        if e and i <= SHOPL.rows_max then
+            row.entry = e
+            ui.FitText(row.name, e.name or "?", SHOPL.w - 96)
+            row.name:SetTextColor(ui.QualityColor(e.quality))
+            row.need:SetText(e.have .. " / " .. e.need)
+            -- The colour is the SOURCE, so a glance down the list tells you
+            -- which of these the merchant in front of you actually sells.
+            local _, key = ui.ShoppingSourceLabel(e)
+            if key == "vendor" then
+                row.need:SetTextColor(C.income[1], C.income[2], C.income[3])
+            elseif key == "ah" then
+                row.need:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+            else
+                row.need:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+end
+
+A.RegisterEvent("MERCHANT_SHOW", function()
+    if A.db.Setting("shopAtMerchant") == false then return end
+    -- NOTHING TO BUY, NOTHING TO SHOW. Popping an empty frame over the
+    -- merchant window every time you talk to a vendor is the behaviour that
+    -- makes people turn a feature off.
+    ui.FlattenCraft()
+    if table.getn(ui.ShoppingShortRows(ui.craftFlat)) == 0 then return end
+    ui.shopAuto = true
+    ui.ShowShopWindow()
+end)
+
+A.RegisterEvent("MERCHANT_CLOSED", function()
+    -- Only if WE opened it. Someone who typed /aex shop wants it to stay.
+    if ui.shopAuto then
+        ui.shopAuto = nil
+        ui.HideShopWindow()
+    end
+end)
+
+-- O(1): a flag and a Show. See ui.shopDriver.
+A.RegisterEvent("BAG_UPDATE", function()
+    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end
+end)
+
 SLASH_AEGISEXCHANGE1 = "/aex"
 SLASH_AEGISEXCHANGE2 = "/aegisexchange"
 SlashCmdList["AEGISEXCHANGE"] = function(msg)
@@ -15690,6 +16033,14 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("Aegis: item cache \226\128\148 " .. n .. " items known,"
                 .. " sweep complete.")
         end
+        return
+    end
+    -- THE SHOPPING LIST, ANYWHERE. The main window only opens at an auction
+    -- house, and half of a reagent list is bought from a vendor -- see the
+    -- note above ui.BuildShopWindow.
+    if string.find(cmd, "shop", 1, true)
+        or string.find(cmd, "list", 1, true) then
+        ui.ToggleShopWindow()
         return
     end
     if string.find(cmd, "debug", 1, true) then

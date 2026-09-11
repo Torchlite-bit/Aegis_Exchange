@@ -18,6 +18,31 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.10]
+
+### Added
+- **The shopping list, out on its own.** `/aex shop` opens a small movable
+  window with everything you still have to buy, anywhere — and it pops up by
+  itself when you open a **merchant**, which is where half a reagent list gets
+  bought. The main window only opens at an auction house, so until now none of
+  this was reachable at a vendor.
+  - Only what is **left to buy**: things you already have enough of are off it,
+    and so is anything you can craft from what is on the list already —
+    listing that would tell you to purchase something you do not need.
+  - **Alphabetical**, because a shopping list is read against what is in front
+    of you and cost order re-shuffles it every time a price is learned.
+  - The count colour says **where**: green for a vendor line, gold for an
+    auction one. Hover a row for the price and which recipes want it.
+  - It closes again when you leave the merchant — **unless you opened it
+    yourself**, in which case it stays.
+  - Nothing to buy, nothing pops up. Turn the automatic half off on the Aegis
+    tab: *Show the shopping list at a merchant*.
+
+- **Real check boxes in the History chart's character picker**, the same ones
+  the Aegis tab's settings use, instead of a tick character in the label. A
+  check box reads as "several of these" at a glance. The whole row still takes
+  the click.
+
 ## [1.53.9]
 
 ### Fixed
@@ -5312,6 +5337,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -836,6 +836,27 @@ do
     H.check("the table still reads its own",
             says(list, "ui.SortHistory(ui.histView or {}"))
 
+    -- A REAL TICK BOX on the multi-select list, not a tick character in the
+    -- label. A check box reads as "several of these" at a glance; a character
+    -- in the text reads as decoration until you have clicked one and watched
+    -- it change. It is the same box the Aegis tab's settings use.
+    local dropdown = bodyOf("local function MakeDropdown(")
+    H.check("the menu is built at all", dropdown ~= "")
+    H.check("a multi-select row carries a check box",
+            says(dropdown, "row.check = ui.MakeCheckBox(row, 12)"))
+    -- DISPLAY, NOT A CONTROL: the ROW takes every click, so the whole line
+    -- toggles and there is no dead strip beside the box that looks clickable.
+    H.check("...which does not take the click itself",
+            says(dropdown, "row.check:EnableMouse(false)"))
+    -- Rows are POOLED, so both states are set on every pass. A row that
+    -- carried a box last time would keep it on a single-select list.
+    H.check("the box is shown and hidden on every pass",
+            says(dropdown, "row.check:Show()") and says(dropdown, "row.check:Hide()"))
+    H.check("...and the label's left edge moves with it",
+            says(dropdown, 'row.label:SetPoint("LEFT", row, "LEFT", labelX, 0)'))
+    H.check("...after being cleared, because SetPoint ADDS a point",
+            says(dropdown, "row.label:ClearAllPoints()"))
+
     -- TWO STRINGS THAT CAN BOTH GROW CANNOT SHARE A LINE. These were anchored
     -- to opposite ends of one line and ran into each other -- "LOW 9g 14s 6c"
     -- and "IN 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window.

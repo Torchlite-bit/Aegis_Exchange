@@ -2671,6 +2671,90 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the shopping list, out on its own (v1.53.10) ---------------------
+
+    # A line you can CRAFT put on the buy list. Its own reagents are already
+    # on that list, so this tells you to purchase something you do not need
+    # and counts its cost on top of the cost of making it.
+    ('shop-lists-craftable-lines', 'ui/frame.lua',
+     '        if r.short and r.short > 0 and not r.craftable then',
+     '        if r.short and r.short > 0 then',
+     'shoplist'),
+
+    # ...and lines you already have enough of, which is most of a mature
+    # list -- the one thing the popout must not be full of.
+    ('shop-lists-things-you-have', 'ui/frame.lua',
+     '        if r.short and r.short > 0 and not r.craftable then',
+     '        if r.short and not r.craftable then',
+     'shoplist'),
+
+
+
+    # Sorted by cost rather than by name. A shopping list is read against
+    # what is in front of you, and cost order re-shuffles the whole list
+    # every time a price is learned.
+    ('shop-sorted-by-cost', 'ui/frame.lua',
+     '        return string.lower(a.name or "") < string.lower(b.name or "")',
+     '        return (a.unit or 0) > (b.unit or 0)',
+     'shoplist'),
+
+    # The source label ignoring what the engine chose, so a line bought from
+    # a vendor is labelled AH -- on a list you are reading AT that vendor.
+    ('shop-source-picks-again', 'ui/frame.lua',
+     '        local where = (r.source == "vendor") and "vendor" or "AH"',
+     '        local where = "AH"',
+     'shoplist'),
+
+    # An unpriced line quoting zero, which reads as free.
+    ('shop-unpriced-line-quotes-zero', 'ui/frame.lua',
+     '    return "no price yet", "unknown"',
+     '    return "vendor " .. util.FormatMoney(0, true), "vendor"',
+     'shoplist'),
+
+    # The rebuild back inside the BAG_UPDATE handler. It walks every tracked
+    # recipe's reagents, which is the shape HARD RULE 16 forbids -- and
+    # doubly so here, because a merchant window is open and the player is
+    # buying, which is exactly when that event storms.
+    ('shop-rebuilds-inside-bag-update', 'ui/frame.lua',
+     '    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.shopDriver:Show() end',
+     '    if ui.shopFrame and ui.shopFrame:IsVisible() then ui.RefreshShopWindow() end',
+     'shoplist'),
+
+    # The flush driver left running, so the list is rebuilt every frame for
+    # the rest of the session.
+    ('shop-driver-never-stops', 'ui/frame.lua',
+     '    ui.shopDriver:SetScript("OnUpdate", function()\n        ui.shopDriver:Hide()',
+     '    ui.shopDriver:SetScript("OnUpdate", function()',
+     'shoplist'),
+
+    # An empty frame popped over the merchant window every time you talk to a
+    # vendor, which is the behaviour that makes people turn a feature off.
+    ('shop-pops-up-empty', 'ui/frame.lua',
+     '    if table.getn(ui.ShoppingShortRows(ui.craftFlat)) == 0 then return end',
+     '    local _ = ui',
+     'shoplist'),
+
+    # ...and no way to turn it off.
+    ('shop-merchant-setting-ignored', 'ui/frame.lua',
+     '    if A.db.Setting("shopAtMerchant") == false then return end',
+     '    local _ = A',
+     'shoplist'),
+
+    # Walking away from a vendor closing a list the player opened by hand.
+    # Only what we opened automatically is ours to close.
+    ('shop-close-hides-what-you-opened', 'ui/frame.lua',
+     '    if ui.shopAuto then\n        ui.shopAuto = nil\n        ui.HideShopWindow()\n    end',
+     '    ui.HideShopWindow()',
+     'shoplist'),
+
+    # The popout computing from something other than the Crafting tab's list.
+    # Two lists that can disagree about what you need is worse than no second
+    # list at all.
+    ('shop-builds-its-own-list', 'ui/frame.lua',
+     '    local rows, total, complete = ui.ShoppingShortRows(ui.craftFlat)',
+     '    local rows, total, complete = ui.ShoppingShortRows({})',
+     'shoplist'),
+
     # ---- multi-select, and the field two features shared (v1.53.9) -------
 
     # THE BUG ITSELF: the chart reading the ledger table's filtered ROW LIST
@@ -4623,6 +4707,7 @@ SUITES = {
     "buygroup": "tests/units/buygroup_test.lua",
     "bids": "tests/units/bids_test.lua",
     "histgraph": "tests/units/histgraph_test.lua",
+    "shoplist": "tests/units/shoplist_test.lua",
     "bidpath": "tests/units/bidpath_test.lua",
     "purse": "tests/units/purse_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
