@@ -58,6 +58,9 @@ local function extract(path, signature)
 end
 
 ui = {}
+-- ui/frame.lua takes `local util = A.util` at file scope, so an extracted
+-- function reads it as a global once it is loaded on its own.
+util = A.util
 for _, sig in ipairs({
     "function ui.MadeSummary(",
     "function ui.CraftTreeRows(",
@@ -471,77 +474,85 @@ H.section("quality is asked for ONCE, not once per repaint")
 -- from a BAG_UPDATE flag, which storms. So it runs once per LIST REBUILD and
 -- the answer is kept -- and that memo is the difference between bounded and
 -- unbounded, which is a thing a suite can actually check.
-local asked
-GetItemInfo = function(id)
-    asked = asked + 1
-    -- name, link, quality, iLevel, reqLevel, class, subclass, maxStack,
-    -- equipSlot, TEXTURE -- the tenth return, which is the one the row icon
-    -- wants. Spelling the whole signature out is the point: a reader that
-    -- counts wrong picks up equipSlot and paints nothing.
-    if id == 13468 then
-        return "Black Lotus", nil, 4, 60, 0, "Trade Goods", "Herb", 5, nil,
-               "Interface\\Icons\\INV_Misc_Herb_BlackLotus"
-    end
-    if id == 13463 then
-        return "Dreamfoil", nil, 1, 55, 0, "Trade Goods", "Herb", 20, nil,
-               "Interface\\Icons\\INV_Misc_Herb_Dreamfoil"
-    end
-    return nil                              -- not in the client's cache yet
-end
+-- ...against EVERY SHAPE OF CLIENT, which is the whole point. The mock offers
+-- five, and they disagree about where the texture lives: vanilla puts it at 9,
+-- a later client inserts itemLevel at 4 and puts it at 10, a client mod
+-- installs an 18-wide tuple, and one REAL client returns vanilla's nine with a
+-- NUMBER appended at 10.
+--
+-- v1.53.14 indexed position 10 by hand. On that last shape it picked up the
+-- appended number, and because SetTexture reads a number as an r, g, b triple
+-- rather than refusing it, every icon in the shopping list painted as a SOLID
+-- RED BOX. Nothing errored. A suite that only ever saw one shape could not
+-- tell a working anchor from a hardcoded index -- so this one sees all five.
+local SHAPES = { "vanilla", "later", "wide", "holey", "trailing" }
+local LOTUS = "Interface\\Icons\\INV_Misc_Herb_BlackLotus"
+local FOIL  = "Interface\\Icons\\INV_Misc_Herb_Dreamfoil"
 
-ui.craftQuality = {}
-asked = 0
+W.AddItem(13468, { name = "Black Lotus", quality = 4, stackCount = 10,
+                   type = "Trade Goods", subType = "Herb", texture = LOTUS })
+W.AddItem(13463, { name = "Dreamfoil", quality = 1, stackCount = 20,
+                   type = "Trade Goods", subType = "Herb", texture = FOIL })
+
+local si = 1
+while si <= table.getn(SHAPES) do
+    local shape = SHAPES[si]
+    W.itemInfoShape = shape
+    ui.craftQuality, ui.craftIcon = {}, {}
+
+    H.eq(shape .. ": the quality resolves", ui.CraftQualityOf(13468), 4)
+    H.eq(shape .. ": ...and a common one too", ui.CraftQualityOf(13463), 1)
+
+    -- THE ONE THAT SHIPPED BROKEN. A path, not a number, and the RIGHT path.
+    H.eq(shape .. ": the icon resolves", ui.CraftIconOf(13468), LOTUS)
+    H.eq(shape .. ": ...and the other one", ui.CraftIconOf(13463), FOIL)
+
+    -- Belt and braces, because "not nil" was exactly the check that let a
+    -- number through into SetTexture.
+    H.eq(shape .. ": the icon is a string",
+         type(ui.CraftIconOf(13468)), "string")
+    si = si + 1
+end
+W.itemInfoShape = "vanilla"
+
+-- ---- the memo, and what is NOT memoised --------------------------------
+
+-- HARD RULE 16. GetItemInfo is a per-item CLIENT QUERY, and this tab repaints
+-- from a BAG_UPDATE flag, which storms. So it runs once per LIST REBUILD and
+-- the answer is kept -- and that memo is the difference between bounded and
+-- unbounded, which is a thing a suite can actually check.
+ui.craftQuality, ui.craftIcon = {}, {}
+W.itemInfoCalls = 0
 H.eq("it resolves", ui.CraftQualityOf(13468), 4)
-H.eq("...having asked the client once", asked, 1)
+H.check("...having asked the client", W.itemInfoCalls > 0, W.itemInfoCalls)
+local afterFirst = W.itemInfoCalls
 H.eq("the second time is a table read", ui.CraftQualityOf(13468), 4)
-H.eq("...and asks nothing", asked, 1)
+H.eq("...and asks nothing", W.itemInfoCalls, afterFirst)
+
+-- THE TWO CACHES ARE INDEPENDENT, which is why the icon is its own lookup and
+-- not a second field off the quality one's single call.
+W.itemInfoCalls = 0
+H.eq("the quality memo does not answer for the icon",
+     ui.CraftIconOf(13468), LOTUS)
+H.check("...it asked the client itself", W.itemInfoCalls > 0, W.itemInfoCalls)
 
 -- AN UNRESOLVED ID IS NOT CACHED. "The client has not loaded that item yet" is
--- a temporary answer; remembering it would leave the name uncoloured until
--- logout. It costs a query per rebuild until it resolves, which is cheap
--- exactly because everything that HAS resolved is already memoised.
-asked = 0
+-- a temporary answer; remembering it would leave the name uncoloured and the
+-- row iconless until logout.
+W.itemInfoCalls = 0
 H.eq("an item the client has not cached yet is nil",
      ui.CraftQualityOf(99999), nil)
 H.eq("...and it is asked again next time", ui.CraftQualityOf(99999), nil)
-H.eq("...which is two queries, not one", asked, 2)
+H.check("...which is two queries, not one", W.itemInfoCalls >= 2,
+        W.itemInfoCalls)
+H.isNil("...and it has no icon either", ui.CraftIconOf(99999))
 
 H.eq("no item id asks nothing", ui.CraftQualityOf(nil), nil)
-
--- ---- the icon, on exactly the same terms -------------------------------
-
--- The icon is a SECOND memoised lookup, not a second return value off the
--- quality one. Same shape, same rules: resolved ids are kept, misses are not,
--- and no id asks nothing.
-ui.craftIcon = {}
-asked = 0
-H.eq("it resolves the tenth return, not the ninth",
-     ui.CraftIconOf(13468), "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
-H.eq("...having asked the client once", asked, 1)
-H.eq("the second time is a table read",
-     ui.CraftIconOf(13468), "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
-H.eq("...and asks nothing", asked, 1)
-
-asked = 0
-H.eq("an unresolved id has no icon", ui.CraftIconOf(99999), nil)
-H.eq("...and is asked again next time", ui.CraftIconOf(99999), nil)
-H.eq("...which is two queries, not one", asked, 2)
-H.eq("no item id asks nothing", ui.CraftIconOf(nil), nil)
-
--- THE TWO CACHES ARE INDEPENDENT. Clearing one may not silently answer for
--- the other -- which is the whole reason the icon is not a second return off
--- ui.CraftQualityOf's single GetItemInfo call.
-ui.craftIcon = {}
-asked = 0
-H.eq("the quality memo does not answer for the icon",
-     ui.CraftIconOf(13463), "Interface\\Icons\\INV_Misc_Herb_Dreamfoil")
-H.eq("...it asked the client itself", asked, 1)
+H.isNil("...nor for an icon", ui.CraftIconOf(nil))
 
 -- ---- the one pass over the list ----------------------------------------
 
-ui.craftQuality = {}
-ui.craftIcon = {}
-asked = 0
+ui.craftQuality, ui.craftIcon = {}, {}
 local PROJ = { { name = "Flask", itemId = 13468 }, { name = "Nameless" } }
 local ROWS = { { name = "Dreamfoil", itemId = 13463 },
                { name = "Black Lotus", itemId = 13468 } }
@@ -552,28 +563,19 @@ H.eq("a row for the same item agrees with the project", ROWS[2].quality, 4)
 H.eq("a project with no item id is left nil", PROJ[2].quality, nil)
 
 -- THE TEXTURE TRAVELS WITH THE QUALITY. Both cost a GetItemInfo, so both are
--- stamped in the same rebuild pass -- and a paint that wanted the icon but
--- not the quality would otherwise be a per-row client query on a list that
--- repaints off a stormable flag.
-H.eq("a project carries its icon",
-     PROJ[1].texture, "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
-H.eq("...and a reagent row too",
-     ROWS[1].texture, "Interface\\Icons\\INV_Misc_Herb_Dreamfoil")
+-- stamped in the same rebuild pass -- a paint that wanted the icon but not the
+-- quality would otherwise be a per-row client query on a list that repaints
+-- off a stormable flag.
+H.eq("a project carries its icon", PROJ[1].texture, LOTUS)
+H.eq("...and a reagent row too", ROWS[1].texture, FOIL)
 H.eq("a project with no item id has no icon", PROJ[2].texture, nil)
-
--- FOUR, not three and not two. Four ids go in -- 13468, a project with no id,
--- 13463 and 13468 again -- and each that resolves is asked TWICE, once for
--- the quality and once for the icon, because the caches are separate. The nil
--- id returns before it asks anything and the repeat 13468 is two memo reads.
-H.eq("four items, four queries", asked, 4)
 
 -- ...and stamping the SAME list again costs nothing, which is what makes it
 -- safe on a tab whose repaint is driven by a stormable event.
-asked = 0
+W.itemInfoCalls = 0
 ui.StampCraftQuality(PROJ, ROWS)
-H.eq("a second pass asks the client nothing", asked, 0)
-H.eq("...and the icons survived it",
-     ROWS[2].texture, "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
+H.eq("a second pass asks the client nothing", W.itemInfoCalls, 0)
+H.eq("...and the icons survived it", ROWS[2].texture, LOTUS)
 
 H.survives("nil lists are not a crash", function()
     ui.StampCraftQuality(nil, nil)

@@ -3607,7 +3607,9 @@ function ui.FillGroupRow(row, e)
     row.entry = e
     if row.selTex then row.selTex:Hide() end
     if row.icon then
-        if e.texture then
+        -- A STRING, not merely non-nil -- SetTexture would read a number as
+        -- an r, g, b triple and paint a solid block. See ui.CraftIconOf.
+        if type(e.texture) == "string" then
             row.icon:SetTexture(e.texture)
             row.icon:SetVertexColor(1, 1, 1)
             row.icon:SetAlpha(1)
@@ -9017,7 +9019,7 @@ function ui.QualityColor(q, dim)
     return r, g, b
 end
 
--- One item's quality, memoised.
+-- One item's quality and icon, memoised.
 --
 -- HARD RULE 16. GetItemInfo is a per-item CLIENT QUERY, so it may not run per
 -- row per paint -- and this tab repaints from a BAG_UPDATE flag, which storms.
@@ -9028,45 +9030,58 @@ end
 -- loaded that item yet" is a temporary answer and caching it would make the
 -- name stay uncoloured until logout. It is asked again on the next rebuild,
 -- which is cheap precisely because everything else is already memoised.
+--
+-- THROUGH util.ItemInfo, NEVER BY INDEXING GetItemInfo. Two reasons, and both
+-- of them have already shipped as bugs in this addon:
+--
+--   * The return LIST is not the same on every client. Vanilla 1.12 gives 9
+--     values with the texture last; later clients insert itemLevel at 4 and
+--     give 10; a client mod can install an 18-wide tuple; and one real client
+--     returns vanilla's 9 with a NUMBER appended at 10. A fixed index is
+--     therefore wrong on some client, silently. v1.53.14 read position 10 and
+--     hit that appended number on a live client -- and because
+--     `SetTexture(<number>)` is read as `SetTexture(r, g, b)`, every icon in
+--     the shopping list painted as a SOLID RED BOX rather than erroring.
+--   * GetItemInfo will not take a bare item id. It wants a name, a link or an
+--     item STRING. util.ItemInfo builds one; passing the number straight in is
+--     what cost the disenchant tooltip line its entire existence.
+--
+-- util.ItemInfo already solves both -- it anchors on the texture path instead
+-- of counting positions, and it is tested against all five shapes the mock
+-- offers. There is no version of this worth hand-rolling beside it.
 ui.craftQuality = {}
+ui.craftIcon = {}
 
 function ui.CraftQualityOf(itemId)
     if not itemId then return nil end
     local q = ui.craftQuality[itemId]
     if q then return q end
-    if not GetItemInfo then return nil end
-    local ok, _, _, quality = pcall(GetItemInfo, itemId)
-    if ok and quality then
-        ui.craftQuality[itemId] = quality
-        return quality
+    local info = util.ItemInfo(itemId)
+    if info and info.quality then
+        ui.craftQuality[itemId] = info.quality
+        return info.quality
     end
     return nil
 end
 
--- An item's icon path, memoised exactly as ui.CraftQualityOf is.
+-- The icon path, on exactly the same terms.
 --
--- ITS OWN LOOKUP RATHER THAN A SECOND RETURN from the quality one, because the
--- two are cached independently: an id can resolve for one reader before the
--- other has asked, and a shared cache entry would have to decide what a
--- half-answer means. Both are one GetItemInfo, both are memoised, and both run
--- at REBUILD time -- see below.
+-- A SEPARATE MEMO from the quality one, because the two are cached
+-- independently: an id can resolve for one reader before the other has asked,
+-- and a shared cache entry would have to decide what a half-answer means.
 --
--- A MISS IS NOT CACHED. An item the client has not resolved yet will resolve
--- later; caching the nil would keep the row blank for the rest of the session.
-ui.craftIcon = {}
+-- ONLY A STRING COUNTS. `SetTexture` takes either a path or an r, g, b triple,
+-- so handing it a number does not fail -- it paints a solid colour. That is
+-- precisely how a wrong field became a red box instead of an error, and a type
+-- check is the cheapest thing that turns that class of mistake back into a
+-- blank icon.
 function ui.CraftIconOf(itemId)
     if not itemId then return nil end
     local t = ui.craftIcon[itemId]
     if t then return t end
-    if not GetItemInfo then return nil end
-    -- GetItemInfo gives back, in order: name, link, quality, iLevel,
-    -- reqLevel, class, subclass, maxStack, equipSlot, TEXTURE. pcall puts
-    -- `ok` in front of all ten, so the texture is the ELEVENTH value back and
-    -- there are NINE discards before it, not eight. Counting eight lands on
-    -- equipSlot, which is nil for a reagent -- so the icon silently never
-    -- paints and nothing errors. tests/units/crafttree_test.lua pins it.
-    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)
-    if ok and tex then
+    local info = util.ItemInfo(itemId)
+    local tex = info and info.texture
+    if type(tex) == "string" and tex ~= "" then
         ui.craftIcon[itemId] = tex
         return tex
     end
@@ -16241,7 +16256,12 @@ function ui.RefreshShopWindow()
                 -- READ OFF THE ROW, not looked up here. ui.StampCraftQuality
                 -- put it there at rebuild time; asking the client per row per
                 -- repaint is the shape HARD RULE 16 forbids.
-                if e.texture then
+                -- A STRING, not merely non-nil. SetTexture takes a path OR
+                -- an r, g, b triple, so a number here paints a solid colour
+                -- instead of failing -- which is how v1.53.14 drew a red box
+                -- on every row rather than throwing something anyone could
+                -- read. See ui.CraftIconOf.
+                if type(e.texture) == "string" then
                     row.icon:SetTexture(e.texture); row.icon:Show()
                 else
                     row.icon:Hide()

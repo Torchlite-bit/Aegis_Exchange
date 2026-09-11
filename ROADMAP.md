@@ -2390,6 +2390,38 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The addon already knew this, and I did not ask it — v1.53.15
+
+**A red box where every shopping-list icon should have been.** Two mistakes
+stacked, and the second is why it was silent.
+
+**One: a fixed index into GetItemInfo.** The return list differs per client --
+vanilla nine, later ten, a client mod eighteen, and one real client returns
+vanilla's nine with a NUMBER appended at position 10. v1.53.14 read position 10.
+
+**Two: SetTexture takes a path OR an r, g, b triple.** So a number is not a bad
+argument, it is a colour -- `SetTexture(4830)` clamps to solid red and draws it.
+The paint's guard was `if e.texture then`, which a number passes. Nothing
+errored, nothing logged, and the failure looked like a deliberate design
+choice.
+
+**The part worth remembering is that this was already solved.**
+`core/util.lua` has carried `util.ItemInfo` for a long time, it documents all
+five shapes, it anchors on the texture PATH rather than counting positions, and
+its comment names the two bugs that bought that knowledge -- four rounds of
+"why does /stack do nothing", and a disenchant tooltip line that never appeared
+on any real client because a bare id was passed where an item string was
+wanted. **I hand-rolled a worse version of it about ten lines away and passed
+the bare id too.** Before writing a client read, grep for the normaliser; this
+codebase has usually met the problem already.
+
+**And the test was wrong in the same direction the code was.** The v1.53.14
+stub returned a ten-value tuple I wrote from memory, so it agreed with the code
+and confirmed it. The mock offers five shapes precisely so a suite can tell an
+anchor from an index -- and the suite must LOOP over them, because a fixed
+index is right on one shape by definition. The two new sabotages are the two
+plausible fixed indices, and both are caught.
+
 ### A gradient out of a file, and a demo that shows its own feature — v1.53.14
 
 **The gradient is an IMAGE now, and the failure mode is visible.** v1.53.11's

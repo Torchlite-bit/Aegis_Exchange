@@ -18,6 +18,31 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.15]
+
+### Fixed
+- **The shopping list at a vendor drew a red box where each item's icon should
+  be.** Reported from a live client with a screenshot.
+
+  The icon was read out of `GetItemInfo` **by counting positions**, and that
+  list is not the same on every client: stock vanilla 1.12 returns nine values
+  with the texture last, a later client inserts item level at position 4 and
+  returns ten, a client mod can install an eighteen-wide one, and at least one
+  real client returns vanilla's nine with a **number** appended at position 10.
+  v1.53.14 read position 10 and landed on that number.
+
+  Then the second half: `SetTexture` accepts **either** a file path **or** an
+  `r, g, b` triple, so handing it a number does not fail — it paints a solid
+  colour. Red, as it happens. Nothing errored anywhere.
+
+  Both lookups now go through `util.ItemInfo`, which has solved this since the
+  `/stack` bug: it finds the texture by looking for the path rather than by
+  counting, and it turns an item id into the item string `GetItemInfo` actually
+  wants. The suite now runs the icon and quality lookups against **all five**
+  client shapes, because one shape cannot tell a working anchor from a lucky
+  index.
+
+
 ## [1.53.14] — restart
 
 > **restart** — this release adds an image file (`art/gradient-fill.tga`).
@@ -5472,6 +5497,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
