@@ -122,6 +122,7 @@ for _, sig in ipairs({
     "function ui.SeriesAt(",
     "function ui.PlotColumns(",
     "function ui.FillColumns(",
+    "function ui.FillTexCoords(",
     "function ui.AxisMarks(",
     "function ui.PlotColumnCount(",
     "function ui.HoverBucket(",
@@ -490,6 +491,128 @@ do
     okIn, why = inside(flat, W_, H_)
     H.check("a flat fill on no scale is still inside the plot", okIn, why)
 end
+
+-- ---------------------------------------------------------------------------
+H.section("which slice of the gradient a fill column shows")
+-- ---------------------------------------------------------------------------
+
+-- THE FADE BELONGS TO THE PLOT, NOT TO THE COLUMN. Hand every column the whole
+-- image and a five-pixel column runs the entire ramp in five pixels while a
+-- hundred-and-fifty-pixel one spreads it across all of them -- the wash then
+-- traces the line instead of sitting behind it. Each column takes exactly the
+-- part of the image its own position earns, and the slices stack into one
+-- continuous gradient. That is one piece of arithmetic, and it is pure.
+--
+-- The image is one plot tall with its OPAQUE end at v=0, so plot height maps
+-- to v backwards: the top of the plot is v=0 and the baseline is v=1.
+
+local function vv(a, b) return string.format("%.4f/%.4f", a, b) end
+
+do
+    local t, b = ui.FillTexCoords(0, 100, 100)
+    H.eq("a column spanning the whole plot takes the whole image", vv(t, b),
+         vv(0, 1))
+
+    t, b = ui.FillTexCoords(0, 50, 100)
+    H.eq("the bottom half takes the BOTTOM half of the image", vv(t, b),
+         vv(0.5, 1))
+
+    t, b = ui.FillTexCoords(50, 100, 100)
+    H.eq("...and the top half the top half", vv(t, b), vv(0, 0.5))
+
+    t, b = ui.FillTexCoords(25, 75, 100)
+    H.eq("a middle band takes the middle", vv(t, b), vv(0.25, 0.75))
+end
+
+-- TWO ADJACENT COLUMNS MUST MEET EXACTLY. A seam is a visible line across the
+-- wash, and the one thing this function exists to avoid is the fade breaking
+-- up into per-column bands.
+do
+    -- v runs BACKWARDS against plot height, so the LOWER band's top edge is
+    -- the one that meets the UPPER band's bottom edge.
+    local lowTop = ui.FillTexCoords(0, 40, 100)
+    local _, highBot = ui.FillTexCoords(40, 90, 100)
+    H.eq("the slices of two stacked bands touch", vv(lowTop, 0),
+         vv(highBot, 0))
+end
+
+-- A column whose rectangle was handed over upside down is still a band, not a
+-- negative one -- FillColumns hands over y and y+h, but a caller that swapped
+-- them would otherwise get top > bottom and the client would draw it mirrored.
+do
+    local a, b = ui.FillTexCoords(75, 25, 100)
+    H.eq("an inverted span is normalised", vv(a, b),
+         vv(ui.FillTexCoords(25, 75, 100)))
+end
+
+-- CLAMPED AT BOTH ENDS. A span that runs past the plot -- which the rasteriser
+-- can produce by a rounding pixel at the extremes -- must clip to the image
+-- rather than sample outside it, because 1.12 WRAPS out-of-range texture
+-- coordinates and a wrapped slice shows the OPPOSITE end of the ramp.
+do
+    local t, b = ui.FillTexCoords(-20, 130, 100)
+    H.check("an overrunning span clamps into the image",
+            t >= 0 and b <= 1, vv(t, b))
+    t, b = ui.FillTexCoords(120, 140, 100)
+    H.check("...and a span entirely above the plot stays in range",
+            t >= 0 and b <= 1 and b > t, vv(t, b))
+    t, b = ui.FillTexCoords(-40, -10, 100)
+    H.check("...as does one entirely below it",
+            t >= 0 and b <= 1 and b > t, vv(t, b))
+end
+
+-- A ZERO-TALL SLICE IS NOT NOTHING. A flat column asks for top == bottom, and
+-- some clients render a zero-height texture coordinate span as no texture at
+-- all rather than as a hairline -- so the band is widened to something
+-- vanishingly thin instead of left empty.
+do
+    local t, b = ui.FillTexCoords(50, 50, 100)
+    H.check("a zero-height column still gets a slice", b > t, vv(t, b))
+    H.check("...and that slice is inside the image", t >= 0 and b <= 1,
+            vv(t, b))
+    -- At the very top of the image the widening has nowhere to grow DOWN into
+    -- without leaving the image, so it grows upward instead.
+    t, b = ui.FillTexCoords(100, 100, 100)
+    H.check("a zero-height column at the top edge stays in range",
+            b > t and t >= 0 and b <= 1, vv(t, b))
+end
+
+-- NO PLOT, NO ARITHMETIC. A height of zero would be a divide by zero, and on
+-- 1.12 that is nan -- which passes every comparison, so the clamps above would
+-- let it through and the client would be handed nan texture coordinates.
+do
+    local t, b = ui.FillTexCoords(0, 10, 0)
+    H.check("a zero-height plot returns the whole image, not nan",
+            t == t and b == b, vv(t, b))
+    H.eq("...which is the full range", vv(t, b), vv(0, 1))
+    t, b = ui.FillTexCoords(0, 10, nil)
+    H.check("...and so does a nil one", t == t and b == b and t == 0 and b == 1,
+            vv(t, b))
+    t, b = ui.FillTexCoords(nil, nil, 100)
+    H.check("nil bounds are not a crash", t == t and b == b, vv(t, b))
+end
+
+-- THE FLIP IS THE ESCAPE HATCH FOR THE ART. The ramp's direction lives in the
+-- file, and the one thing a person regenerating that file can get backwards is
+-- which end is opaque. HISTL.fill_flip turns the mapping over without anybody
+-- editing arithmetic, so a wrong-way-round asset is a one-line setting.
+do
+    local t, b = ui.FillTexCoords(0, 50, 100, true)
+    H.eq("flipped, the bottom half reads the image's top half", vv(t, b),
+         vv(0, 0.5))
+    local ft, fb = ui.FillTexCoords(25, 75, 100, true)
+    local nt, nb = ui.FillTexCoords(25, 75, 100, false)
+    H.eq("a flipped band mirrors the unflipped one", vv(ft, fb),
+         vv(1 - nb, 1 - nt))
+    H.check("...and stays inside the image", ft >= 0 and fb <= 1, vv(ft, fb))
+end
+
+-- THE SETTING THE PAINTER ACTUALLY PASSES has to exist, or `flip` is nil on
+-- every call and the test above is checking a path nothing reaches.
+H.check("HISTL carries a flip flag", HISTL.fill_flip ~= nil,
+        "HISTL.fill_flip is missing")
+H.check("...and the art path it slices", type(HISTL.fill_art) == "string",
+        tostring(HISTL.fill_art))
 
 -- ---------------------------------------------------------------------------
 H.section("the y-axis marks")

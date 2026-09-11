@@ -18,6 +18,59 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.14] — restart
+
+> **restart** — this release adds an image file (`art/gradient-fill.tga`).
+> WoW 1.12 builds its file list at startup, so a `/reload` may not find a
+> texture that was not there when the client launched. If the fade under the
+> line does not appear, restart the client; `/aex diag` says which fill the
+> chart actually drew.
+
+### Added
+- **A real gradient under the chart line.** The wash beneath the line now
+  fades from solid at the line to nothing at the baseline, instead of being a
+  flat block of colour.
+
+  The fade belongs to the **plot**, not to each column: a five-pixel column and
+  a hundred-and-fifty-pixel one each take the slice of the image their own
+  position earns, so the slices stack into one continuous gradient rather than
+  each running the whole ramp and tracing the line.
+
+  *(v1.53.11 tried this with `SetGradientAlpha` and it came out a solid block —
+  that call modulates an **image**, and a solid-colour texture has none, so it
+  succeeded and did nothing. This one loads an actual image file and uses what
+  `SetTexture` **returns** to decide whether it worked, so the flat wash comes
+  back as a visible fallback rather than a silent one.)*
+
+- **Item icons on the shopping list at a vendor.** Each line now shows the
+  item's icon beside its name, so the list reads at a glance rather than by
+  reading every row.
+
+- **Demo mode has invented prices**, so every money figure on the Crafting tab
+  and the shopping list shows something instead of a dash. Same discipline as
+  the rest of the demo — consulted *instead of* your price data, never written
+  to it, gone on `/reload`.
+
+### Changed
+- **The demo recipes are epic and rare now**, not four shades of white. The
+  old set was all common-quality, so the quality colouring on the shopping
+  panel had nothing to colour — the feature was invisible in the demo built to
+  show it. The set is now Sulfuron Hammer and Black Dragonscale Boots (epic),
+  Arcanite Reaper (rare) and Arcanite Bar (uncommon), with an epic reagent,
+  two rare ones, and the commons for contrast. One recipe is still a reagent
+  of two others, so the sub-reagent expansion still runs, and one reagent is
+  still vendor-sold so the list still has to choose a source.
+
+### Fixed
+- **The gold readout when you hover the chart no longer clips.** It sat above
+  the plot, in the same band as the character picker and the topmost axis
+  label; it is now inside the drawing area.
+
+- **The vendor shopping list never showed an item's icon** because the texture
+  was read from the wrong position in the client's reply — `equipSlot`, which
+  is empty for every reagent. Nothing errored; the icons were simply blank.
+
+
 ## [1.53.13]
 
 ### Added
@@ -5419,6 +5472,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

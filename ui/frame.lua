@@ -9043,22 +9043,60 @@ function ui.CraftQualityOf(itemId)
     return nil
 end
 
--- Stamp `quality` on everything the shopping tree is about to draw.
+-- An item's icon path, memoised exactly as ui.CraftQualityOf is.
+--
+-- ITS OWN LOOKUP RATHER THAN A SECOND RETURN from the quality one, because the
+-- two are cached independently: an id can resolve for one reader before the
+-- other has asked, and a shared cache entry would have to decide what a
+-- half-answer means. Both are one GetItemInfo, both are memoised, and both run
+-- at REBUILD time -- see below.
+--
+-- A MISS IS NOT CACHED. An item the client has not resolved yet will resolve
+-- later; caching the nil would keep the row blank for the rest of the session.
+ui.craftIcon = {}
+function ui.CraftIconOf(itemId)
+    if not itemId then return nil end
+    local t = ui.craftIcon[itemId]
+    if t then return t end
+    if not GetItemInfo then return nil end
+    -- GetItemInfo gives back, in order: name, link, quality, iLevel,
+    -- reqLevel, class, subclass, maxStack, equipSlot, TEXTURE. pcall puts
+    -- `ok` in front of all ten, so the texture is the ELEVENTH value back and
+    -- there are NINE discards before it, not eight. Counting eight lands on
+    -- equipSlot, which is nil for a reagent -- so the icon silently never
+    -- paints and nothing errors. tests/units/crafttree_test.lua pins it.
+    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)
+    if ok and tex then
+        ui.craftIcon[itemId] = tex
+        return tex
+    end
+    return nil
+end
+
+-- Stamp `quality` and `texture` on everything the shopping tree is about to
+-- draw.
 --
 -- ONE PASS, at rebuild time, over the projects and the shopping rows -- which
 -- is bounded by the size of the list rather than by how often the list is
 -- repainted. Sub-rows read the reagent's own row, so they need nothing here.
+--
+-- THE TEXTURE TRAVELS WITH THE QUALITY because they cost the same thing: a
+-- GetItemInfo, which is a per-item CLIENT QUERY. Doing either in a paint would
+-- be a query per row per repaint, and both of the lists that read these rows
+-- repaint from a BAG_UPDATE flag that storms. HARD RULE 16.
 function ui.StampCraftQuality(projects, rows)
     local i = 1
     while i <= table.getn(projects or {}) do
         local p = projects[i]
         p.quality = ui.CraftQualityOf(p.itemId)
+        p.texture = ui.CraftIconOf(p.itemId)
         i = i + 1
     end
     local k = 1
     while k <= table.getn(rows or {}) do
         local r = rows[k]
         r.quality = ui.CraftQualityOf(r.itemId)
+        r.texture = ui.CraftIconOf(r.itemId)
         k = k + 1
     end
 end
@@ -9227,17 +9265,14 @@ function ui.FlattenCraft()
         haveOf  = function(id) return ui.CraftHaveOf(id, live) end,
         expand  = true,
         recipeFor = function(id) return byOutput[id] end,
-        vendorOf = function(id)
-            return A.db and A.db.GetVendorBuy and A.db.GetVendorBuy(id) or nil
-        end,
-        marketOf = function(id)
-            if not A.db then return nil end
-            local m = A.db.MinBuyout and A.db.MinBuyout(id)
-            if m and m > 0 then return m end
-            m = A.db.MarketValue and A.db.MarketValue(id)
-            if m and m > 0 then return m end
-            return nil
-        end,
+        -- BOTH PRICES THROUGH A.craft, not read out of the DB here. The
+        -- tab's own totals go through craft.CostOf, which asks
+        -- craft.MarketUnit -- so a second copy of "min buyout, else market
+        -- value" in this closure is two answers to one question, and the
+        -- panel's total stops agreeing with the lines above it the moment
+        -- they drift. It is also the one seam demo mode substitutes at.
+        vendorOf = function(id) return A.craft.VendorUnit(id) end,
+        marketOf = function(id) return A.craft.MarketUnit(id) end,
     })
     ui.craftFlat = rows
     ui.craftShort = short
@@ -11625,9 +11660,27 @@ local HISTL = {
     -- placeable in time at a glance; without them the x labels are captions
     -- for a band whose edges you have to estimate.
     x_lines    = 5,
-    -- The fill under the line. FLAT, not a gradient -- see ui.PaintFill for
-    -- the attempt and why it could not work on this client.
+    -- THE FILL IS A REAL GRADIENT NOW, and it takes a texture FILE to be one.
+    --
+    -- art/gradient-fill.tga is white, 8 x 256, opaque at the top row and
+    -- transparent at the bottom. Each fill column shows the SLICE of that
+    -- image matching its own height in the plot, so the fade is the plot's
+    -- and not each column's -- see ui.FillTexCoords. SetVertexColor tints the
+    -- white ramp to whatever the series colour is.
+    --
+    -- This is what v1.53.11 could not do with SetGradientAlpha: that call
+    -- modulates an IMAGE, and a texture made by SetTexture(r, g, b) has none.
+    fill_art   = "Interface\\AddOns\\Aegis_Exchange\\art\\gradient-fill",
+    -- Overall strength, on top of the ramp in the file.
+    fill_alpha = 0.55,
+    -- ...and the flat wash used if the client will not load the file.
     fill_flat  = 0.18,
+    -- WHICH END OF THE IMAGE IS OPAQUE. The TGA is written top-down (its
+    -- header carries the 0x20 origin flag), so v=0 is the opaque end. If a
+    -- client reads it bottom-up the gradient comes out inverted, and flipping
+    -- this is the whole fix -- which is why it is a constant and not two
+    -- literals buried in the arithmetic.
+    fill_flip  = false,
     -- The chart's own title bar: the heading, and the period buttons beside
     -- it.
     per_w      = 32,
@@ -12033,6 +12086,40 @@ function ui.XAxisMarks(from, to, count)
     return out
 end
 
+-- Which slice of the gradient image a fill column covers.
+--
+-- Returns top, bottom as texture v coordinates. The image is one plot tall:
+-- v=0 is its opaque end and v=1 its transparent end, so a column spanning plot
+-- heights `y0..y1` (0 at the baseline, `h` at the top) shows v from
+-- `1 - y1/h` down to `1 - y0/h`.
+--
+-- THIS IS WHY THE FADE IS THE PLOT'S AND NOT THE COLUMN'S. Give every column
+-- the whole image and a five-pixel column runs the entire ramp in five pixels
+-- while a hundred-and-fifty-pixel one spreads it over all of them -- the wash
+-- then traces the line instead of sitting behind it. Slices stack into one
+-- continuous gradient because each takes exactly the part of the image its own
+-- position earns.
+--
+-- Pure, so the one piece of arithmetic between a rectangle and a texture
+-- coordinate can be checked without a client.
+function ui.FillTexCoords(y0, y1, h, flip)
+    if not h or h <= 0 then return 0, 1 end
+    local lo, hi = y0 or 0, y1 or 0
+    if lo > hi then lo, hi = hi, lo end
+    local top = 1 - (hi / h)
+    local bot = 1 - (lo / h)
+    if top < 0 then top = 0 end
+    if bot > 1 then bot = 1 end
+    if top > 1 then top = 1 end
+    if bot < 0 then bot = 0 end
+    -- A column with no height at all would ask for a zero-tall slice, which
+    -- some clients render as nothing rather than as a hairline.
+    if bot <= top then bot = top + 0.001 end
+    if bot > 1 then top, bot = 1 - 0.001, 1 end
+    if flip then return 1 - bot, 1 - top end
+    return top, bot
+end
+
 -- How many buckets a plot `w` pixels wide should be divided into.
 --
 -- DERIVED FROM THE PLOT, not fixed per period. A fixed thirty across a 300px
@@ -12387,8 +12474,15 @@ function ui.BuildHistoryGraph(panel)
     ui.histCross:SetAlpha(0.55)
     ui.histCross:Hide()
 
-    ui.histHover = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histHover:SetPoint("TOPLEFT", plot, "TOPLEFT", 2, 12)
+    -- INSIDE THE PLOT, not above it.
+    --
+    -- It was twelve pixels ABOVE the plot's top edge, which is the band the
+    -- character picker sits in -- and it also ran over the topmost y-axis
+    -- label. A readout anchored outside the drawing area has two neighbours to
+    -- clear and clears neither; anchored inside it has the whole plot to
+    -- itself and cannot collide with anything the chart does not draw.
+    ui.histHover = plot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histHover:SetPoint("TOPLEFT", plot, "TOPLEFT", 4, -4)
     ui.histHover:SetJustifyH("LEFT")
     ui.histHover:Hide()
 
@@ -12584,21 +12678,32 @@ function ui.PaintFill(colour, values, lo, hi, w, h)
             t:SetWidth(r.w); t:SetHeight(r.h)
             t:ClearAllPoints()
             t:SetPoint("BOTTOMLEFT", ui.histPlot, "BOTTOMLEFT", r.x, r.y)
-            -- A FLAT WASH. NOT A GRADIENT, and the reason is worth keeping.
+            -- A REAL GRADIENT, out of a texture FILE.
             --
-            -- v1.53.11 tried SetGradientAlpha here, guarded by a pcall with
-            -- this flat fill as the fallback. The call SUCCEEDED and did
-            -- nothing: on 1.12 a texture created by SetTexture(r, g, b) is a
-            -- solid colour with no image behind it, and the gradient has
-            -- nothing to modulate. So the pcall returned true, the flat alpha
-            -- was taken back off on the strength of that, and the fill came
-            -- out a solid block of green.
+            -- v1.53.11 tried SetGradientAlpha on a solid-colour texture. The
+            -- call SUCCEEDED and did nothing -- that call modulates an IMAGE,
+            -- and SetTexture(r, g, b) makes one that has none. The pcall
+            -- guarding it reported success, the flat alpha came back off on
+            -- the strength of that, and the fill went opaque.
             --
-            -- The lesson is the one that mattered: A PCALL THAT SUCCEEDS IS
-            -- NOT A CALL THAT WORKED. Guarding an unverified API tells you it
-            -- did not throw, which is a different question from whether it did
-            -- the thing -- and the fallback was wired to the wrong answer.
-            t:SetAlpha(HISTL.fill_flat)
+            -- THE DIFFERENCE HERE IS THAT FAILURE IS VISIBLE TO US. SetTexture
+            -- with a path RETURNS whether the file loaded, so the fallback is
+            -- chosen on an answer rather than on the absence of an error.
+            local loaded = t:SetTexture(HISTL.fill_art)
+            if loaded then
+                local vt, vb = ui.FillTexCoords(r.y, r.y + r.h, h,
+                                                HISTL.fill_flip)
+                t:SetTexCoord(0, 1, vt, vb)
+                t:SetVertexColor(colour[1], colour[2], colour[3])
+                t:SetAlpha(HISTL.fill_alpha)
+            else
+                -- The flat wash, as before. Recorded so /aex diag can say so
+                -- rather than leaving a washed-out chart unexplained.
+                t:SetTexture(colour[1], colour[2], colour[3])
+                t:SetTexCoord(0, 1, 0, 1)
+                t:SetAlpha(HISTL.fill_flat)
+            end
+            ui.histFillArt = loaded and true or false
             t:Show()
         else
             t:Hide()
@@ -15984,8 +16089,18 @@ function ui.BuildShopWindow()
         row:SetPoint("TOPRIGHT", f, "TOPRIGHT",
                      -SHOPL.pad, -(SHOPL.top + (i - 1) * SHOPL.row_h))
         ui.AddRowChrome(row, i)
+        -- THE ITEM'S OWN ICON, which every other table in the window has and
+        -- this one did not. The name was already quality-coloured -- the
+        -- colour is stamped onto the shopping rows by ui.FlattenCraft and read
+        -- here -- but a white name on a common item is indistinguishable from
+        -- no colouring at all, and an icon is the signal you can read from
+        -- across the screen.
+        local icon = row:CreateTexture(nil, "ARTWORK")
+        icon:SetWidth(14); icon:SetHeight(14)
+        icon:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.icon = icon
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.name:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.name:SetPoint("LEFT", row, "LEFT", 20, 0)
         row.name:SetJustifyH("LEFT")
         row.need = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.need:SetPoint("RIGHT", row, "RIGHT", -2, 0)
@@ -16122,7 +16237,17 @@ function ui.RefreshShopWindow()
         local e = rows[i]
         if e and i <= SHOPL.rows_max then
             row.entry = e
-            ui.FitText(row.name, e.name or "?", SHOPL.w - 96)
+            if row.icon then
+                -- READ OFF THE ROW, not looked up here. ui.StampCraftQuality
+                -- put it there at rebuild time; asking the client per row per
+                -- repaint is the shape HARD RULE 16 forbids.
+                if e.texture then
+                    row.icon:SetTexture(e.texture); row.icon:Show()
+                else
+                    row.icon:Hide()
+                end
+            end
+            ui.FitText(row.name, e.name or "?", SHOPL.w - 114)
             row.name:SetTextColor(ui.QualityColor(e.quality))
             row.need:SetText(e.have .. " / " .. e.need)
             -- The colour is the SOURCE, so a glance down the list tells you
@@ -16214,6 +16339,18 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  tooltip refusals=" .. tostring(A.tooltip.failures or 0)
                 .. (lf and ("  last=" .. tostring(lf.method) .. ": "
                     .. tostring(lf.err)) or ""))
+        end
+        -- WHICH FILL PATH TOOK. SetTexture with a path returns whether the
+        -- file loaded, so unlike the SetGradientAlpha attempt this is an
+        -- answer rather than the absence of an error -- and it is worth
+        -- printing, because a washed-out chart and a gradient that never
+        -- loaded look the same.
+        if ui.histFillArt ~= nil then
+            ChatMsg("  chart fill="
+                .. (ui.histFillArt and "gradient art"
+                    or "FLAT (gradient-fill.tga did not load)"))
+        else
+            ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
         ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
         ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
@@ -16362,7 +16499,10 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  Nothing is saved and nothing real is touched. /aex demo"
                 .. " again, or a /reload, turns it off.")
             ChatMsg("  The Crafting tab and the shopping list get four"
-                .. " made-up recipes too, with some reagents part-gathered.")
+                .. " made-up recipes too \226\128\148 epic, rare and plain,"
+                .. " so the quality colours have something to show \226\128\148"
+                .. " with some reagents part-gathered and invented prices"
+                .. " on every line.")
             ChatMsg("  The IN / OUT / NET row still reads your REAL ledger;"
                 .. " only the gold line and the recipes are invented.")
         else

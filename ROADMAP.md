@@ -2390,6 +2390,77 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### A gradient out of a file, and a demo that shows its own feature — v1.53.14
+
+**The gradient is an IMAGE now, and the failure mode is visible.** v1.53.11's
+`SetGradientAlpha` succeeded and did nothing because there was no image behind
+the solid colour to modulate; v1.53.12 removed it. This one ships
+`art/gradient-fill.tga` -- 8x256, uncompressed 32-bit BGRA, top-origin, white
+with an alpha ramp -- and chooses the fallback on `SetTexture`'s **return
+value**, which says whether the file loaded. **An answer, rather than the
+absence of an error.** `/aex diag` reports which one was drawn, so a player
+seeing a flat wash can say so in one line instead of describing it.
+
+**The fade belongs to the PLOT, not to the column.** Hand every column the
+whole image and a five-pixel column runs the entire ramp in five pixels while
+a hundred-and-fifty-pixel one spreads it over all of them -- the wash then
+traces the line instead of sitting behind it. `ui.FillTexCoords` gives each
+column exactly the slice its own position earns, so the slices stack into one
+continuous gradient. It is pure arithmetic between a rectangle and a texture
+coordinate, which is the whole reason it is a separate function: eight
+sabotages point at it and a suite runs it without a client.
+
+**A demo that could not show the feature it was built for.** The four demo
+recipes were linen and mithril -- every item in the set was common quality, so
+the quality colouring the shopping panel had just gained had nothing to colour.
+A feature demonstrated by a demo in which it is invisible. The set is epic and
+rare now, and the suite pins the spread rather than the items: at least one
+epic and one rare among the products AND among the reagents, with every id's
+quality accounted for.
+
+**Every id was checked against a vanilla item dump rather than remembered, and
+that was not a formality.** Black Lotus is Uncommon. Arcanite Reaper is Rare,
+not Epic. The first draft of the set was picked from memory and would have been
+wrong about both -- which is a demo that ships the wrong colours to prove that
+the colours work. The expectation table lives in the SUITE, not in the addon:
+the addon has no business carrying a copy of a fact `GetItemInfo` already
+holds, and the test's copy is the record of what was verified.
+
+**A missing price is a dash, and a demo of dashes shows nothing.** Demo mode
+now supplies invented unit prices, and both readers go through one function.
+They did not before: the tab's totals asked `db.BestUnit` while the shopping
+list's injected `marketOf` had its own copy of "min buyout, else market value"
+-- two answers to one question, in the one place where the total has to agree
+with the lines above it.
+
+**Three sabotages that failed, and each one was a real gap.**
+
+**A sabotage a redundancy defeated.** "No epic recipe" removed one of the two
+epic products and the other went on proving the property -- the same shape as
+v1.53.13's `DEMO_HAVE` miss. Two epics is good demo design, so the sabotage
+moved to the RARE product, of which there is exactly one. **When a property is
+satisfied twice on purpose, the sabotage has to attack the one that is not.**
+
+**A check that passed for the wrong reason.** "Zero is not a price" planted its
+zero with `db.RecordAuction`, which refuses `unitBuyout <= 0` at its own door
+-- so nothing was stored, the answer was nil because the item had never been
+seen, and the guard the check was named for was never reached. The zero goes
+straight into the store now.
+
+**A fallback that was dead code as written.** `craft.MarketUnit` falls back
+from `MinBuyout` to `MarketValue`, and no test reached it -- because it cannot
+be reached the obvious way: both read the same `daily` table, so MinBuyout
+answers whenever MarketValue does. The case that **does** happen is the newest
+day recorded as a bogus zero over a run of real older days. Asking why a
+sabotage could not be caught found the answer.
+
+**And the icon read the wrong return value.** `pcall` puts `ok` in front of
+`GetItemInfo`'s ten, so the texture is the eleventh value back; the first draft
+counted eight discards and landed on `equipSlot`, which is nil for every
+reagent. Nothing errored -- a nil texture path is a legal thing to hand
+`SetTexture` -- and every icon was simply blank. The test that caught it was
+written before the code was run.
+
 ### The cart, and demo recipes — v1.53.13
 
 **The cart chains off the sell button rather than the frame.** v1.51.0 learned

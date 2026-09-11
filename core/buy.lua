@@ -2277,26 +2277,47 @@ end
 -- icons it has cached -- a demo drawn from made-up ids is a demo of the "item
 -- not cached" path, which is not the path anyone wants to look at.
 --
--- CHOSEN TO EXERCISE THE LIST, not just to fill it. Bolt of Linen Cloth is
--- both a project AND a reagent of the Linen Bag above it, which is the
--- sub-reagent expansion; Coarse Thread and Empty Vial are vendor-sold, so the
--- shopping list has to pick a source for each line; and the quantities differ
--- enough that the shortfall arithmetic has something to do.
+-- AND A REAL SPREAD OF QUALITIES, which is the point of this particular set.
+-- The first draft was four linen-and-mithril recipes and every single item in
+-- it was white, so the quality colouring the shopping panel had just gained
+-- had nothing to colour -- a feature demonstrated by a demo in which it is
+-- invisible. This set carries two EPIC recipes (Sulfuron Hammer, Black
+-- Dragonscale Boots), one RARE (Arcanite Reaper) and one UNCOMMON (Arcanite
+-- Bar), and among the reagents one EPIC (Sulfuron Ingot), two RARE (Lava
+-- Core, Fiery Core), four UNCOMMON and the rest common. Every id and every
+-- quality was checked against a vanilla item dump rather than remembered --
+-- several that FEEL rare are white on 1.12, Black Lotus among them.
+--
+-- CHOSEN TO EXERCISE THE LIST, not just to fill it. Arcanite Bar is both a
+-- project AND a reagent of two others, which is the sub-reagent expansion and
+-- the cross-recipe aggregation in one item; Rune Thread is vendor-sold, so
+-- the shopping list has to pick a source for that line; and the quantities
+-- run from 1 to 50, which is the range the money and count columns have to
+-- lay out without clipping.
 craft.DEMO_PROJECTS = {
-    { name = "Linen Bag", itemId = 4238, want = 4, reagents = {
-        { name = "Bolt of Linen Cloth", itemId = 2996, count = 3 },
-        { name = "Coarse Thread",       itemId = 2320, count = 1 },
+    { name = "Sulfuron Hammer", itemId = 17193, want = 1, reagents = {
+        { name = "Sulfuron Ingot",        itemId = 17203, count = 8 },
+        { name = "Lava Core",             itemId = 17011, count = 10 },
+        { name = "Fiery Core",            itemId = 17010, count = 10 },
+        { name = "Arcanite Bar",          itemId = 12360, count = 50 },
+        { name = "Essence of Fire",       itemId = 7078,  count = 25 },
+        { name = "Blood of the Mountain", itemId = 11382, count = 10 },
+        { name = "Dark Iron Bar",         itemId = 11371, count = 20 },
     } },
-    { name = "Bolt of Linen Cloth", itemId = 2996, want = 2, reagents = {
-        { name = "Linen Cloth", itemId = 2589, count = 2 },
+    { name = "Arcanite Reaper", itemId = 12784, want = 1, reagents = {
+        { name = "Arcanite Bar",        itemId = 12360, count = 20 },
+        { name = "Enchanted Leather",   itemId = 12810, count = 6 },
+        { name = "Dense Grinding Stone", itemId = 12644, count = 2 },
     } },
-    { name = "Elixir of Fortitude", itemId = 3825, want = 5, reagents = {
-        { name = "Wild Steelbloom", itemId = 3355, count = 1 },
-        { name = "Stranglekelp",    itemId = 3820, count = 1 },
-        { name = "Empty Vial",      itemId = 3371, count = 1 },
+    { name = "Black Dragonscale Boots", itemId = 16984, want = 1, reagents = {
+        { name = "Black Dragonscale", itemId = 15416, count = 18 },
+        { name = "Fiery Core",        itemId = 17010, count = 3 },
+        { name = "Lava Core",         itemId = 17011, count = 3 },
+        { name = "Rune Thread",       itemId = 14341, count = 2 },
     } },
-    { name = "Mithril Casing", itemId = 10561, want = 3, reagents = {
-        { name = "Mithril Bar", itemId = 3860, count = 3 },
+    { name = "Arcanite Bar", itemId = 12360, want = 2, reagents = {
+        { name = "Thorium Bar",    itemId = 12359, count = 1 },
+        { name = "Arcane Crystal", itemId = 12363, count = 1 },
     } },
 }
 
@@ -2304,14 +2325,98 @@ craft.DEMO_PROJECTS = {
 --
 -- SOME OF EACH, NOT ALL AND NOT NONE. A list where every line reads 0 / 12 is
 -- a list with no progress on it, and the "12 / 42" a reagent row exists to
--- show is the thing worth looking at.
+-- show is the thing worth looking at. Two reagents are deliberately absent so
+-- there is always something left to buy, and two are fully covered so the
+-- "done" state appears as well.
 craft.DEMO_HAVE = {
-    [2589] = 14,     -- Linen Cloth
-    [2996] = 5,      -- Bolt of Linen Cloth
-    [2320] = 2,      -- Coarse Thread
-    [3355] = 3,      -- Wild Steelbloom
-    [3860] = 4,      -- Mithril Bar
+    [17203] = 2,     -- Sulfuron Ingot        (epic, part-gathered)
+    [17011] = 5,     -- Lava Core             (rare)
+    [17010] = 4,     -- Fiery Core            (rare)
+    [12360] = 18,    -- Arcanite Bar
+    [7078]  = 11,    -- Essence of Fire
+    [11371] = 20,    -- Dark Iron Bar         (covered)
+    [12359] = 40,    -- Thorium Bar
+    [12363] = 6,     -- Arcane Crystal
+    [12810] = 6,     -- Enchanted Leather     (covered)
+    [12644] = 1,     -- Dense Grinding Stone
+    [15416] = 18,    -- Black Dragonscale     (covered)
 }
+
+-- What demo mode pretends the auction house is asking, per unit, in copper.
+--
+-- INVENTED BUT PLAUSIBLE, and they have to exist at all: without them every
+-- money figure on the tab reads as a dash, and a demo whose entire purpose is
+-- to let a layout be judged cannot show the money columns empty. These sit
+-- beside the recipes rather than in the price DB for the same reason
+-- db.DemoSeries substitutes a reader -- there is no path by which an invented
+-- price reaches a player's SavedVariables.
+craft.DEMO_PRICE = {
+    [17193] = 9000000,   -- Sulfuron Hammer         900g
+    [12784] = 6500000,   -- Arcanite Reaper         650g
+    [16984] = 2800000,   -- Black Dragonscale Boots 280g
+    [17203] = 4500000,   -- Sulfuron Ingot          450g
+    [17011] = 180000,    -- Lava Core                18g
+    [17010] = 165000,    -- Fiery Core               16g 50s
+    [12360] = 280000,    -- Arcanite Bar             28g
+    [12363] = 240000,    -- Arcane Crystal           24g
+    [11382] = 95000,     -- Blood of the Mountain     9g 50s
+    [15416] = 45000,     -- Black Dragonscale         4g 50s
+    [7078]  = 22000,     -- Essence of Fire           2g 20s
+    [12359] = 21000,     -- Thorium Bar               2g 10s
+    [12810] = 18000,     -- Enchanted Leather         1g 80s
+    [11371] = 12000,     -- Dark Iron Bar             1g 20s
+    [12644] = 9000,      -- Dense Grinding Stone         90s
+    [14341] = 5200,      -- Rune Thread                  52s
+}
+
+-- ...and what a merchant charges, for the one reagent that has a merchant.
+--
+-- ONE ENTRY IS ENOUGH AND ONE ENTRY IS NECESSARY. The shopping list picks the
+-- cheaper of vendor and auction house per line (craft.CheaperSource), and a
+-- demo with no vendor price at all never reaches that branch -- every line
+-- would read "ah" and the source column would be a column of one value. Rune
+-- Thread is genuinely vendor-sold on 1.12 and its demo AH price above is set
+-- deliberately HIGHER than this, so the vendor is the answer.
+craft.DEMO_VENDOR = {
+    [14341] = 4830,      -- Rune Thread            48s 30c
+}
+
+-- The unit price the crafting tab and the shopping list should use.
+--
+-- ONE FUNCTION, because the tab costs reagents through craft.CostOf and the
+-- shopping list prices its own rows through an injected `marketOf`, and the
+-- two reading different sources is exactly how the panel's total stops
+-- agreeing with the lines above it.
+--
+-- Zero is NOT a price. An item recorded at nothing is an item we have not
+-- really seen, and letting a zero through makes a cost total that reads
+-- complete when it is not -- which is the direction that loses money.
+function craft.MarketUnit(itemId)
+    if not itemId or not A.db then return nil end
+    if A.db.demo then
+        local d = craft.DEMO_PRICE[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end
+    local m = A.db.MinBuyout and A.db.MinBuyout(itemId)
+    if m and m > 0 then return m end
+    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m and m > 0 then return m end
+    return nil
+end
+
+-- ...and what a merchant charges for it, on the same terms.
+function craft.VendorUnit(itemId)
+    if not itemId or not A.db then return nil end
+    if A.db.demo then
+        local d = craft.DEMO_VENDOR[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end
+    local v = A.db.GetVendorBuy and A.db.GetVendorBuy(itemId)
+    if v and v > 0 then return v end
+    return nil
+end
 
 function craft.Projects()
     if A.db and A.db.demo then return craft.DEMO_PROJECTS end
@@ -2398,7 +2503,7 @@ function craft.CostOf(project)
     while i <= table.getn(project.reagents) do
         local r = project.reagents[i]
         local id = ResolveId(r.itemId, r.name)
-        local unit = id and A.db.BestUnit(id)
+        local unit = craft.MarketUnit(id)
         if unit then
             total = total + unit * (r.count or 1)
         else
@@ -2447,7 +2552,7 @@ end
 function craft.ValueOf(project)
     if not project then return nil, false end
     local id = ResolveId(project.itemId, project.name)
-    local unit = id and A.db.BestUnit(id)
+    local unit = craft.MarketUnit(id)
     if not unit then return nil, false end
     return unit * (project.made or 1), true
 end

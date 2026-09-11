@@ -701,6 +701,230 @@ do
         H.check("...but not all of them, so there is something to buy",
                 not allCovered)
     end
+
+    -- ---- the spread of qualities ----------------------------------------
+
+    -- THE WHOLE REASON THIS SET REPLACED THE LAST ONE. The first demo was
+    -- four linen-and-mithril recipes and every item in it was white, so the
+    -- quality colouring the shopping panel had just gained had nothing to
+    -- colour -- a feature demonstrated by a demo in which it is invisible.
+    --
+    -- THE EXPECTED QUALITIES LIVE HERE, NOT IN THE ADDON, because the addon
+    -- has no business carrying a copy of a fact the client already holds --
+    -- ui.CraftQualityOf asks GetItemInfo and that answer is the one a player
+    -- sees. This table is the VERIFICATION: every id below was checked
+    -- against a vanilla item dump rather than remembered, which matters more
+    -- than it sounds -- Black Lotus and Arcanite Reaper both FEEL epic and
+    -- neither is, and an earlier draft of this set was picked from memory and
+    -- would have been wrong about both.
+    --
+    --   1 Common   2 Uncommon   3 Rare   4 Epic
+    local QUALITY = {
+        [17193] = 4,   -- Sulfuron Hammer
+        [12784] = 3,   -- Arcanite Reaper
+        [16984] = 4,   -- Black Dragonscale Boots
+        [12360] = 2,   -- Arcanite Bar          (product AND reagent)
+        [17203] = 4,   -- Sulfuron Ingot
+        [17011] = 3,   -- Lava Core
+        [17010] = 3,   -- Fiery Core
+        [7078]  = 2,   -- Essence of Fire
+        [11382] = 2,   -- Blood of the Mountain
+        [12363] = 2,   -- Arcane Crystal
+        [11371] = 1,   -- Dark Iron Bar
+        [12359] = 1,   -- Thorium Bar
+        [12810] = 1,   -- Enchanted Leather
+        [12644] = 1,   -- Dense Grinding Stone
+        [15416] = 1,   -- Black Dragonscale
+        [14341] = 1,   -- Rune Thread
+    }
+
+    do
+        local prodQ, reagQ, unknown = {}, {}, {}
+        local k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            local p = craft.DEMO_PROJECTS[k]
+            local q = QUALITY[p.itemId]
+            if q then prodQ[q] = true else table.insert(unknown, p.name) end
+            local rs, r = p.reagents, 1
+            while r <= table.getn(rs) do
+                local rq = QUALITY[rs[r].itemId]
+                if rq then reagQ[rq] = true
+                else table.insert(unknown, rs[r].name) end
+                r = r + 1
+            end
+            k = k + 1
+        end
+
+        -- EVERY id accounted for, or the two checks below are passing on a
+        -- subset: add a recipe whose quality nobody looked up and the spread
+        -- still reads epic-and-rare off the OTHER entries.
+        H.eq("every demo item's quality was verified",
+             table.concat(unknown, ", "), "")
+
+        H.check("a demo recipe is EPIC", prodQ[4],
+                "no epic recipe -- purple has nothing to colour")
+        H.check("...and one is RARE", prodQ[3],
+                "no rare recipe -- blue has nothing to colour")
+        H.check("a demo REAGENT is epic", reagQ[4],
+                "epic only ever appears on the recipe line")
+        H.check("...and one is rare", reagQ[3],
+                "rare only ever appears on the recipe line")
+        -- ...and the plain ones too, or there is no contrast to see it
+        -- against and every line is the same colour again, just a louder one.
+        H.check("common reagents are still in the mix", reagQ[1])
+        H.check("...and uncommon ones", reagQ[2])
+    end
+
+    -- ---- the prices the money columns read ------------------------------
+
+    -- WITHOUT THESE EVERY MONEY FIGURE ON THE TAB IS A DASH, and a demo whose
+    -- entire purpose is letting a layout be judged cannot show the money
+    -- columns empty. The real price DB is untouched -- same substitution as
+    -- the gold series.
+    do
+        local missing = {}
+        local k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            local p = craft.DEMO_PROJECTS[k]
+            if not craft.DEMO_PRICE[p.itemId] then
+                table.insert(missing, p.name)
+            end
+            local rs, r = p.reagents, 1
+            while r <= table.getn(rs) do
+                if not craft.DEMO_PRICE[rs[r].itemId] then
+                    table.insert(missing, rs[r].name)
+                end
+                r = r + 1
+            end
+            k = k + 1
+        end
+        H.eq("every demo item has a demo price",
+             table.concat(missing, ", "), "")
+    end
+
+    -- THE VENDOR BRANCH. craft.CheaperSource picks the cheaper of vendor and
+    -- auction house per line, and a demo with no vendor price never reaches
+    -- it -- every line reads "ah" and the source column is a column of one
+    -- value. The vendor entry has to be the CHEAPER of the two or the branch
+    -- is reached and still never taken.
+    do
+        local any = false
+        for id, v in pairs(craft.DEMO_VENDOR) do
+            local ah = craft.DEMO_PRICE[id]
+            H.check("demo vendor item " .. id .. " also has an AH price",
+                    ah ~= nil, "CheaperSource needs both to compare")
+            if ah and v < ah then any = true end
+        end
+        H.check("a demo line is cheaper at the vendor than at the AH", any,
+                "the vendor branch is reachable but never taken")
+
+        -- ...and it is a reagent something actually wants, or the line never
+        -- appears on the list at all.
+        local wanted = false
+        local k = 1
+        while k <= table.getn(craft.DEMO_PROJECTS) do
+            local rs, r = craft.DEMO_PROJECTS[k].reagents, 1
+            while r <= table.getn(rs) do
+                if craft.DEMO_VENDOR[rs[r].itemId] then wanted = true end
+                r = r + 1
+            end
+            k = k + 1
+        end
+        H.check("...and a recipe wants it", wanted)
+    end
+
+    -- ---- craft.MarketUnit / craft.VendorUnit ----------------------------
+
+    -- ONE SOURCE FOR BOTH READERS. The tab's totals go through craft.CostOf
+    -- and the shopping list prices its rows through an injected `marketOf`;
+    -- when those were two copies of "min buyout, else market value" the
+    -- panel's total could stop agreeing with the lines above it. This is also
+    -- the one seam demo mode substitutes at.
+    do
+        db.demo = true
+        H.eq("demo mode answers from the demo table",
+             craft.MarketUnit(17203), craft.DEMO_PRICE[17203])
+        H.isNil("...and says nothing for an item it has no price for",
+                craft.MarketUnit(99999))
+        H.isNil("no item id, no price", craft.MarketUnit(nil))
+        H.eq("the vendor price comes from the demo table too",
+             craft.VendorUnit(14341), craft.DEMO_VENDOR[14341])
+        H.isNil("...and nothing for an item no merchant stocks",
+                craft.VendorUnit(17203))
+
+        -- AND THE REAL VENDOR RECORD IS NOT CONSULTED EITHER. Asking for an
+        -- item the demo has no vendor entry for must be nil BECAUSE demo mode
+        -- stopped there -- not because the merchant DB happened to be empty
+        -- too. A harvested price is planted first so the two reasons are
+        -- distinguishable.
+        db.SetVendorBuy(17203, 777)
+        H.isNil("a harvested vendor price does not leak into demo mode",
+                craft.VendorUnit(17203))
+        db.demo = nil
+        H.eq("...and with demo off it is the answer",
+             craft.VendorUnit(17203), 777)
+        db.demo = true
+
+        -- THE REAL DB IS NOT CONSULTED while demo is on. Recording a real
+        -- price for an item the demo table does not carry must still read as
+        -- no price -- otherwise the demo is a mix of invented and real
+        -- numbers, which is the one thing a demo may not be.
+        db.RecordAuction(99999, 4242)
+        H.isNil("a real recorded price does not leak into demo mode",
+                craft.MarketUnit(99999))
+
+        db.demo = nil
+        H.eq("with demo off the real price is the answer",
+             craft.MarketUnit(99999), 4242)
+        H.isNil("...and the demo price is not",
+                craft.MarketUnit(17203))
+    end
+
+    -- ZERO IS NOT A PRICE. An item recorded at nothing is an item we have not
+    -- really seen, and letting a zero through makes a cost total that reads
+    -- COMPLETE when it is not -- a crafting cost that reads low, which is the
+    -- direction that loses money.
+    --
+    -- PLANTED STRAIGHT INTO THE STORE, not put there with db.RecordAuction,
+    -- which refuses `unitBuyout <= 0` at its own door. Going through the
+    -- front door records NOTHING, so MarketUnit answers nil because the item
+    -- was never seen -- and the check passes without ever reaching the guard
+    -- it claims to be about. That was the first draft of this block.
+    do
+        db.demo = nil
+        local items = db.Items()
+        items[99998] = { daily = { [db.Day()] = 0 }, seen = 3 }
+        H.eq("...and the zero really is in the store",
+             db.MinBuyout(99998), 0)
+        H.isNil("a zero price is no price", craft.MarketUnit(99998))
+
+        -- ...and the fallback may not rescue it either: a weighted median of
+        -- nothing but zeros is zero, so BOTH guards have to hold.
+        H.eq("the market-value fallback also sees the zero",
+             db.MarketValue(99998), 0)
+    end
+
+    -- ...AND THE FALLBACK IS NOT DEAD CODE, which is the only interesting
+    -- question about it. db.MinBuyout answers whenever db.MarketValue does --
+    -- both read the same `daily` table -- so "min buyout missing, market
+    -- value present" cannot happen and a test built on that case would prove
+    -- nothing. The case that DOES happen is the newest day recorded as a bogus
+    -- zero over a run of real older days: MinBuyout reads the newest and
+    -- returns 0, the guard above rejects it, and the weighted median over the
+    -- whole window is what rescues the line.
+    do
+        db.demo = nil
+        local today = db.Day()
+        local items = db.Items()
+        items[99997] = { seen = 9, daily = {
+            [today] = 0, [today - 1] = 5000, [today - 2] = 5000,
+        } }
+        H.eq("the newest day is the bogus zero", db.MinBuyout(99997), 0)
+        H.check("...but the window as a whole is not",
+                db.MarketValue(99997) > 0, db.MarketValue(99997))
+        H.eq("so the fallback answers", craft.MarketUnit(99997),
+             db.MarketValue(99997))
+    end
 end
 
 os.exit(H.report("purse"))

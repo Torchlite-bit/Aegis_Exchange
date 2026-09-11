@@ -2735,8 +2735,8 @@ end
     # takes the sub-reagent expansion out of the demo entirely -- the branch
     # that turns "short of a Bolt" into "buy the Linen Cloth to make one".
     ('demo-recipes-have-no-reagents', 'core/buy.lua',
-     '    { name = "Bolt of Linen Cloth", itemId = 2996, want = 2, reagents = {\n        { name = "Linen Cloth", itemId = 2589, count = 2 },\n    } },',
-     '    { name = "Bolt of Linen Cloth", itemId = 2996, want = 2, reagents = {} },',
+     '    { name = "Arcanite Bar", itemId = 12360, want = 2, reagents = {\n        { name = "Thorium Bar",    itemId = 12359, count = 1 },\n        { name = "Arcane Crystal", itemId = 12363, count = 1 },\n    } },',
+     '    { name = "Arcanite Bar", itemId = 12360, want = 2, reagents = {} },',
      'purse'),
 
     # Nothing part-gathered, so every reagent line reads 0 / n and the
@@ -2746,11 +2746,17 @@ end
     # sabotage proves nothing -- it went unnoticed for exactly that reason.
     # Sabotage granularity has to match the property the check states.
     ('demo-has-nothing-gathered', 'core/buy.lua',
-     '''    [2589] = 14,     -- Linen Cloth
-    [2996] = 5,      -- Bolt of Linen Cloth
-    [2320] = 2,      -- Coarse Thread
-    [3355] = 3,      -- Wild Steelbloom
-    [3860] = 4,      -- Mithril Bar''',
+     '''    [17203] = 2,     -- Sulfuron Ingot        (epic, part-gathered)
+    [17011] = 5,     -- Lava Core             (rare)
+    [17010] = 4,     -- Fiery Core            (rare)
+    [12360] = 18,    -- Arcanite Bar
+    [7078]  = 11,    -- Essence of Fire
+    [11371] = 20,    -- Dark Iron Bar         (covered)
+    [12359] = 40,    -- Thorium Bar
+    [12363] = 6,     -- Arcane Crystal
+    [12810] = 6,     -- Enchanted Leather     (covered)
+    [12644] = 1,     -- Dense Grinding Stone
+    [15416] = 18,    -- Black Dragonscale     (covered)''',
      '    [999999] = 14,   -- nothing any recipe wants',
      'purse'),
 
@@ -4885,6 +4891,237 @@ end
      "    if not b or b.aegisNudged then return false end",
      "    if not b then return false end",
      "external.buttons"),
+
+    # ---- the row icon (v1.53.14) ----------------------------------------
+
+    # THE BUG THAT SHIPPED IN THE FIRST DRAFT. pcall puts `ok` in front of
+    # GetItemInfo's ten returns, so the texture is the ELEVENTH value back.
+    # Eight discards lands on equipSlot, which is nil for every reagent -- so
+    # every icon is blank and nothing errors, because a nil texture path is a
+    # perfectly legal thing to hand SetTexture.
+    ("craft-icon-reads-equip-slot", "ui/frame.lua",
+     "    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "    local ok, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "crafttree"),
+
+    # ...and one past it, which reads whatever an item's eleventh return is.
+    # Same symptom from the other side of the correct index, so the check has
+    # to pin the exact value and not merely "something non-nil".
+    ("craft-icon-reads-one-past", "ui/frame.lua",
+     "    local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "    local ok, _, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, itemId)",
+     "crafttree"),
+
+    # The icon lookup never memoised. GetItemInfo is a per-item CLIENT QUERY
+    # and both lists that read these rows repaint off a BAG_UPDATE flag, which
+    # storms -- HARD RULE 16. Unmemoised it is a query per row per repaint.
+    ("craft-icon-not-memoised", "ui/frame.lua",
+     """    if ok and tex then
+        ui.craftIcon[itemId] = tex
+        return tex
+    end""",
+     """    if ok and tex then
+        return tex
+    end""",
+     "crafttree"),
+
+    # The MISS cached, so an item the client has not loaded yet stays without
+    # an icon until logout. Caching a real value rather than `tex` itself,
+    # because assigning nil to a table key REMOVES it -- the lazy version
+    # would not be a bug at all and the sabotage would prove nothing.
+    ("craft-icon-caches-the-miss", "ui/frame.lua",
+     """    if ok and tex then
+        ui.craftIcon[itemId] = tex
+        return tex
+    end
+    return nil""",
+     """    ui.craftIcon[itemId] = tex or ""
+    return ui.craftIcon[itemId]""",
+     "crafttree"),
+
+    # The texture not stamped on the reagent rows -- only on the projects.
+    # The shopping popout draws the ROWS, so every icon in it would be blank
+    # while the crafting tab above looked fine.
+    ("craft-rows-lose-the-icon", "ui/frame.lua",
+     """        r.quality = ui.CraftQualityOf(r.itemId)
+        r.texture = ui.CraftIconOf(r.itemId)""",
+     "        r.quality = ui.CraftQualityOf(r.itemId)",
+     "crafttree"),
+
+    # ...and the same from the project end.
+    ("craft-projects-lose-the-icon", "ui/frame.lua",
+     """        p.quality = ui.CraftQualityOf(p.itemId)
+        p.texture = ui.CraftIconOf(p.itemId)""",
+     "        p.quality = ui.CraftQualityOf(p.itemId)",
+     "crafttree"),
+
+    # ---- the gradient fill (v1.53.14) ------------------------------------
+
+    # EVERY COLUMN HANDED THE WHOLE IMAGE. This is the bug the function exists
+    # to prevent: a five-pixel column then runs the entire ramp in five pixels
+    # while a hundred-and-fifty-pixel one spreads it over all of them, so the
+    # wash traces the line instead of sitting behind it.
+    ("fill-slice-is-the-whole-image", "ui/frame.lua",
+     """    local top = 1 - (hi / h)
+    local bot = 1 - (lo / h)""",
+     """    local top = 0
+    local bot = 1""",
+     "histgraph"),
+
+    # The mapping the right way up, which is upside down: the image's opaque
+    # end is v=0 and plot height counts UP from the baseline, so the two run
+    # against each other. Getting this wrong puts the solid end at the
+    # baseline -- a wash that is darkest where it should have faded out.
+    ("fill-slice-not-inverted", "ui/frame.lua",
+     """    local top = 1 - (hi / h)
+    local bot = 1 - (lo / h)""",
+     """    local top = lo / h
+    local bot = hi / h""",
+     "histgraph"),
+
+    # A zero-height plot dividing by zero. On 1.12 that is nan, and nan passes
+    # EVERY comparison -- so all four clamps below let it through and the
+    # client is handed nan texture coordinates.
+    ("fill-slice-divides-by-zero", "ui/frame.lua",
+     "    if not h or h <= 0 then return 0, 1 end",
+     "    if not h then return 0, 1 end",
+     "histgraph"),
+
+    # The clamps dropped. 1.12 WRAPS out-of-range texture coordinates, so a
+    # span the rasteriser pushed a rounding pixel past the plot shows the
+    # OPPOSITE end of the ramp -- one bright band in an otherwise clean fade.
+    ("fill-slice-unclamped", "ui/frame.lua",
+     """    if top < 0 then top = 0 end
+    if bot > 1 then bot = 1 end""",
+     "    if false then top = 0 end",
+     "histgraph"),
+
+    # A zero-tall slice left at zero. Some clients draw a zero-height texture
+    # coordinate span as no texture at all rather than as a hairline, so a
+    # flat column vanishes.
+    ("fill-slice-zero-height", "ui/frame.lua",
+     "    if bot <= top then bot = top + 0.001 end",
+     "    if false then bot = top + 0.001 end",
+     "histgraph"),
+
+    # The widening applied at the very top of the image, where it has nowhere
+    # to grow DOWN into -- so bot leaves the image and wraps.
+    ("fill-slice-widens-past-the-edge", "ui/frame.lua",
+     "    if bot > 1 then top, bot = 1 - 0.001, 1 end",
+     "    if false then top, bot = 1 - 0.001, 1 end",
+     "histgraph"),
+
+    # An upside-down span left upside down, so top > bot and the client draws
+    # the slice mirrored.
+    ("fill-slice-not-normalised", "ui/frame.lua",
+     "    if lo > hi then lo, hi = hi, lo end",
+     "    if false then lo, hi = hi, lo end",
+     "histgraph"),
+
+    # The flip ignored, which is the one setting a person regenerating the art
+    # has to reach for when they get the ramp's direction backwards.
+    ("fill-slice-ignores-the-flip", "ui/frame.lua",
+     "    if flip then return 1 - bot, 1 - top end",
+     "    if false then return 1 - bot, 1 - top end",
+     "histgraph"),
+
+    # ---- the demo recipes (v1.53.14) -------------------------------------
+
+    # THE BUG THE WHOLE SET REPLACED. Back to an all-white spread, where the
+    # quality colouring the shopping panel exists to show has nothing to show.
+    # One line does it: the epic reagent becomes a common one.
+    ("demo-reagents-all-white", "core/buy.lua",
+     '        { name = "Sulfuron Ingot",        itemId = 17203, count = 8 },',
+     '        { name = "Thorium Bar",           itemId = 12359, count = 8 },',
+     "purse"),
+
+    # ...and the same from the recipe end. THE RARE ONE, not an epic one:
+    # there are deliberately TWO epic recipes in the set, so no single edit can
+    # take purple off the product lines and a sabotage claiming to would be
+    # passing on the other one. Arcanite Reaper is the only blue product, so
+    # this is the edit the "a demo recipe is RARE" check actually answers.
+    ("demo-recipes-lose-the-rare", "core/buy.lua",
+     '    { name = "Arcanite Reaper", itemId = 12784, want = 1, reagents = {',
+     '    { name = "Dark Iron Bar", itemId = 11371, want = 1, reagents = {',
+     "purse"),
+
+    # An id nobody looked up. The quality table in the suite is the record of
+    # what was VERIFIED rather than remembered, so a recipe added without
+    # checking its colour has to fail loudly -- otherwise the spread checks
+    # keep passing on the entries that were checked.
+    ("demo-recipe-quality-unverified", "core/buy.lua",
+     '        { name = "Lava Core",             itemId = 17011, count = 10 },',
+     '        { name = "Essence of Water",      itemId = 7080,  count = 10 },',
+     "purse"),
+
+    # The vendor-sold line priced BELOW the merchant at auction, so
+    # craft.CheaperSource is reached and never takes the vendor branch -- the
+    # source column becomes a column of one value and nobody notices.
+    ("demo-vendor-never-cheaper", "core/buy.lua",
+     "    [14341] = 5200,      -- Rune Thread                  52s",
+     "    [14341] = 1200,      -- Rune Thread                  12s",
+     "purse"),
+
+    # A demo item with no demo price, so its money column reads as a dash --
+    # which is the state the prices exist to get rid of.
+    ("demo-price-missing", "core/buy.lua",
+     "    [17203] = 4500000,   -- Sulfuron Ingot          450g",
+     "",
+     "purse"),
+
+    # ---- craft.MarketUnit / craft.VendorUnit (v1.53.14) ------------------
+
+    # Demo mode falling THROUGH to the real price DB, so the tab shows a mix
+    # of invented and real numbers -- the one thing a demo may not be.
+    ("market-unit-demo-falls-through", "core/buy.lua",
+     """    if A.db.demo then
+        local d = craft.DEMO_PRICE[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end""",
+     """    if A.db.demo then
+        local d = craft.DEMO_PRICE[itemId]
+        if d and d > 0 then return d end
+    end""",
+     "purse"),
+
+    # ...and the same on the vendor side.
+    ("vendor-unit-demo-falls-through", "core/buy.lua",
+     """    if A.db.demo then
+        local d = craft.DEMO_VENDOR[itemId]
+        if d and d > 0 then return d end
+        return nil
+    end""",
+     """    if A.db.demo then
+        local d = craft.DEMO_VENDOR[itemId]
+        if d and d > 0 then return d end
+    end""",
+     "purse"),
+
+    # A zero let through as a price. An item recorded at nothing is an item we
+    # have not really seen, and a cost total that reads COMPLETE when it is
+    # not is a crafting cost that reads LOW -- the direction that loses money.
+    ("market-unit-zero-is-a-price", "core/buy.lua",
+     """    local m = A.db.MinBuyout and A.db.MinBuyout(itemId)
+    if m and m > 0 then return m end
+    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m and m > 0 then return m end""",
+     """    local m = A.db.MinBuyout and A.db.MinBuyout(itemId)
+    if m then return m end
+    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m then return m end""",
+     "purse"),
+
+    # The market-value fallback dropped, so an item seen on an earlier day but
+    # not today prices as unknown and the whole recipe reads incomplete.
+    ("market-unit-loses-the-fallback", "core/buy.lua",
+     """    m = A.db.MarketValue and A.db.MarketValue(itemId)
+    if m and m > 0 then return m end
+    return nil
+end""",
+     """    return nil
+end""",
+     "purse"),
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.

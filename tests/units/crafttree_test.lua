@@ -68,6 +68,7 @@ for _, sig in ipairs({
     "function ui.UnitSpent(",
     "function ui.QualityColor(",
     "function ui.CraftQualityOf(",
+    "function ui.CraftIconOf(",
     "function ui.StampCraftQuality(",
     "function ui.CraftHeadline(",
     "function ui.FitString(",
@@ -473,8 +474,18 @@ H.section("quality is asked for ONCE, not once per repaint")
 local asked
 GetItemInfo = function(id)
     asked = asked + 1
-    if id == 13468 then return "Black Lotus", nil, 4 end
-    if id == 13463 then return "Dreamfoil", nil, 1 end
+    -- name, link, quality, iLevel, reqLevel, class, subclass, maxStack,
+    -- equipSlot, TEXTURE -- the tenth return, which is the one the row icon
+    -- wants. Spelling the whole signature out is the point: a reader that
+    -- counts wrong picks up equipSlot and paints nothing.
+    if id == 13468 then
+        return "Black Lotus", nil, 4, 60, 0, "Trade Goods", "Herb", 5, nil,
+               "Interface\\Icons\\INV_Misc_Herb_BlackLotus"
+    end
+    if id == 13463 then
+        return "Dreamfoil", nil, 1, 55, 0, "Trade Goods", "Herb", 20, nil,
+               "Interface\\Icons\\INV_Misc_Herb_Dreamfoil"
+    end
     return nil                              -- not in the client's cache yet
 end
 
@@ -497,9 +508,39 @@ H.eq("...which is two queries, not one", asked, 2)
 
 H.eq("no item id asks nothing", ui.CraftQualityOf(nil), nil)
 
+-- ---- the icon, on exactly the same terms -------------------------------
+
+-- The icon is a SECOND memoised lookup, not a second return value off the
+-- quality one. Same shape, same rules: resolved ids are kept, misses are not,
+-- and no id asks nothing.
+ui.craftIcon = {}
+asked = 0
+H.eq("it resolves the tenth return, not the ninth",
+     ui.CraftIconOf(13468), "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
+H.eq("...having asked the client once", asked, 1)
+H.eq("the second time is a table read",
+     ui.CraftIconOf(13468), "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
+H.eq("...and asks nothing", asked, 1)
+
+asked = 0
+H.eq("an unresolved id has no icon", ui.CraftIconOf(99999), nil)
+H.eq("...and is asked again next time", ui.CraftIconOf(99999), nil)
+H.eq("...which is two queries, not one", asked, 2)
+H.eq("no item id asks nothing", ui.CraftIconOf(nil), nil)
+
+-- THE TWO CACHES ARE INDEPENDENT. Clearing one may not silently answer for
+-- the other -- which is the whole reason the icon is not a second return off
+-- ui.CraftQualityOf's single GetItemInfo call.
+ui.craftIcon = {}
+asked = 0
+H.eq("the quality memo does not answer for the icon",
+     ui.CraftIconOf(13463), "Interface\\Icons\\INV_Misc_Herb_Dreamfoil")
+H.eq("...it asked the client itself", asked, 1)
+
 -- ---- the one pass over the list ----------------------------------------
 
 ui.craftQuality = {}
+ui.craftIcon = {}
 asked = 0
 local PROJ = { { name = "Flask", itemId = 13468 }, { name = "Nameless" } }
 local ROWS = { { name = "Dreamfoil", itemId = 13463 },
@@ -509,16 +550,30 @@ H.eq("a project is stamped", PROJ[1].quality, 4)
 H.eq("...and a reagent row too", ROWS[1].quality, 1)
 H.eq("a row for the same item agrees with the project", ROWS[2].quality, 4)
 H.eq("a project with no item id is left nil", PROJ[2].quality, nil)
--- TWO, not three. Four calls go in -- 13468, a project with no id, 13463 and
--- 13468 again -- and only two reach the client: the nil id returns before it
--- asks anything, and the repeat is the memo.
-H.eq("four items, two queries", asked, 2)
+
+-- THE TEXTURE TRAVELS WITH THE QUALITY. Both cost a GetItemInfo, so both are
+-- stamped in the same rebuild pass -- and a paint that wanted the icon but
+-- not the quality would otherwise be a per-row client query on a list that
+-- repaints off a stormable flag.
+H.eq("a project carries its icon",
+     PROJ[1].texture, "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
+H.eq("...and a reagent row too",
+     ROWS[1].texture, "Interface\\Icons\\INV_Misc_Herb_Dreamfoil")
+H.eq("a project with no item id has no icon", PROJ[2].texture, nil)
+
+-- FOUR, not three and not two. Four ids go in -- 13468, a project with no id,
+-- 13463 and 13468 again -- and each that resolves is asked TWICE, once for
+-- the quality and once for the icon, because the caches are separate. The nil
+-- id returns before it asks anything and the repeat 13468 is two memo reads.
+H.eq("four items, four queries", asked, 4)
 
 -- ...and stamping the SAME list again costs nothing, which is what makes it
 -- safe on a tab whose repaint is driven by a stormable event.
 asked = 0
 ui.StampCraftQuality(PROJ, ROWS)
 H.eq("a second pass asks the client nothing", asked, 0)
+H.eq("...and the icons survived it",
+     ROWS[2].texture, "Interface\\Icons\\INV_Misc_Herb_BlackLotus")
 
 H.survives("nil lists are not a crash", function()
     ui.StampCraftQuality(nil, nil)
