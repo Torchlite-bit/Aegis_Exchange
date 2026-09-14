@@ -180,12 +180,24 @@ do
 end
 
 -- ---------------------------------------------------------------------------
-H.section("a new search drops the ticks -- a page turn does not")
+H.section("ONLY Clear empties the selection")
 -- ---------------------------------------------------------------------------
 
--- SOURCE CHECKS, because both facts are about WHERE a line sits rather than
--- what a function returns, and the thing that went wrong was an omission in
--- one particular function.
+-- v1.53.17 CLEARED THE TICKS ON A NEW SEARCH, AND THAT WAS WRONG -- worth
+-- stating plainly, because it sounded right when it was decided and shipped.
+--
+-- "A new search" is not only something the player does on purpose.
+-- ui.DoBuySearch is also what runs when you RIGHT-CLICK a grouped row to see
+-- one item on its own, and when you shift-click an item in your bags. Both are
+-- ordinary browsing -- the exact browsing a multi-select exists to survive --
+-- and both silently emptied a basket somebody was filling. Worse, the
+-- right-click is the ONE reliable route to a tick box while results are
+-- grouped, so the only way to reach the feature also wiped it on arrival.
+--
+-- So the button is the only thing that empties it: one control, one meaning.
+-- That also restores the promise the comment above ui.buyChecked has always
+-- made -- the selection survives a re-query, a sort and a page turn, which is
+-- precisely why it holds ENTRIES rather than indices.
 do
     local src = Source()
     local function bodyOf(head)
@@ -200,30 +212,34 @@ do
 
     local search = bodyOf("function ui.DoBuySearch(")
     -- The cap is a RUNAWAY GUARD, not a size budget: a failed extraction
-    -- returns the rest of the file, and a body that long will match anything
+    -- returns the rest of the file, and a body that long matches anything
     -- asked of it. Confirmed by eye that this stops at DoBuySearch's own
     -- terminating `end` -- it is simply a long function.
     H.check("the search function was found",
             search ~= "" and string.len(search) < 4000, string.len(search))
 
-    -- The single selection has always been dropped here. The ticked ones were
-    -- not, which is the whole reported fault.
+    -- The SINGLE selection is still dropped: those rows are about to be
+    -- replaced, and a highlight pointing at a row that has gone means nothing.
+    -- The ticked ones are a basket, which is a different thing.
     H.check("a new search drops the single selection",
             says(search, "ui.buySel = nil"))
-    H.check("...and the ticked ones too", says(search, "ui.buyChecked = {}"),
-            "ticks from one search survived into the results of the next")
+    H.check("...but NOT the ticked ones",
+            not says(search, "ui.buyChecked = {}"),
+            "right-clicking a row to search one item would empty your basket")
 
-    -- ...AND THE DOCUMENTED PROMISE SURVIVES IT. The comment above
-    -- ui.buyChecked says the selection outlives a re-query, a sort and a PAGE
-    -- TURN -- which stays true only because paging never comes through here.
-    -- If paging ever calls DoBuySearch, this suite should fail rather than the
-    -- promise quietly becoming false.
-    H.check("paging does not route through a new search",
-            not says(bodyOf("function ui.BuyNextPage("), "ui.DoBuySearch()")
-            and not says(bodyOf("function ui.BuyPrevPage("), "ui.DoBuySearch()"))
-    H.check("...it calls the engine's paging directly",
-            says(src, "A.buy.NextPage()") and says(src, "A.buy.PrevPage()"),
-            "the page buttons are what keep ticks alive across a page turn")
+    -- ...and nothing else quietly empties it either. ui.ClearBuyChecks is the
+    -- one writer and the button is its one user-facing route.
+    local emptiers = 0
+    for _ in string.gfind(src, "ui%.buyChecked = {}") do
+        emptiers = emptiers + 1
+    end
+    -- TWO: the file-scope declaration, and ui.ClearBuyChecks itself. A third
+    -- is somebody emptying the basket from somewhere the player cannot see.
+    H.eq("only the declaration and Clear itself empty the selection",
+         emptiers, 2)
+
+    H.check("...and Clear is what the button calls",
+            says(src, "function() ui.ClearBuyChecks() end"))
 end
 
 -- ---------------------------------------------------------------------------

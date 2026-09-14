@@ -7961,19 +7961,19 @@ function ui.DoBuySearch()
 
     ui.buyResults = nil
     ui.buySel = nil            -- the rows are about to be replaced
-    -- ...AND SO ARE THE TICKED ONES. The single selection has always been
-    -- dropped here; the multi-selection was not, so ticks from one search
-    -- survived into the results of the next and the bar went on reading
-    -- "Buyout (3)" with a total for rows nobody could see. It failed safe --
-    -- buy.StartBatch works from fingerprints, so the batch aborted with "a
-    -- selected auction is no longer available" rather than buying the wrong
-    -- thing -- but the count and the total were lying until it did.
+    -- THE TICKED ROWS ARE NOT TOUCHED HERE, and v1.53.17 learning that the
+    -- hard way is why this comment exists. Clearing them on a new search
+    -- sounds right and is wrong, because "a new search" is not a thing the
+    -- player does deliberately -- it is also what happens when you RIGHT-CLICK
+    -- a grouped row to see one item on its own, and when you shift-click an
+    -- item in your bags. Both are ordinary browsing, and both silently emptied
+    -- a basket somebody had been filling.
     --
-    -- HERE AND NOT IN THE ENGINE, which is what keeps the documented promise
-    -- above ui.buyChecked intact: the selection still survives a re-query, a
-    -- sort and a PAGE TURN, because paging calls buy.NextPage / buy.PrevPage
-    -- directly and never comes through here. Only a genuinely new search does.
-    ui.buyChecked = {}
+    -- The Clear button is the only thing that empties the selection now, which
+    -- is what makes it predictable: one control, one meaning. That is also the
+    -- promise the comment above ui.buyChecked has always made -- the selection
+    -- survives a re-query, a sort and a page turn, which is exactly why it
+    -- holds entries rather than indices.
     ui.RefreshBuyActionBar()
     ui.UpdateBuyList()
     local ok, err = A.buy.Search(name, {

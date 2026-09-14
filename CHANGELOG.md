@@ -18,6 +18,25 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.18]
+
+### Fixed
+- **A new search no longer empties your ticked rows.** v1.53.17 made it do
+  that, and it was wrong.
+
+  "A new search" is not only something you do on purpose. It is also what runs
+  when you **right-click a grouped row** to see one item on its own, and when
+  you **shift-click an item in your bags** — ordinary browsing, and exactly the
+  browsing a multi-select exists to survive. Worse: while results are grouped,
+  that right-click is the most reliable way to reach a tick box at all, so the
+  one route to the feature was also what wiped it.
+
+  **The Clear button is now the only thing that empties the selection** — one
+  control, one meaning. Your ticks survive a re-query, a sort, a page turn and
+  a new search, which is what the selection was built for: it holds the
+  auctions themselves rather than their positions on a page.
+
+
 ## [1.53.17]
 
 ### Changed
@@ -5556,6 +5575,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -5196,13 +5196,15 @@ end""",
 
     # ---- the Clear button (v1.53.17) -------------------------------------
 
-    # THE REPORTED FAULT, put back: ticks survive a new search, so the action
-    # bar goes on reading "Buyout (3)" with a total for rows nobody can see.
-    # It fails safe -- StartBatch works from fingerprints, so the batch aborts
-    # rather than buying the wrong auction -- but the count is a lie until then.
-    ("ticks-survive-a-new-search", "ui/frame.lua",
-     "    ui.buyChecked = {}\n    ui.RefreshBuyActionBar()",
-     "    ui.RefreshBuyActionBar()",
+    # v1.53.17's MISTAKE, put back. Clearing the ticks on a new search sounds
+    # right and is wrong: ui.DoBuySearch is also what runs when you right-click
+    # a grouped row to see one item alone, and when you shift-click a bag item.
+    # Both are ordinary browsing, and while results are grouped the right-click
+    # is the one reliable route to a tick box -- so the only way to reach the
+    # feature also emptied it on arrival.
+    ("search-empties-the-basket", "ui/frame.lua",
+     "    ui.buySel = nil            -- the rows are about to be replaced",
+     "    ui.buySel = nil\n    ui.buyChecked = {}",
      "buychecks"),
 
     # ...and the other half of that: Clear empties the selection but never

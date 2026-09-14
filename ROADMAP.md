@@ -2390,6 +2390,39 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Clearing on a search was the wrong call — v1.53.18
+
+**Reverted one day after shipping it.** v1.53.17 cleared the ticked rows on a
+new search. I raised the design conflict in the prompt -- the comment above
+`ui.buyChecked` says the selection is built to survive a re-query, a sort and a
+page turn, which is why it holds entries rather than indices -- got a one-word
+"yes", and implemented it anyway. The owner used it and wanted it back.
+
+**WHY IT WAS WRONG, and it is not the reason I argued about.** I checked that
+paging did not route through `ui.DoBuySearch`, decided the promise was intact,
+and stopped there. What I never asked was **what else calls DoBuySearch**. The
+answer is a right-click on a grouped row ("search this item alone") and a
+shift-click on a bag item. Both are ordinary browsing. Neither is a thing
+anybody would describe as starting a new search, and both emptied the basket.
+
+**The worst of it is the interaction.** Buy results have been grouped by
+default since v1.53.2, and `ui.PaintBuyGroupRow` hides the tick box on every
+parent row -- so the right-click to an exact, flat list is the most reliable
+way to reach a tick box at all. The one route to the feature was also what
+wiped it. Neither half is wrong on its own; together they made a working
+feature look deleted.
+
+**Checking that a change keeps a documented promise is not the same as
+checking what the change affects.** One grep of `DoBuySearch()`'s call sites --
+which I ran two turns later, for a different question -- would have shown six
+of them and settled it before it shipped.
+
+**And the report that followed it was "when did we get rid of multi-select?"**
+Nothing had been removed. Grouping had moved the tick boxes one level down in
+v1.53.2, and a group of ONE is emitted as a parent with `expandable = nil` --
+so a lone auction is painted untickable and cannot be expanded to reach one.
+That is a real gap, still open, and separate from this revert.
+
 ### §1 — Clear, and the selection that outlived its results — v1.53.17
 
 **First of the Buy-tab interaction pass.** Two decisions were the owner's and
