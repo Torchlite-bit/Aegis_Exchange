@@ -18,6 +18,43 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.17]
+
+### Changed
+- **The Buy tab's Close button is now Clear.** Ticking rows for a multi-buyout
+  had no way back short of clicking each one again. Close was a duplicate — the
+  **X** at the window's top-right already closed it, and does the identical
+  thing — so that slot is better spent.
+
+  It reads **Clear (3)** while rows are ticked, mirroring **Buyout (3)** beside
+  it so the pair reads as two things you can do to one selection. With nothing
+  ticked it greys rather than disappearing, because a slot that emptied would
+  shift the Filter Builder's action row every time the last tick came off.
+
+- **The Filter Builder's Clear is now Reset.** It empties the *form*, and the
+  button five pixels to its right empties the *ticked rows* — two buttons
+  reading "Clear" that close together, meaning different things, is a coin
+  flip. Ticks aren't view-scoped, so both are loudest at the same moment.
+
+### Fixed
+- **Ticked rows survived a new search.** Tick three things, search for
+  something else, and the action bar still read *Buyout (3)* with a total for
+  rows that were no longer on screen. The single selection had always been
+  dropped on a new search; the multi-selection was simply left out.
+
+  It failed *safe* — a batch works from item fingerprints rather than page
+  positions, so it aborted with *"a selected auction is no longer available"*
+  instead of buying the wrong auction — but the count and the total were wrong
+  until you pressed it. **A page turn and a re-sort still keep your ticks**;
+  only a genuinely new search clears them.
+
+- **Clearing the selection left the tick marks on the rows.** The clear
+  repainted the action bar and not the list. It never showed, because the only
+  thing that called it was a finished batch — and buying re-queries the page,
+  which repaints the rows a moment later anyway. Giving you a button that calls
+  it directly is what would have exposed it.
+
+
 ## [1.53.16]
 
 ### Fixed
@@ -5519,6 +5556,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

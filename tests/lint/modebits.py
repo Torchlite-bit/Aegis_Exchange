@@ -40,7 +40,11 @@ NOT_WIDGETS = {
 # always shown" is also what a forgotten widget looks like.
 ALWAYS_SHOWN = {
     "ui.buyMoney":     "your gold: true in every view",
-    "ui.buyCloseBtn":  "Close: true in every view",
+    # Clear (was Close, until the X at the top made that slot a duplicate).
+    # Never hidden even with nothing ticked: it greys instead, because the
+    # Filter Builder's action row anchors to this frame and a slot that
+    # emptied would shift that row every time the last tick came off.
+    "ui.buyClearBtn":  "Clear: true in every view, greyed when nothing is ticked",
     "ui.buySearchBtn": "Search: the strip's own button, shown in both modes",
     "ui.buyBarRule":   "the action bar's rule, which every view sits above",
 }

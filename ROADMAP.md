@@ -2390,6 +2390,52 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### §1 — Clear, and the selection that outlived its results — v1.53.17
+
+**First of the Buy-tab interaction pass.** Two decisions were the owner's and
+both went against my recommendation on the second point, correctly: the X at
+the window's top-right already calls `ui.CloseWindow()`, so the bottom Close
+was a duplicate of a control the window had anyway, in the place every other
+window in the game puts one. The slot went to Clear.
+
+**Implemented as a RELABEL, not a removal.** Two things anchor to that frame --
+the Buyout button beside it and the Filter Builder's entire action row -- so
+deleting it would move both. Keeping the frame and changing what it says cost
+zero re-anchoring. It is never hidden either, for the same reason: a slot that
+emptied when the selection did would shift the Builder's row every time the
+last tick came off. It greys instead, which is also what Buyout already does
+when the batch is unaffordable.
+
+**The reported problem was the missing button; the real one was the selection.**
+`ui.DoBuySearch` already cleared `ui.buySel` and `ui.buyExpanded` on a new
+search, each with a comment explaining why a value from the previous result set
+must not survive into the next. `ui.buyChecked` was simply left out of that
+list. So the bar read "Buyout (3)" against rows nobody could see.
+
+**And the fix had to not break a documented promise.** The comment above
+`ui.buyChecked` says the selection survives a re-query, a sort and a PAGE TURN
+-- which is why it holds entries rather than indices. Clearing on every query
+would have made that false. It stays true because paging calls
+`buy.NextPage` / `buy.PrevPage` directly and never comes through
+`DoBuySearch`, so only a genuinely new search clears. **The suite asserts the
+promise, not just the fix**: it fails if paging ever starts routing through the
+search path.
+
+**A latent bug the button exposed.** `ui.ClearBuyChecks` repainted the action
+bar and not the list, so tick marks outlived the selection they were drawn for.
+Invisible for its whole life, because its only caller was a finished batch --
+and buying re-queries the page, which repaints the rows a moment later for its
+own reasons. **A function whose only caller hides its bug is not a tested
+function**; giving it a second caller is what found this.
+
+**Two buttons named Clear.** The owner's choice put one on the action bar five
+pixels from the Builder's, which empties the form. Ticks are not view-scoped,
+so both are loudest at the same moment. The Builder's became Reset -- it is the
+one of the two that is not about the auction list.
+
+**Ticking rows shipped in v1.15.0 with no coverage of any kind.** The new suite
+is its first, and it found both faults above on the way in.
+
 ### A flush that belonged to the wrong thing — v1.53.16
 
 **`attempt to index field 'shopDriver' (a nil value)`, once per BAG_UPDATE, at

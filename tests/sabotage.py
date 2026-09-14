@@ -5193,6 +5193,76 @@ end""",
      """    return nil
 end""",
      "purse"),
+
+    # ---- the Clear button (v1.53.17) -------------------------------------
+
+    # THE REPORTED FAULT, put back: ticks survive a new search, so the action
+    # bar goes on reading "Buyout (3)" with a total for rows nobody can see.
+    # It fails safe -- StartBatch works from fingerprints, so the batch aborts
+    # rather than buying the wrong auction -- but the count is a lie until then.
+    ("ticks-survive-a-new-search", "ui/frame.lua",
+     "    ui.buyChecked = {}\n    ui.RefreshBuyActionBar()",
+     "    ui.RefreshBuyActionBar()",
+     "buychecks"),
+
+    # ...and the other half of that: Clear empties the selection but never
+    # repaints the rows, so the tick marks outlive what they were drawn for.
+    # This is the latent bug the button exposed -- it was real before the
+    # button existed and invisible because the only caller re-queried anyway.
+    ("clear-does-not-repaint-the-rows", "ui/frame.lua",
+     """    ui.buyChecked = {}
+    ui.UpdateBuyList()
+    ui.RefreshBuyActionBar()
+end""",
+     """    ui.buyChecked = {}
+    ui.RefreshBuyActionBar()
+end""",
+     "buychecks"),
+
+    # The count dropped from the label, so Clear and "Buyout (3)" stop reading
+    # as two things you can do to ONE selection.
+    ("clear-label-loses-the-count", "ui/frame.lua",
+     '    if n > 0 then return "Clear (" .. n .. ")", true end',
+     '    if n > 0 then return "Clear", true end',
+     "buychecks"),
+
+    # Off by one, which is the classic way a count label goes wrong and the
+    # exact reason this is a function rather than two lines in a painter.
+    ("clear-label-off-by-one", "ui/frame.lua",
+     '    if n > 0 then return "Clear (" .. n .. ")", true end',
+     '    if n > 0 then return "Clear (" .. (n - 1) .. ")", true end',
+     "buychecks"),
+
+    # Live with nothing ticked, so the button clears something invisible --
+    # and, worse, reads as an action that did nothing when pressed.
+    ("clear-live-with-nothing-ticked", "ui/frame.lua",
+     '    return "Clear", false',
+     '    return "Clear", true',
+     "buychecks"),
+
+    # Your own auction tickable. The client refuses to sell it to you, so a
+    # tick that looked accepted would build a batch that could only fail.
+    ("own-auction-is-tickable", "ui/frame.lua",
+     "    if not entry or entry.mine then return end",
+     "    if not entry then return end",
+     "buychecks"),
+
+    # The tick identity keyed on name alone, so every listing of one item
+    # ticks together -- and a batch then buys stacks nobody chose.
+    ("tick-identity-ignores-the-price", "ui/frame.lua",
+     """        if c.index == entry.index and c.name == entry.name
+           and c.buyout == entry.buyout then
+            table.remove(ui.buyChecked, i)""",
+     """        if c.name == entry.name then
+            table.remove(ui.buyChecked, i)""",
+     "buychecks"),
+
+    # The Builder's form button back to "Clear", which puts two buttons of
+    # that name five pixels apart on one row meaning different things.
+    ("two-buttons-named-clear", "ui/frame.lua",
+     'action("Reset", 54, ui.buyClearBtn,',
+     'action("Clear", 54, ui.buyClearBtn,',
+     "buychecks"),
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -5206,6 +5276,7 @@ SUITES = {
     "util":        "tests/units/util_test.lua",
     "db":          "tests/units/db_test.lua",
     "buy.batch":   "tests/units/buy_batch_test.lua",
+    "buychecks":   "tests/units/buychecks_test.lua",
     "buy.term":    "tests/units/buy_term_test.lua",
     "buy.page":    "tests/units/buy_page_test.lua",
     "sort_results": "tests/units/sort_results_test.lua",

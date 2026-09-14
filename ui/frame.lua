@@ -5873,19 +5873,32 @@ ui.GrowBuyRows = function(n)
 
     -- ===== Bottom action bar (both modes) ===============================
     -- Blizzard's shape: your money on the left, a bid entry, then
-    -- Bid / Buyout / Close. All three act on the SELECTED row.
-    local closeBtn = ui.MakeButton(panel, "quiet",
-        "AegisExchangeBuyCloseButton")
-    closeBtn:SetWidth(64); closeBtn:SetHeight(21)
-    closeBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 8)
-    closeBtn:SetText("Close")
-    closeBtn:SetScript("OnClick", function() ui.CloseWindow() end)
-    ui.buyCloseBtn = closeBtn
+    -- Bid / Buyout / Clear. Bid and Buyout act on the SELECTED row.
+    --
+    -- THIS SLOT USED TO BE CLOSE, and Close was a duplicate: the X at the
+    -- window's top-right calls ui.CloseWindow() too, so the window already had
+    -- a working close that is where every other window in the game puts one.
+    -- Ticking rows for a multi-buyout had no way back at all short of clicking
+    -- each one again, which is what the slot is spent on now.
+    --
+    -- THE FRAME STAYS, ONLY ITS LABEL AND ACTION CHANGED. Two things anchor to
+    -- it -- the Buyout button beside it and the Filter Builder's whole action
+    -- row -- so removing it would move both. It is also never hidden, for the
+    -- same reason: a slot that empties when the selection does would shift the
+    -- Builder's row every time you unticked the last item.
+    local clearBtn = ui.MakeButton(panel, "quiet",
+        "AegisExchangeBuyClearButton")
+    clearBtn:SetWidth(64); clearBtn:SetHeight(21)
+    clearBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 8)
+    clearBtn:SetText("Clear")
+    clearBtn:SetScript("OnClick", function() ui.ClearBuyChecks() end)
+    clearBtn:Disable()
+    ui.buyClearBtn = clearBtn
 
     local buyoutBtn = ui.MakeButton(panel, "primary",
         "AegisExchangeBuyBuyoutButton")
     buyoutBtn:SetWidth(70); buyoutBtn:SetHeight(21)
-    buyoutBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
+    buyoutBtn:SetPoint("RIGHT", clearBtn, "LEFT", -5, 0)
     buyoutBtn:SetText("Buyout")
     buyoutBtn:SetScript("OnClick", function()
         -- Ticked rows win over the single selection. You cannot have both
@@ -6777,14 +6790,22 @@ function ui.BuildFilterBuilder(panel, advLeft)
         b:Hide()
         return b
     end
-    -- Right to left: Clear, Import, Build, Search -- so on screen they read
-    -- Search | Build > | Import | Clear, then the window's Bid / Buyout /
-    -- Close.
+    -- Right to left: Reset, Import, Build, Search -- so on screen they read
+    -- Search | Build > | Import | Reset, then the window's Bid / Buyout /
+    -- Clear.
+    --
+    -- IT IS "RESET" BECAUSE THE ACTION BAR NOW HAS A CLEAR. This button empties
+    -- the FORM; the one five pixels to its right empties the TICKED ROWS. Two
+    -- buttons reading "Clear" on one row, that close together, meaning
+    -- different things, is a coin flip -- and both are loudest at the same
+    -- moment, since ticks are not view-scoped and survive the switch into the
+    -- Builder. Emptying a form is a reset in anybody's language, and it is the
+    -- one of the two that is not about the auction list.
     --
     -- Import is back. It was dropped when the Builder was somewhere you only
     -- ever LEFT from; now that a shift-click in Saved Searches lands you in
     -- it, a query typed by hand has no other route into the form.
-    local bClear = action("Clear", 54, ui.buyCloseBtn,
+    local bClear = action("Reset", 54, ui.buyClearBtn,
         function() ui.BuilderClear() end)
     local bImport = action("Import", 60, bClear,
         function() ui.BuilderImport() end)
@@ -7510,14 +7531,53 @@ function ui.ToggleBuyCheck(entry)
     ui.RefreshBuyActionBar()
 end
 
+-- Untick everything.
+--
+-- REPAINTS THE LIST, NOT JUST THE BAR. ui.ToggleBuyCheck does both and this
+-- did only the second, so the tick marks on the rows outlived the selection
+-- they were drawn for. It never showed, because its one caller was the batch
+-- buyout's completion -- and buying things re-queries the page, which repaints
+-- the list for its own reasons a moment later. Giving the player a button that
+-- calls this directly is what would have exposed it.
 function ui.ClearBuyChecks()
     ui.buyChecked = {}
+    ui.UpdateBuyList()
     ui.RefreshBuyActionBar()
+end
+
+-- What the Clear button says, and whether it can be pressed.
+--
+-- A FUNCTION SO IT CAN BE RUN. It is two strings and a boolean, which is
+-- exactly the kind of thing that is wrong for a release before anybody
+-- notices -- an off-by-one in the count, or a button that stays live with
+-- nothing ticked and clears something invisible.
+--
+-- The count mirrors "Buyout (3)" beside it on purpose: the pair reads as two
+-- things you can do to ONE selection rather than two adjacent buttons.
+function ui.ClearButtonState(nChecked)
+    local n = nChecked or 0
+    if n > 0 then return "Clear (" .. n .. ")", true end
+    return "Clear", false
 end
 
 function ui.RefreshBuyActionBar()
     if not ui.buyBidBtn then return end
     local nChecked = table.getn(ui.buyChecked or {})
+
+    -- CLEAR CARRIES THE COUNT, exactly as Buyout does beside it -- so the pair
+    -- reads as two things you can do to one selection rather than as two
+    -- unrelated buttons that happen to be adjacent.
+    --
+    -- DISABLED RATHER THAN HIDDEN when nothing is ticked. A button that names
+    -- what it would do is a better empty state than a gap, it matches how
+    -- Buyout greys itself when the batch is unaffordable, and it keeps the
+    -- Builder's action row -- which anchors to this frame -- from shifting
+    -- every time the last tick comes off.
+    if ui.buyClearBtn then
+        local label, on = ui.ClearButtonState(nChecked)
+        ui.buyClearBtn:SetText(label)
+        if on then ui.buyClearBtn:Enable() else ui.buyClearBtn:Disable() end
+    end
 
     -- Ticked rows take over the Buyout button. Bid stays single-target --
     -- bidding a batch means nothing, since each auction needs its own amount.
@@ -7901,6 +7961,19 @@ function ui.DoBuySearch()
 
     ui.buyResults = nil
     ui.buySel = nil            -- the rows are about to be replaced
+    -- ...AND SO ARE THE TICKED ONES. The single selection has always been
+    -- dropped here; the multi-selection was not, so ticks from one search
+    -- survived into the results of the next and the bar went on reading
+    -- "Buyout (3)" with a total for rows nobody could see. It failed safe --
+    -- buy.StartBatch works from fingerprints, so the batch aborted with "a
+    -- selected auction is no longer available" rather than buying the wrong
+    -- thing -- but the count and the total were lying until it did.
+    --
+    -- HERE AND NOT IN THE ENGINE, which is what keeps the documented promise
+    -- above ui.buyChecked intact: the selection still survives a re-query, a
+    -- sort and a PAGE TURN, because paging calls buy.NextPage / buy.PrevPage
+    -- directly and never comes through here. Only a genuinely new search does.
+    ui.buyChecked = {}
     ui.RefreshBuyActionBar()
     ui.UpdateBuyList()
     local ok, err = A.buy.Search(name, {
