@@ -2390,6 +2390,43 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Multi-select was unreachable for seventeen releases — v1.53.19
+
+**Reported three times before I found it, and my first two answers were
+wrong.** "There used to be check boxes to select multiple items" -- I said they
+had been moved one level down by grouping and were reachable by expanding a
+group. They were not reachable at all.
+
+**ONE POOL, TWO KINDS, ONE MISSING LINE.** `ui.FillGroupRow` and
+`ui.FillResultRow` paint the SAME pooled row frames. A parent row is not
+tickable, so the group fill hides the tick box. The listing fill set its
+checked state and its dimming and never showed it again. Results have been
+grouped by DEFAULT since v1.53.2, so every pooled row lost its box on the first
+paint of any search and nothing restored it for the rest of the session --
+including on the listing rows underneath an expanded group.
+
+**The invariant was written down and not enforced.** The dispatch in
+`ui.UpdateBuyList` says, in as many words, that "each fill clears what the
+other uses, because the row above may have been the other kind". That is
+exactly the property that broke. A comment stating an invariant is not a check
+of it, and this one had been true for seventeen releases in the direction
+somebody happened to test.
+
+**So the test is the invariant, not the line.** Every `row.<w>:Hide()` in the
+group fill must have a matching `row.<w>:Show()` in the listing fill.
+Asserting `row.check:Show()` alone would pass the day a second widget joins
+the hide list and the same thing happens again. Two exemptions, each with its
+reason: the per-row Buy/Bid buttons are built only on the Crafting tab's rows,
+so on a Buy row there is nothing to restore.
+
+**WHY I MISSED IT TWICE.** Both wrong answers came from reading the group
+painter's comment -- "nothing on a parent is tickable" -- and stopping there,
+because it explained the symptom plausibly. It explained half of it. The
+question I did not ask until the third report was the mechanical one: does
+anything ever call `row.check:Show()`? One grep answered it. **A plausible
+explanation that accounts for the symptom is not the same as the cause**, and
+the difference between them is a grep I kept not running.
+
 ### Clearing on a search was the wrong call — v1.53.18
 
 **Reverted one day after shipping it.** v1.53.17 cleared the ticked rows on a

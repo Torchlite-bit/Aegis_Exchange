@@ -3986,6 +3986,20 @@ function ui.FillResultRow(row, r)
         -- box is DIMMED rather than hidden: hiding it punched a hole in the
         -- tick column, so an owned row read as a row missing a cell instead
         -- of a row you are not allowed to buy.
+        -- SHOWN, and this line is the whole of a feature that went missing.
+        --
+        -- ONE POOL, TWO KINDS: ui.FillGroupRow HIDES this box, because a
+        -- parent row is not tickable -- you cannot buy "an item". The two
+        -- fills share the same row frames, so the promise above the dispatch
+        -- ("each fill clears what the other uses") requires this fill to put
+        -- back what that one took away. It never did.
+        --
+        -- Results have been grouped by DEFAULT since v1.53.2, so every pooled
+        -- row got its box hidden on the first paint and nothing ever showed it
+        -- again -- for the rest of the session, including on the listing rows
+        -- underneath an expanded group. Multi-select was not moved or
+        -- redesigned; it was unreachable, from v1.53.2 to v1.53.19.
+        row.check:Show()
         row.check:SetChecked(ui.IsBuyChecked(r) and 1 or nil)
         row.check:SetDimmed(r.mine and true or false)
     end

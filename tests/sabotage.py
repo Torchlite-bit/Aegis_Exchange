@@ -5259,6 +5259,25 @@ end""",
             table.remove(ui.buyChecked, i)""",
      "buychecks"),
 
+    # THE BUG THAT MADE MULTI-SELECT LOOK DELETED, from v1.53.2 to v1.53.18.
+    # One pool, two kinds: the group fill hides the tick box because a parent
+    # is not tickable, and the listing fill has to put it back. It did not, so
+    # every pooled row lost its box on the first grouped paint -- which is
+    # every paint, since grouping is the default -- and nothing showed it again
+    # for the rest of the session.
+    ("listing-row-never-shows-its-tick-box", "ui/frame.lua",
+     "        row.check:Show()\n        row.check:SetChecked(",
+     "        row.check:SetChecked(",
+     "buychecks"),
+
+    # ...and the other direction: a parent row that IS tickable. You cannot buy
+    # "an item", and a tick there would build a batch out of a row that stands
+    # for several different auctions at several different prices.
+    ("parent-row-is-tickable", "ui/frame.lua",
+     "    if row.check then row.check:Hide() end",
+     "    if row.check then row.check:Show() end",
+     "buychecks"),
+
     # The Builder's form button back to "Clear", which puts two buttons of
     # that name five pixels apart on one row meaning different things.
     ("two-buttons-named-clear", "ui/frame.lua",

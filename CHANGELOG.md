@@ -18,6 +18,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.19]
+
+### Fixed
+- **The tick boxes for buying several auctions at once are back.** They had
+  been unreachable since **v1.53.2** — not moved, not redesigned, gone.
+
+  Grouped parent rows and individual listing rows are painted into the *same*
+  pooled row frames. A parent isn't tickable — you can't buy "an item" — so
+  painting one **hides** its tick box. Painting a listing back into that frame
+  was supposed to put the box back, and never did. Since results have been
+  grouped by default since v1.53.2, every row lost its box on the first paint
+  of any search, and nothing showed it again for the rest of the session —
+  including on the listings underneath an expanded group.
+
+  One missing line. Tick a row, tick another, and **Buyout (2)** buys both, as
+  it did before.
+
+
 ## [1.53.18]
 
 ### Fixed
@@ -5575,6 +5593,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

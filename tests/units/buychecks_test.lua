@@ -267,4 +267,85 @@ do
             "two adjacent buttons named Clear, meaning different things")
 end
 
+-- ---------------------------------------------------------------------------
+H.section("one pool, two kinds -- what one fill hides, the other restores")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG THAT MADE MULTI-SELECT LOOK DELETED, and it was a single missing
+-- line rather than a decision anybody took.
+--
+-- ui.FillGroupRow and ui.FillResultRow paint the SAME pooled row frames --
+-- "one pool, two kinds", as the dispatch in ui.UpdateBuyList says. A parent
+-- row is not tickable (you cannot buy "an item"), so the group fill HIDES the
+-- tick box. The listing fill set its checked state and its dimming but never
+-- showed it again.
+--
+-- Results have been grouped by default since v1.53.2, so every pooled row had
+-- its box hidden on the first paint and nothing ever put it back -- including
+-- on the listing rows underneath an expanded group. The feature was not moved
+-- one level down, which is what I told the owner first: it was unreachable.
+--
+-- CHECKED AS AN INVARIANT, not as one line. The dispatch promises that "each
+-- fill clears what the other uses", so every widget one fill hides must be
+-- shown by the other. Asserting only `row.check:Show()` would pass the day
+-- somebody adds a second widget to the group fill's hide list and forgets the
+-- same thing again.
+do
+    local src = Source()
+    local function bodyOf(head)
+        local at = string.find(src, head, 1, true)
+        if not at then return "" end
+        local stop = string.find(src, "\nend\n", at, true)
+        return string.sub(src, at, stop or -1)
+    end
+
+    local group   = bodyOf("function ui.FillGroupRow(")
+    local listing = bodyOf("function ui.FillResultRow(")
+    H.check("both fills were found",
+            group ~= "" and listing ~= ""
+            and string.len(group) < 6000 and string.len(listing) < 8000,
+            string.len(group) .. "/" .. string.len(listing))
+
+    -- NOT ON A BUY ROW AT ALL, so there is nothing to restore. The per-row
+    -- Buy/Bid buttons are built only on the `not selectable` branch -- the
+    -- Crafting tab's rows -- while the Buy tab is Blizzlike: select a row and
+    -- act from the bottom bar. Both fills guard them with `if row.buyBtn`,
+    -- so the group fill's Hide is defensive and never fires here.
+    --
+    -- Each exemption carries its reason, for the same cause modebits.py
+    -- spells out: "nothing to restore" is also what a forgotten widget looks
+    -- like, and an unexplained allowlist is where the next one hides.
+    local NOT_ON_BUY_ROWS = { buyBtn = true, bidBtn = true }
+
+    -- Every `row.<widget>:Hide()` in the group fill...
+    local hidden, missing = {}, {}
+    for w in string.gfind(group, "row%.(%w+):Hide%(%)") do
+        if not NOT_ON_BUY_ROWS[w] then table.insert(hidden, w) end
+    end
+    H.check("the group fill hides something", table.getn(hidden) > 0,
+            "the invariant below has nothing to check")
+
+    -- ...has a matching `row.<widget>:Show()` in the listing fill.
+    local i = 1
+    while i <= table.getn(hidden) do
+        local w = hidden[i]
+        if not string.find(listing, "row." .. w .. ":Show()", 1, true) then
+            table.insert(missing, w)
+        end
+        i = i + 1
+    end
+    H.eq("...and the listing fill shows every one of them back",
+         table.concat(missing, ", "), "",
+         "a pooled row keeps the other kind's hidden widget for the session")
+
+    -- The specific one, named, so a failure says what the player lost rather
+    -- than only which invariant broke.
+    H.check("the tick box is shown on a listing row",
+            string.find(listing, "row.check:Show()", 1, true) ~= nil,
+            "multi-select is unreachable: v1.53.2 through v1.53.18")
+    H.check("...and hidden on a parent",
+            string.find(group, "row.check:Hide()", 1, true) ~= nil,
+            "you cannot tick 'an item'")
+end
+
 os.exit(H.report("buychecks"))
