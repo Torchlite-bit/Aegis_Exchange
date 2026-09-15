@@ -65,6 +65,20 @@ local C = {
     -- Chart furniture: the horizontal rules behind the lines. Dim enough to
     -- sit behind data and bright enough to be read as a scale.
     grid    = { 0.34, 0.29, 0.19 },
+    -- The two row tints, and the ONLY two entries here carrying a fourth
+    -- value: these are painted with SetTexture(r, g, b, a) rather than read as
+    -- a text colour, and splitting the alpha into a file-scope local would
+    -- cost an upvalue in two of the largest functions in this file for no
+    -- gain (see the 32-upvalue note in CLAUDE.md).
+    --
+    -- rowSel is the SELECTED row, and it is the window's language for that
+    -- across every table. rowOpen is a different fact -- the grouped parent
+    -- whose listings are UNFOLDED underneath it -- so it is a different
+    -- colour: the accent purple the Advanced and Build buttons wear, dulled
+    -- to sit behind text. A row can be one or the other and never both, since
+    -- clicking a parent folds it rather than selecting it.
+    rowSel  = { 0.60, 0.45, 0.10, 0.34 },
+    rowOpen = { 0.38, 0.29, 0.58, 0.42 },
 }
 
 -- Last scan older than this is "stale" and rendered amber.
@@ -3397,7 +3411,10 @@ function ui.AddRowChrome(row, i, selectable)
         local sel = row:CreateTexture(nil, "BACKGROUND")
         sel:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
         sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
-        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+        -- The colour is set by whichever FILL paints this row, not here: one
+        -- pool serves two kinds and they tint it differently. This is only a
+        -- sensible starting value.
+        sel:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3], C.rowSel[4])
         sel:Hide()
         row.selTex = sel
     end
@@ -3687,6 +3704,25 @@ function ui.FillGroupRow(row, e)
         cells[i]:SetAlpha(1)
         i = i + 1
     end
+    -- AN UNFOLDED PARENT STAYS LIT, in the accent purple rather than the gold
+    -- a selected row wears -- because it is a different fact. Gold means "this
+    -- is the row you acted on"; purple means "this row's listings are the ones
+    -- underneath". Without it the parent you opened looks exactly like the
+    -- ones you did not, and the rows below have nothing saying whose they are.
+    --
+    -- THE COLOUR IS SET HERE, EVERY PAINT, not once at creation: this frame is
+    -- pooled and the listing fill tints the same texture gold. Setting it only
+    -- at creation is how a row that was an open parent would come back as a
+    -- gold-selected listing wearing purple, or the reverse.
+    if row.selTex then
+        if e.expanded then
+            row.selTex:SetTexture(C.rowOpen[1], C.rowOpen[2], C.rowOpen[3],
+                                  C.rowOpen[4])
+            row.selTex:Show()
+        else
+            row.selTex:Hide()
+        end
+    end
     if row.check then row.check:Hide() end
     if row.buyBtn then row.buyBtn:Hide() end
     if row.bidBtn then row.bidBtn:Hide() end
@@ -3876,7 +3912,13 @@ end
 function ui.FillResultRow(row, r)
     row.entry = r
     -- Selection tint (Buy tab rows only; the Crafting tab builds no selTex).
+    --
+    -- THE COLOUR IS RE-ASSERTED EVERY PAINT for the reason the group fill's is:
+    -- both kinds share one pooled texture and tint it differently, so a frame
+    -- that was last an unfolded parent still carries purple.
     if row.selTex then
+        row.selTex:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3],
+                              C.rowSel[4])
         if ui.IsBuySelected(r) then row.selTex:Show() else row.selTex:Hide() end
     end
     if row.icon then

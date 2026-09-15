@@ -2390,6 +2390,46 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The unfolded parent stays lit — v1.53.20
+
+**The last piece of the owner's spec for grouped results**, and it completes a
+picture the previous two releases each fixed a corner of: a parent with several
+auctions has no tick box, its unfolded listings do, hovering highlights the row
+under the cursor, and the open parent carries a dull purple tint.
+
+**A DIFFERENT FACT NEEDS A DIFFERENT COLOUR.** Gold is the window's language
+for "this is the row you acted on" across all six tables. "These listings are
+this row's" is not that, so reusing gold would have made the open parent and a
+selected listing indistinguishable while they sit two rows apart. The accent
+purple the Advanced and Build buttons wear is already the window's own, so it
+reads as belonging rather than as a new colour.
+
+**THE POOLED-TINT HAZARD IS v1.53.19's BUG WEARING A DIFFERENT HAT.** One row
+pool, two kinds, ONE shared `selTex` texture -- and now two colours on it.
+Setting the colour at creation and only toggling visibility per paint is
+exactly the mistake that hid the tick boxes for seventeen releases: whichever
+fill painted last owns the frame. So both fills set the colour on every paint,
+and the suite asserts that both do, not merely that each reads the right
+palette name.
+
+**A sabotage that was not caught, and what it taught.** Collapsing both palette
+entries to the same triple went unnoticed: the checks verified which NAME each
+fill reads, which stays true when both names hold the same colour. The
+distinction was then drawn in the source and nowhere on screen. The suite now
+parses both entries out of the real palette and asserts they differ -- and that
+the open one is actually purple (blue above red above green) rather than some
+other colour wearing the name. **Checking that the right constant is READ is
+not the same as checking what is IN it.**
+
+**The tints moved into the palette on the way.** `rowchrome_test` had asserted
+"exactly one selection tint literal in the file", which was the right rule when
+one call site wrote it; there are three now -- the row's creation and both
+fills -- so a literal was the copy that check exists to prevent. They are
+`C.rowSel` and `C.rowOpen`, the only two palette entries carrying a fourth
+value, because these are painted as `SetTexture(r, g, b, a)` rather than read
+as a text colour and splitting the alpha out would cost an upvalue in two of
+the largest functions in the file.
+
 ### Multi-select was unreachable for seventeen releases — v1.53.19
 
 **Reported three times before I found it, and my first two answers were

@@ -18,6 +18,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.20]
+
+### Added
+- **An unfolded item stays lit.** Open a grouped row and the parent now wears a
+  dull purple tint — the same accent the Advanced and Build buttons use — for
+  as long as its listings are showing underneath it.
+
+  It is deliberately **not** the gold a selected row wears, because it says a
+  different thing. Gold means *this is the row you acted on*; purple means
+  *these listings below are this row's*. Without it the item you opened looked
+  exactly like the ones you did not, and the rows underneath had nothing
+  saying whose they were.
+
+  Hovering still gives you the usual highlight on whichever row is under the
+  cursor, so you can read the open item, the row you are pointing at, and
+  anything you have ticked, all at once.
+
+
 ## [1.53.19]
 
 ### Fixed
@@ -5593,6 +5611,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

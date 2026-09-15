@@ -893,9 +893,9 @@ end""",
     # A selection tint that starts visible paints every row as chosen the
     # moment the table is built.
     ("chrome-tint-starts-visible", "ui/frame.lua",
-     """        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+     """        sel:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3], C.rowSel[4])
         sel:Hide()""",
-     """        sel:SetTexture(0.6, 0.45, 0.10, 0.34)""",
+     """        sel:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3], C.rowSel[4])""",
      "rowchrome"),
 
     # A second copy of the stripe grown on one tab -- the drift this function
@@ -5268,6 +5268,41 @@ end""",
     ("listing-row-never-shows-its-tick-box", "ui/frame.lua",
      "        row.check:Show()\n        row.check:SetChecked(",
      "        row.check:SetChecked(",
+     "buychecks"),
+
+    # ---- the unfolded parent's tint (v1.53.20) --------------------------
+
+    # THE POOLED-TINT HAZARD, which is the tick box's bug wearing a different
+    # hat: one pool, two kinds, one shared texture, two colours. Drop the
+    # listing fill's colour and a frame that was an unfolded parent comes back
+    # as a gold-selected listing still painted purple.
+    ("listing-row-keeps-the-parents-purple", "ui/frame.lua",
+     """        row.selTex:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3],
+                              C.rowSel[4])
+""",
+     "",
+     "buychecks"),
+
+    # ...and the same from the other side.
+    ("parent-row-keeps-the-listings-gold", "ui/frame.lua",
+     """            row.selTex:SetTexture(C.rowOpen[1], C.rowOpen[2], C.rowOpen[3],
+                                  C.rowOpen[4])
+""",
+     "",
+     "buychecks"),
+
+    # Every parent lit, not just the unfolded one -- which is the same as none
+    # lit, because the highlight stops distinguishing anything.
+    ("every-parent-is-lit", "ui/frame.lua",
+     "        if e.expanded then",
+     "        if true then",
+     "buychecks"),
+
+    # The two tints collapsed into one colour, so "selected" and "unfolded"
+    # become indistinguishable.
+    ("both-tints-the-same-colour", "ui/frame.lua",
+     "    rowOpen = { 0.38, 0.29, 0.58, 0.42 },",
+     "    rowOpen = { 0.60, 0.45, 0.10, 0.34 },",
      "buychecks"),
 
     # ...and the other direction: a parent row that IS tickable. You cannot buy

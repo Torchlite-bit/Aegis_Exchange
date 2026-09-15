@@ -55,7 +55,11 @@ C = {}
 ui.inputBoxes = {}
 do
     local src = Source()
-    for _, key in ipairs({ "input", "text" }) do
+    -- READ OUT OF THE REAL PALETTE, never copied: a copy keeps passing after
+    -- the real one moves. rowSel and rowOpen are the two row tints and carry
+    -- a fourth value, the alpha -- the loop below takes however many numbers
+    -- the entry has, so a triple and a quad both arrive intact.
+    for _, key in ipairs({ "input", "text", "rowSel", "rowOpen" }) do
         local _, _, body = string.find(src,
             "\n    " .. key .. "%s*=%s*{([^}]*)}")
         assert(body, "no C." .. key .. " in the palette")
@@ -244,8 +248,20 @@ H.eq("exactly one zebra stripe colour in the file",
      occurrences("SetTexture%(1, 1, 1, 0%.022%)"), 1)
 H.eq("exactly one separator colour",
      occurrences("SetTexture%(0%.28, 0%.24, 0%.15, 0%.55%)"), 1)
-H.eq("exactly one selection tint colour",
-     occurrences("SetTexture%(0%.6, 0%.45, 0%.10, 0%.34%)"), 1)
+-- THE SELECTION TINT MOVED INTO THE PALETTE, which is the same discipline
+-- one step further on: the zebra and separator colours above are each written
+-- once at their single call site, but this one is read by THREE -- the row's
+-- creation and both of the Buy table's fills, which tint the shared texture
+-- differently. Three reads of one literal is the copy this section exists to
+-- prevent, so it is a palette entry and the literal must be gone.
+H.eq("the selection tint is no longer a literal",
+     occurrences("SetTexture%(0%.6, 0%.45, 0%.10, 0%.34%)"), 0)
+H.check("...it is a palette colour",
+        string.find(src, "rowSel  = {", 1, true) ~= nil,
+        "C.rowSel is where the selected-row tint lives")
+H.check("...and the unfolded-parent tint is its own entry beside it",
+        string.find(src, "rowOpen = {", 1, true) ~= nil,
+        "two different facts must not share one colour")
 
 -- ...and every table actually asks for it. One definition plus FIVE call
 -- sites covering six tables: BuildResultRow serves both Buy and Crafting,

@@ -348,4 +348,97 @@ do
             "you cannot tick 'an item'")
 end
 
+-- ---------------------------------------------------------------------------
+H.section("the unfolded parent stays lit")
+-- ---------------------------------------------------------------------------
+
+-- WHAT THE PARENT ROW SAYS WHILE ITS LISTINGS ARE OPEN. Gold means "this is
+-- the row you acted on" and is the window's language for selection across
+-- every table; the accent purple means "this row's listings are the ones
+-- underneath". Two different facts, so two different colours -- and a row is
+-- one or the other, never both, because clicking a parent folds it rather
+-- than selecting it.
+do
+    local src = Source()
+    local function bodyOf(head)
+        local at = string.find(src, head, 1, true)
+        if not at then return "" end
+        local stop = string.find(src, "\nend\n", at, true)
+        return string.sub(src, at, stop or -1)
+    end
+    local function says(body, needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+
+    local group   = bodyOf("function ui.FillGroupRow(")
+    local listing = bodyOf("function ui.FillResultRow(")
+
+    -- BOTH COLOURS COME FROM THE PALETTE. tests/lint/palette.py already fails
+    -- an invented C.<name>, but it cannot say these two are READ -- a tint
+    -- left as a literal passes it and then disagrees with everything else the
+    -- window paints.
+    H.check("the open-parent tint is a palette colour", says(src, "C.rowOpen"))
+    H.check("the selected-row tint is too", says(src, "C.rowSel"))
+    H.check("...and neither is still a literal",
+            not says(src, "SetTexture(0.6, 0.45, 0.10, 0.34)"))
+
+    -- ONLY WHEN UNFOLDED. A parent that is merely on screen is not lit, or
+    -- the highlight stops meaning anything.
+    H.check("the parent is lit only while expanded",
+            says(group, "if e.expanded then"),
+            "every parent lit is the same as none lit")
+
+    -- THE POOLED-TINT HAZARD, which is the same shape as the tick box that
+    -- went missing for seventeen releases: one pool, two kinds, one shared
+    -- texture, two colours. Whichever fill paints the row LAST owns it, so
+    -- each must set the colour on every paint rather than trusting the value
+    -- it was created with. Otherwise a frame that was an unfolded parent
+    -- comes back as a gold-selected listing still wearing purple.
+    H.check("the group fill sets the tint colour itself",
+            says(group, "row.selTex:SetTexture("),
+            "a pooled row keeps the other kind's colour")
+    H.check("...and so does the listing fill",
+            says(listing, "row.selTex:SetTexture("),
+            "a pooled row keeps the other kind's colour")
+
+    -- ...and they must set DIFFERENT colours, or the distinction the two
+    -- tints exist to draw is not being drawn at all.
+    H.check("the group fill uses the open tint", says(group, "C.rowOpen"))
+    H.check("the listing fill uses the selected tint", says(listing, "C.rowSel"))
+    H.check("...and not each other's",
+            not says(group, "C.rowSel") and not says(listing, "C.rowOpen"))
+
+    -- ...AND THE TWO ENTRIES ARE ACTUALLY DIFFERENT COLOURS. Checking only
+    -- which NAME each fill reads passes happily when both names hold the same
+    -- triple -- the distinction is then drawn in the source and nowhere on
+    -- screen. The values are read out of the real palette rather than copied
+    -- here, so this keeps agreeing with it after somebody retunes the purple.
+    local function tint(key)
+        local _, _, body = string.find(src, "\n    " .. key .. "%s*=%s*{([^}]*)}")
+        H.check("the palette carries C." .. key, body ~= nil)
+        local out = {}
+        for num in string.gfind(body or "", "([%d%.%-]+)") do
+            table.insert(out, tonumber(num))
+        end
+        return table.concat(out, "/")
+    end
+    local selT, openT = tint("rowSel"), tint("rowOpen")
+    H.check("the two tints are different colours", selT ~= openT,
+            "both read " .. selT .. " -- selected and unfolded look identical")
+
+    -- The open tint is the accent PURPLE: blue above red above green, which is
+    -- what makes it read as the window's own accent rather than as a second
+    -- gold. A tint that fails this is some other colour wearing the name.
+    local b, g, r = nil, nil, nil
+    local n = 0
+    for num in string.gfind(openT, "([%d%.%-]+)") do
+        n = n + 1
+        if n == 1 then r = tonumber(num) end
+        if n == 2 then g = tonumber(num) end
+        if n == 3 then b = tonumber(num) end
+    end
+    H.check("...and the open one is purple", b and r and g and b > r and r > g,
+            openT)
+end
+
 os.exit(H.report("buychecks"))
