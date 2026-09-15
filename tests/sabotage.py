@@ -5194,6 +5194,48 @@ end""",
 end""",
      "purse"),
 
+    # ---- Display on Character (v1.53.24) --------------------------------
+
+    # THE CHECK BOX THAT SILENTLY DOES NOTHING. Assuming the API is there is
+    # the mistake CLAUDE.md's "when in doubt, assume it does not exist" rule is
+    # written against -- and a client with neither global would give no error,
+    # just a tick box nobody can tell is broken.
+    ("dressup-assumes-the-api", "ui/frame.lua",
+     """    if DressUpItemLink then return "link" end
+    if DressUpModel and DressUpModel.TryOn then return "model" end
+    return nil""",
+     '    return "link"',
+     "buygroup"),
+
+    # Having the frame taken for having the method. DressUpModel could be some
+    # other kind of frame entirely; only TryOn makes it usable.
+    ("dressup-model-without-tryon", "ui/frame.lua",
+     '    if DressUpModel and DressUpModel.TryOn then return "model" end',
+     '    if DressUpModel then return "model" end',
+     "buygroup"),
+
+    # AN UNCACHED ITEM REFUSED. util.ItemInfo answers nil for an item the
+    # client has not loaded, which is not the same as "this has no equip
+    # slot" -- refusing it makes the box look broken on exactly the items you
+    # have not looked at yet.
+    ("dressup-refuses-uncached-items", "ui/frame.lua",
+     "    if not info then return true end\n    local slot = info.equipLoc",
+     "    if not info then return false end\n    local slot = info.equipLoc",
+     "buygroup"),
+
+    # ...and the other way: a trade good handed to the dressing room, which
+    # opens an empty window over the world and reads as the feature misfiring.
+    ("dressup-tries-on-a-trade-good", "ui/frame.lua",
+     '    if not slot or slot == "" then return false end',
+     '    if not slot or slot == "" then return true end',
+     "buygroup"),
+
+    # A nil link passed straight through to the client.
+    ("dressup-passes-a-nil-link", "ui/frame.lua",
+     '    if not link or link == "" then return false end\n    if not ui.CanDressUp',
+     '    if false then return false end\n    if not ui.CanDressUp',
+     "buygroup"),
+
     # ---- the ghost after the caret (v1.53.23) ---------------------------
 
     # THE GHOST SHOWING SOMETHING OTHER THAN WHAT TAB WOULD INSERT. The grey

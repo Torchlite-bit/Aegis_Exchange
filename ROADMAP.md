@@ -2390,6 +2390,43 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Display on Character — v1.53.24
+
+**§3, and the owner's third answer to it was the right one.** I had offered
+ctrl-click or shift-click-on-results; the answer was neither -- a TICK BOX,
+the way the stock auction house does it, with a screenshot of exactly that.
+That settled the API question I had flagged as needing verification: 1.12's own
+AH carries this control, so the machinery is in FrameXML.
+
+**It settled that the feature EXISTS, not what it is called.** CLAUDE.md's rule
+is that an API is absent until shown otherwise, and a screenshot of a working
+window is not the name of a global. Both known shapes are probed --
+`DressUpItemLink`, then `DressUpModel:TryOn` -- and `/aex diag` reports which
+the client has, so a box that cannot work says so rather than doing nothing
+quietly. Having the FRAME is not having the METHOD either: `DressUpModel`
+could be some other frame entirely, and only `TryOn` makes it usable.
+
+**"NO INFO" AND "NOT WEARABLE" ARE DIFFERENT ANSWERS**, and collapsing them is
+the trap here. `util.ItemInfo` returns nil for an item the client has not
+cached -- refusing those would leave the box looking broken on exactly the
+items you have not looked at yet, which is most of a fresh search. Nil is
+attempted; a KNOWN item with no equip slot is refused. The dressing room is the
+backstop either way: handed something unwearable it shows nothing.
+
+**Read off the SLOT, not the type.** `INVTYPE_` constants are the same on every
+client; "Armor" and "Weapon" are localised. util.ItemInfo already fills a
+missing slot in from the type where it can, so reading the slot gets the
+stand-in for free and costs nothing on a non-enUS client.
+
+**The box persists, unlike the stock one.** Everything else on that strip is a
+search TERM and resets with the search; this is a preference about what
+clicking does. It is deliberately left out of `ui.BuyTermFrom`/`ApplyTerm` for
+that reason -- loading a saved search must not toggle it underneath you.
+
+**modebits went 46 -> 48 and passed on its own.** Two new Buy-tab widgets, both
+accounted for by the view lists without being told -- which is the check doing
+exactly what it was built for after the column ticks once went unhidden.
+
 ### It was never the text — v1.53.23
 
 **Five attempts at "the undercut box is too dark", and the first four all

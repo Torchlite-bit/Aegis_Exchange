@@ -54,9 +54,15 @@ local function extract(path, signature)
 end
 
 ui = {}
+-- ui/frame.lua takes `local util = A.util` at file scope, so a function
+-- extracted out of it reads `util` as a global once loaded on its own.
+util = A.util
 for _, sig in ipairs({
     "function ui.BuyTreeRows(",
     "function ui.CompletionSuffix(",
+    "function ui.DressUpMethod(",
+    "function ui.CanDressUp(",
+    "function ui.TryDressUp(",
     "function ui.ToggleBuyGroup(",
     "function ui.BuyGrouped(",
 }) do
@@ -473,6 +479,98 @@ do
 
     -- CASE-INSENSITIVE, like the list it must agree with.
     H.eq("matching ignores case", buy.FirstCompletion("LINEN"), list[1])
+end
+
+-- ---------------------------------------------------------------------------
+H.section("Display on Character")
+-- ---------------------------------------------------------------------------
+
+-- WHICH API THE CLIENT HAS, if either. 1.12's own auction house carries this
+-- box, so the machinery exists -- but which global holds it is not something
+-- to take from a screenshot, and CLAUDE.md's rule is that an API is absent
+-- until shown otherwise. Both known shapes are probed and /aex diag reports
+-- the answer, so a client with neither says so instead of leaving a tick box
+-- that silently does nothing.
+do
+    local realLink, realModel = DressUpItemLink, DressUpModel
+
+    DressUpItemLink, DressUpModel = function() end, nil
+    H.eq("the link API is preferred when present", ui.DressUpMethod(), "link")
+
+    DressUpItemLink = nil
+    DressUpModel = { TryOn = function() end }
+    H.eq("...the model is the fallback", ui.DressUpMethod(), "model")
+
+    -- HAVING THE FRAME IS NOT HAVING THE METHOD. DressUpModel could exist as
+    -- some other kind of frame entirely; only TryOn makes it usable.
+    DressUpModel = {}
+    H.isNil("a model with no TryOn is no method", ui.DressUpMethod())
+
+    DressUpModel = nil
+    H.isNil("a client with neither says so", ui.DressUpMethod())
+
+    DressUpItemLink, DressUpModel = realLink, realModel
+end
+
+-- ---- what can actually be shown ----------------------------------------
+
+-- A non-empty equip slot means the item goes on the character somewhere.
+H.check("a weapon can be shown",
+        ui.CanDressUp({ equipLoc = "INVTYPE_2HWEAPON" }))
+H.check("...and a chest piece", ui.CanDressUp({ equipLoc = "INVTYPE_CHEST" }))
+-- util.ItemInfo substitutes these when the client gives no slot but does give
+-- a type -- a real state on Turtle with ClassicAPI, where the slot is absent
+-- rather than moved.
+H.check("...and the stand-in slots util.ItemInfo fills in",
+        ui.CanDressUp({ equipLoc = "AEGIS_ANY_WEAPON" })
+        and ui.CanDressUp({ equipLoc = "AEGIS_ANY_ARMOR" }))
+
+-- NOTHING TO PUT ON A MODEL. Opening an empty dressing room over a stack of
+-- cloth reads as the feature misfiring rather than as the item being
+-- unwearable.
+H.check("a trade good cannot", not ui.CanDressUp({ equipLoc = "" }))
+H.check("...nor one with no slot at all", not ui.CanDressUp({ type = "Trade Goods" }))
+
+-- NO INFO IS A YES, and this is the distinction that matters: util.ItemInfo
+-- returns nil for an item the client has not cached, which is a different
+-- statement from "this item has no equip slot". Refusing what we cannot
+-- identify would make the box look broken on exactly the items you have not
+-- looked at yet -- and the dressing room is the backstop, since handed
+-- something unwearable it shows nothing anyway.
+H.check("an item the client has not cached is attempted",
+        ui.CanDressUp(nil),
+        "the box would look broken on every uncached item")
+
+-- ---- and the attempt ----------------------------------------------------
+
+do
+    local realLink = DressUpItemLink
+    local asked
+    DressUpItemLink = function(link) asked = link end
+
+    W.AddItem(7100, { name = "Test Sword", quality = 2, stackCount = 1,
+                      type = "Weapon", subType = "Sword",
+                      equipLoc = "INVTYPE_WEAPONMAINHAND" })
+    local link = W.items[7100].link
+
+    asked = nil
+    H.check("a wearable item is handed to the client", ui.TryDressUp(link))
+    H.eq("...as the link it was given", asked, link)
+
+    -- No link, nothing asked. A row whose auction index the client no longer
+    -- holds gives nil here, and that has to be a quiet no rather than a call
+    -- with nil in it.
+    asked = nil
+    H.check("no link, no attempt", not ui.TryDressUp(nil))
+    H.isNil("...and nothing was asked", asked)
+    H.check("an empty link is the same", not ui.TryDressUp(""))
+
+    -- A client with no API at all refuses rather than erroring.
+    DressUpItemLink = nil
+    local realModel = DressUpModel
+    DressUpModel = nil
+    H.check("no API, no attempt", not ui.TryDressUp(link))
+    DressUpItemLink, DressUpModel = realLink, realModel
 end
 
 os.exit(H.report("buygroup"))

@@ -18,6 +18,29 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.24]
+
+### Added
+- **Display on Character.** A tick box on the Buy tab, beside *Usable items*.
+  With it on, clicking a result tries the item on in the dressing room — the
+  same thing the stock auction house's box of that name does.
+
+  - **Clicking a grouped item works too**, not just an unfolded listing. The
+    parent stands for the item and carries its first auction, so "click it to
+    see it" is true of both views.
+  - **Only things that can be worn.** A stack of cloth leaves the dressing
+    room shut rather than opening an empty one. An item your client hasn't
+    cached yet is still attempted — "we don't know what this is" and "this
+    can't be worn" are different, and refusing the first would make the box
+    look broken on everything you haven't looked at.
+  - **It stays ticked between sessions.** Everything else on that strip is part
+    of the search and resets with it; this is a preference about what clicking
+    does, so loading a saved search won't turn it on or off underneath you.
+
+  `/aex diag` reports whether your client provides the dressing-room API at
+  all, so a box that can't work says so instead of doing nothing quietly.
+
+
 ## [1.53.23]
 
 ### Fixed
@@ -5691,6 +5714,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

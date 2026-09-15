@@ -3934,6 +3934,87 @@ end
 -- Buttons on 1.12 report which mouse button through the `arg1` GLOBAL inside
 -- OnClick -- never a handler argument (HARD RULE 6) -- and a row has to be
 -- registered for right-clicks or the script never runs for one.
+-- ---------------------------------------------------------------------------
+-- "Display on Character" -- try a result on, the way the stock AH does
+-- ---------------------------------------------------------------------------
+
+-- WHICH WAY this client can show an item on the character, if any.
+--
+-- 1.12's own auction house has this box, so the machinery is there -- but
+-- WHICH global carries it is not something to assume from a screenshot.
+-- CLAUDE.md's rule stands: when in doubt, assume the API does not exist. Both
+-- known shapes are probed, and /aex diag reports the answer, so a client that
+-- provides neither says so rather than leaving a check box that silently does
+-- nothing.
+function ui.DressUpMethod()
+    if DressUpItemLink then return "link" end
+    if DressUpModel and DressUpModel.TryOn then return "model" end
+    return nil
+end
+
+-- Can the dressing room show THIS item?
+--
+-- A non-empty equip slot means it goes on the character somewhere. Everything
+-- else has nothing to put on a model, and opening an empty dressing room over
+-- a stack of cloth is worse than doing nothing -- it reads as the feature
+-- misfiring rather than as the item being unwearable.
+--
+-- NO INFO IS A YES, and that distinction is the point: util.ItemInfo returns
+-- nil for an item the client has not cached, which is a different statement
+-- from "this item has no equip slot". Refusing what we cannot identify would
+-- make the box look broken on exactly the items you have not looked at yet.
+-- The dressing room is the backstop -- handed something unwearable it shows
+-- nothing, which is the same outcome by a cheaper route.
+--
+-- THE SLOT, NOT THE TYPE, because INVTYPE_ constants are not localised and
+-- "Armor"/"Weapon" are. util.ItemInfo already fills a missing slot in from
+-- the type where it can (see its TYPE_SLOT stand-ins), so this reads the one
+-- field that means the same thing on every client.
+function ui.CanDressUp(info)
+    if not info then return true end
+    local slot = info.equipLoc
+    if not slot or slot == "" then return false end
+    return true
+end
+
+-- Try it on. Returns whether we got as far as asking the client.
+--
+-- THAT IS NOT THE SAME AS "IT WORKED", and the comment says so because this
+-- addon has already shipped a pcall whose success meant nothing
+-- (SetGradientAlpha, v1.53.11). 1.12 gives no answer back here, so what can
+-- honestly be detected is the ABSENCE of the API, not its refusal.
+function ui.TryDressUp(link)
+    if not link or link == "" then return false end
+    if not ui.CanDressUp(util.ItemInfo(link)) then return false end
+    local how = ui.DressUpMethod()
+    if how == "link" then
+        return pcall(function() DressUpItemLink(link) end) and true or false
+    end
+    if how == "model" then
+        return pcall(function()
+            if ShowUIPanel and DressUpFrame then ShowUIPanel(DressUpFrame) end
+            if DressUpModel.SetUnit then DressUpModel:SetUnit("player") end
+            DressUpModel:TryOn(link)
+        end) and true or false
+    end
+    return false
+end
+
+-- The row that was clicked, tried on -- if the box is ticked.
+--
+-- A PARENT COUNTS. It stands for an item and carries that item's first
+-- listing as its entry, so "click an item to see it" is true of the grouped
+-- view as well as the unfolded one. Folding is what the click DOES; this is
+-- what it additionally shows.
+function ui.DressUpRow(e)
+    if not e then return false end
+    if not (ui.buyDressUp and ui.buyDressUp:GetChecked()) then return false end
+    local entry = (e.kind == "group") and e.entry or e
+    local idx = entry and entry.index
+    if not idx or not GetAuctionItemLink then return false end
+    return ui.TryDressUp(GetAuctionItemLink("list", idx))
+end
+
 function ui.OnBuyRowClick(row)
     local e = row and row.entry
     if not e then return end
@@ -3946,6 +4027,7 @@ function ui.OnBuyRowClick(row)
             ui.ExactSearchFor(e.name)
         else
             ui.ToggleBuyRow(row)
+            ui.DressUpRow(e)
         end
         return
     end
@@ -3956,6 +4038,7 @@ function ui.OnBuyRowClick(row)
         ui.ExactSearchFor(e.name)
     elseif row.aegisSelectable then
         ui.SelectBuyRow(e)
+        ui.DressUpRow(e)
     end
 end
 
@@ -5833,6 +5916,35 @@ function ui.BuildBuyTab()
     usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
     ui.buyUsableLbl = usableLbl
 
+    -- "Display on Character", the stock auction house's own control and in as
+    -- close to its own words as the strip has room for.
+    --
+    -- NOT WHERE THE STOCK UI PUTS IT: that spot is the strip's outer right,
+    -- and Advanced has it (see below). Beside Usable items is where the other
+    -- tick box already lives, so the two read as a pair of toggles rather than
+    -- as one control and a stray.
+    --
+    -- PERSISTED, unlike the stock one. Everything else on this strip is a
+    -- search term and resets with the search; this is a preference about what
+    -- clicking does, and re-ticking it every session is the kind of small
+    -- friction that makes a feature go unused.
+    ui.buyDressUp = ui.MakeCheckBox(panel, 16)
+    ui.buyDressUp:SetPoint("LEFT", usableLbl, "RIGHT", 14, 0)
+    ui.buyDressUp:SetScript("OnClick", function()
+        A.db.SetSetting("dressUpOnClick",
+            ui.buyDressUp:GetChecked() and true or false)
+    end)
+    local dressLbl = panel:CreateFontString(nil, "OVERLAY",
+                                            "GameFontHighlightSmall")
+    dressLbl:SetPoint("LEFT", ui.buyDressUp, "RIGHT", 2, 0)
+    dressLbl:SetText("Display on Character")
+    dressLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.buyDressUpLbl = dressLbl
+    -- Restored from the setting, once, at build. The DB is live by now: the
+    -- Buy tab is built on first use and ADDON_LOADED has long since run
+    -- (HARD RULE 13), which is why this can read a setting at all here.
+    ui.buyDressUp:SetChecked(A.db.Setting("dressUpOnClick") and 1 or nil)
+
     -- Right pair. Advanced is the outermost, so it lands where the stock UI
     -- put "Display on Character".
     local advBtn = ui.MakeButton(panel, "accent",
@@ -7565,7 +7677,8 @@ local function BitsFor(mode)
     return { ui.buyNameLbl, ui.buyBox, ui.buyLvlLbl, ui.buyMinLevel,
              ui.buyLvlDash, ui.buyMaxLevel, ui.buyQualLbl,
              ui.buyQuality and ui.buyQuality.button, ui.buyUsable,
-             ui.buyUsableLbl, ui.buyAdvBtn, ui.buyBrowseHdr,
+             ui.buyUsableLbl, ui.buyDressUp, ui.buyDressUpLbl,
+             ui.buyAdvBtn, ui.buyBrowseHdr,
              ui.buyCatWell, ui.buyCatScroll, ui.buyStripRule }
 end
 
@@ -7684,6 +7797,10 @@ function ui.DefaultSetTerm(t)
     end
     if ui.buyQuality then ui.buyQuality:SetValue(t.quality, true) end
     if ui.buyUsable then ui.buyUsable:SetChecked(t.usable and 1 or nil) end
+    -- ...but NOT the dress-up box. It is a preference, not part of the term,
+    -- so loading a saved search must not turn it on or off underneath you --
+    -- see where it is built. It is restored once, from the setting.
+
     ui.buyCatClass, ui.buyCatSubclass, ui.buyCatSlot = t.class, t.subclass, t.slot
     ui.buyCatSel = ui.CatKey(t.class and {
         kind = t.slot and "slot" or (t.subclass and "sub" or "class"),
@@ -16880,6 +16997,12 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
         ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
+        -- WHICH dressing-room API this client has, if either. A check box
+        -- that silently does nothing is the failure this line exists to make
+        -- reportable in one word.
+        ChatMsg("  dress-up=" .. (ui.DressUpMethod() or "NONE (no API)")
+            .. "  on click=" .. tostring(A.db.Setting("dressUpOnClick")
+                                         and true or false))
 
         -- EVERY EDIT BOX, with what it was ASKED to be and what it actually
         -- IS. See ui.InputDiagVerdict for why the three causes have to be
