@@ -2390,6 +2390,60 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The lone auction, the dead key, and a readout before a fifth attempt — v1.53.21
+
+**A group of one is now the auction it stands for.** Every item in a grouped
+search got a parent row, including items with exactly one auction -- and a
+parent is not tickable while a group of one never opens, so a lone auction
+could not be selected for a multi-buyout at all. The row also said LESS than
+the listing it wrapped: "1 auction, from 4g" in place of a seller, a stack, a
+time left and a price. Listing it directly answers both, and costs nothing --
+it is the same row the group would have revealed, one level up.
+
+**Tab stops being a dead key.** The two search boxes are the documented
+exception to Tab traversal: Tab completes item names there, which is older and
+more valuable. But on a prefix matching nothing the key did nothing at all,
+which from the player's side is indistinguishable from the addon having stopped
+responding. `ui.BuyAutocomplete` now REPORTS whether it completed, and the
+handler falls through to traversal only on a false -- so nothing anybody
+already does changes, and the fall-through is reachable only on a prefix Aegis
+has never seen.
+
+**AND A READOUT INSTEAD OF A FIFTH ATTEMPT.** The pfUI input colour has been
+"fixed" four times, and all four were the same move: assert our colour harder
+and later. Three different faults produce an identical screenshot --
+
+  1. the colour did not STICK -- something repainted it after us;
+  2. it stuck and the box is dark BEHIND it -- a contrast problem, nothing to
+     do with the text;
+  3. the box was never ours -- built after `skin.Apply`, so never skinned and
+     never registered
+
+-- and they need three different fixes. Four attempts all addressed (1),
+because that is the one that occurs to you when the report says "the text is
+too dark". `/aex diag` now prints every registered box with what it was asked
+to be, what it has, what is behind it, and a verdict naming which of the three
+it is.
+
+**This is ROADMAP's own deposit lesson, applied before the fact rather than
+after.** Three releases were spent reasoning about `TURTLE_DEPOSIT_FACTOR` from
+the outside and one diag line settled it -- and settled a DIFFERENT question
+than the one being argued about. Nothing here is a fix yet; it is the
+measurement that decides which fix.
+
+**The verdict's ORDER is the load-bearing part**, and it is where four attempts
+went wrong: an unregistered box is reported as such and nothing else, because
+its colours are whatever the template left and naming them "lost" sends the
+next fix in the wrong direction. Contrast is checked last, because it only
+means anything once the colour IS what we asked for.
+
+**A sabotage retired for planting a variation rather than a bug.** Swapping
+`return false` for a bare `return` on the no-candidates path: both are falsy,
+the one reader treats them identically, so there is nothing there to catch. Same
+reasoning that retired the LCG-overflow sabotage. The half that does matter --
+dropping the success report, which makes Tab traverse even when it completed --
+is kept and caught.
+
 ### The unfolded parent stays lit — v1.53.20
 
 **The last piece of the owner's spec for grouped results**, and it completes a

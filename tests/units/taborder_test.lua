@@ -45,10 +45,17 @@ local function extract(signature)
 end
 
 ui = {}
-do
-    local fn, err = loadstring(extract("function ui.NextInputIn("),
-                               "NextInputIn")
-    if not fn then error("will not compile: " .. tostring(err)) end
+-- The autocomplete half needs the addon's namespace, because ui.BuyAutocomplete
+-- asks A.buy for its candidates. Only the one function is stubbed; the rest of
+-- the engine is not involved in deciding where Tab goes.
+A = { buy = {} }
+for _, sig in ipairs({
+    "function ui.NextInputIn(",
+    "function ui.BuyAutocomplete(",
+    "function ui.SearchTabChain(",
+}) do
+    local fn, err = loadstring(extract(sig), sig)
+    if not fn then error(sig .. " will not compile: " .. tostring(err)) end
     fn()
 end
 
@@ -151,9 +158,115 @@ for i = 1, n do
 end
 H.isNil("no search box was added to a traversal chain", trespass)
 
--- And the binding they keep instead.
-local _, autocompletes = string.gsub(src,
-    'SetScript%("OnTabPressed", function%(%) ui%.BuyAutocomplete%(%) end%)', "")
-H.eq("both search boxes still autocomplete on Tab", autocompletes, 2)
+-- And the binding they keep instead. BOTH go through ui.SearchBoxTab, which
+-- tries the completion FIRST and only falls through to traversal when the
+-- prefix matches nothing -- so nothing anybody already does changes, and the
+-- key stops being dead on a prefix Aegis has never seen.
+local _, bound = string.gsub(src,
+    'SetScript%("OnTabPressed",\s*\n?%s*function%(%) ui%.SearchBoxTab', "")
+H.eq("both search boxes go through the search-box Tab handler", bound, 2)
+
+-- COMPLETING STILL WINS. If the handler ever traverses before completing, the
+-- exception above is over -- Tab would step off the box the moment you had
+-- typed a prefix, which is the behaviour the two boxes exist to avoid.
+local at = string.find(src, "function ui.SearchBoxTab(", 1, true)
+H.check("the handler exists", at ~= nil)
+local body = string.sub(src, at or 1,
+                        string.find(src, "\nend\n", at or 1, true))
+H.check("it tries the completion first",
+        string.find(body, "if ui.BuyAutocomplete() then return end", 1, true)
+            ~= nil,
+        "traversing before completing ends the autocomplete exception")
+H.check("...and only then traverses",
+        string.find(body, "ui.NextInputIn(", 1, true) ~= nil)
+
+-- ---------------------------------------------------------------------------
+H.section("Tab on a search box: complete, or move on")
+-- ---------------------------------------------------------------------------
+
+-- THE DOCUMENTED EXCEPTION, with its dead case fixed. Tab completes item names
+-- on the two search boxes rather than stepping to the next field. But when the
+-- prefix matched NOTHING the key did nothing at all -- a dead key rather than
+-- a reserved one, and from the player's side indistinguishable from the addon
+-- having stopped responding.
+--
+-- ui.BuyAutocomplete now REPORTS whether it completed anything, which is the
+-- whole mechanism: the handler falls through only on a false.
+do
+    local boxText, cursor
+    local box = {
+        GetText = function() return boxText end,
+        SetText = function(_, t) boxText = t end,
+        SetCursorPosition = function(_, n) cursor = n end,
+    }
+    ui.ActiveSearchBox = function() return box end
+
+    -- FAITHFUL TO THE REAL ONE, including its first line: an empty prefix
+    -- returns nothing. The first version of this stub matched everything on
+    -- "", which is a mock being MORE capable than the function it stands for
+    -- -- the failure mode this repo has already been bitten by, when the
+    -- harness resolved bare item ids that no real client accepts.
+    local pool = {}
+    A.buy.AutocompleteCandidates = function(prefix)
+        local out = {}
+        if not prefix or prefix == "" then return out end
+        for i = 1, table.getn(pool) do
+            if string.find(string.lower(pool[i]), string.lower(prefix or ""),
+                           1, true) == 1 then
+                table.insert(out, pool[i])
+            end
+        end
+        return out
+    end
+
+    -- ---- something to complete ------------------------------------------
+    pool = { "Linen Cloth", "Linen Bandage" }
+    ui.buyAC, boxText = nil, "linen"
+    H.check("it completes when there are candidates", ui.BuyAutocomplete())
+    H.eq("...and the box now holds the first", boxText, "Linen Cloth")
+    H.eq("...with the cursor at the end", cursor, string.len("Linen Cloth"))
+
+    -- Pressing again cycles rather than re-completing the same one.
+    H.check("a second press still reports a completion", ui.BuyAutocomplete())
+    H.eq("...and moves to the next candidate", boxText, "Linen Bandage")
+
+    -- ---- nothing to complete --------------------------------------------
+    -- THE CASE THE FALL-THROUGH EXISTS FOR. Reported as false, and the text is
+    -- left exactly as typed -- a Tab that silently rewrote what you had typed
+    -- to something that did not match would be worse than doing nothing.
+    ui.buyAC, boxText = nil, "zzzqqq"
+    H.check("it reports nothing to complete", not ui.BuyAutocomplete(),
+            "Tab would stay dead on a prefix nobody has seen")
+    H.eq("...and leaves the text alone", boxText, "zzzqqq")
+
+    -- An empty box has no prefix, so there is nothing to complete either.
+    ui.buyAC, boxText = nil, ""
+    H.check("an empty box completes nothing", not ui.BuyAutocomplete())
+end
+
+-- ---- where it falls through TO ------------------------------------------
+
+-- The DEFAULT view's Name box leads into the level range, which is how the
+-- strip reads left to right. The ADVANCED query box has no strip beside it --
+-- the Builder owns its own chain -- so there is nowhere to go, and staying put
+-- is the honest answer rather than jumping somewhere unrelated.
+do
+    ui.buyBox = { name = "buyBox" }
+    ui.buyMinLevel = { name = "min" }
+    ui.buyMaxLevel = { name = "max" }
+    ui.buyQueryBox = { name = "query" }
+
+    local chain = ui.SearchTabChain(ui.buyBox)
+    H.check("the Name box has a chain", chain ~= nil)
+    H.eq("...starting with itself", chain and chain[1], ui.buyBox)
+    H.eq("...then the level range", chain and chain[2], ui.buyMinLevel)
+    H.eq("...and its other half", chain and chain[3], ui.buyMaxLevel)
+
+    H.isNil("the Advanced query box has nowhere to go",
+            ui.SearchTabChain(ui.buyQueryBox))
+    H.isNil("...and neither does a box we do not know",
+            ui.SearchTabChain({ name = "stranger" }))
+    H.isNil("...nor no box at all", ui.SearchTabChain(nil))
+end
 
 os.exit(H.report("taborder"))

@@ -3864,8 +3864,8 @@ end
     # The expansion set keyed by INDEX. A re-sort renumbers every row, and this
     # then expands whichever item slid into the slot -- silently.
     ("buy-open-keyed-by-index", "ui/frame.lua",
-     "        local isOpen = (many and open[g.key]) and true or nil",
-     "        local isOpen = (many and open[i]) and true or nil",
+     "            local isOpen = open[g.key] and true or nil",
+     "            local isOpen = open[i] and true or nil",
      "buygroup"),
 
     # A group of ONE offering a triangle, which reveals a copy of its own
@@ -5193,6 +5193,107 @@ end""",
      """    return nil
 end""",
      "purse"),
+
+    # ---- a group of one is its own listing (v1.53.21) -------------------
+
+    # BACK TO A PARENT STANDING FOR ONE AUCTION, which could do nothing anybody
+    # wanted: not tickable, and a group of one never expands -- so a lone
+    # auction could not be selected for a multi-buyout at all.
+    ("lone-auction-is-a-parent-again", "ui/frame.lua",
+     "        if many then",
+     "        if true then",
+     "buygroup"),
+
+    # ...and the copy. The tree must LIST the engine's row, not clone it: the
+    # paint reads price, seller, stack and time left straight off it, and a
+    # copy is a second table to keep in step.
+    ("lone-auction-row-is-copied", "ui/frame.lua",
+     """            local r = g.rows[1]
+            if r then
+                r.kind = "listing"
+                table.insert(rows, r)
+            end""",
+     """            local r = g.rows[1]
+            if r then
+                table.insert(rows, { kind = "listing", name = r.name,
+                    itemId = r.itemId, buyout = r.buyout })
+            end""",
+     "buygroup"),
+
+    # ---- Tab falls through (v1.53.21) -----------------------------------
+
+    # NOT SABOTAGED: swapping `return false` for a bare `return` on the
+    # no-candidates path. Both are falsy in Lua and the one reader treats them
+    # identically (`if ui.BuyAutocomplete() then`), so it is a change with no
+    # behavioural difference -- an edit no check could catch, because there is
+    # nothing there to catch. Same reasoning that retired the LCG-overflow
+    # sabotage: a sabotage has to plant a BUG, not a variation.
+    #
+    # The half that does matter is below -- dropping the success report, which
+    # makes Tab traverse even when it just completed something.
+    ("autocomplete-never-reports-success", "ui/frame.lua",
+     """    if acb.SetCursorPosition then
+        acb:SetCursorPosition(string.len(pick))
+    end
+    return true""",
+     """    if acb.SetCursorPosition then
+        acb:SetCursorPosition(string.len(pick))
+    end""",
+     "taborder"),
+
+    # TRAVERSING BEFORE COMPLETING ends the autocomplete exception: Tab would
+    # step off the box the moment you had typed a prefix, which is the whole
+    # behaviour the two search boxes exist to avoid.
+    ("search-tab-traverses-first", "ui/frame.lua",
+     "    if ui.BuyAutocomplete() then return end",
+     "    if false then return end",
+     "taborder"),
+
+    # The Name box's chain dropped, so the key stays dead on a prefix that
+    # matches nothing -- the fault this change exists to fix.
+    ("search-tab-has-no-chain", "ui/frame.lua",
+     "        return { ui.buyBox, ui.buyMinLevel, ui.buyMaxLevel }",
+     "        return nil",
+     "taborder"),
+
+    # ---- the input-colour diagnostic (v1.53.21) -------------------------
+
+    # A flat average instead of perceived brightness. Pure blue and pure green
+    # are nothing alike to the eye, and a flat average calls them equal -- so
+    # the contrast verdict stops matching what anybody can actually read.
+    ("luminance-is-a-flat-average", "ui/frame.lua",
+     "    return 0.299 * r + 0.587 * g + 0.114 * b",
+     "    return (r + g + b) / 3",
+     "rowchrome"),
+
+    # The gap signed rather than a distance, so dark-on-light reads as a
+    # negative and passes every threshold below it.
+    ("contrast-gap-is-signed", "ui/frame.lua",
+     "    if d < 0 then d = -d end",
+     "    if false then d = -d end",
+     "rowchrome"),
+
+    # An unreadable backdrop reported as a gap of zero, which turns "we cannot
+    # see the background" into "the background is a contrast failure".
+    ("unreadable-backdrop-reads-as-zero", "ui/frame.lua",
+     "    if not lf or not lb then return nil end",
+     "    if not lf or not lb then return 0 end",
+     "rowchrome"),
+
+    # THE ORDERING THAT GOT THIS TO FOUR ATTEMPTS: an unregistered box
+    # reported as a lost colour. Its colours are whatever the template left,
+    # so naming them sends the next fix in the wrong direction.
+    ("unregistered-box-reads-as-lost-colour", "ui/frame.lua",
+     '    if not registered then return "NOT OURS (never registered)" end',
+     '    if false then return "NOT OURS (never registered)" end',
+     "rowchrome"),
+
+    # Contrast checked before the colour, so a box whose colour was repainted
+    # is diagnosed as a backdrop problem.
+    ("verdict-checks-contrast-first", "ui/frame.lua",
+     '    if d and d > 0.02 then return "COLOUR LOST (something repainted it)" end',
+     '    if false then return "COLOUR LOST (something repainted it)" end',
+     "rowchrome"),
 
     # ---- the Clear button (v1.53.17) -------------------------------------
 

@@ -725,6 +725,75 @@ ui.inputBoxes = {}
 -- Bounded by the number of edit boxes in the window -- a handful -- and it is
 -- four calls each, so this is cheap enough to run on a timer tick without
 -- thinking about it.
+-- ---------------------------------------------------------------------------
+-- Why is that box unreadable? -- the /aex diag readout
+--
+-- FOUR ATTEMPTS HAVE BEEN MADE AT THIS and it keeps coming back, because all
+-- four were the same move: assert our colour harder and later. The three
+-- things that produce an unreadable box are indistinguishable from a
+-- screenshot, and nobody has ever measured which one it is --
+--
+--   1. the colour did not STICK      -- something repainted it after us
+--   2. the colour stuck and the box is DARK BEHIND IT -- a contrast problem,
+--      and nothing to do with the text at all
+--   3. the box was never ours        -- built after skin.Apply ran, so it was
+--      never skinned and never registered
+--
+-- ...and they need three different fixes. This is the readout ROADMAP.md's
+-- deposit note says to build first: one /aex diag line settled that in a
+-- sentence, after three releases of reasoning from the outside.
+-- ---------------------------------------------------------------------------
+
+-- Perceived brightness, Rec. 601. NOT a colorimetric contrast ratio: this only
+-- has to tell "white on near-black" from "tan on tan", which is the whole
+-- question being asked.
+function ui.Luminance(c)
+    if not c then return nil end
+    local r, g, b = c[1] or 0, c[2] or 0, c[3] or 0
+    return 0.299 * r + 0.587 * g + 0.114 * b
+end
+
+-- How far apart the text and the thing behind it are. nil when the backdrop
+-- could not be read, which is an ANSWER -- "we cannot see the background" is
+-- different from "the background is fine".
+function ui.ContrastGap(fg, bg)
+    local lf, lb = ui.Luminance(fg), ui.Luminance(bg)
+    if not lf or not lb then return nil end
+    local d = lf - lb
+    if d < 0 then d = -d end
+    return d
+end
+
+-- Below this, text and backdrop are too close to read comfortably. Chosen as
+-- roughly half the gap our own palette gives (white on the near-black well),
+-- so a box that has drifted meaningfully toward its background trips it while
+-- the intended look does not.
+ui.CONTRAST_MIN = 0.35
+
+-- One box's verdict, from values already read off the client.
+--
+-- SEPARATED FROM THE READING so a suite can run it. The reads are client
+-- calls; this is where the three causes are actually told apart, and it is
+-- the part that can be wrong in a way nobody notices.
+--
+-- ORDER MATTERS. An unregistered box is reported as such and nothing else --
+-- its colours are whatever the template left, so calling them "lost" would
+-- name the wrong cause. A colour that did not stick is next, because it is
+-- the one we can fix from here. Contrast is last: it is only meaningful once
+-- the colour IS what we asked for.
+function ui.InputDiagVerdict(registered, got, want, bg)
+    if not registered then return "NOT OURS (never registered)" end
+    if not got then return "NO COLOUR READ" end
+    local d = ui.ContrastGap(got, want)
+    if d and d > 0.02 then return "COLOUR LOST (something repainted it)" end
+    local gap = ui.ContrastGap(got, bg)
+    if not gap then return "ok (backdrop unreadable)" end
+    if gap < ui.CONTRAST_MIN then
+        return "LOW CONTRAST (gap " .. string.format("%.2f", gap) .. ")"
+    end
+    return "ok (gap " .. string.format("%.2f", gap) .. ")"
+end
+
 function ui.ReapplyInputText()
     -- THE COUNT IS TAKEN BEFORE THE WALK, and that is not a micro-optimisation.
     -- ui.InputText REGISTERS what it colours, so re-colouring a registered box
@@ -3835,19 +3904,43 @@ function ui.BuyTreeRows(groups, open)
     while i <= table.getn(groups or {}) do
         local g = groups[i]
         local many = g.listings and g.listings > 1
-        local isOpen = (many and open[g.key]) and true or nil
-        table.insert(rows, { kind = "group", key = g.key, name = g.name,
-            itemId = g.itemId, texture = g.texture, quality = g.quality,
-            level = g.level, listings = g.listings, units = g.units,
-            low = g.low, expandable = many or nil, expanded = isOpen,
-            entry = g.rows[1] })
-        if isOpen then
-            local k = 1
-            while k <= table.getn(g.rows) do
-                local r = g.rows[k]
+        -- AN ITEM WITH ONE AUCTION IS THAT AUCTION, so it is listed as one
+        -- rather than wrapped in a parent standing for it.
+        --
+        -- It used to get a group row, and that row could do nothing a player
+        -- wanted: a parent is not tickable (you cannot buy "an item") and a
+        -- group of one never expands, so a lone auction could not be selected
+        -- for a multi-buyout AT ALL -- the only route to it was a right-click
+        -- to search that item on its own. It also said LESS than the listing
+        -- it stood for: "1 auction, from 4g" in place of a seller, a stack, a
+        -- time left and a price.
+        --
+        -- The listing row answers all of that and costs nothing: it is the
+        -- same row the group would have revealed, one level up.
+        if many then
+            local isOpen = open[g.key] and true or nil
+            table.insert(rows, { kind = "group", key = g.key, name = g.name,
+                itemId = g.itemId, texture = g.texture, quality = g.quality,
+                level = g.level, listings = g.listings, units = g.units,
+                low = g.low, expandable = true, expanded = isOpen,
+                entry = g.rows[1] })
+            if isOpen then
+                local k = 1
+                while k <= table.getn(g.rows) do
+                    local r = g.rows[k]
+                    r.kind = "listing"
+                    table.insert(rows, r)
+                    k = k + 1
+                end
+            end
+        else
+            -- THE ENGINE'S ROW, not a copy -- the same rule the children
+            -- follow. The paint reads price, seller, stack and time left
+            -- straight off it, and a copy is a second table to keep in step.
+            local r = g.rows[1]
+            if r then
                 r.kind = "listing"
                 table.insert(rows, r)
-                k = k + 1
             end
         end
         i = i + 1
@@ -5622,7 +5715,7 @@ function ui.BuildBuyTab()
     -- names here. That binding is older than traversal and worth more on a
     -- search box than stepping to the level fields, so the two search boxes
     -- keep it and nothing else does. See ui.LinkTabOrder.
-    box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
+    box:SetScript("OnTabPressed", function() ui.SearchBoxTab(box) end)
     -- Shift-click an item anywhere in the game and its name lands here.
     -- Registered BEFORE the Advanced query box, so with neither focused the
     -- default strip's box wins -- and only one of the two is ever visible.
@@ -5721,7 +5814,8 @@ function ui.BuildBuyTab()
     ui.RegisterLinkTarget(ui.buyQueryBox)
     -- The OTHER autocomplete box, and the other half of the traversal
     -- exception. See ui.LinkTabOrder.
-    ui.buyQueryBox:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
+    ui.buyQueryBox:SetScript("OnTabPressed",
+        function() ui.SearchBoxTab(ui.buyQueryBox) end)
 
 
     -- View switcher: a row of three, INSIDE the frame and under the query
@@ -7968,7 +8062,10 @@ function ui.BuyAutocomplete()
         ui.buyAC = ac
     end
     local n = table.getn(ac.candidates)
-    if n == 0 then return end
+    -- RETURNS WHETHER IT COMPLETED ANYTHING, which is what lets Tab fall
+    -- through to the next field when there is nothing to complete -- see
+    -- ui.SearchBoxTab.
+    if n == 0 then return false end
     ac.index = math.mod(ac.index, n) + 1
     local pick = ac.candidates[ac.index]
     acb:SetText(pick)
@@ -7976,6 +8073,44 @@ function ui.BuyAutocomplete()
     if acb.SetCursorPosition then
         acb:SetCursorPosition(string.len(pick))
     end
+    return true
+end
+
+-- Tab on one of the two search boxes.
+--
+-- THE DOCUMENTED EXCEPTION, with its dead case fixed. Tab completes item names
+-- on these two boxes rather than stepping to the next field, which is older,
+-- more valuable and already in people's fingers. But when the prefix matches
+-- NOTHING the key used to do nothing at all -- a dead key rather than a
+-- reserved one, and indistinguishable from the addon having stopped
+-- responding. Now it falls through to the traversal every other box uses.
+--
+-- COMPLETING WINS whenever there is something to complete, so nothing anybody
+-- already does changes: the fall-through is only reachable on a prefix that
+-- matches no item Aegis has ever seen.
+function ui.SearchBoxTab(box)
+    if ui.BuyAutocomplete() then return end
+    local chain = ui.SearchTabChain(box)
+    local nxt = chain and ui.NextInputIn(chain, box,
+                                         IsShiftKeyDown and IsShiftKeyDown())
+    if nxt then
+        nxt:SetFocus()
+        if nxt.HighlightText then nxt:HighlightText() end
+    end
+end
+
+-- Which fields Tab steps through from a search box.
+--
+-- The DEFAULT view's Name box sits at the head of the control strip, so it
+-- leads into the level range the way the form reads. The ADVANCED query box
+-- has no strip beside it -- the Builder owns its own chain -- so there is
+-- nowhere to go and Tab stays inert there, which is the honest answer rather
+-- than jumping somewhere unrelated.
+function ui.SearchTabChain(box)
+    if box and box == ui.buyBox then
+        return { ui.buyBox, ui.buyMinLevel, ui.buyMaxLevel }
+    end
+    return nil
 end
 
 function ui.DoBuySearch()
@@ -16534,6 +16669,43 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
         ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
+
+        -- EVERY EDIT BOX, with what it was ASKED to be and what it actually
+        -- IS. See ui.InputDiagVerdict for why the three causes have to be
+        -- told apart rather than guessed at.
+        local boxes = ui.inputBoxes or {}
+        ChatMsg("  input boxes: " .. table.getn(boxes) .. " registered")
+        local bi = 1
+        while bi <= table.getn(boxes) do
+            local e = boxes[bi]
+            local name = (e.GetName and e:GetName()) or "(unnamed)"
+            local got
+            if e.GetTextColor then
+                local ok, r, g, b = pcall(function()
+                    return e:GetTextColor()
+                end)
+                if ok and r then got = { r, g, b } end
+            end
+            local bg
+            if e.GetBackdropColor then
+                local ok, r, g, b = pcall(function()
+                    return e:GetBackdropColor()
+                end)
+                if ok and r then bg = { r, g, b } end
+            end
+            local function rgb(c)
+                if not c then return "?" end
+                return string.format("%.2f/%.2f/%.2f", c[1], c[2], c[3])
+            end
+            ChatMsg("    " .. name
+                .. "  text=" .. rgb(got)
+                .. "  want=" .. rgb(C.input)
+                .. "  bg=" .. rgb(bg)
+                .. "  skinned=" .. tostring(e.aegisSkinned and true or false)
+                .. "  \226\128\148 "
+                .. ui.InputDiagVerdict(e.aegisInputBox, got, C.input, bg))
+            bi = bi + 1
+        end
         ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
             .. "  cached items=" .. tostring(A.db.HarvestCount and A.db.HarvestCount()))
         local itemId = A.de and A.de.ParseReportArgs and A.de.ParseReportArgs(diagArgs)

@@ -53,6 +53,15 @@ C = {}
 -- line immediately after the function; extracting the function does not bring
 -- it, so the suite declares it before first use.
 ui.inputBoxes = {}
+-- ...and so is the contrast floor ui.InputDiagVerdict compares against. READ
+-- OUT OF THE SOURCE rather than copied: a copy keeps passing after the real
+-- one is re-tuned, which is exactly the drift that makes a threshold test
+-- worthless.
+do
+    local _, _, v = string.find(Source(), "ui%.CONTRAST_MIN%s*=%s*([%d%.]+)")
+    assert(v, "no ui.CONTRAST_MIN in ui/frame.lua")
+    ui.CONTRAST_MIN = tonumber(v)
+end
 do
     local src = Source()
     -- READ OUT OF THE REAL PALETTE, never copied: a copy keeps passing after
@@ -78,6 +87,9 @@ for _, sig in ipairs({
     "function ui.MarkChosen(",
     "function ui.PaintSortHeaders(",
     "function ui.ReapplyInputText(",
+    "function ui.Luminance(",
+    "function ui.ContrastGap(",
+    "function ui.InputDiagVerdict(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -596,5 +608,100 @@ H.eq("sorting the same column twice does not stack arrows",
 H.survives("no headers is not a crash", function()
     ui.PaintSortHeaders(nil, "unit", "asc")
 end)
+
+-- ---------------------------------------------------------------------------
+H.section("Why is that box unreadable? -- the diag verdict")
+-- ---------------------------------------------------------------------------
+
+-- FOUR ATTEMPTS HAVE BEEN MADE AT THE pfUI INPUT COLOUR and it keeps coming
+-- back, because all four were the same move: assert our colour harder and
+-- later. Three different faults produce an identical screenshot --
+--
+--   1. the colour did not STICK  -- something repainted it after us
+--   2. it stuck and the box is DARK BEHIND IT -- a contrast problem, nothing
+--      to do with the text
+--   3. the box was never ours    -- built after skin.Apply, so never skinned
+--
+-- -- and they need three different fixes. This is the arithmetic that tells
+-- them apart, which is the part that can be wrong without anybody noticing.
+
+local WHITE = { 1, 1, 1 }
+local NEAR_BLACK = { 0.05, 0.05, 0.04 }
+local TAN = { 0.72, 0.58, 0.32 }
+
+-- ---- luminance ----------------------------------------------------------
+
+H.check("white is bright", ui.Luminance(WHITE) > 0.99)
+H.check("near-black is dark", ui.Luminance(NEAR_BLACK) < 0.06)
+-- GREEN WEIGHS MOST, which is the whole reason this is not (r+g+b)/3: pure
+-- blue and pure green are nothing alike to the eye, and a flat average calls
+-- them equal.
+H.check("green reads brighter than blue at the same value",
+        ui.Luminance({ 0, 1, 0 }) > ui.Luminance({ 0, 0, 1 }),
+        "a flat average would call these the same")
+H.isNil("no colour, no luminance", ui.Luminance(nil))
+
+-- ---- the gap ------------------------------------------------------------
+
+H.check("white on near-black is a wide gap",
+        ui.ContrastGap(WHITE, NEAR_BLACK) > 0.9)
+H.check("tan on tan is a narrow one",
+        ui.ContrastGap(TAN, TAN) < 0.01)
+-- SYMMETRIC: it is a distance, so which way round the arguments go cannot
+-- change the answer. Dark text on a light box is exactly as unreadable as the
+-- reverse, and an unsigned subtraction is what makes that true.
+H.eq("the gap is a distance, not a direction",
+     ui.ContrastGap(WHITE, NEAR_BLACK), ui.ContrastGap(NEAR_BLACK, WHITE))
+
+-- nil is an ANSWER. "We could not read the backdrop" is a different statement
+-- from "the backdrop is fine", and collapsing them to 0 would report every
+-- unreadable backdrop as a contrast failure.
+H.isNil("an unreadable backdrop has no gap", ui.ContrastGap(WHITE, nil))
+H.isNil("...either way round", ui.ContrastGap(nil, NEAR_BLACK))
+
+-- ---- the verdict --------------------------------------------------------
+
+-- ORDER MATTERS, and this is the whole value of the readout. An unregistered
+-- box is reported as such and NOTHING else: its colours are whatever the
+-- template left, so calling them "lost" would name the wrong cause and send
+-- the next fix in the wrong direction -- which is how this got to four
+-- attempts.
+H.eq("a box that was never ours says so",
+     ui.InputDiagVerdict(nil, TAN, WHITE, NEAR_BLACK),
+     "NOT OURS (never registered)")
+H.check("...even when its colours look wrong",
+        string.find(ui.InputDiagVerdict(nil, TAN, WHITE, NEAR_BLACK),
+                    "NOT OURS", 1, true) ~= nil,
+        "an unregistered box must not be reported as a lost colour")
+
+-- The colour we asked for is not the colour it has: somebody repainted it.
+H.check("a repainted box is named as one",
+        string.find(ui.InputDiagVerdict(true, TAN, WHITE, NEAR_BLACK),
+                    "COLOUR LOST", 1, true) ~= nil)
+
+-- The colour IS ours and the box is still unreadable: that is the backdrop.
+H.check("a dark box under our own colour is low contrast",
+        string.find(ui.InputDiagVerdict(true, TAN, TAN, TAN),
+                    "LOW CONTRAST", 1, true) ~= nil,
+        "the one cause four attempts at the TEXT colour could never fix")
+
+-- ...and the healthy case.
+H.check("white on near-black is fine",
+        string.find(ui.InputDiagVerdict(true, WHITE, WHITE, NEAR_BLACK),
+                    "ok", 1, true) ~= nil)
+
+-- A backdrop we cannot read is reported as such rather than as a pass or a
+-- failure, because either would be a guess.
+H.check("an unreadable backdrop is confessed",
+        string.find(ui.InputDiagVerdict(true, WHITE, WHITE, nil),
+                    "backdrop unreadable", 1, true) ~= nil)
+H.eq("no colour read at all", ui.InputDiagVerdict(true, nil, WHITE, NEAR_BLACK),
+     "NO COLOUR READ")
+
+-- The threshold is a named constant, so the verdict can be re-tuned in one
+-- place rather than by editing a comparison buried in a branch.
+H.check("the contrast floor is a constant",
+        ui.CONTRAST_MIN and ui.CONTRAST_MIN > 0 and ui.CONTRAST_MIN < 1,
+        tostring(ui.CONTRAST_MIN))
 
 os.exit(H.report("rowchrome"))

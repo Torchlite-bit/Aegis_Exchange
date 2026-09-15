@@ -18,6 +18,36 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.21]
+
+### Fixed
+- **An item with a single auction can be ticked now.** In a grouped search
+  every item got a parent row — including items with exactly **one** auction.
+  A parent isn't tickable and a group of one never opens, so a lone auction
+  could not be selected for a multi-buyout at all; the only way to reach it was
+  a right-click to search that item on its own.
+
+  It is listed as the auction it is now, which also tells you more: the seller,
+  the stack, the time left and the price, instead of *"1 auction, from 4g"*.
+
+- **Tab on the search box is no longer a dead key.** Tab completes item names
+  there, which stays exactly as it was — but when what you'd typed matched
+  nothing it did *nothing*, which is indistinguishable from the addon having
+  stopped responding. It now moves to the next field, like Tab everywhere else,
+  and only when there is nothing to complete.
+
+### Added
+- **`/aex diag` now reports every input box**: the colour it was asked to be,
+  the colour it actually has, what's behind it, whether it was skinned, and a
+  verdict. If a box is hard to read under pfUI, this says **which** of the
+  three causes it is — a colour that didn't stick, a backdrop too close to the
+  text, or a box that was built too late to be ours — because they look
+  identical on screen and need different fixes.
+
+  *(If you've been seeing the undercut box too dark: run `/aex diag` with pfUI
+  on and send me those lines.)*
+
+
 ## [1.53.20]
 
 ### Added
@@ -5611,6 +5641,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

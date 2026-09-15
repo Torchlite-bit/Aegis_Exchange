@@ -160,14 +160,17 @@ local function kinds(rows)
     return table.concat(out, ",")
 end
 
+-- ONE ROW PER ITEM, and the row's KIND depends on how many auctions that item
+-- has. An item with several gets a parent you can open; an item with ONE is
+-- listed as that auction directly -- see ui.BuyTreeRows for why.
 local closed = ui.BuyTreeRows(g, {})
-H.eq("closed, it is one row per item", kinds(closed), "group,group")
+H.eq("closed, it is one row per item", kinds(closed), "group,listing")
 H.eq("a group carries its count", closed[1].listings, 3)
 H.eq("...and its lowest price", closed[1].low, 562)
 
 local open = ui.BuyTreeRows(g, { [g[1].key] = true })
 H.eq("expanding adds its listings underneath it", kinds(open),
-     "group,listing,listing,listing,group")
+     "group,listing,listing,listing,listing")
 H.check("...and the group says it is open", open[1].expanded,
         "the flag did not follow")
 H.eq("the children are that item's listings", open[2].owner, "Valarich")
@@ -178,12 +181,20 @@ H.eq("...in the order the page gave them", open[3].owner, "Tekbank")
 H.check("a child row IS the engine's row", open[2] == PAGE[1],
         "the tree copied the listings instead of listing them")
 
--- A GROUP OF ONE NEVER EXPANDS. There is nothing under it but the row you are
--- already looking at, and a triangle that reveals a copy of its own parent
--- reads as a bug.
-H.eq("a lone listing is not expandable", closed[2].expandable, nil)
+-- AN ITEM WITH ONE AUCTION IS LISTED AS THAT AUCTION. It used to be a parent
+-- standing for it, which could do nothing anybody wanted: a parent is not
+-- tickable, and a group of one never expands -- so a lone auction could not be
+-- selected for a multi-buyout at all, and the row said "1 auction, from 4g"
+-- where the listing says who is selling it, in what stack, for how long.
+H.eq("a lone auction is a listing, not a parent", closed[2].kind, "listing")
+H.eq("...it is not expandable", closed[2].expandable, nil)
+H.check("...and it is the engine's own row", closed[2] == PAGE[2],
+        "the tree copied the lone listing instead of listing it")
+
+-- ...and asking to open it changes nothing: there is no parent to open.
 local lone = ui.BuyTreeRows(g, { [g[2].key] = true })
-H.eq("...and does not expand even when asked", kinds(lone), "group,group")
+H.eq("opening it is a no-op", kinds(lone), "group,listing")
+
 H.check("a group of several IS expandable", closed[1].expandable,
         "three listings should offer a triangle")
 
@@ -195,7 +206,7 @@ H.check("a group of several IS expandable", closed[1].expandable,
 local REORDERED = { g[2], g[1] }
 local moved = ui.BuyTreeRows(REORDERED, { [g[1].key] = true })
 H.eq("a re-sort keeps the shape", kinds(moved),
-     "group,group,listing,listing,listing")
+     "listing,group,listing,listing,listing")
 -- Greater Mana Potion was at index 1 and is now at index 2. It is still the
 -- one that is open; an index-keyed set would have expanded whatever took
 -- slot 1, which is the Minor.
@@ -209,7 +220,7 @@ H.check("...and says so", not moved[1].expanded,
         "the row that slid into slot 1 was expanded instead")
 
 H.eq("nothing open is one row per item",
-     kinds(ui.BuyTreeRows(g, nil)), "group,group")
+     kinds(ui.BuyTreeRows(g, nil)), "group,listing")
 H.eq("no groups is no rows", table.getn(ui.BuyTreeRows(nil, {})), 0)
 
 -- ---- toggling ------------------------------------------------------------
