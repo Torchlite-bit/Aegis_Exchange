@@ -1097,12 +1097,50 @@ function sell.MatchUnit(itemId)
     return s.minBuyout or s.market
 end
 
--- Per-unit price to undercut the cheapest seen buyout (falls back to market
--- value). Returns copper, or nil if we have no data for the item.
+-- WHICH price to work from, and whether to go BELOW it.
+--
+-- Returns (reference, undercut). `undercut` false means MATCH: your own
+-- auction is already the cheapest, so there is nobody to go under and the only
+-- thing an undercut could achieve is walking your own price down.
+--
+-- REPORTED FROM A LIVE CLIENT: posting the same item repeatedly while holding
+-- the cheapest listing dropped the price a step each time -- the seller
+-- competing with nobody but themselves, a few percent at a time, for as long
+-- as they kept posting.
+--
+-- TIES MATCH TOO. Level with somebody else and you are already as cheap as the
+-- market; a step under buys nothing an equal price does not, and it is a step
+-- somebody else then takes back. `<=`, not `<`.
+--
+-- Pure, and separate from the reading, because this is the whole of the
+-- decision and every way it can be wrong costs real money.
+function sell.PriceReference(lowestOther, lowestMine)
+    if lowestMine and (not lowestOther or lowestMine <= lowestOther) then
+        return lowestMine, false
+    end
+    if lowestOther then return lowestOther, true end
+    return nil, true
+end
+
+-- Per-unit price to undercut the cheapest OTHER seller -- or to match your own
+-- when yours is the cheapest. Falls back to the price DB, then market value.
+-- Returns copper, or nil if we have no data for the item.
 function sell.UndercutUnit(itemId)
-    local ref = sell.MatchUnit(itemId)
-    if not ref then return nil end
-    return ApplyUndercut(ref)
+    local ref, under = sell.PriceReference(sell.LowestListingUnit(true),
+                                           sell.LowestOwnUnit())
+    if ref then
+        if not under then return ref end
+        return ApplyUndercut(ref)
+    end
+    -- NO SCAN FOR THIS ITEM. The price DB cannot answer whose auction a figure
+    -- came from -- it records what was seen, not who posted it -- so this path
+    -- genuinely cannot tell your own listing from anyone else's. It is the
+    -- uncommon one: slotting an item on the Sell tab scans it, which is what
+    -- fills the list the branch above reads.
+    local s = sell.Suggest(itemId)
+    local db = s and (s.minBuyout or s.market)
+    if not db then return nil end
+    return ApplyUndercut(db)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1230,6 +1268,26 @@ function sell.LowestListingUnit(excludeMine)
     while i <= table.getn(sell.listings) do
         local r = sell.listings[i]
         if r.unit and r.unit > 0 and not (excludeMine and r.isMine) then
+            if not best or r.unit < best then best = r.unit end
+        end
+        i = i + 1
+    end
+    return best
+end
+
+-- ...and the cheapest of YOUR OWN, which is the other half of the question.
+--
+-- sell.LowestListingUnit(true) answers "what is the competition asking". On
+-- its own that is not enough to price against: when the cheapest thing on the
+-- list is YOURS, there is no competition to undercut and the honest answer is
+-- to match what you already have. See sell.PriceReference.
+function sell.LowestOwnUnit()
+    if not sell.listings then return nil end
+    local best = nil
+    local i = 1
+    while i <= table.getn(sell.listings) do
+        local r = sell.listings[i]
+        if r.unit and r.unit > 0 and r.isMine then
             if not best or r.unit < best then best = r.unit end
         end
         i = i + 1

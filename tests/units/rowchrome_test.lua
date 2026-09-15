@@ -53,9 +53,38 @@ C = {}
 -- line immediately after the function; extracting the function does not bring
 -- it, so the suite declares it before first use.
 ui.inputBoxes = {}
+-- ...and so is the contrast floor ui.InputDiagVerdict compares against. READ
+-- OUT OF THE SOURCE rather than copied: a copy keeps passing after the real
+-- one is re-tuned, which is exactly the drift that makes a threshold test
+-- worthless.
+do
+    local _, _, v = string.find(Source(), "ui%.CONTRAST_MIN%s*=%s*([%d%.]+)")
+    assert(v, "no ui.CONTRAST_MIN in ui/frame.lua")
+    ui.CONTRAST_MIN = tonumber(v)
+    local _, _, e = string.find(Source(), "ui%.EDGE_MIN%s*=%s*([%d%.]+)")
+    assert(e, "no ui.EDGE_MIN in ui/frame.lua")
+    ui.EDGE_MIN = tonumber(e)
+    -- ...and the two font constants ui.InputText reads. THE MINUS SIGN IS IN
+    -- THE PATTERN: the delta is negative, and a reader that only took digits
+    -- would find "1" in "-1" and shrink nothing -- or, here, find nothing at
+    -- all and leave a nil to be compared against a number.
+    local _, _, d = string.find(Source(),
+                                "local INPUT_FONT_DELTA%s*=%s*(%-?[%d%.]+)")
+    assert(d, "no INPUT_FONT_DELTA in ui/frame.lua")
+    INPUT_FONT_DELTA = tonumber(d)
+    local _, _, m = string.find(Source(),
+                                "local INPUT_FONT_MIN%s*=%s*(%-?[%d%.]+)")
+    assert(m, "no INPUT_FONT_MIN in ui/frame.lua")
+    INPUT_FONT_MIN = tonumber(m)
+end
 do
     local src = Source()
-    for _, key in ipairs({ "input", "text" }) do
+    -- READ OUT OF THE REAL PALETTE, never copied: a copy keeps passing after
+    -- the real one moves. rowSel and rowOpen are the two row tints and carry
+    -- a fourth value, the alpha -- the loop below takes however many numbers
+    -- the entry has, so a triple and a quad both arrive intact.
+    for _, key in ipairs({ "input", "text", "rowSel", "rowOpen",
+                           "inputEdge", "panelBG" }) do
         local _, _, body = string.find(src,
             "\n    " .. key .. "%s*=%s*{([^}]*)}")
         assert(body, "no C." .. key .. " in the palette")
@@ -74,6 +103,11 @@ for _, sig in ipairs({
     "function ui.MarkChosen(",
     "function ui.PaintSortHeaders(",
     "function ui.ReapplyInputText(",
+    "function ui.Luminance(",
+    "function ui.ContrastGap(",
+    "function ui.InputDiagVerdict(",
+    "function ui.BackdropSource(",
+    "function ui.EdgeVerdict(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -244,8 +278,20 @@ H.eq("exactly one zebra stripe colour in the file",
      occurrences("SetTexture%(1, 1, 1, 0%.022%)"), 1)
 H.eq("exactly one separator colour",
      occurrences("SetTexture%(0%.28, 0%.24, 0%.15, 0%.55%)"), 1)
-H.eq("exactly one selection tint colour",
-     occurrences("SetTexture%(0%.6, 0%.45, 0%.10, 0%.34%)"), 1)
+-- THE SELECTION TINT MOVED INTO THE PALETTE, which is the same discipline
+-- one step further on: the zebra and separator colours above are each written
+-- once at their single call site, but this one is read by THREE -- the row's
+-- creation and both of the Buy table's fills, which tint the shared texture
+-- differently. Three reads of one literal is the copy this section exists to
+-- prevent, so it is a palette entry and the literal must be gone.
+H.eq("the selection tint is no longer a literal",
+     occurrences("SetTexture%(0%.6, 0%.45, 0%.10, 0%.34%)"), 0)
+H.check("...it is a palette colour",
+        string.find(src, "rowSel  = {", 1, true) ~= nil,
+        "C.rowSel is where the selected-row tint lives")
+H.check("...and the unfolded-parent tint is its own entry beside it",
+        string.find(src, "rowOpen = {", 1, true) ~= nil,
+        "two different facts must not share one colour")
 
 -- ...and every table actually asks for it. One definition plus FIVE call
 -- sites covering six tables: BuildResultRow serves both Buy and Crafting,
@@ -302,7 +348,25 @@ H.check("the box is given its own font", box.font ~= nil,
         "a box backed by a font OBJECT loses SetTextColor on the next redraw")
 H.eq("...which is the font it already had, not a new one",
      box.font[1], "Fonts\\ARIALN.TTF")
-H.eq("...at the size it already had", box.font[2], 12)
+-- ...AND ONE NOTCH SMALLER. InputBoxTemplate's font is the client's chat font
+-- at chat size, and these boxes are not chat: the undercut percent field is
+-- 34x18 and a two-digit number in it sat against the edges. The shrink rides
+-- the SetFont call that has to happen anyway for the colour to stick.
+H.eq("...a notch smaller than the font it inherited",
+     box.font[2], 12 + INPUT_FONT_DELTA)
+
+-- A FLOOR, so a box whose font is already tiny is not shrunk into illegibility
+-- to satisfy a rule about boxes that are not.
+do
+    local tiny = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\ARIALN.TTF", INPUT_FONT_MIN, "" end,
+        SetFont = function(self, path, size) self.font = { path, size } end,
+    }
+    ui.InputText(tiny)
+    H.eq("a font already at the floor is left alone",
+         tiny.font[2], INPUT_FONT_MIN)
+end
 H.listEq("the font comes BEFORE the colour", box.order,
          { "font", "colour" })
 
@@ -580,5 +644,287 @@ H.eq("sorting the same column twice does not stack arrows",
 H.survives("no headers is not a crash", function()
     ui.PaintSortHeaders(nil, "unit", "asc")
 end)
+
+-- ---------------------------------------------------------------------------
+H.section("Why is that box unreadable? -- the diag verdict")
+-- ---------------------------------------------------------------------------
+
+-- FOUR ATTEMPTS HAVE BEEN MADE AT THE pfUI INPUT COLOUR and it keeps coming
+-- back, because all four were the same move: assert our colour harder and
+-- later. Three different faults produce an identical screenshot --
+--
+--   1. the colour did not STICK  -- something repainted it after us
+--   2. it stuck and the box is DARK BEHIND IT -- a contrast problem, nothing
+--      to do with the text
+--   3. the box was never ours    -- built after skin.Apply, so never skinned
+--
+-- -- and they need three different fixes. This is the arithmetic that tells
+-- them apart, which is the part that can be wrong without anybody noticing.
+
+local WHITE = { 1, 1, 1 }
+local NEAR_BLACK = { 0.05, 0.05, 0.04 }
+local TAN = { 0.72, 0.58, 0.32 }
+
+-- ---- luminance ----------------------------------------------------------
+
+H.check("white is bright", ui.Luminance(WHITE) > 0.99)
+H.check("near-black is dark", ui.Luminance(NEAR_BLACK) < 0.06)
+-- GREEN WEIGHS MOST, which is the whole reason this is not (r+g+b)/3: pure
+-- blue and pure green are nothing alike to the eye, and a flat average calls
+-- them equal.
+H.check("green reads brighter than blue at the same value",
+        ui.Luminance({ 0, 1, 0 }) > ui.Luminance({ 0, 0, 1 }),
+        "a flat average would call these the same")
+H.isNil("no colour, no luminance", ui.Luminance(nil))
+
+-- ---- the gap ------------------------------------------------------------
+
+H.check("white on near-black is a wide gap",
+        ui.ContrastGap(WHITE, NEAR_BLACK) > 0.9)
+H.check("tan on tan is a narrow one",
+        ui.ContrastGap(TAN, TAN) < 0.01)
+-- SYMMETRIC: it is a distance, so which way round the arguments go cannot
+-- change the answer. Dark text on a light box is exactly as unreadable as the
+-- reverse, and an unsigned subtraction is what makes that true.
+H.eq("the gap is a distance, not a direction",
+     ui.ContrastGap(WHITE, NEAR_BLACK), ui.ContrastGap(NEAR_BLACK, WHITE))
+
+-- nil is an ANSWER. "We could not read the backdrop" is a different statement
+-- from "the backdrop is fine", and collapsing them to 0 would report every
+-- unreadable backdrop as a contrast failure.
+H.isNil("an unreadable backdrop has no gap", ui.ContrastGap(WHITE, nil))
+H.isNil("...either way round", ui.ContrastGap(nil, NEAR_BLACK))
+
+-- ---- the verdict --------------------------------------------------------
+
+-- ORDER MATTERS, and this is the whole value of the readout. An unregistered
+-- box is reported as such and NOTHING else: its colours are whatever the
+-- template left, so calling them "lost" would name the wrong cause and send
+-- the next fix in the wrong direction -- which is how this got to four
+-- attempts.
+H.eq("a box that was never ours says so",
+     ui.InputDiagVerdict(nil, TAN, WHITE, NEAR_BLACK),
+     "NOT OURS (never registered)")
+H.check("...even when its colours look wrong",
+        string.find(ui.InputDiagVerdict(nil, TAN, WHITE, NEAR_BLACK),
+                    "NOT OURS", 1, true) ~= nil,
+        "an unregistered box must not be reported as a lost colour")
+
+-- The colour we asked for is not the colour it has: somebody repainted it.
+H.check("a repainted box is named as one",
+        string.find(ui.InputDiagVerdict(true, TAN, WHITE, NEAR_BLACK),
+                    "COLOUR LOST", 1, true) ~= nil)
+
+-- The colour IS ours and the box is still unreadable: that is the backdrop.
+H.check("a dark box under our own colour is low contrast",
+        string.find(ui.InputDiagVerdict(true, TAN, TAN, TAN),
+                    "LOW CONTRAST", 1, true) ~= nil,
+        "the one cause four attempts at the TEXT colour could never fix")
+
+-- ...and the healthy case.
+H.check("white on near-black is fine",
+        string.find(ui.InputDiagVerdict(true, WHITE, WHITE, NEAR_BLACK),
+                    "ok", 1, true) ~= nil)
+
+-- A backdrop we cannot read is reported as such rather than as a pass or a
+-- failure, because either would be a guess.
+--
+-- AND IT MUST NOT READ AS A PASS. v1.53.21 worded this "ok (backdrop
+-- unreadable)" and the live readout came back that way on all twenty-five
+-- boxes -- which scans as twenty-five passes, when the contrast test was the
+-- only one of the three still standing and had not run at all. A check that
+-- could not run says so; "ok" is a verdict, not a shrug.
+local cannot = ui.InputDiagVerdict(true, WHITE, WHITE, nil)
+H.check("an unreadable backdrop is confessed",
+        string.find(cannot, "CANNOT TELL", 1, true) ~= nil, cannot)
+H.check("...and does not read as a pass",
+        string.find(cannot, "ok", 1, true) == nil, cannot)
+H.eq("no colour read at all", ui.InputDiagVerdict(true, nil, WHITE, NEAR_BLACK),
+     "NO COLOUR READ")
+
+-- ---- which frame carries the background ---------------------------------
+
+-- NOT ALWAYS THE BOX, and this is what made v1.53.21's readout useless. pfUI's
+-- CreateBackdrop builds a CHILD FRAME on `frame.backdrop`, and ui/skin.lua
+-- clears the box's own backdrop first so the two cannot double-border -- so on
+-- a pfUI client the box has no backdrop and asking it for one answers nothing.
+-- The readout reported "backdrop unreadable" on every box and it looked like a
+-- client limitation. It was the instrument reading the wrong object.
+do
+    local function withBackdrop() return 1 end
+    local plain = { GetBackdropColor = withBackdrop }
+    local skinned = { GetBackdropColor = withBackdrop,
+                      backdrop = { GetBackdropColor = withBackdrop } }
+
+    local f, where = ui.BackdropSource(skinned)
+    H.eq("pfUI's child frame wins when it is there", f, skinned.backdrop)
+    H.eq("...and the readout says which it read", where, "pfUI")
+
+    f, where = ui.BackdropSource(plain)
+    H.eq("the box's own backdrop otherwise", f, plain)
+    H.eq("...and says so", where, "own")
+
+    -- A box with a `backdrop` field that cannot answer is not a source. The
+    -- field exists on other frames for other reasons; having one is not the
+    -- same as it being a backdrop we can read.
+    f, where = ui.BackdropSource({ backdrop = {} })
+    H.isNil("a backdrop field that answers nothing is not a source", f)
+    H.eq("...and is reported as none", where, "none")
+
+    f, where = ui.BackdropSource(nil)
+    H.isNil("no box, no source", f)
+    H.eq("...none", where, "none")
+end
+
+-- ---- can you SEE the box at all -----------------------------------------
+
+-- A DIFFERENT QUESTION FROM whether the text is readable, and the likelier
+-- reading of the original report: "too dark to see", said of a field whose
+-- text turned out to be pure white, is a complaint about the FIELD rather
+-- than the characters in it.
+do
+    local PANEL = { 0.13, 0.12, 0.10 }
+    H.check("an edge close to the panel is invisible",
+            string.find(ui.EdgeVerdict({ 0.14, 0.13, 0.11 }, PANEL),
+                        "EDGE INVISIBLE", 1, true) ~= nil)
+    H.check("...and a bright one is not",
+            string.find(ui.EdgeVerdict({ 0.79, 0.64, 0.15 }, PANEL),
+                        "edge ok", 1, true) ~= nil)
+    H.eq("no border read, no verdict", ui.EdgeVerdict(nil, PANEL), "edge ?")
+
+    -- The edge floor is LOWER than the text floor on purpose: a hairline only
+    -- has to be findable, not comfortably readable.
+    H.check("the edge floor is its own constant, and lower",
+            ui.EDGE_MIN and ui.EDGE_MIN < ui.CONTRAST_MIN,
+            tostring(ui.EDGE_MIN) .. " vs " .. tostring(ui.CONTRAST_MIN))
+end
+
+-- The threshold is a named constant, so the verdict can be re-tuned in one
+-- place rather than by editing a comparison buried in a branch.
+H.check("the contrast floor is a constant",
+        ui.CONTRAST_MIN and ui.CONTRAST_MIN > 0 and ui.CONTRAST_MIN < 1,
+        tostring(ui.CONTRAST_MIN))
+
+-- ---------------------------------------------------------------------------
+H.section("The edge, which is what 'too dark to see' actually meant")
+-- ---------------------------------------------------------------------------
+
+-- FOUR ATTEMPTS AIMED AT THE TEXT COLOUR and the report kept standing. The
+-- readout settled it: /aex diag came back text=1.00/1.00/1.00 on all
+-- twenty-five boxes -- pure white, exactly what was asked for -- while the box
+-- was still reported as too dark to see.
+--
+-- What is dark is the BOX. Under pfUI its own backdrop is cleared (skin.lua
+-- does that deliberately, so pfUI's and ours cannot double-border) and
+-- replaced by a CHILD FRAME whose default border is near-black. Our panel
+-- behind it is near-black too, so nothing shows where the field is.
+--
+-- The edge rides the same register-and-reapply machinery the text colour
+-- does, because whatever repaints one repaints the other: one mechanism for
+-- both properties, so neither can be re-asserted while the other is forgotten.
+do
+    -- THE PLATE IS ON THE BOX, not on a child frame over it. ui/skin.lua's
+    -- EditBoxPlate keeps it there deliberately -- a child frame draws above
+    -- its parent's regions, which is how pfUI's plate came to be covering the
+    -- text -- so the edge is painted on whichever frame ui.BackdropSource
+    -- says carries it, and that is the box.
+    local painted
+    local box = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
+        SetFont = function() end,
+        GetBackdropColor = function() return 0.06, 0.05, 0.04 end,
+        SetBackdropBorderColor = function(_, r, g, b, a)
+            painted = { r, g, b, a }
+        end,
+    }
+    ui.InputText(box)
+    H.check("a box's own plate gets its edge painted", painted ~= nil,
+            "nothing shows where the field is")
+    H.eq("...in the palette's edge colour",
+         painted and (painted[1] .. "/" .. painted[2] .. "/" .. painted[3]),
+         C.inputEdge[1] .. "/" .. C.inputEdge[2] .. "/" .. C.inputEdge[3])
+    H.eq("...at its alpha", painted and painted[4], C.inputEdge[4])
+
+    -- AND IT IS FINDABLE against the panel behind it, which is the whole
+    -- point -- a border painted in a colour as dark as the panel is the bug
+    -- being fixed, restated.
+    H.check("the edge stands out from the panel",
+            ui.ContrastGap(C.inputEdge, C.panelBG) >= ui.EDGE_MIN,
+            "the edge is as dark as the panel behind it")
+
+    -- A box with NO pfUI backdrop -- the stock-skin path -- must not error.
+    -- It has its own border from the template and needs nothing from us.
+    local plain = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
+        SetFont = function() end,
+    }
+    H.survives("an unskinned box is not a crash", function()
+        ui.InputText(plain)
+    end)
+
+    -- ...and a backdrop that cannot take a border colour is skipped rather
+    -- than called. Having the field is not the same as it answering.
+    local odd = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
+        SetFont = function() end,
+        backdrop = {},
+    }
+    H.survives("a backdrop that cannot be coloured is skipped", function()
+        ui.InputText(odd)
+    end)
+end
+
+
+-- ---- and the plate must live INSIDE the box -----------------------------
+
+-- THE CAUSE, pinned. pfUI's CreateBackdrop builds a CHILD FRAME, and a child
+-- draws above ALL of its parent's regions whatever draw layer they are on. A
+-- button answers that by re-homing its label onto the backdrop (LiftLabel); an
+-- EditBox cannot, because it draws its own text internally and there is no
+-- FontString to move. So pfUI's plate sat ON TOP of the text -- translucent
+-- and dark on one config, opaque on another, which is precisely the range
+-- reported: "dark grey" in one, invisible in the next.
+--
+-- GetTextColor answered 1.00/1.00/1.00 the whole time, because the colour WAS
+-- white and merely covered. Four attempts at making it whiter could not have
+-- worked; the readout agreeing the colour was right is what finally said so.
+--
+-- A SOURCE CHECK, because draw order needs a client and this does not: the
+-- EditBox branch must give the box its own plate and must NOT hand it to
+-- pfUI's child-frame builder.
+do
+    local f = assert(io.open("ui/skin.lua", "r"), "run this from the repo root")
+    local sk = f:read("*a")
+    f:close()
+
+    local at = string.find(sk, 'elseif otype == "EditBox" then', 1, true)
+    H.check("the EditBox branch was found", at ~= nil)
+    local branch = string.sub(sk, at or 1,
+        string.find(sk, 'elseif otype == "Slider" then', at or 1, true))
+    H.check("...and the extraction stopped at the next branch",
+            string.len(branch) < 1600, string.len(branch))
+
+    H.check("an edit box gets its own plate",
+            string.find(branch, "EditBoxPlate(f)", 1, true) ~= nil,
+            "the box has no background under the skin")
+    H.check("...and NOT pfUI's child frame",
+            string.find(branch, "\n        Backdrop(f)", 1, true) == nil,
+            "a child frame draws over the text it is supposed to sit behind")
+
+    -- The plate itself has to be set ON the frame -- SetBackdrop, which lands
+    -- on the frame's own BACKGROUND layer, under its own text.
+    local plate = string.sub(sk,
+        string.find(sk, "local function EditBoxPlate", 1, true),
+        string.find(sk, "\nend\n",
+                    string.find(sk, "local function EditBoxPlate", 1, true), true))
+    H.check("the plate is set on the frame itself",
+            string.find(plate, "f:SetBackdrop(", 1, true) ~= nil)
+    H.check("...and any plate pfUI already built is put away",
+            string.find(plate, "f.backdrop:Hide()", 1, true) ~= nil,
+            "an earlier pass's child frame would still be covering the text")
+end
 
 os.exit(H.report("rowchrome"))

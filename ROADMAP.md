@@ -2390,6 +2390,410 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Undercutting yourself — v1.53.26
+
+**A money bug, reported from a live client, and it compounds.** Post an item
+while already holding the cheapest listing of it and the suggested price
+stepped UNDER your own -- so posting repeatedly walked your price down a few
+percent at a time against nobody.
+
+**HALF THE FIX WAS ALREADY THERE, which is why it survived.**
+`sell.LowestListingUnit(true)` has always excluded your own rows, so the
+obvious reading -- "does it know which listings are mine" -- says yes. What it
+does when the answer is "all of them" is the gap: it returns nil, and the
+caller falls through to the price DB, which records what was SEEN and not who
+posted it. Your own auction comes back as the market and gets undercut.
+
+**"Excludes mine" is not the same as "handles being cheapest".** Excluding your
+rows answers "what is the competition asking"; it cannot answer "what should I
+charge" on its own, because with no competition the right answer is not a
+smaller number -- it is the price you already have.
+
+**A TIE MATCHES TOO**, and that is the same argument rather than a separate
+nicety: level with somebody else you are already as cheap as the market, and a
+step under buys nothing an equal price does not while inviting a step back.
+`<=`, not `<`.
+
+**The decision is pure and separate from the reading** -- `sell.PriceReference`
+takes two numbers and returns which to use and whether to go below it. Every
+way it can be wrong costs real money, which is exactly the shape that should
+not be buried inside a function that also does I/O.
+
+**The DB fallback still cannot tell.** No scan for the item means no owner
+data, and the price DB does not store one. That path is left as it was and
+says so in a comment rather than pretending -- it is also the uncommon one,
+since slotting an item on the Sell tab scans it.
+
+**Two smaller things.** The dressing room is parked against our right edge
+rather than left where the client puts UI panels, which is on top of the rows
+being clicked; and input text is a point smaller, with a floor, because
+InputBoxTemplate's font is the chat font at chat size and a 34x18 box is not
+chat.
+
+### Something was over the box — v1.53.25
+
+**The owner diagnosed this one.** "I wonder if there is an overlay that is also
+over the input box?" -- yes, and it had been there the whole time.
+
+**pfUI's backdrop is a CHILD FRAME, and an EditBox has no label to re-home.**
+A child draws above ALL of its parent's regions whatever draw layer they are
+on. `LiftLabel` answers that for buttons by moving the label onto the backdrop;
+an EditBox draws its own text internally, so there is nothing to move. pfUI's
+plate sat on top of the text -- translucent and dark on one config, near-opaque
+on another, which is exactly the range reported: grey in one skin, invisible in
+the next.
+
+**THE FILE ALREADY KNEW THIS.** `SinkBackdrop`'s comment states the
+child-over-parent rule; `LiftLabel`'s says frame level is not worth betting
+text on and names the Aegis settings panel as the deep-nesting case where
+sinking alone failed -- which is exactly where the undercut boxes live. Both
+were written about BUTTONS, and the EditBox branch three screens below called
+`Backdrop(f)` and neither of the two functions that exist to undo what it does.
+**The knowledge was in the file; the branch that needed it did not use it.**
+
+**Five releases aimed at the text colour, and the colour was never wrong.**
+`/aex diag` answered `1.00/1.00/1.00` every time -- correctly. Attempts one to
+four made it whiter, which cannot beat something drawn on top of it. The
+readout's real contribution was not finding the cause but **eliminating** it:
+once the colour was measured and correct, "the text is dark" had to mean
+something other than the text colour, and the only two candidates left were
+the backdrop behind it and something in front. v1.53.23 chased the first. The
+owner named the second.
+
+**The fix is LiftLabel's conclusion applied from the other side.** Inside ONE
+frame the draw layer is the whole ordering rule -- so instead of lifting the
+text above a child frame, the plate goes DOWN onto the box itself, where
+`SetBackdrop` lands it on BACKGROUND, under the box's own text, with no frame
+level left to lose. Edit boxes are now the one widget that keeps its Aegis
+background under the skin, and it keeps it so the text stays visible.
+
+**A check that needs no client.** Draw order does; "the EditBox branch must
+call EditBoxPlate and must not call Backdrop" does not. Three sabotages: the
+child backdrop restored, the plate dropped entirely, and an earlier pass's
+plate left showing.
+
+### Display on Character — v1.53.24
+
+**§3, and the owner's third answer to it was the right one.** I had offered
+ctrl-click or shift-click-on-results; the answer was neither -- a TICK BOX,
+the way the stock auction house does it, with a screenshot of exactly that.
+That settled the API question I had flagged as needing verification: 1.12's own
+AH carries this control, so the machinery is in FrameXML.
+
+**It settled that the feature EXISTS, not what it is called.** CLAUDE.md's rule
+is that an API is absent until shown otherwise, and a screenshot of a working
+window is not the name of a global. Both known shapes are probed --
+`DressUpItemLink`, then `DressUpModel:TryOn` -- and `/aex diag` reports which
+the client has, so a box that cannot work says so rather than doing nothing
+quietly. Having the FRAME is not having the METHOD either: `DressUpModel`
+could be some other frame entirely, and only `TryOn` makes it usable.
+
+**"NO INFO" AND "NOT WEARABLE" ARE DIFFERENT ANSWERS**, and collapsing them is
+the trap here. `util.ItemInfo` returns nil for an item the client has not
+cached -- refusing those would leave the box looking broken on exactly the
+items you have not looked at yet, which is most of a fresh search. Nil is
+attempted; a KNOWN item with no equip slot is refused. The dressing room is the
+backstop either way: handed something unwearable it shows nothing.
+
+**Read off the SLOT, not the type.** `INVTYPE_` constants are the same on every
+client; "Armor" and "Weapon" are localised. util.ItemInfo already fills a
+missing slot in from the type where it can, so reading the slot gets the
+stand-in for free and costs nothing on a non-enUS client.
+
+**The box persists, unlike the stock one.** Everything else on that strip is a
+search TERM and resets with the search; this is a preference about what
+clicking does. It is deliberately left out of `ui.BuyTermFrom`/`ApplyTerm` for
+that reason -- loading a saved search must not toggle it underneath you.
+
+**modebits went 46 -> 48 and passed on its own.** Two new Buy-tab widgets, both
+accounted for by the view lists without being told -- which is the check doing
+exactly what it was built for after the column ticks once went unhidden.
+
+### It was never the text — v1.53.23
+
+**Five attempts at "the undercut box is too dark", and the first four all
+aimed at the text colour.** The readout ended it in one round: `/aex diag`
+reported `text=1.00/1.00/1.00 want=1.00/1.00/1.00` on all twenty-five boxes,
+and the screenshot that came with it showed the values -- 1, 100%, 1 --
+perfectly legible. **The characters were never dark.** The BOX is: pfUI
+replaces its backdrop with a child frame whose default border is near-black,
+our panel behind it is near-black, and nothing shows where the field is.
+
+**"Too dark to see" is ambiguous and nobody asked which.** Whether you can
+read the text IN a box and whether you can SEE the box at all are different
+faults with different fixes, and four releases were spent on the first because
+that is the reading "the text is too dark" suggests. The instrument that
+settled it took one release to build, after those four.
+
+**The edge rides the text colour's machinery**, not skin.lua's one-shot pass:
+`ui.InputText` sets both, so `ui.ReapplyInputText` and `ui.DeferInputText`
+re-assert both. One mechanism for two properties is what stops the next person
+re-asserting one and forgetting the other -- which is the shape all four
+earlier attempts had.
+
+**And the ghost.** §2(a): the search box shows what Tab would complete to, in
+grey, after the caret. 1.12 has no inline completion and an EditBox will not
+say where its caret is in pixels, so the suffix is a FontString positioned by
+MEASURING the typed text with a second FontString wearing the box's own font.
+
+**The ghost is a promise about the key**, so the two must agree exactly. Tab
+takes entry one of a sorted candidate list; `buy.FirstCompletion` returns the
+alphabetically smallest match by the same comparison, in ONE pass with no
+table and no sort -- this runs while somebody is typing, and a played-in
+database has ten thousand names. It is additionally held behind a dirty flag
+flushed once per frame, so typing "linen" quickly costs one pass rather than
+five. The suite asserts the agreement rather than the mechanism: the single
+pick and `AutocompleteCandidates(...)[1]` must be the same string.
+
+**The scoping lint earned its keep again.** `GHOST_INSET` was declared below
+the function that reads it -- legal Lua, compiles clean, and a nil global at
+runtime. That is the fourth time this check has caught the same shape.
+
+### The readout was pointed at the wrong object — v1.53.22
+
+**v1.53.21's diagnostic came back useless, and usefully so.** All twenty-five
+boxes reported `text=1.00/1.00/1.00 want=1.00/1.00/1.00 skinned=true bg=?` and
+a verdict of "ok (backdrop unreadable)". Two of the three hypotheses died on
+the spot -- the colour IS sticking, and every box IS registered and skinned --
+which is two-thirds of the value of building it. The third could not be
+measured, and that was the instrument's fault.
+
+**`GetBackdropColor` on the box answers nothing on a pfUI client.** pfUI's
+CreateBackdrop builds a CHILD FRAME on `frame.backdrop`, and `ui/skin.lua`
+calls `SetBackdrop(nil)` on the box first -- deliberately, so the two cannot
+double-border. So the box genuinely has no backdrop, and asking it for one is
+not a client limitation, it is the wrong question. `ui.BackdropSource` picks
+whichever frame actually carries it and reports which one answered.
+
+**"ok" FOR A CHECK THAT DID NOT RUN.** The worst line in the readout was its
+own verdict. Twenty-five lines beginning "ok" scan as twenty-five passes; the
+contrast test was the only one of the three still standing and it had not run
+at all. It says CANNOT TELL now. **A diagnostic that reports a pass for
+something it could not measure is worse than no diagnostic**, because it ends
+the investigation.
+
+**And it could not say WHICH box.** Almost every edit box is built without a
+name -- a getglobal name costs a global each and nothing needed them -- so the
+list was twenty-five lines of "(unnamed)" and the field the report was about
+could not be picked out of them. `ui.InputText` takes an optional label now.
+
+**A second question the output raised.** The text is pure white on every box,
+so "too dark to see" said of the undercut field is unlikely to be about the
+characters. Whether you can READ THE TEXT IN a box and whether you can SEE THE
+BOX AT ALL are different questions with different causes, and only the first
+was being asked. `ui.EdgeVerdict` measures the border against the panel behind
+it, on its own lower floor -- a hairline has to be findable, not readable.
+
+### The lone auction, the dead key, and a readout before a fifth attempt — v1.53.21
+
+**A group of one is now the auction it stands for.** Every item in a grouped
+search got a parent row, including items with exactly one auction -- and a
+parent is not tickable while a group of one never opens, so a lone auction
+could not be selected for a multi-buyout at all. The row also said LESS than
+the listing it wrapped: "1 auction, from 4g" in place of a seller, a stack, a
+time left and a price. Listing it directly answers both, and costs nothing --
+it is the same row the group would have revealed, one level up.
+
+**Tab stops being a dead key.** The two search boxes are the documented
+exception to Tab traversal: Tab completes item names there, which is older and
+more valuable. But on a prefix matching nothing the key did nothing at all,
+which from the player's side is indistinguishable from the addon having stopped
+responding. `ui.BuyAutocomplete` now REPORTS whether it completed, and the
+handler falls through to traversal only on a false -- so nothing anybody
+already does changes, and the fall-through is reachable only on a prefix Aegis
+has never seen.
+
+**AND A READOUT INSTEAD OF A FIFTH ATTEMPT.** The pfUI input colour has been
+"fixed" four times, and all four were the same move: assert our colour harder
+and later. Three different faults produce an identical screenshot --
+
+  1. the colour did not STICK -- something repainted it after us;
+  2. it stuck and the box is dark BEHIND it -- a contrast problem, nothing to
+     do with the text;
+  3. the box was never ours -- built after `skin.Apply`, so never skinned and
+     never registered
+
+-- and they need three different fixes. Four attempts all addressed (1),
+because that is the one that occurs to you when the report says "the text is
+too dark". `/aex diag` now prints every registered box with what it was asked
+to be, what it has, what is behind it, and a verdict naming which of the three
+it is.
+
+**This is ROADMAP's own deposit lesson, applied before the fact rather than
+after.** Three releases were spent reasoning about `TURTLE_DEPOSIT_FACTOR` from
+the outside and one diag line settled it -- and settled a DIFFERENT question
+than the one being argued about. Nothing here is a fix yet; it is the
+measurement that decides which fix.
+
+**The verdict's ORDER is the load-bearing part**, and it is where four attempts
+went wrong: an unregistered box is reported as such and nothing else, because
+its colours are whatever the template left and naming them "lost" sends the
+next fix in the wrong direction. Contrast is checked last, because it only
+means anything once the colour IS what we asked for.
+
+**A sabotage retired for planting a variation rather than a bug.** Swapping
+`return false` for a bare `return` on the no-candidates path: both are falsy,
+the one reader treats them identically, so there is nothing there to catch. Same
+reasoning that retired the LCG-overflow sabotage. The half that does matter --
+dropping the success report, which makes Tab traverse even when it completed --
+is kept and caught.
+
+### The unfolded parent stays lit — v1.53.20
+
+**The last piece of the owner's spec for grouped results**, and it completes a
+picture the previous two releases each fixed a corner of: a parent with several
+auctions has no tick box, its unfolded listings do, hovering highlights the row
+under the cursor, and the open parent carries a dull purple tint.
+
+**A DIFFERENT FACT NEEDS A DIFFERENT COLOUR.** Gold is the window's language
+for "this is the row you acted on" across all six tables. "These listings are
+this row's" is not that, so reusing gold would have made the open parent and a
+selected listing indistinguishable while they sit two rows apart. The accent
+purple the Advanced and Build buttons wear is already the window's own, so it
+reads as belonging rather than as a new colour.
+
+**THE POOLED-TINT HAZARD IS v1.53.19's BUG WEARING A DIFFERENT HAT.** One row
+pool, two kinds, ONE shared `selTex` texture -- and now two colours on it.
+Setting the colour at creation and only toggling visibility per paint is
+exactly the mistake that hid the tick boxes for seventeen releases: whichever
+fill painted last owns the frame. So both fills set the colour on every paint,
+and the suite asserts that both do, not merely that each reads the right
+palette name.
+
+**A sabotage that was not caught, and what it taught.** Collapsing both palette
+entries to the same triple went unnoticed: the checks verified which NAME each
+fill reads, which stays true when both names hold the same colour. The
+distinction was then drawn in the source and nowhere on screen. The suite now
+parses both entries out of the real palette and asserts they differ -- and that
+the open one is actually purple (blue above red above green) rather than some
+other colour wearing the name. **Checking that the right constant is READ is
+not the same as checking what is IN it.**
+
+**The tints moved into the palette on the way.** `rowchrome_test` had asserted
+"exactly one selection tint literal in the file", which was the right rule when
+one call site wrote it; there are three now -- the row's creation and both
+fills -- so a literal was the copy that check exists to prevent. They are
+`C.rowSel` and `C.rowOpen`, the only two palette entries carrying a fourth
+value, because these are painted as `SetTexture(r, g, b, a)` rather than read
+as a text colour and splitting the alpha out would cost an upvalue in two of
+the largest functions in the file.
+
+### Multi-select was unreachable for seventeen releases — v1.53.19
+
+**Reported three times before I found it, and my first two answers were
+wrong.** "There used to be check boxes to select multiple items" -- I said they
+had been moved one level down by grouping and were reachable by expanding a
+group. They were not reachable at all.
+
+**ONE POOL, TWO KINDS, ONE MISSING LINE.** `ui.FillGroupRow` and
+`ui.FillResultRow` paint the SAME pooled row frames. A parent row is not
+tickable, so the group fill hides the tick box. The listing fill set its
+checked state and its dimming and never showed it again. Results have been
+grouped by DEFAULT since v1.53.2, so every pooled row lost its box on the first
+paint of any search and nothing restored it for the rest of the session --
+including on the listing rows underneath an expanded group.
+
+**The invariant was written down and not enforced.** The dispatch in
+`ui.UpdateBuyList` says, in as many words, that "each fill clears what the
+other uses, because the row above may have been the other kind". That is
+exactly the property that broke. A comment stating an invariant is not a check
+of it, and this one had been true for seventeen releases in the direction
+somebody happened to test.
+
+**So the test is the invariant, not the line.** Every `row.<w>:Hide()` in the
+group fill must have a matching `row.<w>:Show()` in the listing fill.
+Asserting `row.check:Show()` alone would pass the day a second widget joins
+the hide list and the same thing happens again. Two exemptions, each with its
+reason: the per-row Buy/Bid buttons are built only on the Crafting tab's rows,
+so on a Buy row there is nothing to restore.
+
+**WHY I MISSED IT TWICE.** Both wrong answers came from reading the group
+painter's comment -- "nothing on a parent is tickable" -- and stopping there,
+because it explained the symptom plausibly. It explained half of it. The
+question I did not ask until the third report was the mechanical one: does
+anything ever call `row.check:Show()`? One grep answered it. **A plausible
+explanation that accounts for the symptom is not the same as the cause**, and
+the difference between them is a grep I kept not running.
+
+### Clearing on a search was the wrong call — v1.53.18
+
+**Reverted one day after shipping it.** v1.53.17 cleared the ticked rows on a
+new search. I raised the design conflict in the prompt -- the comment above
+`ui.buyChecked` says the selection is built to survive a re-query, a sort and a
+page turn, which is why it holds entries rather than indices -- got a one-word
+"yes", and implemented it anyway. The owner used it and wanted it back.
+
+**WHY IT WAS WRONG, and it is not the reason I argued about.** I checked that
+paging did not route through `ui.DoBuySearch`, decided the promise was intact,
+and stopped there. What I never asked was **what else calls DoBuySearch**. The
+answer is a right-click on a grouped row ("search this item alone") and a
+shift-click on a bag item. Both are ordinary browsing. Neither is a thing
+anybody would describe as starting a new search, and both emptied the basket.
+
+**The worst of it is the interaction.** Buy results have been grouped by
+default since v1.53.2, and `ui.PaintBuyGroupRow` hides the tick box on every
+parent row -- so the right-click to an exact, flat list is the most reliable
+way to reach a tick box at all. The one route to the feature was also what
+wiped it. Neither half is wrong on its own; together they made a working
+feature look deleted.
+
+**Checking that a change keeps a documented promise is not the same as
+checking what the change affects.** One grep of `DoBuySearch()`'s call sites --
+which I ran two turns later, for a different question -- would have shown six
+of them and settled it before it shipped.
+
+**And the report that followed it was "when did we get rid of multi-select?"**
+Nothing had been removed. Grouping had moved the tick boxes one level down in
+v1.53.2, and a group of ONE is emitted as a parent with `expandable = nil` --
+so a lone auction is painted untickable and cannot be expanded to reach one.
+That is a real gap, still open, and separate from this revert.
+
+### §1 — Clear, and the selection that outlived its results — v1.53.17
+
+**First of the Buy-tab interaction pass.** Two decisions were the owner's and
+both went against my recommendation on the second point, correctly: the X at
+the window's top-right already calls `ui.CloseWindow()`, so the bottom Close
+was a duplicate of a control the window had anyway, in the place every other
+window in the game puts one. The slot went to Clear.
+
+**Implemented as a RELABEL, not a removal.** Two things anchor to that frame --
+the Buyout button beside it and the Filter Builder's entire action row -- so
+deleting it would move both. Keeping the frame and changing what it says cost
+zero re-anchoring. It is never hidden either, for the same reason: a slot that
+emptied when the selection did would shift the Builder's row every time the
+last tick came off. It greys instead, which is also what Buyout already does
+when the batch is unaffordable.
+
+**The reported problem was the missing button; the real one was the selection.**
+`ui.DoBuySearch` already cleared `ui.buySel` and `ui.buyExpanded` on a new
+search, each with a comment explaining why a value from the previous result set
+must not survive into the next. `ui.buyChecked` was simply left out of that
+list. So the bar read "Buyout (3)" against rows nobody could see.
+
+**And the fix had to not break a documented promise.** The comment above
+`ui.buyChecked` says the selection survives a re-query, a sort and a PAGE TURN
+-- which is why it holds entries rather than indices. Clearing on every query
+would have made that false. It stays true because paging calls
+`buy.NextPage` / `buy.PrevPage` directly and never comes through
+`DoBuySearch`, so only a genuinely new search clears. **The suite asserts the
+promise, not just the fix**: it fails if paging ever starts routing through the
+search path.
+
+**A latent bug the button exposed.** `ui.ClearBuyChecks` repainted the action
+bar and not the list, so tick marks outlived the selection they were drawn for.
+Invisible for its whole life, because its only caller was a finished batch --
+and buying re-queries the page, which repaints the rows a moment later for its
+own reasons. **A function whose only caller hides its bug is not a tested
+function**; giving it a second caller is what found this.
+
+**Two buttons named Clear.** The owner's choice put one on the action bar five
+pixels from the Builder's, which empties the form. Ticks are not view-scoped,
+so both are loudest at the same moment. The Builder's became Reset -- it is the
+one of the two that is not about the auction list.
+
+**Ticking rows shipped in v1.15.0 with no coverage of any kind.** The new suite
+is its first, and it found both faults above on the way in.
+
 ### A flush that belonged to the wrong thing — v1.53.16
 
 **`attempt to index field 'shopDriver' (a nil value)`, once per BAG_UPDATE, at

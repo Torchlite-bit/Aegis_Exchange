@@ -18,6 +18,245 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.26]
+
+### Fixed
+- **Aegis will not undercut you.** If the cheapest listing of an item is your
+  own, the suggested price now **matches** it instead of going under it.
+
+  Reported from a live client, and it compounds: post the same item again while
+  holding the cheapest listing and the price stepped down each time — competing
+  with nobody but yourself, a few percent per post, for as long as you kept
+  posting. A **tie** matches too: level with somebody else you're already as
+  cheap as the market, and a step under only invites a step back.
+
+  **Price match is unchanged** — it answers "what is the competition asking",
+  so it still ignores your own listings.
+
+### Changed
+- **The dressing room opens beside the Aegis window** instead of wherever the
+  client last put it, which was usually on top of the results you were
+  clicking.
+- **Input box text is a notch smaller**, so a two-digit undercut percentage
+  isn't pressed against the edges of its box. It won't shrink a font that is
+  already small.
+
+
+## [1.53.25]
+
+### Fixed
+- **Input box text is white under pfUI.** Something *was* over the box — you
+  called it, and that was the whole cause.
+
+  pfUI's backdrop is a **child frame**, and a child draws above *all* of its
+  parent's regions no matter what layer they are on. A button can answer that
+  by moving its label onto the backdrop; an **edit box cannot** — it draws its
+  own text internally, so there is no label to move. pfUI's plate simply sat on
+  top. Translucent and dark on one pfUI config, near-opaque on another, which
+  is exactly the range reported: grey in one, unreadable in the next.
+
+  The text colour was correct the whole time — `/aex diag` kept answering
+  `1.00/1.00/1.00`, which is why four attempts at making it whiter changed
+  nothing. Edit boxes now keep their own background, set **on the box**, where
+  the draw layer puts it underneath the box's own text with no frame ordering
+  left to lose.
+
+
+## [1.53.24]
+
+### Added
+- **Display on Character.** A tick box on the Buy tab, beside *Usable items*.
+  With it on, clicking a result tries the item on in the dressing room — the
+  same thing the stock auction house's box of that name does.
+
+  - **Clicking a grouped item works too**, not just an unfolded listing. The
+    parent stands for the item and carries its first auction, so "click it to
+    see it" is true of both views.
+  - **Only things that can be worn.** A stack of cloth leaves the dressing
+    room shut rather than opening an empty one. An item your client hasn't
+    cached yet is still attempted — "we don't know what this is" and "this
+    can't be worn" are different, and refusing the first would make the box
+    look broken on everything you haven't looked at.
+  - **It stays ticked between sessions.** Everything else on that strip is part
+    of the search and resets with it; this is a preference about what clicking
+    does, so loading a saved search won't turn it on or off underneath you.
+
+  `/aex diag` reports whether your client provides the dressing-room API at
+  all, so a box that can't work says so instead of doing nothing quietly.
+
+
+## [1.53.23]
+
+### Fixed
+- **Input boxes are findable under pfUI again.** This is the fifth go at "the
+  undercut box is too dark", and the first one aimed at the right thing.
+
+  **The text was never the problem.** `/aex diag` reported pure white on all
+  twenty-five boxes while the report still stood — and the screenshot that
+  came with it showed the *values* perfectly legible. What is dark is the
+  **box**: pfUI replaces its backdrop with a child frame whose default border
+  is near-black, our panel behind it is near-black, and nothing shows where the
+  field is. The boxes now carry a gold edge, asserted through the same
+  machinery that keeps the text colour — so whatever repaints one repaints
+  both.
+
+### Added
+- **The search box shows what Tab would complete to**, in grey, after what
+  you've typed. Type `linen` and ` Cloth` appears beside it; press Tab and
+  that's exactly what you get — the suggestion and the key cannot disagree,
+  because they pick the same way.
+
+  It never touches what you've already typed: the grey sits *after* the caret
+  and the characters before it stay yours, whatever case you typed them in. It
+  appears only while the box has focus, and only when there is something to
+  complete.
+
+
+## [1.53.22]
+
+### Fixed
+- **`/aex diag` was reading the wrong frame for a box's background**, so it
+  reported *"backdrop unreadable"* for every input box and looked like a client
+  limitation. pfUI puts its backdrop on a **child frame** and Aegis clears the
+  box's own first so the two can't double-border — so asking the box answers
+  nothing. It now reads whichever frame actually carries it, and says which.
+
+- **A check that couldn't run no longer reports "ok".** That line read
+  *"ok (backdrop unreadable)"*, which scans as a pass when it is the opposite:
+  the one test still standing hadn't run. It says **CANNOT TELL** now.
+
+### Added
+- **The readout names the boxes.** Most input boxes are built without a name,
+  so the list was twenty-five lines of *"(unnamed)"* and the one you were
+  asking about couldn't be picked out. The undercut percent field and its three
+  coin boxes now identify themselves.
+- **An edge verdict.** Whether you can *read the text in* a box and whether you
+  can *see the box at all* are different questions with different causes. The
+  readout now answers both.
+
+
+## [1.53.21]
+
+### Fixed
+- **An item with a single auction can be ticked now.** In a grouped search
+  every item got a parent row — including items with exactly **one** auction.
+  A parent isn't tickable and a group of one never opens, so a lone auction
+  could not be selected for a multi-buyout at all; the only way to reach it was
+  a right-click to search that item on its own.
+
+  It is listed as the auction it is now, which also tells you more: the seller,
+  the stack, the time left and the price, instead of *"1 auction, from 4g"*.
+
+- **Tab on the search box is no longer a dead key.** Tab completes item names
+  there, which stays exactly as it was — but when what you'd typed matched
+  nothing it did *nothing*, which is indistinguishable from the addon having
+  stopped responding. It now moves to the next field, like Tab everywhere else,
+  and only when there is nothing to complete.
+
+### Added
+- **`/aex diag` now reports every input box**: the colour it was asked to be,
+  the colour it actually has, what's behind it, whether it was skinned, and a
+  verdict. If a box is hard to read under pfUI, this says **which** of the
+  three causes it is — a colour that didn't stick, a backdrop too close to the
+  text, or a box that was built too late to be ours — because they look
+  identical on screen and need different fixes.
+
+  *(If you've been seeing the undercut box too dark: run `/aex diag` with pfUI
+  on and send me those lines.)*
+
+
+## [1.53.20]
+
+### Added
+- **An unfolded item stays lit.** Open a grouped row and the parent now wears a
+  dull purple tint — the same accent the Advanced and Build buttons use — for
+  as long as its listings are showing underneath it.
+
+  It is deliberately **not** the gold a selected row wears, because it says a
+  different thing. Gold means *this is the row you acted on*; purple means
+  *these listings below are this row's*. Without it the item you opened looked
+  exactly like the ones you did not, and the rows underneath had nothing
+  saying whose they were.
+
+  Hovering still gives you the usual highlight on whichever row is under the
+  cursor, so you can read the open item, the row you are pointing at, and
+  anything you have ticked, all at once.
+
+
+## [1.53.19]
+
+### Fixed
+- **The tick boxes for buying several auctions at once are back.** They had
+  been unreachable since **v1.53.2** — not moved, not redesigned, gone.
+
+  Grouped parent rows and individual listing rows are painted into the *same*
+  pooled row frames. A parent isn't tickable — you can't buy "an item" — so
+  painting one **hides** its tick box. Painting a listing back into that frame
+  was supposed to put the box back, and never did. Since results have been
+  grouped by default since v1.53.2, every row lost its box on the first paint
+  of any search, and nothing showed it again for the rest of the session —
+  including on the listings underneath an expanded group.
+
+  One missing line. Tick a row, tick another, and **Buyout (2)** buys both, as
+  it did before.
+
+
+## [1.53.18]
+
+### Fixed
+- **A new search no longer empties your ticked rows.** v1.53.17 made it do
+  that, and it was wrong.
+
+  "A new search" is not only something you do on purpose. It is also what runs
+  when you **right-click a grouped row** to see one item on its own, and when
+  you **shift-click an item in your bags** — ordinary browsing, and exactly the
+  browsing a multi-select exists to survive. Worse: while results are grouped,
+  that right-click is the most reliable way to reach a tick box at all, so the
+  one route to the feature was also what wiped it.
+
+  **The Clear button is now the only thing that empties the selection** — one
+  control, one meaning. Your ticks survive a re-query, a sort, a page turn and
+  a new search, which is what the selection was built for: it holds the
+  auctions themselves rather than their positions on a page.
+
+
+## [1.53.17]
+
+### Changed
+- **The Buy tab's Close button is now Clear.** Ticking rows for a multi-buyout
+  had no way back short of clicking each one again. Close was a duplicate — the
+  **X** at the window's top-right already closed it, and does the identical
+  thing — so that slot is better spent.
+
+  It reads **Clear (3)** while rows are ticked, mirroring **Buyout (3)** beside
+  it so the pair reads as two things you can do to one selection. With nothing
+  ticked it greys rather than disappearing, because a slot that emptied would
+  shift the Filter Builder's action row every time the last tick came off.
+
+- **The Filter Builder's Clear is now Reset.** It empties the *form*, and the
+  button five pixels to its right empties the *ticked rows* — two buttons
+  reading "Clear" that close together, meaning different things, is a coin
+  flip. Ticks aren't view-scoped, so both are loudest at the same moment.
+
+### Fixed
+- **Ticked rows survived a new search.** Tick three things, search for
+  something else, and the action bar still read *Buyout (3)* with a total for
+  rows that were no longer on screen. The single selection had always been
+  dropped on a new search; the multi-selection was simply left out.
+
+  It failed *safe* — a batch works from item fingerprints rather than page
+  positions, so it aborted with *"a selected auction is no longer available"*
+  instead of buying the wrong auction — but the count and the total were wrong
+  until you pressed it. **A page turn and a re-sort still keep your ticks**;
+  only a genuinely new search clears them.
+
+- **Clearing the selection left the tick marks on the rows.** The clear
+  repainted the action bar and not the list. It never showed, because the only
+  thing that called it was a finished batch — and buying re-queries the page,
+  which repaints the rows a moment later anyway. Giving you a button that calls
+  it directly is what would have exposed it.
+
+
 ## [1.53.16]
 
 ### Fixed
@@ -5519,6 +5758,16 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -54,8 +54,16 @@ local function extract(path, signature)
 end
 
 ui = {}
+-- ui/frame.lua takes `local util = A.util` at file scope, so a function
+-- extracted out of it reads `util` as a global once loaded on its own.
+util = A.util
 for _, sig in ipairs({
     "function ui.BuyTreeRows(",
+    "function ui.CompletionSuffix(",
+    "function ui.DressUpMethod(",
+    "function ui.CanDressUp(",
+    "function ui.TryDressUp(",
+    "function ui.ParkDressUpFrame(",
     "function ui.ToggleBuyGroup(",
     "function ui.BuyGrouped(",
 }) do
@@ -160,14 +168,17 @@ local function kinds(rows)
     return table.concat(out, ",")
 end
 
+-- ONE ROW PER ITEM, and the row's KIND depends on how many auctions that item
+-- has. An item with several gets a parent you can open; an item with ONE is
+-- listed as that auction directly -- see ui.BuyTreeRows for why.
 local closed = ui.BuyTreeRows(g, {})
-H.eq("closed, it is one row per item", kinds(closed), "group,group")
+H.eq("closed, it is one row per item", kinds(closed), "group,listing")
 H.eq("a group carries its count", closed[1].listings, 3)
 H.eq("...and its lowest price", closed[1].low, 562)
 
 local open = ui.BuyTreeRows(g, { [g[1].key] = true })
 H.eq("expanding adds its listings underneath it", kinds(open),
-     "group,listing,listing,listing,group")
+     "group,listing,listing,listing,listing")
 H.check("...and the group says it is open", open[1].expanded,
         "the flag did not follow")
 H.eq("the children are that item's listings", open[2].owner, "Valarich")
@@ -178,12 +189,20 @@ H.eq("...in the order the page gave them", open[3].owner, "Tekbank")
 H.check("a child row IS the engine's row", open[2] == PAGE[1],
         "the tree copied the listings instead of listing them")
 
--- A GROUP OF ONE NEVER EXPANDS. There is nothing under it but the row you are
--- already looking at, and a triangle that reveals a copy of its own parent
--- reads as a bug.
-H.eq("a lone listing is not expandable", closed[2].expandable, nil)
+-- AN ITEM WITH ONE AUCTION IS LISTED AS THAT AUCTION. It used to be a parent
+-- standing for it, which could do nothing anybody wanted: a parent is not
+-- tickable, and a group of one never expands -- so a lone auction could not be
+-- selected for a multi-buyout at all, and the row said "1 auction, from 4g"
+-- where the listing says who is selling it, in what stack, for how long.
+H.eq("a lone auction is a listing, not a parent", closed[2].kind, "listing")
+H.eq("...it is not expandable", closed[2].expandable, nil)
+H.check("...and it is the engine's own row", closed[2] == PAGE[2],
+        "the tree copied the lone listing instead of listing it")
+
+-- ...and asking to open it changes nothing: there is no parent to open.
 local lone = ui.BuyTreeRows(g, { [g[2].key] = true })
-H.eq("...and does not expand even when asked", kinds(lone), "group,group")
+H.eq("opening it is a no-op", kinds(lone), "group,listing")
+
 H.check("a group of several IS expandable", closed[1].expandable,
         "three listings should offer a triangle")
 
@@ -195,7 +214,7 @@ H.check("a group of several IS expandable", closed[1].expandable,
 local REORDERED = { g[2], g[1] }
 local moved = ui.BuyTreeRows(REORDERED, { [g[1].key] = true })
 H.eq("a re-sort keeps the shape", kinds(moved),
-     "group,group,listing,listing,listing")
+     "listing,group,listing,listing,listing")
 -- Greater Mana Potion was at index 1 and is now at index 2. It is still the
 -- one that is open; an index-keyed set would have expanded whatever took
 -- slot 1, which is the Minor.
@@ -209,7 +228,7 @@ H.check("...and says so", not moved[1].expanded,
         "the row that slid into slot 1 was expanded instead")
 
 H.eq("nothing open is one row per item",
-     kinds(ui.BuyTreeRows(g, nil)), "group,group")
+     kinds(ui.BuyTreeRows(g, nil)), "group,listing")
 H.eq("no groups is no rows", table.getn(ui.BuyTreeRows(nil, {})), 0)
 
 -- ---- toggling ------------------------------------------------------------
@@ -389,6 +408,206 @@ do
             string.find(src, "    ui.buyExpanded = {}\n\n    ui.buyResults = nil",
                         1, true) ~= nil,
             "stale expansion keys survive into the next page")
+end
+
+-- ---------------------------------------------------------------------------
+H.section("The ghost after the caret")
+-- ---------------------------------------------------------------------------
+
+-- 1.12 has no inline completion, so the suggestion is a grey FontString laid
+-- over the box. WHAT IT SHOWS is arithmetic and is checked here; where it
+-- lands needs a client and a person.
+
+-- IT RETURNS THE CANDIDATE'S OWN CASING for the untyped tail, so "linen"
+-- against "Linen Cloth" ghosts " Cloth" and the two read as one word.
+H.eq("the untyped tail", ui.CompletionSuffix("linen", "Linen Cloth"),
+     " Cloth")
+H.eq("...and capitals in the tail survive",
+     ui.CompletionSuffix("black", "Black Lotus"), " Lotus")
+H.eq("an exact-case prefix works the same",
+     ui.CompletionSuffix("Linen", "Linen Cloth"), " Cloth")
+
+-- WHAT IT MUST NOT DO is correct what is already typed. The ghost sits AFTER
+-- the caret and the characters before it are the player's; returning the
+-- candidate's own first letters there would restyle their typing under them
+-- mid-keystroke.
+local tail = ui.CompletionSuffix("linen", "Linen Cloth")
+H.check("the tail never includes what was typed",
+        string.find(tail, "inen", 1, true) == nil,
+        "the ghost would rewrite the caret's left-hand side")
+
+-- Nothing to show, in each of the ways there can be nothing.
+H.isNil("nothing typed, nothing ghosted", ui.CompletionSuffix("", "Linen"))
+H.isNil("...nor on no text at all", ui.CompletionSuffix(nil, "Linen"))
+H.isNil("no candidate", ui.CompletionSuffix("linen", nil))
+H.isNil("...nor an empty one", ui.CompletionSuffix("linen", ""))
+
+-- ALREADY COMPLETE. An exact match has no tail, and a ghost of "" left shown
+-- would be an empty FontString sitting there for no reason.
+H.isNil("an exact match has no tail",
+        ui.CompletionSuffix("Linen Cloth", "Linen Cloth"))
+H.isNil("...case-insensitively too",
+        ui.CompletionSuffix("linen cloth", "Linen Cloth"))
+H.isNil("a candidate shorter than what is typed is not a completion",
+        ui.CompletionSuffix("Linen Cloth", "Linen"))
+
+-- NOT A PREFIX AT ALL. buy.FirstCompletion only returns prefix matches, but
+-- this must not assume its caller got that right -- a mid-string match would
+-- ghost a tail that does not follow from what was typed.
+H.isNil("a candidate that does not start with what was typed",
+        ui.CompletionSuffix("cloth", "Linen Cloth"))
+
+-- ---- and it agrees with what Tab would do -------------------------------
+
+-- THE GHOST IS A PROMISE ABOUT THE KEY. If it shows one completion and Tab
+-- inserts another, the grey text is a lie -- so the single pick and the first
+-- entry of the sorted list have to be the same string, by the same comparison.
+do
+    A.db.account.names = {}
+    local pool = { "Linen Cloth", "Linen Bandage", "Linen Belt", "Silk Cloth" }
+    for i = 1, table.getn(pool) do A.db.account.names[pool[i]] = 1000 + i end
+
+    local list = buy.AutocompleteCandidates("linen")
+    H.check("the list has several", table.getn(list) > 1, table.getn(list))
+    H.eq("the ghost shows what the first Tab press would insert",
+         buy.FirstCompletion("linen"), list[1])
+
+    -- ...on a single match too, and on none.
+    H.eq("one match is that match", buy.FirstCompletion("silk"), "Silk Cloth")
+    H.isNil("no match, no ghost", buy.FirstCompletion("zzzq"))
+    H.isNil("an empty prefix has nothing to complete", buy.FirstCompletion(""))
+    H.isNil("...nor no prefix at all", buy.FirstCompletion(nil))
+
+    -- CASE-INSENSITIVE, like the list it must agree with.
+    H.eq("matching ignores case", buy.FirstCompletion("LINEN"), list[1])
+end
+
+-- ---------------------------------------------------------------------------
+H.section("Display on Character")
+-- ---------------------------------------------------------------------------
+
+-- WHICH API THE CLIENT HAS, if either. 1.12's own auction house carries this
+-- box, so the machinery exists -- but which global holds it is not something
+-- to take from a screenshot, and CLAUDE.md's rule is that an API is absent
+-- until shown otherwise. Both known shapes are probed and /aex diag reports
+-- the answer, so a client with neither says so instead of leaving a tick box
+-- that silently does nothing.
+do
+    local realLink, realModel = DressUpItemLink, DressUpModel
+
+    DressUpItemLink, DressUpModel = function() end, nil
+    H.eq("the link API is preferred when present", ui.DressUpMethod(), "link")
+
+    DressUpItemLink = nil
+    DressUpModel = { TryOn = function() end }
+    H.eq("...the model is the fallback", ui.DressUpMethod(), "model")
+
+    -- HAVING THE FRAME IS NOT HAVING THE METHOD. DressUpModel could exist as
+    -- some other kind of frame entirely; only TryOn makes it usable.
+    DressUpModel = {}
+    H.isNil("a model with no TryOn is no method", ui.DressUpMethod())
+
+    DressUpModel = nil
+    H.isNil("a client with neither says so", ui.DressUpMethod())
+
+    DressUpItemLink, DressUpModel = realLink, realModel
+end
+
+-- ---- what can actually be shown ----------------------------------------
+
+-- A non-empty equip slot means the item goes on the character somewhere.
+H.check("a weapon can be shown",
+        ui.CanDressUp({ equipLoc = "INVTYPE_2HWEAPON" }))
+H.check("...and a chest piece", ui.CanDressUp({ equipLoc = "INVTYPE_CHEST" }))
+-- util.ItemInfo substitutes these when the client gives no slot but does give
+-- a type -- a real state on Turtle with ClassicAPI, where the slot is absent
+-- rather than moved.
+H.check("...and the stand-in slots util.ItemInfo fills in",
+        ui.CanDressUp({ equipLoc = "AEGIS_ANY_WEAPON" })
+        and ui.CanDressUp({ equipLoc = "AEGIS_ANY_ARMOR" }))
+
+-- NOTHING TO PUT ON A MODEL. Opening an empty dressing room over a stack of
+-- cloth reads as the feature misfiring rather than as the item being
+-- unwearable.
+H.check("a trade good cannot", not ui.CanDressUp({ equipLoc = "" }))
+H.check("...nor one with no slot at all", not ui.CanDressUp({ type = "Trade Goods" }))
+
+-- NO INFO IS A YES, and this is the distinction that matters: util.ItemInfo
+-- returns nil for an item the client has not cached, which is a different
+-- statement from "this item has no equip slot". Refusing what we cannot
+-- identify would make the box look broken on exactly the items you have not
+-- looked at yet -- and the dressing room is the backstop, since handed
+-- something unwearable it shows nothing anyway.
+H.check("an item the client has not cached is attempted",
+        ui.CanDressUp(nil),
+        "the box would look broken on every uncached item")
+
+-- ---- and the attempt ----------------------------------------------------
+
+do
+    local realLink = DressUpItemLink
+    local asked
+    DressUpItemLink = function(link) asked = link end
+
+    W.AddItem(7100, { name = "Test Sword", quality = 2, stackCount = 1,
+                      type = "Weapon", subType = "Sword",
+                      equipLoc = "INVTYPE_WEAPONMAINHAND" })
+    local link = W.items[7100].link
+
+    asked = nil
+    H.check("a wearable item is handed to the client", ui.TryDressUp(link))
+    H.eq("...as the link it was given", asked, link)
+
+    -- No link, nothing asked. A row whose auction index the client no longer
+    -- holds gives nil here, and that has to be a quiet no rather than a call
+    -- with nil in it.
+    asked = nil
+    H.check("no link, no attempt", not ui.TryDressUp(nil))
+    H.isNil("...and nothing was asked", asked)
+    H.check("an empty link is the same", not ui.TryDressUp(""))
+
+    -- THE WINDOW IS PARKED BESIDE OURS, not left wherever the client put it.
+    -- It opens as a UI panel, which generally lands it over the middle of the
+    -- screen -- on top of the results you are clicking, which is the one
+    -- arrangement in which "click things and watch them" does not work.
+    do
+        local points
+        ui.frame = {
+            IsVisible = function() return true end,
+        }
+        DressUpFrame = {
+            ClearAllPoints = function() points = 0 end,
+            SetPoint = function() points = (points or 0) + 1 end,
+        }
+        asked = nil
+        H.check("it is tried on", ui.TryDressUp(link))
+        H.eq("...and the dressing room is re-anchored once", points, 1)
+
+        -- CLEARALLPOINTS FIRST, because SetPoint ADDS a point on 1.12 rather
+        -- than replacing one -- a frame with two anchors is stretched between
+        -- them. Parking twice must still leave exactly one.
+        ui.TryDressUp(link)
+        H.eq("...and parking again still leaves one anchor", points, 1)
+
+        -- Our window closed: leave the dressing room where it is. Anchoring to
+        -- a hidden frame would drag it off wherever that frame happens to sit.
+        ui.frame.IsVisible = function() return false end
+        points = nil
+        ui.ParkDressUpFrame()
+        H.isNil("nothing is moved while our window is hidden", points)
+
+        ui.frame = nil
+        H.check("no window, no parking", not ui.ParkDressUpFrame())
+        DressUpFrame = nil
+        H.check("no dressing room, no parking", not ui.ParkDressUpFrame())
+    end
+
+    -- A client with no API at all refuses rather than erroring.
+    DressUpItemLink = nil
+    local realModel = DressUpModel
+    DressUpModel = nil
+    H.check("no API, no attempt", not ui.TryDressUp(link))
+    DressUpItemLink, DressUpModel = realLink, realModel
 end
 
 os.exit(H.report("buygroup"))

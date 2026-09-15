@@ -893,9 +893,9 @@ end""",
     # A selection tint that starts visible paints every row as chosen the
     # moment the table is built.
     ("chrome-tint-starts-visible", "ui/frame.lua",
-     """        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+     """        sel:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3], C.rowSel[4])
         sel:Hide()""",
-     """        sel:SetTexture(0.6, 0.45, 0.10, 0.34)""",
+     """        sel:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3], C.rowSel[4])""",
      "rowchrome"),
 
     # A second copy of the stripe grown on one tab -- the drift this function
@@ -2555,24 +2555,25 @@ end
     # This is the mechanism two earlier fixes missed while re-arranging WHEN
     # the colour was set.
     ("input-font-object-not-detached", "ui/frame.lua",
-     """        local path, size, flags = e:GetFont()
-        if path then pcall(function() e:SetFont(path, size, flags) end) end""",
-     "        local _ = e",
+     "        if path then pcall(function() e:SetFont(path, size, flags) end) end",
+     "        local _ = path",
      "rowchrome"),
 
     # ...and the colour set BEFORE the font, which re-attaches the object and
     # throws the colour away again. Same two calls, wrong order, no error.
     ("input-colour-set-before-the-font", "ui/frame.lua",
-     """    if e.GetFont and e.SetFont then
-        local path, size, flags = e:GetFont()
-        if path then pcall(function() e:SetFont(path, size, flags) end) end
+     """        if path then pcall(function() e:SetFont(path, size, flags) end) end
     end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])""",
-     """    e:SetTextColor(C.input[1], C.input[2], C.input[3])
-    if e.GetFont and e.SetFont then
-        local path, size, flags = e:GetFont()
-        if path then pcall(function() e:SetFont(path, size, flags) end) end
+     """        if path then pcall(function() e:SetFont(path, size, flags) end) end
     end""",
+     "rowchrome"),
+
+    # The shrink applied with no floor, so a box whose font is already small
+    # is walked down every time the colour is re-asserted.
+    ("input-font-shrinks-without-a-floor", "ui/frame.lua",
+     "        if size and size > INPUT_FONT_MIN then",
+     "        if size then",
      "rowchrome"),
 
     # ---- the grouped Buy table's widgets (v1.53.2) -----------------------
@@ -3864,8 +3865,8 @@ end
     # The expansion set keyed by INDEX. A re-sort renumbers every row, and this
     # then expands whichever item slid into the slot -- silently.
     ("buy-open-keyed-by-index", "ui/frame.lua",
-     "        local isOpen = (many and open[g.key]) and true or nil",
-     "        local isOpen = (many and open[i]) and true or nil",
+     "            local isOpen = open[g.key] and true or nil",
+     "            local isOpen = open[i] and true or nil",
      "buygroup"),
 
     # A group of ONE offering a triangle, which reveals a copy of its own
@@ -5193,6 +5194,442 @@ end""",
      """    return nil
 end""",
      "purse"),
+
+    # ---- never undercut yourself (v1.53.26) -----------------------------
+
+    # THE REPORTED BUG, put back: your own cheapest listing undercut instead of
+    # matched, so posting the same item repeatedly walks your own price down a
+    # step at a time against nobody.
+    ("undercuts-your-own-listing", "core/sell.lua",
+     "        return lowestMine, false",
+     "        return lowestMine, true",
+     "sellslot"),
+
+    # ...and the tie. Level with somebody else you are already as cheap as the
+    # market; a step under buys nothing and they take it straight back.
+    ("undercut-war-on-a-tie", "core/sell.lua",
+     "    if lowestMine and (not lowestOther or lowestMine <= lowestOther) then",
+     "    if lowestMine and (not lowestOther or lowestMine < lowestOther) then",
+     "sellslot"),
+
+    # Your own listings ignored entirely, which is where this started: the
+    # reference comes back as the competition's and the self-undercut returns.
+    ("own-listings-not-consulted", "core/sell.lua",
+     "        if r.unit and r.unit > 0 and r.isMine then",
+     "        if r.unit and r.unit > 0 and not r.isMine then",
+     "sellslot"),
+
+    # Price-match quietly taking your OWN price into account, which would make
+    # it match a figure the competition never asked for.
+    ("price-match-counts-your-own", "core/sell.lua",
+     "    local low = sell.LowestListingUnit(true)",
+     "    local low = sell.LowestListingUnit(false)",
+     "sellslot"),
+
+    # ---- the dressing room's position (v1.53.26) ------------------------
+
+    # SetPoint ADDS a point on 1.12 rather than replacing one, so parking
+    # twice without clearing leaves the frame stretched between two anchors.
+    ("dressup-park-does-not-clear-points", "ui/frame.lua",
+     "        DressUpFrame:ClearAllPoints()",
+     "",
+     "buygroup"),
+
+    # The dressing room dragged around by a window that is not on screen.
+    ("dressup-parks-against-a-hidden-window", "ui/frame.lua",
+     "    if not ui.frame:IsVisible() then return false end",
+     "",
+     "buygroup"),
+
+    # ---- the plate that was covering the text (v1.53.25) ----------------
+
+    # THE CAUSE, PUT BACK. pfUI's CreateBackdrop builds a CHILD FRAME, and a
+    # child draws above ALL of its parent's regions whatever layer they are on.
+    # An EditBox draws its own text internally and has no label to re-home, so
+    # the plate simply sits on top of it -- grey text on one pfUI config,
+    # invisible on the next. GetTextColor answers 1.00/1.00/1.00 throughout.
+    ("editbox-wears-pfuis-child-backdrop", "ui/skin.lua",
+     "        EditBoxPlate(f)",
+     "        Backdrop(f)",
+     "rowchrome"),
+
+    # The plate not set at all, so under the skin the box has no background --
+    # Strip already took the template's art away.
+    ("editbox-has-no-plate", "ui/skin.lua",
+     "        EditBoxPlate(f)\n",
+     "",
+     "rowchrome"),
+
+    # A plate pfUI built on an earlier pass left showing, which is still over
+    # the text however politely the new one sits underneath.
+    ("editbox-keeps-the-old-child-plate", "ui/skin.lua",
+     """    if f.backdrop and f.backdrop.Hide then
+        pcall(function() f.backdrop:Hide() end)
+    end""",
+     "",
+     "rowchrome"),
+
+    # ---- Display on Character (v1.53.24) --------------------------------
+
+    # THE CHECK BOX THAT SILENTLY DOES NOTHING. Assuming the API is there is
+    # the mistake CLAUDE.md's "when in doubt, assume it does not exist" rule is
+    # written against -- and a client with neither global would give no error,
+    # just a tick box nobody can tell is broken.
+    ("dressup-assumes-the-api", "ui/frame.lua",
+     """    if DressUpItemLink then return "link" end
+    if DressUpModel and DressUpModel.TryOn then return "model" end
+    return nil""",
+     '    return "link"',
+     "buygroup"),
+
+    # Having the frame taken for having the method. DressUpModel could be some
+    # other kind of frame entirely; only TryOn makes it usable.
+    ("dressup-model-without-tryon", "ui/frame.lua",
+     '    if DressUpModel and DressUpModel.TryOn then return "model" end',
+     '    if DressUpModel then return "model" end',
+     "buygroup"),
+
+    # AN UNCACHED ITEM REFUSED. util.ItemInfo answers nil for an item the
+    # client has not loaded, which is not the same as "this has no equip
+    # slot" -- refusing it makes the box look broken on exactly the items you
+    # have not looked at yet.
+    ("dressup-refuses-uncached-items", "ui/frame.lua",
+     "    if not info then return true end\n    local slot = info.equipLoc",
+     "    if not info then return false end\n    local slot = info.equipLoc",
+     "buygroup"),
+
+    # ...and the other way: a trade good handed to the dressing room, which
+    # opens an empty window over the world and reads as the feature misfiring.
+    ("dressup-tries-on-a-trade-good", "ui/frame.lua",
+     '    if not slot or slot == "" then return false end',
+     '    if not slot or slot == "" then return true end',
+     "buygroup"),
+
+    # A nil link passed straight through to the client.
+    ("dressup-passes-a-nil-link", "ui/frame.lua",
+     '    if not link or link == "" then return false end\n    if not ui.CanDressUp',
+     '    if false then return false end\n    if not ui.CanDressUp',
+     "buygroup"),
+
+    # ---- the ghost after the caret (v1.53.23) ---------------------------
+
+    # THE GHOST SHOWING SOMETHING OTHER THAN WHAT TAB WOULD INSERT. The grey
+    # text is a promise about the key; picking the last match instead of the
+    # first makes it a lie, and the player sees one completion and gets
+    # another.
+    ("ghost-disagrees-with-tab", "core/buy.lua",
+     "            if not best or name < best then best = name end",
+     "            if not best or name > best then best = name end",
+     "buygroup"),
+
+    # The tail including what was already typed, which restyles the player's
+    # own characters under the caret mid-keystroke.
+    ("ghost-tail-includes-what-was-typed", "ui/frame.lua",
+     "    return string.sub(candidate, n + 1)",
+     "    return candidate",
+     "buygroup"),
+
+    # An exact match ghosting an empty string, so a finished word leaves an
+    # empty FontString shown for no reason.
+    ("ghost-shows-an-empty-tail", "ui/frame.lua",
+     "    if string.len(candidate) <= n then return nil end",
+     "    if string.len(candidate) < n then return nil end",
+     "buygroup"),
+
+    # The prefix check dropped, so a mid-string match ghosts a tail that does
+    # not follow from what was typed at all.
+    ("ghost-accepts-a-non-prefix", "ui/frame.lua",
+     """    if string.lower(string.sub(candidate, 1, n)) ~= string.lower(typed) then
+        return nil
+    end""",
+     "",
+     "buygroup"),
+
+    # Case-sensitive matching, so typing in lower case ghosts nothing on a
+    # database whose names are all capitalised -- which is all of them.
+    ("ghost-is-case-sensitive", "core/buy.lua",
+     "        if string.find(string.lower(name), low, 1, true) == 1 then\n            -- `<` is the comparison",
+     "        if string.find(name, low, 1, true) == 1 then\n            -- `<` is the comparison",
+     "buygroup"),
+
+    # ---- the input edge (v1.53.23) --------------------------------------
+
+    # THE FIFTH ATTEMPT UNDONE. The edge never painted, so under pfUI the box
+    # keeps a near-black border against a near-black panel and nothing shows
+    # where the field is -- which is what "too dark to see" meant all along,
+    # while four attempts went at the text colour.
+    ("input-edge-never-painted", "ui/frame.lua",
+     """    local plate = ui.BackdropSource(e)
+    if plate and plate.SetBackdropBorderColor then
+        pcall(function()
+            plate:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
+                                         C.inputEdge[3], C.inputEdge[4])
+        end)
+    end""",
+     "",
+     "rowchrome"),
+
+    # ...and the edge painted as dark as the panel behind it, which is the bug
+    # restated rather than fixed.
+    ("input-edge-as-dark-as-the-panel", "ui/frame.lua",
+     "    inputEdge = { 0.62, 0.50, 0.16, 0.95 },",
+     "    inputEdge = { 0.14, 0.13, 0.11, 0.95 },",
+     "rowchrome"),
+
+    # ---- a group of one is its own listing (v1.53.21) -------------------
+
+    # BACK TO A PARENT STANDING FOR ONE AUCTION, which could do nothing anybody
+    # wanted: not tickable, and a group of one never expands -- so a lone
+    # auction could not be selected for a multi-buyout at all.
+    ("lone-auction-is-a-parent-again", "ui/frame.lua",
+     "        if many then",
+     "        if true then",
+     "buygroup"),
+
+    # ...and the copy. The tree must LIST the engine's row, not clone it: the
+    # paint reads price, seller, stack and time left straight off it, and a
+    # copy is a second table to keep in step.
+    ("lone-auction-row-is-copied", "ui/frame.lua",
+     """            local r = g.rows[1]
+            if r then
+                r.kind = "listing"
+                table.insert(rows, r)
+            end""",
+     """            local r = g.rows[1]
+            if r then
+                table.insert(rows, { kind = "listing", name = r.name,
+                    itemId = r.itemId, buyout = r.buyout })
+            end""",
+     "buygroup"),
+
+    # ---- Tab falls through (v1.53.21) -----------------------------------
+
+    # NOT SABOTAGED: swapping `return false` for a bare `return` on the
+    # no-candidates path. Both are falsy in Lua and the one reader treats them
+    # identically (`if ui.BuyAutocomplete() then`), so it is a change with no
+    # behavioural difference -- an edit no check could catch, because there is
+    # nothing there to catch. Same reasoning that retired the LCG-overflow
+    # sabotage: a sabotage has to plant a BUG, not a variation.
+    #
+    # The half that does matter is below -- dropping the success report, which
+    # makes Tab traverse even when it just completed something.
+    ("autocomplete-never-reports-success", "ui/frame.lua",
+     """    if acb.SetCursorPosition then
+        acb:SetCursorPosition(string.len(pick))
+    end
+    return true""",
+     """    if acb.SetCursorPosition then
+        acb:SetCursorPosition(string.len(pick))
+    end""",
+     "taborder"),
+
+    # TRAVERSING BEFORE COMPLETING ends the autocomplete exception: Tab would
+    # step off the box the moment you had typed a prefix, which is the whole
+    # behaviour the two search boxes exist to avoid.
+    ("search-tab-traverses-first", "ui/frame.lua",
+     "    if ui.BuyAutocomplete() then return end",
+     "    if false then return end",
+     "taborder"),
+
+    # The Name box's chain dropped, so the key stays dead on a prefix that
+    # matches nothing -- the fault this change exists to fix.
+    ("search-tab-has-no-chain", "ui/frame.lua",
+     "        return { ui.buyBox, ui.buyMinLevel, ui.buyMaxLevel }",
+     "        return nil",
+     "taborder"),
+
+    # ---- the input-colour diagnostic (v1.53.21) -------------------------
+
+    # A flat average instead of perceived brightness. Pure blue and pure green
+    # are nothing alike to the eye, and a flat average calls them equal -- so
+    # the contrast verdict stops matching what anybody can actually read.
+    ("luminance-is-a-flat-average", "ui/frame.lua",
+     "    return 0.299 * r + 0.587 * g + 0.114 * b",
+     "    return (r + g + b) / 3",
+     "rowchrome"),
+
+    # The gap signed rather than a distance, so dark-on-light reads as a
+    # negative and passes every threshold below it.
+    ("contrast-gap-is-signed", "ui/frame.lua",
+     "    if d < 0 then d = -d end",
+     "    if false then d = -d end",
+     "rowchrome"),
+
+    # An unreadable backdrop reported as a gap of zero, which turns "we cannot
+    # see the background" into "the background is a contrast failure".
+    ("unreadable-backdrop-reads-as-zero", "ui/frame.lua",
+     "    if not lf or not lb then return nil end",
+     "    if not lf or not lb then return 0 end",
+     "rowchrome"),
+
+    # THE ORDERING THAT GOT THIS TO FOUR ATTEMPTS: an unregistered box
+    # reported as a lost colour. Its colours are whatever the template left,
+    # so naming them sends the next fix in the wrong direction.
+    ("unregistered-box-reads-as-lost-colour", "ui/frame.lua",
+     '    if not registered then return "NOT OURS (never registered)" end',
+     '    if false then return "NOT OURS (never registered)" end',
+     "rowchrome"),
+
+    # THE FLAW v1.53.21 SHIPPED: a check that could not run reporting "ok".
+    # The live readout came back "ok (backdrop unreadable)" on all twenty-five
+    # boxes, which scans as twenty-five passes -- while the contrast test was
+    # the only one of the three still standing and had not run at all.
+    ("unmeasured-contrast-reads-as-ok", "ui/frame.lua",
+     '    if not gap then return "CANNOT TELL (no backdrop read)" end',
+     '    if not gap then return "ok (backdrop unreadable)" end',
+     "rowchrome"),
+
+    # The readout asking the BOX for its backdrop on a pfUI client, where
+    # CreateBackdrop put it on a child frame and skin.lua cleared the box's
+    # own. Answers nothing, and looks like a client limitation rather than an
+    # instrument pointed at the wrong object.
+    ("backdrop-read-off-the-wrong-frame", "ui/frame.lua",
+     """    if e.backdrop and e.backdrop.GetBackdropColor then
+        return e.backdrop, "pfUI"
+    end""",
+     "",
+     "rowchrome"),
+
+    # An edge measured against the same floor as the text. A hairline only has
+    # to be findable, so holding it to a readability threshold reports every
+    # ordinary border as invisible.
+    ("edge-held-to-the-text-floor", "ui/frame.lua",
+     "ui.EDGE_MIN = 0.10",
+     "ui.EDGE_MIN = 0.35",
+     "rowchrome"),
+
+    # Contrast checked before the colour, so a box whose colour was repainted
+    # is diagnosed as a backdrop problem.
+    ("verdict-checks-contrast-first", "ui/frame.lua",
+     '    if d and d > 0.02 then return "COLOUR LOST (something repainted it)" end',
+     '    if false then return "COLOUR LOST (something repainted it)" end',
+     "rowchrome"),
+
+    # ---- the Clear button (v1.53.17) -------------------------------------
+
+    # v1.53.17's MISTAKE, put back. Clearing the ticks on a new search sounds
+    # right and is wrong: ui.DoBuySearch is also what runs when you right-click
+    # a grouped row to see one item alone, and when you shift-click a bag item.
+    # Both are ordinary browsing, and while results are grouped the right-click
+    # is the one reliable route to a tick box -- so the only way to reach the
+    # feature also emptied it on arrival.
+    ("search-empties-the-basket", "ui/frame.lua",
+     "    ui.buySel = nil            -- the rows are about to be replaced",
+     "    ui.buySel = nil\n    ui.buyChecked = {}",
+     "buychecks"),
+
+    # ...and the other half of that: Clear empties the selection but never
+    # repaints the rows, so the tick marks outlive what they were drawn for.
+    # This is the latent bug the button exposed -- it was real before the
+    # button existed and invisible because the only caller re-queried anyway.
+    ("clear-does-not-repaint-the-rows", "ui/frame.lua",
+     """    ui.buyChecked = {}
+    ui.UpdateBuyList()
+    ui.RefreshBuyActionBar()
+end""",
+     """    ui.buyChecked = {}
+    ui.RefreshBuyActionBar()
+end""",
+     "buychecks"),
+
+    # The count dropped from the label, so Clear and "Buyout (3)" stop reading
+    # as two things you can do to ONE selection.
+    ("clear-label-loses-the-count", "ui/frame.lua",
+     '    if n > 0 then return "Clear (" .. n .. ")", true end',
+     '    if n > 0 then return "Clear", true end',
+     "buychecks"),
+
+    # Off by one, which is the classic way a count label goes wrong and the
+    # exact reason this is a function rather than two lines in a painter.
+    ("clear-label-off-by-one", "ui/frame.lua",
+     '    if n > 0 then return "Clear (" .. n .. ")", true end',
+     '    if n > 0 then return "Clear (" .. (n - 1) .. ")", true end',
+     "buychecks"),
+
+    # Live with nothing ticked, so the button clears something invisible --
+    # and, worse, reads as an action that did nothing when pressed.
+    ("clear-live-with-nothing-ticked", "ui/frame.lua",
+     '    return "Clear", false',
+     '    return "Clear", true',
+     "buychecks"),
+
+    # Your own auction tickable. The client refuses to sell it to you, so a
+    # tick that looked accepted would build a batch that could only fail.
+    ("own-auction-is-tickable", "ui/frame.lua",
+     "    if not entry or entry.mine then return end",
+     "    if not entry then return end",
+     "buychecks"),
+
+    # The tick identity keyed on name alone, so every listing of one item
+    # ticks together -- and a batch then buys stacks nobody chose.
+    ("tick-identity-ignores-the-price", "ui/frame.lua",
+     """        if c.index == entry.index and c.name == entry.name
+           and c.buyout == entry.buyout then
+            table.remove(ui.buyChecked, i)""",
+     """        if c.name == entry.name then
+            table.remove(ui.buyChecked, i)""",
+     "buychecks"),
+
+    # THE BUG THAT MADE MULTI-SELECT LOOK DELETED, from v1.53.2 to v1.53.18.
+    # One pool, two kinds: the group fill hides the tick box because a parent
+    # is not tickable, and the listing fill has to put it back. It did not, so
+    # every pooled row lost its box on the first grouped paint -- which is
+    # every paint, since grouping is the default -- and nothing showed it again
+    # for the rest of the session.
+    ("listing-row-never-shows-its-tick-box", "ui/frame.lua",
+     "        row.check:Show()\n        row.check:SetChecked(",
+     "        row.check:SetChecked(",
+     "buychecks"),
+
+    # ---- the unfolded parent's tint (v1.53.20) --------------------------
+
+    # THE POOLED-TINT HAZARD, which is the tick box's bug wearing a different
+    # hat: one pool, two kinds, one shared texture, two colours. Drop the
+    # listing fill's colour and a frame that was an unfolded parent comes back
+    # as a gold-selected listing still painted purple.
+    ("listing-row-keeps-the-parents-purple", "ui/frame.lua",
+     """        row.selTex:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3],
+                              C.rowSel[4])
+""",
+     "",
+     "buychecks"),
+
+    # ...and the same from the other side.
+    ("parent-row-keeps-the-listings-gold", "ui/frame.lua",
+     """            row.selTex:SetTexture(C.rowOpen[1], C.rowOpen[2], C.rowOpen[3],
+                                  C.rowOpen[4])
+""",
+     "",
+     "buychecks"),
+
+    # Every parent lit, not just the unfolded one -- which is the same as none
+    # lit, because the highlight stops distinguishing anything.
+    ("every-parent-is-lit", "ui/frame.lua",
+     "        if e.expanded then",
+     "        if true then",
+     "buychecks"),
+
+    # The two tints collapsed into one colour, so "selected" and "unfolded"
+    # become indistinguishable.
+    ("both-tints-the-same-colour", "ui/frame.lua",
+     "    rowOpen = { 0.38, 0.29, 0.58, 0.42 },",
+     "    rowOpen = { 0.60, 0.45, 0.10, 0.34 },",
+     "buychecks"),
+
+    # ...and the other direction: a parent row that IS tickable. You cannot buy
+    # "an item", and a tick there would build a batch out of a row that stands
+    # for several different auctions at several different prices.
+    ("parent-row-is-tickable", "ui/frame.lua",
+     "    if row.check then row.check:Hide() end",
+     "    if row.check then row.check:Show() end",
+     "buychecks"),
+
+    # The Builder's form button back to "Clear", which puts two buttons of
+    # that name five pixels apart on one row meaning different things.
+    ("two-buttons-named-clear", "ui/frame.lua",
+     'action("Reset", 54, ui.buyClearBtn,',
+     'action("Clear", 54, ui.buyClearBtn,',
+     "buychecks"),
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -5206,6 +5643,7 @@ SUITES = {
     "util":        "tests/units/util_test.lua",
     "db":          "tests/units/db_test.lua",
     "buy.batch":   "tests/units/buy_batch_test.lua",
+    "buychecks":   "tests/units/buychecks_test.lua",
     "buy.term":    "tests/units/buy_term_test.lua",
     "buy.page":    "tests/units/buy_page_test.lua",
     "sort_results": "tests/units/sort_results_test.lua",

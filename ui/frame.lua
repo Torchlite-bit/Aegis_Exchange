@@ -65,6 +65,30 @@ local C = {
     -- Chart furniture: the horizontal rules behind the lines. Dim enough to
     -- sit behind data and bright enough to be read as a scale.
     grid    = { 0.34, 0.29, 0.19 },
+    -- The two row tints, and the ONLY two entries here carrying a fourth
+    -- value: these are painted with SetTexture(r, g, b, a) rather than read as
+    -- a text colour, and splitting the alpha into a file-scope local would
+    -- cost an upvalue in two of the largest functions in this file for no
+    -- gain (see the 32-upvalue note in CLAUDE.md).
+    --
+    -- rowSel is the SELECTED row, and it is the window's language for that
+    -- across every table. rowOpen is a different fact -- the grouped parent
+    -- whose listings are UNFOLDED underneath it -- so it is a different
+    -- colour: the accent purple the Advanced and Build buttons wear, dulled
+    -- to sit behind text. A row can be one or the other and never both, since
+    -- clicking a parent folds it rather than selecting it.
+    -- The EDGE an input box wears, and the fifth attempt at "the undercut box
+    -- is too dark" -- the first one aimed at the right thing.
+    --
+    -- The TEXT was never the problem. /aex diag reported pure white on all
+    -- twenty-five boxes while the report stood. What is dark is the box: under
+    -- pfUI its own backdrop is cleared and replaced by a child frame whose
+    -- default border is near-black, and our panel behind it is near-black too,
+    -- so nothing shows where the field is. Gold, because that is what the rest
+    -- of this window draws its edges in.
+    inputEdge = { 0.62, 0.50, 0.16, 0.95 },
+    rowSel  = { 0.60, 0.45, 0.10, 0.34 },
+    rowOpen = { 0.38, 0.29, 0.58, 0.42 },
 }
 
 -- Last scan older than this is "stale" and rendered amber.
@@ -669,13 +693,24 @@ end
 -- then sit it on a near-black backdrop. Nothing was wrong with it -- it had
 -- simply never been chosen.
 --
+-- How much smaller an input box's text sits than the font it inherits, and the
+-- floor it will not go below -- a box whose font is already tiny must not be
+-- shrunk into illegibility to satisfy a rule about boxes that are not.
+local INPUT_FONT_DELTA = -1
+local INPUT_FONT_MIN = 9
+
 -- A FUNCTION OF ITS OWN, not a line inside ui.FlattenEditBox, because three of
 -- this window's edit boxes keep the stock art and never go through it: the two
 -- search boxes and the settings percent field. That last one is the exact case
 -- this was reported on -- a percent box sitting next to three coin boxes on
 -- one row, reading dimmer than nothing at all.
-function ui.InputText(e)
+function ui.InputText(e, label)
     if not e or not e.SetTextColor then return e end
+    -- A NAME FOR THE READOUT. Most of these boxes are created without one --
+    -- getglobal names cost a global each and almost nothing needs them -- so
+    -- /aex diag listed twenty-five lines reading "(unnamed)" and the one the
+    -- report was about could not be picked out of them. This costs a field.
+    if label then e.aegisLabel = label end
     -- DETACH THE FONT OBJECT FIRST, and this is the part that was missing.
     --
     -- InputBoxTemplate gives its box a font OBJECT (ChatFontNormal), not a
@@ -689,9 +724,40 @@ function ui.InputText(e)
     -- LOOKS changes here; the only thing that changes is who owns it.
     if e.GetFont and e.SetFont then
         local path, size, flags = e:GetFont()
+        -- ...AND A NOTCH SMALLER WHILE WE ARE HERE. InputBoxTemplate's font is
+        -- the client's chat font at chat size, and these boxes are not chat:
+        -- the undercut percent field is 34x18 and a two-digit number in it sat
+        -- against the edges. One point down fits without becoming small print,
+        -- and it rides the SetFont call that was already being made -- the
+        -- detach above has to happen anyway, for the colour to stick.
+        if size and size > INPUT_FONT_MIN then
+            size = size + INPUT_FONT_DELTA
+        end
         if path then pcall(function() e:SetFont(path, size, flags) end) end
     end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])
+    -- ...AND THE EDGE, on the same terms and through the same machinery. It
+    -- rides ui.ReapplyInputText and ui.DeferInputText rather than being set
+    -- once at skin time, because whatever repaints a box's colours repaints
+    -- its border too -- one mechanism for both properties, so neither can be
+    -- re-asserted while the other is forgotten.
+    --
+    -- ON pfUI's CHILD FRAME, not the box: skin.lua clears the box's own
+    -- backdrop deliberately so the two cannot double-border, which is why the
+    -- box itself has no border to set. See ui.BackdropSource.
+    -- WHICHEVER FRAME CARRIES THE PLATE. Under the skin that is the box
+    -- itself now (ui/skin.lua's EditBoxPlate keeps it there, because a child
+    -- frame would draw OVER the text); unskinned it is also the box. It was
+    -- pfUI's child frame for one release, and reading the wrong one is how
+    -- the readout spent a release saying "backdrop unreadable" -- so this
+    -- asks ui.BackdropSource rather than picking.
+    local plate = ui.BackdropSource(e)
+    if plate and plate.SetBackdropBorderColor then
+        pcall(function()
+            plate:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
+                                         C.inputEdge[3], C.inputEdge[4])
+        end)
+    end
     -- REGISTERED, so the colour can be re-asserted after somebody else's
     -- pass -- see ui.ReapplyInputText. Deduped on the box itself because
     -- ui.RefreshSettings calls this on every repaint, and an ever-growing
@@ -711,6 +777,120 @@ ui.inputBoxes = {}
 -- Bounded by the number of edit boxes in the window -- a handful -- and it is
 -- four calls each, so this is cheap enough to run on a timer tick without
 -- thinking about it.
+-- ---------------------------------------------------------------------------
+-- Why is that box unreadable? -- the /aex diag readout
+--
+-- FOUR ATTEMPTS HAVE BEEN MADE AT THIS and it keeps coming back, because all
+-- four were the same move: assert our colour harder and later. The three
+-- things that produce an unreadable box are indistinguishable from a
+-- screenshot, and nobody has ever measured which one it is --
+--
+--   1. the colour did not STICK      -- something repainted it after us
+--   2. the colour stuck and the box is DARK BEHIND IT -- a contrast problem,
+--      and nothing to do with the text at all
+--   3. the box was never ours        -- built after skin.Apply ran, so it was
+--      never skinned and never registered
+--
+-- ...and they need three different fixes. This is the readout ROADMAP.md's
+-- deposit note says to build first: one /aex diag line settled that in a
+-- sentence, after three releases of reasoning from the outside.
+-- ---------------------------------------------------------------------------
+
+-- Perceived brightness, Rec. 601. NOT a colorimetric contrast ratio: this only
+-- has to tell "white on near-black" from "tan on tan", which is the whole
+-- question being asked.
+function ui.Luminance(c)
+    if not c then return nil end
+    local r, g, b = c[1] or 0, c[2] or 0, c[3] or 0
+    return 0.299 * r + 0.587 * g + 0.114 * b
+end
+
+-- How far apart the text and the thing behind it are. nil when the backdrop
+-- could not be read, which is an ANSWER -- "we cannot see the background" is
+-- different from "the background is fine".
+function ui.ContrastGap(fg, bg)
+    local lf, lb = ui.Luminance(fg), ui.Luminance(bg)
+    if not lf or not lb then return nil end
+    local d = lf - lb
+    if d < 0 then d = -d end
+    return d
+end
+
+-- Below this, text and backdrop are too close to read comfortably. Chosen as
+-- roughly half the gap our own palette gives (white on the near-black well),
+-- so a box that has drifted meaningfully toward its background trips it while
+-- the intended look does not.
+ui.CONTRAST_MIN = 0.35
+
+-- WHICH FRAME actually carries the background behind an edit box.
+--
+-- NOT ALWAYS THE BOX. pfUI's CreateBackdrop builds a CHILD FRAME and hangs it
+-- on `frame.backdrop` -- and ui/skin.lua clears the box's own backdrop first,
+-- deliberately, so the two cannot double-border. So on a pfUI client the box
+-- has no backdrop at all and asking it for one answers nothing.
+--
+-- That is exactly what v1.53.21's readout did. It came back "backdrop
+-- unreadable" on all 25 boxes and looked like a client limitation; it was the
+-- instrument reading the wrong object. Returns the frame and which of the two
+-- it was, because "we read pfUI's" and "we read the box's own" are different
+-- facts about the same client and the next fix depends on which.
+function ui.BackdropSource(e)
+    if not e then return nil, "none" end
+    if e.backdrop and e.backdrop.GetBackdropColor then
+        return e.backdrop, "pfUI"
+    end
+    if e.GetBackdropColor then return e, "own" end
+    return nil, "none"
+end
+
+-- Can you SEE the box at all?
+--
+-- A SEPARATE QUESTION FROM whether you can read the text in it, and the one
+-- the original report is most likely to have been about: "too dark to see"
+-- said of a field whose text turned out to be pure white is a complaint about
+-- the field, not the characters. An edge that sits too close to the panel
+-- behind it leaves nothing showing where the box is.
+function ui.EdgeVerdict(border, panel)
+    local gap = ui.ContrastGap(border, panel)
+    if not gap then return "edge ?" end
+    if gap < ui.EDGE_MIN then
+        return "EDGE INVISIBLE (" .. string.format("%.2f", gap) .. ")"
+    end
+    return "edge ok (" .. string.format("%.2f", gap) .. ")"
+end
+
+-- Lower than CONTRAST_MIN on purpose: an edge is a hairline, and it only has
+-- to be findable rather than comfortably readable.
+ui.EDGE_MIN = 0.10
+
+-- One box's verdict, from values already read off the client.
+--
+-- SEPARATED FROM THE READING so a suite can run it. The reads are client
+-- calls; this is where the three causes are actually told apart, and it is
+-- the part that can be wrong in a way nobody notices.
+--
+-- ORDER MATTERS. An unregistered box is reported as such and nothing else --
+-- its colours are whatever the template left, so calling them "lost" would
+-- name the wrong cause. A colour that did not stick is next, because it is
+-- the one we can fix from here. Contrast is last: it is only meaningful once
+-- the colour IS what we asked for.
+function ui.InputDiagVerdict(registered, got, want, bg)
+    if not registered then return "NOT OURS (never registered)" end
+    if not got then return "NO COLOUR READ" end
+    local d = ui.ContrastGap(got, want)
+    if d and d > 0.02 then return "COLOUR LOST (something repainted it)" end
+    local gap = ui.ContrastGap(got, bg)
+    -- NOT "ok". v1.53.21's readout said "ok (backdrop unreadable)" on all 25
+    -- boxes, which reads as a pass and is not one: the contrast test is the
+    -- only one of the three still standing at that point, and it had not run.
+    -- A check that could not run says so.
+    if not gap then return "CANNOT TELL (no backdrop read)" end
+    if gap < ui.CONTRAST_MIN then
+        return "LOW CONTRAST (gap " .. string.format("%.2f", gap) .. ")"
+    end
+    return "ok (gap " .. string.format("%.2f", gap) .. ")"
+end
+
 function ui.ReapplyInputText()
     -- THE COUNT IS TAKEN BEFORE THE WALK, and that is not a micro-optimisation.
     -- ui.InputText REGISTERS what it colours, so re-colouring a registered box
@@ -1913,7 +2093,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local uc = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     uc:SetWidth(34); uc:SetHeight(18)
     uc:SetAutoFocus(false); uc:SetNumeric(true); uc:SetJustifyH("CENTER")
-    ui.InputText(uc)
+    ui.InputText(uc, "Aegis tab: undercut %")
     uc:SetPoint("LEFT", flatMode, "RIGHT", 12, 0)
     uc:SetScript("OnEnterPressed", function() ui.CommitUndercut(); uc:ClearFocus() end)
     uc:SetScript("OnEscapePressed", function() uc:ClearFocus() end)
@@ -1941,6 +2121,12 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         fi = fi + 1
     end
     ui.setUndercutFlat = flat
+    -- Labelled for the readout, same reason as the percent box above: these
+    -- four are the "undercut" control and a diag line has to be able to say
+    -- which of them it is talking about.
+    ui.InputText(flat.g, "Aegis tab: undercut flat (g)")
+    ui.InputText(flat.s, "Aegis tab: undercut flat (s)")
+    ui.InputText(flat.c, "Aegis tab: undercut flat (c)")
     -- Percent, then the three coins. Only one of the two is on screen at a
     -- time -- ui.NextInputIn skips whichever the mode has hidden.
     ui.LinkTabOrder({ uc, flat.g, flat.s, flat.c })
@@ -3397,7 +3583,10 @@ function ui.AddRowChrome(row, i, selectable)
         local sel = row:CreateTexture(nil, "BACKGROUND")
         sel:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
         sel:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
-        sel:SetTexture(0.6, 0.45, 0.10, 0.34)
+        -- The colour is set by whichever FILL paints this row, not here: one
+        -- pool serves two kinds and they tint it differently. This is only a
+        -- sensible starting value.
+        sel:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3], C.rowSel[4])
         sel:Hide()
         row.selTex = sel
     end
@@ -3687,6 +3876,25 @@ function ui.FillGroupRow(row, e)
         cells[i]:SetAlpha(1)
         i = i + 1
     end
+    -- AN UNFOLDED PARENT STAYS LIT, in the accent purple rather than the gold
+    -- a selected row wears -- because it is a different fact. Gold means "this
+    -- is the row you acted on"; purple means "this row's listings are the ones
+    -- underneath". Without it the parent you opened looks exactly like the
+    -- ones you did not, and the rows below have nothing saying whose they are.
+    --
+    -- THE COLOUR IS SET HERE, EVERY PAINT, not once at creation: this frame is
+    -- pooled and the listing fill tints the same texture gold. Setting it only
+    -- at creation is how a row that was an open parent would come back as a
+    -- gold-selected listing wearing purple, or the reverse.
+    if row.selTex then
+        if e.expanded then
+            row.selTex:SetTexture(C.rowOpen[1], C.rowOpen[2], C.rowOpen[3],
+                                  C.rowOpen[4])
+            row.selTex:Show()
+        else
+            row.selTex:Hide()
+        end
+    end
     if row.check then row.check:Hide() end
     if row.buyBtn then row.buyBtn:Hide() end
     if row.bidBtn then row.bidBtn:Hide() end
@@ -3748,6 +3956,120 @@ end
 -- Buttons on 1.12 report which mouse button through the `arg1` GLOBAL inside
 -- OnClick -- never a handler argument (HARD RULE 6) -- and a row has to be
 -- registered for right-clicks or the script never runs for one.
+-- ---------------------------------------------------------------------------
+-- "Display on Character" -- try a result on, the way the stock AH does
+-- ---------------------------------------------------------------------------
+
+-- Air between our right edge and the dressing room parked against it.
+local DRESS_GAP = 4
+
+-- WHICH WAY this client can show an item on the character, if any.
+--
+-- 1.12's own auction house has this box, so the machinery is there -- but
+-- WHICH global carries it is not something to assume from a screenshot.
+-- CLAUDE.md's rule stands: when in doubt, assume the API does not exist. Both
+-- known shapes are probed, and /aex diag reports the answer, so a client that
+-- provides neither says so rather than leaving a check box that silently does
+-- nothing.
+function ui.DressUpMethod()
+    if DressUpItemLink then return "link" end
+    if DressUpModel and DressUpModel.TryOn then return "model" end
+    return nil
+end
+
+-- Can the dressing room show THIS item?
+--
+-- A non-empty equip slot means it goes on the character somewhere. Everything
+-- else has nothing to put on a model, and opening an empty dressing room over
+-- a stack of cloth is worse than doing nothing -- it reads as the feature
+-- misfiring rather than as the item being unwearable.
+--
+-- NO INFO IS A YES, and that distinction is the point: util.ItemInfo returns
+-- nil for an item the client has not cached, which is a different statement
+-- from "this item has no equip slot". Refusing what we cannot identify would
+-- make the box look broken on exactly the items you have not looked at yet.
+-- The dressing room is the backstop -- handed something unwearable it shows
+-- nothing, which is the same outcome by a cheaper route.
+--
+-- THE SLOT, NOT THE TYPE, because INVTYPE_ constants are not localised and
+-- "Armor"/"Weapon" are. util.ItemInfo already fills a missing slot in from
+-- the type where it can (see its TYPE_SLOT stand-ins), so this reads the one
+-- field that means the same thing on every client.
+function ui.CanDressUp(info)
+    if not info then return true end
+    local slot = info.equipLoc
+    if not slot or slot == "" then return false end
+    return true
+end
+
+-- Try it on. Returns whether we got as far as asking the client.
+--
+-- THAT IS NOT THE SAME AS "IT WORKED", and the comment says so because this
+-- addon has already shipped a pcall whose success meant nothing
+-- (SetGradientAlpha, v1.53.11). 1.12 gives no answer back here, so what can
+-- honestly be detected is the ABSENCE of the API, not its refusal.
+function ui.TryDressUp(link)
+    if not link or link == "" then return false end
+    if not ui.CanDressUp(util.ItemInfo(link)) then return false end
+    local how = ui.DressUpMethod()
+    if how == "link" then
+        local ok = pcall(function() DressUpItemLink(link) end) and true or false
+        if ok then ui.ParkDressUpFrame() end
+        return ok
+    end
+    if how == "model" then
+        local ok = pcall(function()
+            if ShowUIPanel and DressUpFrame then ShowUIPanel(DressUpFrame) end
+            if DressUpModel.SetUnit then DressUpModel:SetUnit("player") end
+            DressUpModel:TryOn(link)
+        end) and true or false
+        if ok then ui.ParkDressUpFrame() end
+        return ok
+    end
+    return false
+end
+
+-- Put the dressing room beside our window rather than wherever the client
+-- last left it.
+--
+-- IT OPENS AS A UI PANEL, which means the client places it -- generally over
+-- the middle of the screen, and with our window open that is on top of the
+-- results you are clicking. Re-anchoring it to our right edge keeps both
+-- readable at once, which is the only arrangement in which "click things and
+-- watch them" works at all.
+--
+-- CLEARALLPOINTS FIRST. SetPoint ADDS a point on 1.12 rather than replacing
+-- the existing one, and a frame with two anchors is stretched between them.
+--
+-- Guarded end to end: this is somebody else's frame, it may be positioned by
+-- another addon, and none of it is worth an error on a window that is only
+-- being moved for convenience.
+function ui.ParkDressUpFrame()
+    if not DressUpFrame or not ui.frame then return false end
+    if not ui.frame:IsVisible() then return false end
+    local ok = pcall(function()
+        DressUpFrame:ClearAllPoints()
+        DressUpFrame:SetPoint("TOPLEFT", ui.frame, "TOPRIGHT",
+                              DRESS_GAP, 0)
+    end)
+    return ok and true or false
+end
+
+-- The row that was clicked, tried on -- if the box is ticked.
+--
+-- A PARENT COUNTS. It stands for an item and carries that item's first
+-- listing as its entry, so "click an item to see it" is true of the grouped
+-- view as well as the unfolded one. Folding is what the click DOES; this is
+-- what it additionally shows.
+function ui.DressUpRow(e)
+    if not e then return false end
+    if not (ui.buyDressUp and ui.buyDressUp:GetChecked()) then return false end
+    local entry = (e.kind == "group") and e.entry or e
+    local idx = entry and entry.index
+    if not idx or not GetAuctionItemLink then return false end
+    return ui.TryDressUp(GetAuctionItemLink("list", idx))
+end
+
 function ui.OnBuyRowClick(row)
     local e = row and row.entry
     if not e then return end
@@ -3760,6 +4082,7 @@ function ui.OnBuyRowClick(row)
             ui.ExactSearchFor(e.name)
         else
             ui.ToggleBuyRow(row)
+            ui.DressUpRow(e)
         end
         return
     end
@@ -3770,6 +4093,7 @@ function ui.OnBuyRowClick(row)
         ui.ExactSearchFor(e.name)
     elseif row.aegisSelectable then
         ui.SelectBuyRow(e)
+        ui.DressUpRow(e)
     end
 end
 
@@ -3799,19 +4123,43 @@ function ui.BuyTreeRows(groups, open)
     while i <= table.getn(groups or {}) do
         local g = groups[i]
         local many = g.listings and g.listings > 1
-        local isOpen = (many and open[g.key]) and true or nil
-        table.insert(rows, { kind = "group", key = g.key, name = g.name,
-            itemId = g.itemId, texture = g.texture, quality = g.quality,
-            level = g.level, listings = g.listings, units = g.units,
-            low = g.low, expandable = many or nil, expanded = isOpen,
-            entry = g.rows[1] })
-        if isOpen then
-            local k = 1
-            while k <= table.getn(g.rows) do
-                local r = g.rows[k]
+        -- AN ITEM WITH ONE AUCTION IS THAT AUCTION, so it is listed as one
+        -- rather than wrapped in a parent standing for it.
+        --
+        -- It used to get a group row, and that row could do nothing a player
+        -- wanted: a parent is not tickable (you cannot buy "an item") and a
+        -- group of one never expands, so a lone auction could not be selected
+        -- for a multi-buyout AT ALL -- the only route to it was a right-click
+        -- to search that item on its own. It also said LESS than the listing
+        -- it stood for: "1 auction, from 4g" in place of a seller, a stack, a
+        -- time left and a price.
+        --
+        -- The listing row answers all of that and costs nothing: it is the
+        -- same row the group would have revealed, one level up.
+        if many then
+            local isOpen = open[g.key] and true or nil
+            table.insert(rows, { kind = "group", key = g.key, name = g.name,
+                itemId = g.itemId, texture = g.texture, quality = g.quality,
+                level = g.level, listings = g.listings, units = g.units,
+                low = g.low, expandable = true, expanded = isOpen,
+                entry = g.rows[1] })
+            if isOpen then
+                local k = 1
+                while k <= table.getn(g.rows) do
+                    local r = g.rows[k]
+                    r.kind = "listing"
+                    table.insert(rows, r)
+                    k = k + 1
+                end
+            end
+        else
+            -- THE ENGINE'S ROW, not a copy -- the same rule the children
+            -- follow. The paint reads price, seller, stack and time left
+            -- straight off it, and a copy is a second table to keep in step.
+            local r = g.rows[1]
+            if r then
                 r.kind = "listing"
                 table.insert(rows, r)
-                k = k + 1
             end
         end
         i = i + 1
@@ -3876,7 +4224,13 @@ end
 function ui.FillResultRow(row, r)
     row.entry = r
     -- Selection tint (Buy tab rows only; the Crafting tab builds no selTex).
+    --
+    -- THE COLOUR IS RE-ASSERTED EVERY PAINT for the reason the group fill's is:
+    -- both kinds share one pooled texture and tint it differently, so a frame
+    -- that was last an unfolded parent still carries purple.
     if row.selTex then
+        row.selTex:SetTexture(C.rowSel[1], C.rowSel[2], C.rowSel[3],
+                              C.rowSel[4])
         if ui.IsBuySelected(r) then row.selTex:Show() else row.selTex:Hide() end
     end
     if row.icon then
@@ -3986,6 +4340,20 @@ function ui.FillResultRow(row, r)
         -- box is DIMMED rather than hidden: hiding it punched a hole in the
         -- tick column, so an owned row read as a row missing a cell instead
         -- of a row you are not allowed to buy.
+        -- SHOWN, and this line is the whole of a feature that went missing.
+        --
+        -- ONE POOL, TWO KINDS: ui.FillGroupRow HIDES this box, because a
+        -- parent row is not tickable -- you cannot buy "an item". The two
+        -- fills share the same row frames, so the promise above the dispatch
+        -- ("each fill clears what the other uses") requires this fill to put
+        -- back what that one took away. It never did.
+        --
+        -- Results have been grouped by DEFAULT since v1.53.2, so every pooled
+        -- row got its box hidden on the first paint and nothing ever showed it
+        -- again -- for the rest of the session, including on the listing rows
+        -- underneath an expanded group. Multi-select was not moved or
+        -- redesigned; it was unreachable, from v1.53.2 to v1.53.19.
+        row.check:Show()
         row.check:SetChecked(ui.IsBuyChecked(r) and 1 or nil)
         row.check:SetDimmed(r.mine and true or false)
     end
@@ -5566,11 +5934,12 @@ function ui.BuildBuyTab()
     -- names here. That binding is older than traversal and worth more on a
     -- search box than stepping to the level fields, so the two search boxes
     -- keep it and nothing else does. See ui.LinkTabOrder.
-    box:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
+    box:SetScript("OnTabPressed", function() ui.SearchBoxTab(box) end)
     -- Shift-click an item anywhere in the game and its name lands here.
     -- Registered BEFORE the Advanced query box, so with neither focused the
     -- default strip's box wins -- and only one of the two is ever visible.
     ui.RegisterLinkTarget(box)
+    ui.AttachGhost(box)
     ui.buyBox = box
     ui.buyNameLbl = stripLabel("Name", box)
 
@@ -5601,6 +5970,35 @@ function ui.BuildBuyTab()
     usableLbl:SetText("Usable items")
     usableLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
     ui.buyUsableLbl = usableLbl
+
+    -- "Display on Character", the stock auction house's own control and in as
+    -- close to its own words as the strip has room for.
+    --
+    -- NOT WHERE THE STOCK UI PUTS IT: that spot is the strip's outer right,
+    -- and Advanced has it (see below). Beside Usable items is where the other
+    -- tick box already lives, so the two read as a pair of toggles rather than
+    -- as one control and a stray.
+    --
+    -- PERSISTED, unlike the stock one. Everything else on this strip is a
+    -- search term and resets with the search; this is a preference about what
+    -- clicking does, and re-ticking it every session is the kind of small
+    -- friction that makes a feature go unused.
+    ui.buyDressUp = ui.MakeCheckBox(panel, 16)
+    ui.buyDressUp:SetPoint("LEFT", usableLbl, "RIGHT", 14, 0)
+    ui.buyDressUp:SetScript("OnClick", function()
+        A.db.SetSetting("dressUpOnClick",
+            ui.buyDressUp:GetChecked() and true or false)
+    end)
+    local dressLbl = panel:CreateFontString(nil, "OVERLAY",
+                                            "GameFontHighlightSmall")
+    dressLbl:SetPoint("LEFT", ui.buyDressUp, "RIGHT", 2, 0)
+    dressLbl:SetText("Display on Character")
+    dressLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.buyDressUpLbl = dressLbl
+    -- Restored from the setting, once, at build. The DB is live by now: the
+    -- Buy tab is built on first use and ADDON_LOADED has long since run
+    -- (HARD RULE 13), which is why this can read a setting at all here.
+    ui.buyDressUp:SetChecked(A.db.Setting("dressUpOnClick") and 1 or nil)
 
     -- Right pair. Advanced is the outermost, so it lands where the stock UI
     -- put "Display on Character".
@@ -5665,7 +6063,9 @@ function ui.BuildBuyTab()
     ui.RegisterLinkTarget(ui.buyQueryBox)
     -- The OTHER autocomplete box, and the other half of the traversal
     -- exception. See ui.LinkTabOrder.
-    ui.buyQueryBox:SetScript("OnTabPressed", function() ui.BuyAutocomplete() end)
+    ui.buyQueryBox:SetScript("OnTabPressed",
+        function() ui.SearchBoxTab(ui.buyQueryBox) end)
+    ui.AttachGhost(ui.buyQueryBox)
 
 
     -- View switcher: a row of three, INSIDE the frame and under the query
@@ -5873,19 +6273,32 @@ ui.GrowBuyRows = function(n)
 
     -- ===== Bottom action bar (both modes) ===============================
     -- Blizzard's shape: your money on the left, a bid entry, then
-    -- Bid / Buyout / Close. All three act on the SELECTED row.
-    local closeBtn = ui.MakeButton(panel, "quiet",
-        "AegisExchangeBuyCloseButton")
-    closeBtn:SetWidth(64); closeBtn:SetHeight(21)
-    closeBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 8)
-    closeBtn:SetText("Close")
-    closeBtn:SetScript("OnClick", function() ui.CloseWindow() end)
-    ui.buyCloseBtn = closeBtn
+    -- Bid / Buyout / Clear. Bid and Buyout act on the SELECTED row.
+    --
+    -- THIS SLOT USED TO BE CLOSE, and Close was a duplicate: the X at the
+    -- window's top-right calls ui.CloseWindow() too, so the window already had
+    -- a working close that is where every other window in the game puts one.
+    -- Ticking rows for a multi-buyout had no way back at all short of clicking
+    -- each one again, which is what the slot is spent on now.
+    --
+    -- THE FRAME STAYS, ONLY ITS LABEL AND ACTION CHANGED. Two things anchor to
+    -- it -- the Buyout button beside it and the Filter Builder's whole action
+    -- row -- so removing it would move both. It is also never hidden, for the
+    -- same reason: a slot that empties when the selection does would shift the
+    -- Builder's row every time you unticked the last item.
+    local clearBtn = ui.MakeButton(panel, "quiet",
+        "AegisExchangeBuyClearButton")
+    clearBtn:SetWidth(64); clearBtn:SetHeight(21)
+    clearBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 8)
+    clearBtn:SetText("Clear")
+    clearBtn:SetScript("OnClick", function() ui.ClearBuyChecks() end)
+    clearBtn:Disable()
+    ui.buyClearBtn = clearBtn
 
     local buyoutBtn = ui.MakeButton(panel, "primary",
         "AegisExchangeBuyBuyoutButton")
     buyoutBtn:SetWidth(70); buyoutBtn:SetHeight(21)
-    buyoutBtn:SetPoint("RIGHT", closeBtn, "LEFT", -5, 0)
+    buyoutBtn:SetPoint("RIGHT", clearBtn, "LEFT", -5, 0)
     buyoutBtn:SetText("Buyout")
     buyoutBtn:SetScript("OnClick", function()
         -- Ticked rows win over the single selection. You cannot have both
@@ -6777,14 +7190,22 @@ function ui.BuildFilterBuilder(panel, advLeft)
         b:Hide()
         return b
     end
-    -- Right to left: Clear, Import, Build, Search -- so on screen they read
-    -- Search | Build > | Import | Clear, then the window's Bid / Buyout /
-    -- Close.
+    -- Right to left: Reset, Import, Build, Search -- so on screen they read
+    -- Search | Build > | Import | Reset, then the window's Bid / Buyout /
+    -- Clear.
+    --
+    -- IT IS "RESET" BECAUSE THE ACTION BAR NOW HAS A CLEAR. This button empties
+    -- the FORM; the one five pixels to its right empties the TICKED ROWS. Two
+    -- buttons reading "Clear" on one row, that close together, meaning
+    -- different things, is a coin flip -- and both are loudest at the same
+    -- moment, since ticks are not view-scoped and survive the switch into the
+    -- Builder. Emptying a form is a reset in anybody's language, and it is the
+    -- one of the two that is not about the auction list.
     --
     -- Import is back. It was dropped when the Builder was somewhere you only
     -- ever LEFT from; now that a shift-click in Saved Searches lands you in
     -- it, a query typed by hand has no other route into the form.
-    local bClear = action("Clear", 54, ui.buyCloseBtn,
+    local bClear = action("Reset", 54, ui.buyClearBtn,
         function() ui.BuilderClear() end)
     local bImport = action("Import", 60, bClear,
         function() ui.BuilderImport() end)
@@ -7311,7 +7732,8 @@ local function BitsFor(mode)
     return { ui.buyNameLbl, ui.buyBox, ui.buyLvlLbl, ui.buyMinLevel,
              ui.buyLvlDash, ui.buyMaxLevel, ui.buyQualLbl,
              ui.buyQuality and ui.buyQuality.button, ui.buyUsable,
-             ui.buyUsableLbl, ui.buyAdvBtn, ui.buyBrowseHdr,
+             ui.buyUsableLbl, ui.buyDressUp, ui.buyDressUpLbl,
+             ui.buyAdvBtn, ui.buyBrowseHdr,
              ui.buyCatWell, ui.buyCatScroll, ui.buyStripRule }
 end
 
@@ -7430,6 +7852,10 @@ function ui.DefaultSetTerm(t)
     end
     if ui.buyQuality then ui.buyQuality:SetValue(t.quality, true) end
     if ui.buyUsable then ui.buyUsable:SetChecked(t.usable and 1 or nil) end
+    -- ...but NOT the dress-up box. It is a preference, not part of the term,
+    -- so loading a saved search must not turn it on or off underneath you --
+    -- see where it is built. It is restored once, from the setting.
+
     ui.buyCatClass, ui.buyCatSubclass, ui.buyCatSlot = t.class, t.subclass, t.slot
     ui.buyCatSel = ui.CatKey(t.class and {
         kind = t.slot and "slot" or (t.subclass and "sub" or "class"),
@@ -7510,14 +7936,53 @@ function ui.ToggleBuyCheck(entry)
     ui.RefreshBuyActionBar()
 end
 
+-- Untick everything.
+--
+-- REPAINTS THE LIST, NOT JUST THE BAR. ui.ToggleBuyCheck does both and this
+-- did only the second, so the tick marks on the rows outlived the selection
+-- they were drawn for. It never showed, because its one caller was the batch
+-- buyout's completion -- and buying things re-queries the page, which repaints
+-- the list for its own reasons a moment later. Giving the player a button that
+-- calls this directly is what would have exposed it.
 function ui.ClearBuyChecks()
     ui.buyChecked = {}
+    ui.UpdateBuyList()
     ui.RefreshBuyActionBar()
+end
+
+-- What the Clear button says, and whether it can be pressed.
+--
+-- A FUNCTION SO IT CAN BE RUN. It is two strings and a boolean, which is
+-- exactly the kind of thing that is wrong for a release before anybody
+-- notices -- an off-by-one in the count, or a button that stays live with
+-- nothing ticked and clears something invisible.
+--
+-- The count mirrors "Buyout (3)" beside it on purpose: the pair reads as two
+-- things you can do to ONE selection rather than two adjacent buttons.
+function ui.ClearButtonState(nChecked)
+    local n = nChecked or 0
+    if n > 0 then return "Clear (" .. n .. ")", true end
+    return "Clear", false
 end
 
 function ui.RefreshBuyActionBar()
     if not ui.buyBidBtn then return end
     local nChecked = table.getn(ui.buyChecked or {})
+
+    -- CLEAR CARRIES THE COUNT, exactly as Buyout does beside it -- so the pair
+    -- reads as two things you can do to one selection rather than as two
+    -- unrelated buttons that happen to be adjacent.
+    --
+    -- DISABLED RATHER THAN HIDDEN when nothing is ticked. A button that names
+    -- what it would do is a better empty state than a gap, it matches how
+    -- Buyout greys itself when the batch is unaffordable, and it keeps the
+    -- Builder's action row -- which anchors to this frame -- from shifting
+    -- every time the last tick comes off.
+    if ui.buyClearBtn then
+        local label, on = ui.ClearButtonState(nChecked)
+        ui.buyClearBtn:SetText(label)
+        if on then ui.buyClearBtn:Enable() else ui.buyClearBtn:Disable() end
+    end
 
     -- Ticked rows take over the Buyout button. Bid stays single-target --
     -- bidding a batch means nothing, since each auction needs its own amount.
@@ -7852,7 +8317,10 @@ function ui.BuyAutocomplete()
         ui.buyAC = ac
     end
     local n = table.getn(ac.candidates)
-    if n == 0 then return end
+    -- RETURNS WHETHER IT COMPLETED ANYTHING, which is what lets Tab fall
+    -- through to the next field when there is nothing to complete -- see
+    -- ui.SearchBoxTab.
+    if n == 0 then return false end
     ac.index = math.mod(ac.index, n) + 1
     local pick = ac.candidates[ac.index]
     acb:SetText(pick)
@@ -7860,6 +8328,172 @@ function ui.BuyAutocomplete()
     if acb.SetCursorPosition then
         acb:SetCursorPosition(string.len(pick))
     end
+    return true
+end
+
+-- ---------------------------------------------------------------------------
+-- The ghost: what Tab would complete to, in grey, after the caret
+-- ---------------------------------------------------------------------------
+--
+-- 1.12 HAS NO INLINE COMPLETION and an EditBox will not tell you where its
+-- caret is in pixels, so the suffix is a FontString laid over the box and
+-- positioned by MEASURING the typed text. `ui.ghostRuler` is a second
+-- FontString kept off-screen for exactly that: set it to the typed text, ask
+-- its width, and that is where the caret is.
+--
+-- THE RULER MUST WEAR THE BOX'S OWN FONT or the measurement is of a different
+-- typeface than the one on screen and the ghost lands beside the caret rather
+-- than on it.
+ui.ghostBoxes = {}
+
+-- Attach a ghost to a search box. Idempotent: called from the box's build.
+function ui.AttachGhost(box)
+    if not box or box.aegisGhost then return box end
+    local g = box:CreateFontString(nil, "OVERLAY", "ChatFontNormal")
+    g:SetJustifyH("LEFT")
+    -- Grey, and dimmer than `text`: this is not content, it is a suggestion,
+    -- and it sits directly beside characters the player typed. Anything
+    -- brighter reads as text that is already in the box.
+    g:SetTextColor(C.goldDim[1] * 0.75, C.goldDim[2] * 0.75,
+                   C.goldDim[3] * 0.75)
+    g:Hide()
+    box.aegisGhost = g
+    local ruler = box:CreateFontString(nil, "OVERLAY", "ChatFontNormal")
+    ruler:Hide()
+    box.aegisRuler = ruler
+    if box.GetFont and g.SetFont then
+        local path, size, flags = box:GetFont()
+        if path then
+            pcall(function() g:SetFont(path, size, flags) end)
+            pcall(function() ruler:SetFont(path, size, flags) end)
+        end
+    end
+    -- THE THREE THINGS THAT CHANGE WHAT THE GHOST SHOULD SAY, owned here
+    -- rather than at each box's build site -- SetScript REPLACES, so a handler
+    -- added later beside one of these would silently delete it, and putting
+    -- all three in one place makes that visible. Checked at the time of
+    -- writing: neither search box binds any of the three anywhere else.
+    box:SetScript("OnTextChanged", function() ui.GhostTick() end)
+    box:SetScript("OnEditFocusGained", function() ui.GhostTick() end)
+    box:SetScript("OnEditFocusLost", function() ui.GhostTick() end)
+    table.insert(ui.ghostBoxes, box)
+    return box
+end
+
+-- The inset an EditBox's own text starts at. InputBoxTemplate pads its left
+-- edge, so a ghost measured from the frame's LEFT sits that much too far back
+-- without it.
+local GHOST_INSET = 6
+
+-- Repaint one box's ghost.
+function ui.PaintGhost(box)
+    local g, ruler = box and box.aegisGhost, box and box.aegisRuler
+    if not g or not ruler then return end
+    -- ONLY WHILE THE BOX HAS FOCUS. A suggestion hanging off an unfocused box
+    -- is text nobody is about to accept, and it would sit there looking like
+    -- part of a search somebody already ran.
+    local typed = box:GetText() or ""
+    if typed == "" or (box.HasFocus and not box:HasFocus()) then
+        g:Hide()
+        return
+    end
+    local pick = A.buy and A.buy.FirstCompletion and A.buy.FirstCompletion(typed)
+    local tail = ui.CompletionSuffix(typed, pick)
+    if not tail then
+        g:Hide()
+        return
+    end
+    ruler:SetText(typed)
+    local w = (ruler.GetStringWidth and ruler:GetStringWidth()) or 0
+    g:ClearAllPoints()
+    -- Off the box's own LEFT plus the typed width, which is where the caret
+    -- is. Anchoring to the text would need a FontString we do not have -- an
+    -- EditBox draws its own.
+    g:SetPoint("LEFT", box, "LEFT", w + GHOST_INSET, 0)
+    g:SetText(tail)
+    g:Show()
+end
+
+-- TYPING IS NOT A STORM, but it is frequent, and the scan behind the ghost
+-- walks every item name the database knows -- ten thousand of them on a
+-- played-in account. So it is a dirty flag flushed once per frame, the same
+-- shape ui.DeferInputText uses: type "linen" quickly and it costs one pass,
+-- not five.
+local ghostTick = CreateFrame("Frame", "AegisExchangeGhostTick")
+ghostTick:Hide()
+ghostTick:SetScript("OnUpdate", function()
+    ghostTick:Hide()
+    local i = 1
+    while i <= table.getn(ui.ghostBoxes) do
+        ui.PaintGhost(ui.ghostBoxes[i])
+        i = i + 1
+    end
+end)
+
+function ui.GhostTick()
+    ghostTick:Show()
+end
+
+-- The part of a completion that has not been typed yet.
+--
+-- RETURNS THE CANDIDATE'S OWN CASING for the untyped tail, so typing "linen"
+-- against "Linen Cloth" ghosts " Cloth" and the two read as one word. What it
+-- must NOT do is correct what you have already typed: the ghost sits AFTER the
+-- caret and the characters before it are yours. Returning the candidate's
+-- first five letters there would silently restyle your typing mid-keystroke.
+--
+-- Nil, not an empty string, when there is nothing to show -- the caller hides
+-- the FontString on nil, and "" would leave an empty one shown for no reason.
+function ui.CompletionSuffix(typed, candidate)
+    if not typed or typed == "" then return nil end
+    if not candidate or candidate == "" then return nil end
+    local n = string.len(typed)
+    -- Already complete: an exact match has no tail, and a candidate SHORTER
+    -- than what is typed is not a completion of it at all.
+    if string.len(candidate) <= n then return nil end
+    -- Case-insensitive, because that is how the match was found -- but the
+    -- slice comes off the candidate, so its capitals survive.
+    if string.lower(string.sub(candidate, 1, n)) ~= string.lower(typed) then
+        return nil
+    end
+    return string.sub(candidate, n + 1)
+end
+
+-- Tab on one of the two search boxes.
+--
+-- THE DOCUMENTED EXCEPTION, with its dead case fixed. Tab completes item names
+-- on these two boxes rather than stepping to the next field, which is older,
+-- more valuable and already in people's fingers. But when the prefix matches
+-- NOTHING the key used to do nothing at all -- a dead key rather than a
+-- reserved one, and indistinguishable from the addon having stopped
+-- responding. Now it falls through to the traversal every other box uses.
+--
+-- COMPLETING WINS whenever there is something to complete, so nothing anybody
+-- already does changes: the fall-through is only reachable on a prefix that
+-- matches no item Aegis has ever seen.
+function ui.SearchBoxTab(box)
+    if ui.BuyAutocomplete() then return end
+    local chain = ui.SearchTabChain(box)
+    local nxt = chain and ui.NextInputIn(chain, box,
+                                         IsShiftKeyDown and IsShiftKeyDown())
+    if nxt then
+        nxt:SetFocus()
+        if nxt.HighlightText then nxt:HighlightText() end
+    end
+end
+
+-- Which fields Tab steps through from a search box.
+--
+-- The DEFAULT view's Name box sits at the head of the control strip, so it
+-- leads into the level range the way the form reads. The ADVANCED query box
+-- has no strip beside it -- the Builder owns its own chain -- so there is
+-- nowhere to go and Tab stays inert there, which is the honest answer rather
+-- than jumping somewhere unrelated.
+function ui.SearchTabChain(box)
+    if box and box == ui.buyBox then
+        return { ui.buyBox, ui.buyMinLevel, ui.buyMaxLevel }
+    end
+    return nil
 end
 
 function ui.DoBuySearch()
@@ -7901,6 +8535,19 @@ function ui.DoBuySearch()
 
     ui.buyResults = nil
     ui.buySel = nil            -- the rows are about to be replaced
+    -- THE TICKED ROWS ARE NOT TOUCHED HERE, and v1.53.17 learning that the
+    -- hard way is why this comment exists. Clearing them on a new search
+    -- sounds right and is wrong, because "a new search" is not a thing the
+    -- player does deliberately -- it is also what happens when you RIGHT-CLICK
+    -- a grouped row to see one item on its own, and when you shift-click an
+    -- item in your bags. Both are ordinary browsing, and both silently emptied
+    -- a basket somebody had been filling.
+    --
+    -- The Clear button is the only thing that empties the selection now, which
+    -- is what makes it predictable: one control, one meaning. That is also the
+    -- promise the comment above ui.buyChecked has always made -- the selection
+    -- survives a re-query, a sort and a page turn, which is exactly why it
+    -- holds entries rather than indices.
     ui.RefreshBuyActionBar()
     ui.UpdateBuyList()
     local ok, err = A.buy.Search(name, {
@@ -16405,6 +17052,57 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
         ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
+        -- WHICH dressing-room API this client has, if either. A check box
+        -- that silently does nothing is the failure this line exists to make
+        -- reportable in one word.
+        ChatMsg("  dress-up=" .. (ui.DressUpMethod() or "NONE (no API)")
+            .. "  on click=" .. tostring(A.db.Setting("dressUpOnClick")
+                                         and true or false))
+
+        -- EVERY EDIT BOX, with what it was ASKED to be and what it actually
+        -- IS. See ui.InputDiagVerdict for why the three causes have to be
+        -- told apart rather than guessed at.
+        local boxes = ui.inputBoxes or {}
+        ChatMsg("  input boxes: " .. table.getn(boxes) .. " registered")
+        local bi = 1
+        while bi <= table.getn(boxes) do
+            local e = boxes[bi]
+            local name = (e.GetName and e:GetName())
+                or e.aegisLabel or "(unnamed)"
+            local got
+            if e.GetTextColor then
+                local ok, r, g, b = pcall(function()
+                    return e:GetTextColor()
+                end)
+                if ok and r then got = { r, g, b } end
+            end
+            -- THE FRAME THAT ACTUALLY HAS THE BACKGROUND, which on a pfUI
+            -- client is a child frame and not the box -- see ui.BackdropSource.
+            local src, where = ui.BackdropSource(e)
+            local bg, border
+            if src then
+                local ok, r, g, b = pcall(function()
+                    return src:GetBackdropColor()
+                end)
+                if ok and r then bg = { r, g, b } end
+                local ok2, br, bgn, bb = pcall(function()
+                    return src:GetBackdropBorderColor()
+                end)
+                if ok2 and br then border = { br, bgn, bb } end
+            end
+            local function rgb(c)
+                if not c then return "?" end
+                return string.format("%.2f/%.2f/%.2f", c[1], c[2], c[3])
+            end
+            ChatMsg("    " .. name
+                .. "  text=" .. rgb(got)
+                .. "  bg=" .. rgb(bg) .. "(" .. where .. ")"
+                .. "  edge=" .. rgb(border)
+                .. "  \226\128\148 "
+                .. ui.InputDiagVerdict(e.aegisInputBox, got, C.input, bg)
+                .. "  " .. ui.EdgeVerdict(border, C.panelBG))
+            bi = bi + 1
+        end
         ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
             .. "  cached items=" .. tostring(A.db.HarvestCount and A.db.HarvestCount()))
         local itemId = A.de and A.de.ParseReportArgs and A.de.ParseReportArgs(diagArgs)

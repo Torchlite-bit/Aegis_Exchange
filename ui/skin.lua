@@ -88,6 +88,44 @@ local function SinkBackdrop(frame)
     end)
 end
 
+-- A backdrop ON THE BOX, rather than a child frame over it.
+--
+-- THIS IS THE FIX FOR A REPORT THAT STOOD FOR FIVE RELEASES, and the cause was
+-- never the text colour. pfUI's CreateBackdrop builds a CHILD FRAME, and a
+-- child draws above ALL of its parent's regions whatever draw layer they are
+-- on. A button can answer that by re-homing its label onto the backdrop -- see
+-- LiftLabel below -- but an EditBox CANNOT: it draws its own text internally
+-- and there is no FontString to move.
+--
+-- So pfUI's plate sat on top of the text. A translucent dark plate over white
+-- text is grey text, and an opaque one is no text at all -- which is exactly
+-- the range reported, "dark grey" on one pfUI config and invisible on another.
+-- GetTextColor went on answering 1.00/1.00/1.00 throughout, because the colour
+-- WAS white. It was covered. Four attempts at making it whiter could not have
+-- worked, and /aex diag agreeing the colour was right is what finally said so.
+--
+-- Inside ONE frame the draw layer is the whole ordering rule -- the same
+-- conclusion LiftLabel reached from the other side. A backdrop set on the box
+-- lands on its BACKGROUND layer, under its own text, with no frame-level
+-- question left to lose.
+local function EditBoxPlate(f)
+    if not f or not f.SetBackdrop then return end
+    pcall(function()
+        f:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 10,
+            insets = { left = 2, right = 2, top = 2, bottom = 2 },
+        })
+        f:SetBackdropColor(0.06, 0.05, 0.04, 1)
+    end)
+    -- A plate pfUI already built on an earlier pass has to go, or it is still
+    -- there covering the text that the new one sits politely underneath.
+    if f.backdrop and f.backdrop.Hide then
+        pcall(function() f.backdrop:Hide() end)
+    end
+end
+
 -- Move an Aegis button's label ONTO pfUI's backdrop frame.
 --
 -- SinkBackdrop above was the first attempt and it is not enough on its own.
@@ -234,16 +272,18 @@ local function SkinWidget(f)
         return true
     elseif otype == "EditBox" then
         Strip(f)
-        Backdrop(f)
+        -- OUR OWN PLATE, NOT pfUI's -- see EditBoxPlate for why an EditBox
+        -- cannot take a child-frame backdrop the way a button can. This is
+        -- the one widget in the window that keeps its Aegis background under
+        -- the skin, and it keeps it so the text stays visible.
+        EditBoxPlate(f)
         -- ...AND PUT OUR TEXT COLOUR BACK. ui.InputText sets it when the box
         -- is BUILT, and skin.Apply runs last -- after every widget exists --
         -- so anything pfUI does to a box here happens afterwards and wins.
-        -- The reported symptom was the flat-undercut amount reading too dull
-        -- to see under some pfUI configurations, and it was dull only there.
         --
-        -- Same arrangement, same reason, as the button branch above calling
-        -- A.ui.SetButtonKind: pfUI restyles, then we re-assert the one thing
-        -- we actually care about.
+        -- KEPT even though the plate above is now the actual fix: the colour
+        -- still has to survive whatever else touches the box, and the edge
+        -- colour rides the same call.
         if A.ui and A.ui.InputText then A.ui.InputText(f) end
         -- ...AND AGAIN A FRAME LATER. Re-applying here is not enough: the
         -- colour is right unskinned and wrong under pfUI, so pfUI touches the

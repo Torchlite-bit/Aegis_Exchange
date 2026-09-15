@@ -219,6 +219,11 @@ local SETTING_DEFAULTS = {
     -- the Crafting tab already has it). On by default because a player who
     -- tracked a recipe has already said they intend to buy its reagents.
     shopAtMerchant = true,
+    -- "Display on Character": clicking a result tries it on, the way the
+    -- stock auction house does. OFF by default, because it opens a window
+    -- over the game world and a feature that does that uninvited is one
+    -- people turn off rather than find.
+    dressUpOnClick = false,
     -- After posting, keep any REMAINING items of the same type in the sell
     -- slot at the same price, so the leftover stack can go straight out. Off
     -- clears the slot, which is what you want when posting one thing at a
