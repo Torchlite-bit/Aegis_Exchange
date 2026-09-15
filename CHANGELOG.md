@@ -18,6 +18,26 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.25]
+
+### Fixed
+- **Input box text is white under pfUI.** Something *was* over the box — you
+  called it, and that was the whole cause.
+
+  pfUI's backdrop is a **child frame**, and a child draws above *all* of its
+  parent's regions no matter what layer they are on. A button can answer that
+  by moving its label onto the backdrop; an **edit box cannot** — it draws its
+  own text internally, so there is no label to move. pfUI's plate simply sat on
+  top. Translucent and dark on one pfUI config, near-opaque on another, which
+  is exactly the range reported: grey in one, unreadable in the next.
+
+  The text colour was correct the whole time — `/aex diag` kept answering
+  `1.00/1.00/1.00`, which is why four attempts at making it whiter changed
+  nothing. Edit boxes now keep their own background, set **on the box**, where
+  the draw layer puts it underneath the box's own text with no frame ordering
+  left to lose.
+
+
 ## [1.53.24]
 
 ### Added
@@ -5714,6 +5734,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

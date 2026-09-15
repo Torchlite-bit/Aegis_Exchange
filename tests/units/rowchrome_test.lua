@@ -793,19 +793,23 @@ H.section("The edge, which is what 'too dark to see' actually meant")
 -- does, because whatever repaints one repaints the other: one mechanism for
 -- both properties, so neither can be re-asserted while the other is forgotten.
 do
+    -- THE PLATE IS ON THE BOX, not on a child frame over it. ui/skin.lua's
+    -- EditBoxPlate keeps it there deliberately -- a child frame draws above
+    -- its parent's regions, which is how pfUI's plate came to be covering the
+    -- text -- so the edge is painted on whichever frame ui.BackdropSource
+    -- says carries it, and that is the box.
     local painted
     local box = {
         SetTextColor = function() end,
         GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
         SetFont = function() end,
-        backdrop = {
-            SetBackdropBorderColor = function(_, r, g, b, a)
-                painted = { r, g, b, a }
-            end,
-        },
+        GetBackdropColor = function() return 0.06, 0.05, 0.04 end,
+        SetBackdropBorderColor = function(_, r, g, b, a)
+            painted = { r, g, b, a }
+        end,
     }
     ui.InputText(box)
-    H.check("a skinned box gets its edge painted", painted ~= nil,
+    H.check("a box's own plate gets its edge painted", painted ~= nil,
             "nothing shows where the field is")
     H.eq("...in the palette's edge colour",
          painted and (painted[1] .. "/" .. painted[2] .. "/" .. painted[3]),
@@ -841,6 +845,56 @@ do
     H.survives("a backdrop that cannot be coloured is skipped", function()
         ui.InputText(odd)
     end)
+end
+
+
+-- ---- and the plate must live INSIDE the box -----------------------------
+
+-- THE CAUSE, pinned. pfUI's CreateBackdrop builds a CHILD FRAME, and a child
+-- draws above ALL of its parent's regions whatever draw layer they are on. A
+-- button answers that by re-homing its label onto the backdrop (LiftLabel); an
+-- EditBox cannot, because it draws its own text internally and there is no
+-- FontString to move. So pfUI's plate sat ON TOP of the text -- translucent
+-- and dark on one config, opaque on another, which is precisely the range
+-- reported: "dark grey" in one, invisible in the next.
+--
+-- GetTextColor answered 1.00/1.00/1.00 the whole time, because the colour WAS
+-- white and merely covered. Four attempts at making it whiter could not have
+-- worked; the readout agreeing the colour was right is what finally said so.
+--
+-- A SOURCE CHECK, because draw order needs a client and this does not: the
+-- EditBox branch must give the box its own plate and must NOT hand it to
+-- pfUI's child-frame builder.
+do
+    local f = assert(io.open("ui/skin.lua", "r"), "run this from the repo root")
+    local sk = f:read("*a")
+    f:close()
+
+    local at = string.find(sk, 'elseif otype == "EditBox" then', 1, true)
+    H.check("the EditBox branch was found", at ~= nil)
+    local branch = string.sub(sk, at or 1,
+        string.find(sk, 'elseif otype == "Slider" then', at or 1, true))
+    H.check("...and the extraction stopped at the next branch",
+            string.len(branch) < 1600, string.len(branch))
+
+    H.check("an edit box gets its own plate",
+            string.find(branch, "EditBoxPlate(f)", 1, true) ~= nil,
+            "the box has no background under the skin")
+    H.check("...and NOT pfUI's child frame",
+            string.find(branch, "\n        Backdrop(f)", 1, true) == nil,
+            "a child frame draws over the text it is supposed to sit behind")
+
+    -- The plate itself has to be set ON the frame -- SetBackdrop, which lands
+    -- on the frame's own BACKGROUND layer, under its own text.
+    local plate = string.sub(sk,
+        string.find(sk, "local function EditBoxPlate", 1, true),
+        string.find(sk, "\nend\n",
+                    string.find(sk, "local function EditBoxPlate", 1, true), true))
+    H.check("the plate is set on the frame itself",
+            string.find(plate, "f:SetBackdrop(", 1, true) ~= nil)
+    H.check("...and any plate pfUI already built is put away",
+            string.find(plate, "f.backdrop:Hide()", 1, true) ~= nil,
+            "an earlier pass's child frame would still be covering the text")
 end
 
 os.exit(H.report("rowchrome"))

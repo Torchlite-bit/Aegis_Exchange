@@ -730,10 +730,17 @@ function ui.InputText(e, label)
     -- ON pfUI's CHILD FRAME, not the box: skin.lua clears the box's own
     -- backdrop deliberately so the two cannot double-border, which is why the
     -- box itself has no border to set. See ui.BackdropSource.
-    if e.backdrop and e.backdrop.SetBackdropBorderColor then
+    -- WHICHEVER FRAME CARRIES THE PLATE. Under the skin that is the box
+    -- itself now (ui/skin.lua's EditBoxPlate keeps it there, because a child
+    -- frame would draw OVER the text); unskinned it is also the box. It was
+    -- pfUI's child frame for one release, and reading the wrong one is how
+    -- the readout spent a release saying "backdrop unreadable" -- so this
+    -- asks ui.BackdropSource rather than picking.
+    local plate = ui.BackdropSource(e)
+    if plate and plate.SetBackdropBorderColor then
         pcall(function()
-            e.backdrop:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
-                                              C.inputEdge[3], C.inputEdge[4])
+            plate:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
+                                         C.inputEdge[3], C.inputEdge[4])
         end)
     end
     -- REGISTERED, so the colour can be re-asserted after somebody else's

@@ -2390,6 +2390,48 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Something was over the box — v1.53.25
+
+**The owner diagnosed this one.** "I wonder if there is an overlay that is also
+over the input box?" -- yes, and it had been there the whole time.
+
+**pfUI's backdrop is a CHILD FRAME, and an EditBox has no label to re-home.**
+A child draws above ALL of its parent's regions whatever draw layer they are
+on. `LiftLabel` answers that for buttons by moving the label onto the backdrop;
+an EditBox draws its own text internally, so there is nothing to move. pfUI's
+plate sat on top of the text -- translucent and dark on one config, near-opaque
+on another, which is exactly the range reported: grey in one skin, invisible in
+the next.
+
+**THE FILE ALREADY KNEW THIS.** `SinkBackdrop`'s comment states the
+child-over-parent rule; `LiftLabel`'s says frame level is not worth betting
+text on and names the Aegis settings panel as the deep-nesting case where
+sinking alone failed -- which is exactly where the undercut boxes live. Both
+were written about BUTTONS, and the EditBox branch three screens below called
+`Backdrop(f)` and neither of the two functions that exist to undo what it does.
+**The knowledge was in the file; the branch that needed it did not use it.**
+
+**Five releases aimed at the text colour, and the colour was never wrong.**
+`/aex diag` answered `1.00/1.00/1.00` every time -- correctly. Attempts one to
+four made it whiter, which cannot beat something drawn on top of it. The
+readout's real contribution was not finding the cause but **eliminating** it:
+once the colour was measured and correct, "the text is dark" had to mean
+something other than the text colour, and the only two candidates left were
+the backdrop behind it and something in front. v1.53.23 chased the first. The
+owner named the second.
+
+**The fix is LiftLabel's conclusion applied from the other side.** Inside ONE
+frame the draw layer is the whole ordering rule -- so instead of lifting the
+text above a child frame, the plate goes DOWN onto the box itself, where
+`SetBackdrop` lands it on BACKGROUND, under the box's own text, with no frame
+level left to lose. Edit boxes are now the one widget that keeps its Aegis
+background under the skin, and it keeps it so the text stays visible.
+
+**A check that needs no client.** Draw order does; "the EditBox branch must
+call EditBoxPlate and must not call Backdrop" does not. Three sabotages: the
+child backdrop restored, the plate dropped entirely, and an earlier pass's
+plate left showing.
+
 ### Display on Character — v1.53.24
 
 **§3, and the owner's third answer to it was the right one.** I had offered

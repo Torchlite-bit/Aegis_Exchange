@@ -5194,6 +5194,34 @@ end""",
 end""",
      "purse"),
 
+    # ---- the plate that was covering the text (v1.53.25) ----------------
+
+    # THE CAUSE, PUT BACK. pfUI's CreateBackdrop builds a CHILD FRAME, and a
+    # child draws above ALL of its parent's regions whatever layer they are on.
+    # An EditBox draws its own text internally and has no label to re-home, so
+    # the plate simply sits on top of it -- grey text on one pfUI config,
+    # invisible on the next. GetTextColor answers 1.00/1.00/1.00 throughout.
+    ("editbox-wears-pfuis-child-backdrop", "ui/skin.lua",
+     "        EditBoxPlate(f)",
+     "        Backdrop(f)",
+     "rowchrome"),
+
+    # The plate not set at all, so under the skin the box has no background --
+    # Strip already took the template's art away.
+    ("editbox-has-no-plate", "ui/skin.lua",
+     "        EditBoxPlate(f)\n",
+     "",
+     "rowchrome"),
+
+    # A plate pfUI built on an earlier pass left showing, which is still over
+    # the text however politely the new one sits underneath.
+    ("editbox-keeps-the-old-child-plate", "ui/skin.lua",
+     """    if f.backdrop and f.backdrop.Hide then
+        pcall(function() f.backdrop:Hide() end)
+    end""",
+     "",
+     "rowchrome"),
+
     # ---- Display on Character (v1.53.24) --------------------------------
 
     # THE CHECK BOX THAT SILENTLY DOES NOTHING. Assuming the API is there is
@@ -5284,10 +5312,11 @@ end""",
     # where the field is -- which is what "too dark to see" meant all along,
     # while four attempts went at the text colour.
     ("input-edge-never-painted", "ui/frame.lua",
-     """    if e.backdrop and e.backdrop.SetBackdropBorderColor then
+     """    local plate = ui.BackdropSource(e)
+    if plate and plate.SetBackdropBorderColor then
         pcall(function()
-            e.backdrop:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
-                                              C.inputEdge[3], C.inputEdge[4])
+            plate:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
+                                         C.inputEdge[3], C.inputEdge[4])
         end)
     end""",
      "",
