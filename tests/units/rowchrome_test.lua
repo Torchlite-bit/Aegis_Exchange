@@ -71,7 +71,8 @@ do
     -- the real one moves. rowSel and rowOpen are the two row tints and carry
     -- a fourth value, the alpha -- the loop below takes however many numbers
     -- the entry has, so a triple and a quad both arrive intact.
-    for _, key in ipairs({ "input", "text", "rowSel", "rowOpen" }) do
+    for _, key in ipairs({ "input", "text", "rowSel", "rowOpen",
+                           "inputEdge", "panelBG" }) do
         local _, _, body = string.find(src,
             "\n    " .. key .. "%s*=%s*{([^}]*)}")
         assert(body, "no C." .. key .. " in the palette")
@@ -773,5 +774,73 @@ end
 H.check("the contrast floor is a constant",
         ui.CONTRAST_MIN and ui.CONTRAST_MIN > 0 and ui.CONTRAST_MIN < 1,
         tostring(ui.CONTRAST_MIN))
+
+-- ---------------------------------------------------------------------------
+H.section("The edge, which is what 'too dark to see' actually meant")
+-- ---------------------------------------------------------------------------
+
+-- FOUR ATTEMPTS AIMED AT THE TEXT COLOUR and the report kept standing. The
+-- readout settled it: /aex diag came back text=1.00/1.00/1.00 on all
+-- twenty-five boxes -- pure white, exactly what was asked for -- while the box
+-- was still reported as too dark to see.
+--
+-- What is dark is the BOX. Under pfUI its own backdrop is cleared (skin.lua
+-- does that deliberately, so pfUI's and ours cannot double-border) and
+-- replaced by a CHILD FRAME whose default border is near-black. Our panel
+-- behind it is near-black too, so nothing shows where the field is.
+--
+-- The edge rides the same register-and-reapply machinery the text colour
+-- does, because whatever repaints one repaints the other: one mechanism for
+-- both properties, so neither can be re-asserted while the other is forgotten.
+do
+    local painted
+    local box = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
+        SetFont = function() end,
+        backdrop = {
+            SetBackdropBorderColor = function(_, r, g, b, a)
+                painted = { r, g, b, a }
+            end,
+        },
+    }
+    ui.InputText(box)
+    H.check("a skinned box gets its edge painted", painted ~= nil,
+            "nothing shows where the field is")
+    H.eq("...in the palette's edge colour",
+         painted and (painted[1] .. "/" .. painted[2] .. "/" .. painted[3]),
+         C.inputEdge[1] .. "/" .. C.inputEdge[2] .. "/" .. C.inputEdge[3])
+    H.eq("...at its alpha", painted and painted[4], C.inputEdge[4])
+
+    -- AND IT IS FINDABLE against the panel behind it, which is the whole
+    -- point -- a border painted in a colour as dark as the panel is the bug
+    -- being fixed, restated.
+    H.check("the edge stands out from the panel",
+            ui.ContrastGap(C.inputEdge, C.panelBG) >= ui.EDGE_MIN,
+            "the edge is as dark as the panel behind it")
+
+    -- A box with NO pfUI backdrop -- the stock-skin path -- must not error.
+    -- It has its own border from the template and needs nothing from us.
+    local plain = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
+        SetFont = function() end,
+    }
+    H.survives("an unskinned box is not a crash", function()
+        ui.InputText(plain)
+    end)
+
+    -- ...and a backdrop that cannot take a border colour is skipped rather
+    -- than called. Having the field is not the same as it answering.
+    local odd = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\FRIZQT__.TTF", 10, "" end,
+        SetFont = function() end,
+        backdrop = {},
+    }
+    H.survives("a backdrop that cannot be coloured is skipped", function()
+        ui.InputText(odd)
+    end)
+end
 
 os.exit(H.report("rowchrome"))

@@ -5194,6 +5194,70 @@ end""",
 end""",
      "purse"),
 
+    # ---- the ghost after the caret (v1.53.23) ---------------------------
+
+    # THE GHOST SHOWING SOMETHING OTHER THAN WHAT TAB WOULD INSERT. The grey
+    # text is a promise about the key; picking the last match instead of the
+    # first makes it a lie, and the player sees one completion and gets
+    # another.
+    ("ghost-disagrees-with-tab", "core/buy.lua",
+     "            if not best or name < best then best = name end",
+     "            if not best or name > best then best = name end",
+     "buygroup"),
+
+    # The tail including what was already typed, which restyles the player's
+    # own characters under the caret mid-keystroke.
+    ("ghost-tail-includes-what-was-typed", "ui/frame.lua",
+     "    return string.sub(candidate, n + 1)",
+     "    return candidate",
+     "buygroup"),
+
+    # An exact match ghosting an empty string, so a finished word leaves an
+    # empty FontString shown for no reason.
+    ("ghost-shows-an-empty-tail", "ui/frame.lua",
+     "    if string.len(candidate) <= n then return nil end",
+     "    if string.len(candidate) < n then return nil end",
+     "buygroup"),
+
+    # The prefix check dropped, so a mid-string match ghosts a tail that does
+    # not follow from what was typed at all.
+    ("ghost-accepts-a-non-prefix", "ui/frame.lua",
+     """    if string.lower(string.sub(candidate, 1, n)) ~= string.lower(typed) then
+        return nil
+    end""",
+     "",
+     "buygroup"),
+
+    # Case-sensitive matching, so typing in lower case ghosts nothing on a
+    # database whose names are all capitalised -- which is all of them.
+    ("ghost-is-case-sensitive", "core/buy.lua",
+     "        if string.find(string.lower(name), low, 1, true) == 1 then\n            -- `<` is the comparison",
+     "        if string.find(name, low, 1, true) == 1 then\n            -- `<` is the comparison",
+     "buygroup"),
+
+    # ---- the input edge (v1.53.23) --------------------------------------
+
+    # THE FIFTH ATTEMPT UNDONE. The edge never painted, so under pfUI the box
+    # keeps a near-black border against a near-black panel and nothing shows
+    # where the field is -- which is what "too dark to see" meant all along,
+    # while four attempts went at the text colour.
+    ("input-edge-never-painted", "ui/frame.lua",
+     """    if e.backdrop and e.backdrop.SetBackdropBorderColor then
+        pcall(function()
+            e.backdrop:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
+                                              C.inputEdge[3], C.inputEdge[4])
+        end)
+    end""",
+     "",
+     "rowchrome"),
+
+    # ...and the edge painted as dark as the panel behind it, which is the bug
+    # restated rather than fixed.
+    ("input-edge-as-dark-as-the-panel", "ui/frame.lua",
+     "    inputEdge = { 0.62, 0.50, 0.16, 0.95 },",
+     "    inputEdge = { 0.14, 0.13, 0.11, 0.95 },",
+     "rowchrome"),
+
     # ---- a group of one is its own listing (v1.53.21) -------------------
 
     # BACK TO A PARENT STANDING FOR ONE AUCTION, which could do nothing anybody

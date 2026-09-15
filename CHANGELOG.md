@@ -18,6 +18,33 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.23]
+
+### Fixed
+- **Input boxes are findable under pfUI again.** This is the fifth go at "the
+  undercut box is too dark", and the first one aimed at the right thing.
+
+  **The text was never the problem.** `/aex diag` reported pure white on all
+  twenty-five boxes while the report still stood — and the screenshot that
+  came with it showed the *values* perfectly legible. What is dark is the
+  **box**: pfUI replaces its backdrop with a child frame whose default border
+  is near-black, our panel behind it is near-black, and nothing shows where the
+  field is. The boxes now carry a gold edge, asserted through the same
+  machinery that keeps the text colour — so whatever repaints one repaints
+  both.
+
+### Added
+- **The search box shows what Tab would complete to**, in grey, after what
+  you've typed. Type `linen` and ` Cloth` appears beside it; press Tab and
+  that's exactly what you get — the suggestion and the key cannot disagree,
+  because they pick the same way.
+
+  It never touches what you've already typed: the grey sits *after* the caret
+  and the characters before it stay yours, whatever case you typed them in. It
+  appears only while the box has focus, and only when there is something to
+  complete.
+
+
 ## [1.53.22]
 
 ### Fixed
@@ -5664,6 +5691,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

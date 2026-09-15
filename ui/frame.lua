@@ -77,6 +77,16 @@ local C = {
     -- colour: the accent purple the Advanced and Build buttons wear, dulled
     -- to sit behind text. A row can be one or the other and never both, since
     -- clicking a parent folds it rather than selecting it.
+    -- The EDGE an input box wears, and the fifth attempt at "the undercut box
+    -- is too dark" -- the first one aimed at the right thing.
+    --
+    -- The TEXT was never the problem. /aex diag reported pure white on all
+    -- twenty-five boxes while the report stood. What is dark is the box: under
+    -- pfUI its own backdrop is cleared and replaced by a child frame whose
+    -- default border is near-black, and our panel behind it is near-black too,
+    -- so nothing shows where the field is. Gold, because that is what the rest
+    -- of this window draws its edges in.
+    inputEdge = { 0.62, 0.50, 0.16, 0.95 },
     rowSel  = { 0.60, 0.45, 0.10, 0.34 },
     rowOpen = { 0.38, 0.29, 0.58, 0.42 },
 }
@@ -711,6 +721,21 @@ function ui.InputText(e, label)
         if path then pcall(function() e:SetFont(path, size, flags) end) end
     end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])
+    -- ...AND THE EDGE, on the same terms and through the same machinery. It
+    -- rides ui.ReapplyInputText and ui.DeferInputText rather than being set
+    -- once at skin time, because whatever repaints a box's colours repaints
+    -- its border too -- one mechanism for both properties, so neither can be
+    -- re-asserted while the other is forgotten.
+    --
+    -- ON pfUI's CHILD FRAME, not the box: skin.lua clears the box's own
+    -- backdrop deliberately so the two cannot double-border, which is why the
+    -- box itself has no border to set. See ui.BackdropSource.
+    if e.backdrop and e.backdrop.SetBackdropBorderColor then
+        pcall(function()
+            e.backdrop:SetBackdropBorderColor(C.inputEdge[1], C.inputEdge[2],
+                                              C.inputEdge[3], C.inputEdge[4])
+        end)
+    end
     -- REGISTERED, so the colour can be re-asserted after somebody else's
     -- pass -- see ui.ReapplyInputText. Deduped on the box itself because
     -- ui.RefreshSettings calls this on every repaint, and an ever-growing
@@ -5776,6 +5801,7 @@ function ui.BuildBuyTab()
     -- Registered BEFORE the Advanced query box, so with neither focused the
     -- default strip's box wins -- and only one of the two is ever visible.
     ui.RegisterLinkTarget(box)
+    ui.AttachGhost(box)
     ui.buyBox = box
     ui.buyNameLbl = stripLabel("Name", box)
 
@@ -5872,6 +5898,7 @@ function ui.BuildBuyTab()
     -- exception. See ui.LinkTabOrder.
     ui.buyQueryBox:SetScript("OnTabPressed",
         function() ui.SearchBoxTab(ui.buyQueryBox) end)
+    ui.AttachGhost(ui.buyQueryBox)
 
 
     -- View switcher: a row of three, INSIDE the frame and under the query
@@ -8130,6 +8157,134 @@ function ui.BuyAutocomplete()
         acb:SetCursorPosition(string.len(pick))
     end
     return true
+end
+
+-- ---------------------------------------------------------------------------
+-- The ghost: what Tab would complete to, in grey, after the caret
+-- ---------------------------------------------------------------------------
+--
+-- 1.12 HAS NO INLINE COMPLETION and an EditBox will not tell you where its
+-- caret is in pixels, so the suffix is a FontString laid over the box and
+-- positioned by MEASURING the typed text. `ui.ghostRuler` is a second
+-- FontString kept off-screen for exactly that: set it to the typed text, ask
+-- its width, and that is where the caret is.
+--
+-- THE RULER MUST WEAR THE BOX'S OWN FONT or the measurement is of a different
+-- typeface than the one on screen and the ghost lands beside the caret rather
+-- than on it.
+ui.ghostBoxes = {}
+
+-- Attach a ghost to a search box. Idempotent: called from the box's build.
+function ui.AttachGhost(box)
+    if not box or box.aegisGhost then return box end
+    local g = box:CreateFontString(nil, "OVERLAY", "ChatFontNormal")
+    g:SetJustifyH("LEFT")
+    -- Grey, and dimmer than `text`: this is not content, it is a suggestion,
+    -- and it sits directly beside characters the player typed. Anything
+    -- brighter reads as text that is already in the box.
+    g:SetTextColor(C.goldDim[1] * 0.75, C.goldDim[2] * 0.75,
+                   C.goldDim[3] * 0.75)
+    g:Hide()
+    box.aegisGhost = g
+    local ruler = box:CreateFontString(nil, "OVERLAY", "ChatFontNormal")
+    ruler:Hide()
+    box.aegisRuler = ruler
+    if box.GetFont and g.SetFont then
+        local path, size, flags = box:GetFont()
+        if path then
+            pcall(function() g:SetFont(path, size, flags) end)
+            pcall(function() ruler:SetFont(path, size, flags) end)
+        end
+    end
+    -- THE THREE THINGS THAT CHANGE WHAT THE GHOST SHOULD SAY, owned here
+    -- rather than at each box's build site -- SetScript REPLACES, so a handler
+    -- added later beside one of these would silently delete it, and putting
+    -- all three in one place makes that visible. Checked at the time of
+    -- writing: neither search box binds any of the three anywhere else.
+    box:SetScript("OnTextChanged", function() ui.GhostTick() end)
+    box:SetScript("OnEditFocusGained", function() ui.GhostTick() end)
+    box:SetScript("OnEditFocusLost", function() ui.GhostTick() end)
+    table.insert(ui.ghostBoxes, box)
+    return box
+end
+
+-- The inset an EditBox's own text starts at. InputBoxTemplate pads its left
+-- edge, so a ghost measured from the frame's LEFT sits that much too far back
+-- without it.
+local GHOST_INSET = 6
+
+-- Repaint one box's ghost.
+function ui.PaintGhost(box)
+    local g, ruler = box and box.aegisGhost, box and box.aegisRuler
+    if not g or not ruler then return end
+    -- ONLY WHILE THE BOX HAS FOCUS. A suggestion hanging off an unfocused box
+    -- is text nobody is about to accept, and it would sit there looking like
+    -- part of a search somebody already ran.
+    local typed = box:GetText() or ""
+    if typed == "" or (box.HasFocus and not box:HasFocus()) then
+        g:Hide()
+        return
+    end
+    local pick = A.buy and A.buy.FirstCompletion and A.buy.FirstCompletion(typed)
+    local tail = ui.CompletionSuffix(typed, pick)
+    if not tail then
+        g:Hide()
+        return
+    end
+    ruler:SetText(typed)
+    local w = (ruler.GetStringWidth and ruler:GetStringWidth()) or 0
+    g:ClearAllPoints()
+    -- Off the box's own LEFT plus the typed width, which is where the caret
+    -- is. Anchoring to the text would need a FontString we do not have -- an
+    -- EditBox draws its own.
+    g:SetPoint("LEFT", box, "LEFT", w + GHOST_INSET, 0)
+    g:SetText(tail)
+    g:Show()
+end
+
+-- TYPING IS NOT A STORM, but it is frequent, and the scan behind the ghost
+-- walks every item name the database knows -- ten thousand of them on a
+-- played-in account. So it is a dirty flag flushed once per frame, the same
+-- shape ui.DeferInputText uses: type "linen" quickly and it costs one pass,
+-- not five.
+local ghostTick = CreateFrame("Frame", "AegisExchangeGhostTick")
+ghostTick:Hide()
+ghostTick:SetScript("OnUpdate", function()
+    ghostTick:Hide()
+    local i = 1
+    while i <= table.getn(ui.ghostBoxes) do
+        ui.PaintGhost(ui.ghostBoxes[i])
+        i = i + 1
+    end
+end)
+
+function ui.GhostTick()
+    ghostTick:Show()
+end
+
+-- The part of a completion that has not been typed yet.
+--
+-- RETURNS THE CANDIDATE'S OWN CASING for the untyped tail, so typing "linen"
+-- against "Linen Cloth" ghosts " Cloth" and the two read as one word. What it
+-- must NOT do is correct what you have already typed: the ghost sits AFTER the
+-- caret and the characters before it are yours. Returning the candidate's
+-- first five letters there would silently restyle your typing mid-keystroke.
+--
+-- Nil, not an empty string, when there is nothing to show -- the caller hides
+-- the FontString on nil, and "" would leave an empty one shown for no reason.
+function ui.CompletionSuffix(typed, candidate)
+    if not typed or typed == "" then return nil end
+    if not candidate or candidate == "" then return nil end
+    local n = string.len(typed)
+    -- Already complete: an exact match has no tail, and a candidate SHORTER
+    -- than what is typed is not a completion of it at all.
+    if string.len(candidate) <= n then return nil end
+    -- Case-insensitive, because that is how the match was found -- but the
+    -- slice comes off the candidate, so its capitals survive.
+    if string.lower(string.sub(candidate, 1, n)) ~= string.lower(typed) then
+        return nil
+    end
+    return string.sub(candidate, n + 1)
 end
 
 -- Tab on one of the two search boxes.

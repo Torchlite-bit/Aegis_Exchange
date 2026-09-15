@@ -2390,6 +2390,46 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### It was never the text — v1.53.23
+
+**Five attempts at "the undercut box is too dark", and the first four all
+aimed at the text colour.** The readout ended it in one round: `/aex diag`
+reported `text=1.00/1.00/1.00 want=1.00/1.00/1.00` on all twenty-five boxes,
+and the screenshot that came with it showed the values -- 1, 100%, 1 --
+perfectly legible. **The characters were never dark.** The BOX is: pfUI
+replaces its backdrop with a child frame whose default border is near-black,
+our panel behind it is near-black, and nothing shows where the field is.
+
+**"Too dark to see" is ambiguous and nobody asked which.** Whether you can
+read the text IN a box and whether you can SEE the box at all are different
+faults with different fixes, and four releases were spent on the first because
+that is the reading "the text is too dark" suggests. The instrument that
+settled it took one release to build, after those four.
+
+**The edge rides the text colour's machinery**, not skin.lua's one-shot pass:
+`ui.InputText` sets both, so `ui.ReapplyInputText` and `ui.DeferInputText`
+re-assert both. One mechanism for two properties is what stops the next person
+re-asserting one and forgetting the other -- which is the shape all four
+earlier attempts had.
+
+**And the ghost.** §2(a): the search box shows what Tab would complete to, in
+grey, after the caret. 1.12 has no inline completion and an EditBox will not
+say where its caret is in pixels, so the suffix is a FontString positioned by
+MEASURING the typed text with a second FontString wearing the box's own font.
+
+**The ghost is a promise about the key**, so the two must agree exactly. Tab
+takes entry one of a sorted candidate list; `buy.FirstCompletion` returns the
+alphabetically smallest match by the same comparison, in ONE pass with no
+table and no sort -- this runs while somebody is typing, and a played-in
+database has ten thousand names. It is additionally held behind a dirty flag
+flushed once per frame, so typing "linen" quickly costs one pass rather than
+five. The suite asserts the agreement rather than the mechanism: the single
+pick and `AutocompleteCandidates(...)[1]` must be the same string.
+
+**The scoping lint earned its keep again.** `GHOST_INSET` was declared below
+the function that reads it -- legal Lua, compiles clean, and a nil global at
+runtime. That is the fourth time this check has caught the same shape.
+
 ### The readout was pointed at the wrong object — v1.53.22
 
 **v1.53.21's diagnostic came back useless, and usefully so.** All twenty-five

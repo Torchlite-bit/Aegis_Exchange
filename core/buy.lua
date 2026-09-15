@@ -118,6 +118,41 @@ function buy.AutocompleteCandidates(prefix)
     return out
 end
 
+-- The ONE completion the ghost after the caret shows.
+--
+-- IT MUST BE WHAT TAB WOULD PICK, or the grey text is a promise the key does
+-- not keep. buy.AutocompleteCandidates sorts and the first press takes entry
+-- one, so this returns the alphabetically smallest match -- the same string,
+-- by the same comparison.
+--
+-- ONE PASS, NO TABLE, NO SORT, because this runs while somebody is TYPING
+-- rather than once per Tab press. Building the full candidate list to read its
+-- first entry would allocate a table and sort it on every keystroke; there are
+-- ten thousand names in a played-in database. The caller additionally holds
+-- this behind a dirty flag flushed once per frame (ui.GhostTick), so a burst
+-- of typing costs one pass rather than one per character.
+function buy.FirstCompletion(prefix)
+    if not prefix or prefix == "" then return nil end
+    local low = string.lower(prefix)
+    local best
+    local function consider(name)
+        if not name or name == "" then return end
+        if string.find(string.lower(name), low, 1, true) == 1 then
+            -- `<` is the comparison table.sort uses by default, so "smallest"
+            -- here and "first" there are the same string.
+            if not best or name < best then best = name end
+        end
+    end
+    local names = A.db and A.db.account and A.db.account.names
+    if names then
+        for name in pairs(names) do consider(name) end
+    end
+    local recent = buy.Recent()
+    local i = 1
+    while i <= table.getn(recent) do consider(recent[i]); i = i + 1 end
+    return best
+end
+
 -- ---- Favorites (saved searches) ----------------------------------------
 --
 -- An ordered list of query strings. Order is the user's, so every mutator

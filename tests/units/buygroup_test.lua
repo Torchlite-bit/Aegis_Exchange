@@ -56,6 +56,7 @@ end
 ui = {}
 for _, sig in ipairs({
     "function ui.BuyTreeRows(",
+    "function ui.CompletionSuffix(",
     "function ui.ToggleBuyGroup(",
     "function ui.BuyGrouped(",
 }) do
@@ -400,6 +401,78 @@ do
             string.find(src, "    ui.buyExpanded = {}\n\n    ui.buyResults = nil",
                         1, true) ~= nil,
             "stale expansion keys survive into the next page")
+end
+
+-- ---------------------------------------------------------------------------
+H.section("The ghost after the caret")
+-- ---------------------------------------------------------------------------
+
+-- 1.12 has no inline completion, so the suggestion is a grey FontString laid
+-- over the box. WHAT IT SHOWS is arithmetic and is checked here; where it
+-- lands needs a client and a person.
+
+-- IT RETURNS THE CANDIDATE'S OWN CASING for the untyped tail, so "linen"
+-- against "Linen Cloth" ghosts " Cloth" and the two read as one word.
+H.eq("the untyped tail", ui.CompletionSuffix("linen", "Linen Cloth"),
+     " Cloth")
+H.eq("...and capitals in the tail survive",
+     ui.CompletionSuffix("black", "Black Lotus"), " Lotus")
+H.eq("an exact-case prefix works the same",
+     ui.CompletionSuffix("Linen", "Linen Cloth"), " Cloth")
+
+-- WHAT IT MUST NOT DO is correct what is already typed. The ghost sits AFTER
+-- the caret and the characters before it are the player's; returning the
+-- candidate's own first letters there would restyle their typing under them
+-- mid-keystroke.
+local tail = ui.CompletionSuffix("linen", "Linen Cloth")
+H.check("the tail never includes what was typed",
+        string.find(tail, "inen", 1, true) == nil,
+        "the ghost would rewrite the caret's left-hand side")
+
+-- Nothing to show, in each of the ways there can be nothing.
+H.isNil("nothing typed, nothing ghosted", ui.CompletionSuffix("", "Linen"))
+H.isNil("...nor on no text at all", ui.CompletionSuffix(nil, "Linen"))
+H.isNil("no candidate", ui.CompletionSuffix("linen", nil))
+H.isNil("...nor an empty one", ui.CompletionSuffix("linen", ""))
+
+-- ALREADY COMPLETE. An exact match has no tail, and a ghost of "" left shown
+-- would be an empty FontString sitting there for no reason.
+H.isNil("an exact match has no tail",
+        ui.CompletionSuffix("Linen Cloth", "Linen Cloth"))
+H.isNil("...case-insensitively too",
+        ui.CompletionSuffix("linen cloth", "Linen Cloth"))
+H.isNil("a candidate shorter than what is typed is not a completion",
+        ui.CompletionSuffix("Linen Cloth", "Linen"))
+
+-- NOT A PREFIX AT ALL. buy.FirstCompletion only returns prefix matches, but
+-- this must not assume its caller got that right -- a mid-string match would
+-- ghost a tail that does not follow from what was typed.
+H.isNil("a candidate that does not start with what was typed",
+        ui.CompletionSuffix("cloth", "Linen Cloth"))
+
+-- ---- and it agrees with what Tab would do -------------------------------
+
+-- THE GHOST IS A PROMISE ABOUT THE KEY. If it shows one completion and Tab
+-- inserts another, the grey text is a lie -- so the single pick and the first
+-- entry of the sorted list have to be the same string, by the same comparison.
+do
+    A.db.account.names = {}
+    local pool = { "Linen Cloth", "Linen Bandage", "Linen Belt", "Silk Cloth" }
+    for i = 1, table.getn(pool) do A.db.account.names[pool[i]] = 1000 + i end
+
+    local list = buy.AutocompleteCandidates("linen")
+    H.check("the list has several", table.getn(list) > 1, table.getn(list))
+    H.eq("the ghost shows what the first Tab press would insert",
+         buy.FirstCompletion("linen"), list[1])
+
+    -- ...on a single match too, and on none.
+    H.eq("one match is that match", buy.FirstCompletion("silk"), "Silk Cloth")
+    H.isNil("no match, no ghost", buy.FirstCompletion("zzzq"))
+    H.isNil("an empty prefix has nothing to complete", buy.FirstCompletion(""))
+    H.isNil("...nor no prefix at all", buy.FirstCompletion(nil))
+
+    -- CASE-INSENSITIVE, like the list it must agree with.
+    H.eq("matching ignores case", buy.FirstCompletion("LINEN"), list[1])
 end
 
 os.exit(H.report("buygroup"))
