@@ -5288,6 +5288,34 @@ end""",
      '    if false then return "NOT OURS (never registered)" end',
      "rowchrome"),
 
+    # THE FLAW v1.53.21 SHIPPED: a check that could not run reporting "ok".
+    # The live readout came back "ok (backdrop unreadable)" on all twenty-five
+    # boxes, which scans as twenty-five passes -- while the contrast test was
+    # the only one of the three still standing and had not run at all.
+    ("unmeasured-contrast-reads-as-ok", "ui/frame.lua",
+     '    if not gap then return "CANNOT TELL (no backdrop read)" end',
+     '    if not gap then return "ok (backdrop unreadable)" end',
+     "rowchrome"),
+
+    # The readout asking the BOX for its backdrop on a pfUI client, where
+    # CreateBackdrop put it on a child frame and skin.lua cleared the box's
+    # own. Answers nothing, and looks like a client limitation rather than an
+    # instrument pointed at the wrong object.
+    ("backdrop-read-off-the-wrong-frame", "ui/frame.lua",
+     """    if e.backdrop and e.backdrop.GetBackdropColor then
+        return e.backdrop, "pfUI"
+    end""",
+     "",
+     "rowchrome"),
+
+    # An edge measured against the same floor as the text. A hairline only has
+    # to be findable, so holding it to a readability threshold reports every
+    # ordinary border as invisible.
+    ("edge-held-to-the-text-floor", "ui/frame.lua",
+     "ui.EDGE_MIN = 0.10",
+     "ui.EDGE_MIN = 0.35",
+     "rowchrome"),
+
     # Contrast checked before the colour, so a box whose colour was repainted
     # is diagnosed as a backdrop problem.
     ("verdict-checks-contrast-first", "ui/frame.lua",

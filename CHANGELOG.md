@@ -18,6 +18,29 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.22]
+
+### Fixed
+- **`/aex diag` was reading the wrong frame for a box's background**, so it
+  reported *"backdrop unreadable"* for every input box and looked like a client
+  limitation. pfUI puts its backdrop on a **child frame** and Aegis clears the
+  box's own first so the two can't double-border — so asking the box answers
+  nothing. It now reads whichever frame actually carries it, and says which.
+
+- **A check that couldn't run no longer reports "ok".** That line read
+  *"ok (backdrop unreadable)"*, which scans as a pass when it is the opposite:
+  the one test still standing hadn't run. It says **CANNOT TELL** now.
+
+### Added
+- **The readout names the boxes.** Most input boxes are built without a name,
+  so the list was twenty-five lines of *"(unnamed)"* and the one you were
+  asking about couldn't be picked out. The undercut percent field and its three
+  coin boxes now identify themselves.
+- **An edge verdict.** Whether you can *read the text in* a box and whether you
+  can *see the box at all* are different questions with different causes. The
+  readout now answers both.
+
+
 ## [1.53.21]
 
 ### Fixed
@@ -5641,6 +5664,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

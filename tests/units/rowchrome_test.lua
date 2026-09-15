@@ -61,6 +61,9 @@ do
     local _, _, v = string.find(Source(), "ui%.CONTRAST_MIN%s*=%s*([%d%.]+)")
     assert(v, "no ui.CONTRAST_MIN in ui/frame.lua")
     ui.CONTRAST_MIN = tonumber(v)
+    local _, _, e = string.find(Source(), "ui%.EDGE_MIN%s*=%s*([%d%.]+)")
+    assert(e, "no ui.EDGE_MIN in ui/frame.lua")
+    ui.EDGE_MIN = tonumber(e)
 end
 do
     local src = Source()
@@ -90,6 +93,8 @@ for _, sig in ipairs({
     "function ui.Luminance(",
     "function ui.ContrastGap(",
     "function ui.InputDiagVerdict(",
+    "function ui.BackdropSource(",
+    "function ui.EdgeVerdict(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -692,11 +697,76 @@ H.check("white on near-black is fine",
 
 -- A backdrop we cannot read is reported as such rather than as a pass or a
 -- failure, because either would be a guess.
+--
+-- AND IT MUST NOT READ AS A PASS. v1.53.21 worded this "ok (backdrop
+-- unreadable)" and the live readout came back that way on all twenty-five
+-- boxes -- which scans as twenty-five passes, when the contrast test was the
+-- only one of the three still standing and had not run at all. A check that
+-- could not run says so; "ok" is a verdict, not a shrug.
+local cannot = ui.InputDiagVerdict(true, WHITE, WHITE, nil)
 H.check("an unreadable backdrop is confessed",
-        string.find(ui.InputDiagVerdict(true, WHITE, WHITE, nil),
-                    "backdrop unreadable", 1, true) ~= nil)
+        string.find(cannot, "CANNOT TELL", 1, true) ~= nil, cannot)
+H.check("...and does not read as a pass",
+        string.find(cannot, "ok", 1, true) == nil, cannot)
 H.eq("no colour read at all", ui.InputDiagVerdict(true, nil, WHITE, NEAR_BLACK),
      "NO COLOUR READ")
+
+-- ---- which frame carries the background ---------------------------------
+
+-- NOT ALWAYS THE BOX, and this is what made v1.53.21's readout useless. pfUI's
+-- CreateBackdrop builds a CHILD FRAME on `frame.backdrop`, and ui/skin.lua
+-- clears the box's own backdrop first so the two cannot double-border -- so on
+-- a pfUI client the box has no backdrop and asking it for one answers nothing.
+-- The readout reported "backdrop unreadable" on every box and it looked like a
+-- client limitation. It was the instrument reading the wrong object.
+do
+    local function withBackdrop() return 1 end
+    local plain = { GetBackdropColor = withBackdrop }
+    local skinned = { GetBackdropColor = withBackdrop,
+                      backdrop = { GetBackdropColor = withBackdrop } }
+
+    local f, where = ui.BackdropSource(skinned)
+    H.eq("pfUI's child frame wins when it is there", f, skinned.backdrop)
+    H.eq("...and the readout says which it read", where, "pfUI")
+
+    f, where = ui.BackdropSource(plain)
+    H.eq("the box's own backdrop otherwise", f, plain)
+    H.eq("...and says so", where, "own")
+
+    -- A box with a `backdrop` field that cannot answer is not a source. The
+    -- field exists on other frames for other reasons; having one is not the
+    -- same as it being a backdrop we can read.
+    f, where = ui.BackdropSource({ backdrop = {} })
+    H.isNil("a backdrop field that answers nothing is not a source", f)
+    H.eq("...and is reported as none", where, "none")
+
+    f, where = ui.BackdropSource(nil)
+    H.isNil("no box, no source", f)
+    H.eq("...none", where, "none")
+end
+
+-- ---- can you SEE the box at all -----------------------------------------
+
+-- A DIFFERENT QUESTION FROM whether the text is readable, and the likelier
+-- reading of the original report: "too dark to see", said of a field whose
+-- text turned out to be pure white, is a complaint about the FIELD rather
+-- than the characters in it.
+do
+    local PANEL = { 0.13, 0.12, 0.10 }
+    H.check("an edge close to the panel is invisible",
+            string.find(ui.EdgeVerdict({ 0.14, 0.13, 0.11 }, PANEL),
+                        "EDGE INVISIBLE", 1, true) ~= nil)
+    H.check("...and a bright one is not",
+            string.find(ui.EdgeVerdict({ 0.79, 0.64, 0.15 }, PANEL),
+                        "edge ok", 1, true) ~= nil)
+    H.eq("no border read, no verdict", ui.EdgeVerdict(nil, PANEL), "edge ?")
+
+    -- The edge floor is LOWER than the text floor on purpose: a hairline only
+    -- has to be findable, not comfortably readable.
+    H.check("the edge floor is its own constant, and lower",
+            ui.EDGE_MIN and ui.EDGE_MIN < ui.CONTRAST_MIN,
+            tostring(ui.EDGE_MIN) .. " vs " .. tostring(ui.CONTRAST_MIN))
+end
 
 -- The threshold is a named constant, so the verdict can be re-tuned in one
 -- place rather than by editing a comparison buried in a branch.

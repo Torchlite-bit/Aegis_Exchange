@@ -2390,6 +2390,41 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The readout was pointed at the wrong object — v1.53.22
+
+**v1.53.21's diagnostic came back useless, and usefully so.** All twenty-five
+boxes reported `text=1.00/1.00/1.00 want=1.00/1.00/1.00 skinned=true bg=?` and
+a verdict of "ok (backdrop unreadable)". Two of the three hypotheses died on
+the spot -- the colour IS sticking, and every box IS registered and skinned --
+which is two-thirds of the value of building it. The third could not be
+measured, and that was the instrument's fault.
+
+**`GetBackdropColor` on the box answers nothing on a pfUI client.** pfUI's
+CreateBackdrop builds a CHILD FRAME on `frame.backdrop`, and `ui/skin.lua`
+calls `SetBackdrop(nil)` on the box first -- deliberately, so the two cannot
+double-border. So the box genuinely has no backdrop, and asking it for one is
+not a client limitation, it is the wrong question. `ui.BackdropSource` picks
+whichever frame actually carries it and reports which one answered.
+
+**"ok" FOR A CHECK THAT DID NOT RUN.** The worst line in the readout was its
+own verdict. Twenty-five lines beginning "ok" scan as twenty-five passes; the
+contrast test was the only one of the three still standing and it had not run
+at all. It says CANNOT TELL now. **A diagnostic that reports a pass for
+something it could not measure is worse than no diagnostic**, because it ends
+the investigation.
+
+**And it could not say WHICH box.** Almost every edit box is built without a
+name -- a getglobal name costs a global each and nothing needed them -- so the
+list was twenty-five lines of "(unnamed)" and the field the report was about
+could not be picked out of them. `ui.InputText` takes an optional label now.
+
+**A second question the output raised.** The text is pure white on every box,
+so "too dark to see" said of the undercut field is unlikely to be about the
+characters. Whether you can READ THE TEXT IN a box and whether you can SEE THE
+BOX AT ALL are different questions with different causes, and only the first
+was being asked. `ui.EdgeVerdict` measures the border against the panel behind
+it, on its own lower floor -- a hairline has to be findable, not readable.
+
 ### The lone auction, the dead key, and a readout before a fifth attempt — v1.53.21
 
 **A group of one is now the auction it stands for.** Every item in a grouped

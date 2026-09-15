@@ -688,8 +688,13 @@ end
 -- search boxes and the settings percent field. That last one is the exact case
 -- this was reported on -- a percent box sitting next to three coin boxes on
 -- one row, reading dimmer than nothing at all.
-function ui.InputText(e)
+function ui.InputText(e, label)
     if not e or not e.SetTextColor then return e end
+    -- A NAME FOR THE READOUT. Most of these boxes are created without one --
+    -- getglobal names cost a global each and almost nothing needs them -- so
+    -- /aex diag listed twenty-five lines reading "(unnamed)" and the one the
+    -- report was about could not be picked out of them. This costs a field.
+    if label then e.aegisLabel = label end
     -- DETACH THE FONT OBJECT FIRST, and this is the part that was missing.
     --
     -- InputBoxTemplate gives its box a font OBJECT (ChatFontNormal), not a
@@ -770,6 +775,47 @@ end
 -- the intended look does not.
 ui.CONTRAST_MIN = 0.35
 
+-- WHICH FRAME actually carries the background behind an edit box.
+--
+-- NOT ALWAYS THE BOX. pfUI's CreateBackdrop builds a CHILD FRAME and hangs it
+-- on `frame.backdrop` -- and ui/skin.lua clears the box's own backdrop first,
+-- deliberately, so the two cannot double-border. So on a pfUI client the box
+-- has no backdrop at all and asking it for one answers nothing.
+--
+-- That is exactly what v1.53.21's readout did. It came back "backdrop
+-- unreadable" on all 25 boxes and looked like a client limitation; it was the
+-- instrument reading the wrong object. Returns the frame and which of the two
+-- it was, because "we read pfUI's" and "we read the box's own" are different
+-- facts about the same client and the next fix depends on which.
+function ui.BackdropSource(e)
+    if not e then return nil, "none" end
+    if e.backdrop and e.backdrop.GetBackdropColor then
+        return e.backdrop, "pfUI"
+    end
+    if e.GetBackdropColor then return e, "own" end
+    return nil, "none"
+end
+
+-- Can you SEE the box at all?
+--
+-- A SEPARATE QUESTION FROM whether you can read the text in it, and the one
+-- the original report is most likely to have been about: "too dark to see"
+-- said of a field whose text turned out to be pure white is a complaint about
+-- the field, not the characters. An edge that sits too close to the panel
+-- behind it leaves nothing showing where the box is.
+function ui.EdgeVerdict(border, panel)
+    local gap = ui.ContrastGap(border, panel)
+    if not gap then return "edge ?" end
+    if gap < ui.EDGE_MIN then
+        return "EDGE INVISIBLE (" .. string.format("%.2f", gap) .. ")"
+    end
+    return "edge ok (" .. string.format("%.2f", gap) .. ")"
+end
+
+-- Lower than CONTRAST_MIN on purpose: an edge is a hairline, and it only has
+-- to be findable rather than comfortably readable.
+ui.EDGE_MIN = 0.10
+
 -- One box's verdict, from values already read off the client.
 --
 -- SEPARATED FROM THE READING so a suite can run it. The reads are client
@@ -787,7 +833,11 @@ function ui.InputDiagVerdict(registered, got, want, bg)
     local d = ui.ContrastGap(got, want)
     if d and d > 0.02 then return "COLOUR LOST (something repainted it)" end
     local gap = ui.ContrastGap(got, bg)
-    if not gap then return "ok (backdrop unreadable)" end
+    -- NOT "ok". v1.53.21's readout said "ok (backdrop unreadable)" on all 25
+    -- boxes, which reads as a pass and is not one: the contrast test is the
+    -- only one of the three still standing at that point, and it had not run.
+    -- A check that could not run says so.
+    if not gap then return "CANNOT TELL (no backdrop read)" end
     if gap < ui.CONTRAST_MIN then
         return "LOW CONTRAST (gap " .. string.format("%.2f", gap) .. ")"
     end
@@ -1996,7 +2046,7 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     local uc = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
     uc:SetWidth(34); uc:SetHeight(18)
     uc:SetAutoFocus(false); uc:SetNumeric(true); uc:SetJustifyH("CENTER")
-    ui.InputText(uc)
+    ui.InputText(uc, "Aegis tab: undercut %")
     uc:SetPoint("LEFT", flatMode, "RIGHT", 12, 0)
     uc:SetScript("OnEnterPressed", function() ui.CommitUndercut(); uc:ClearFocus() end)
     uc:SetScript("OnEscapePressed", function() uc:ClearFocus() end)
@@ -2024,6 +2074,12 @@ function ui.BuildAegisSettings(panel, anchorAbove)
         fi = fi + 1
     end
     ui.setUndercutFlat = flat
+    -- Labelled for the readout, same reason as the percent box above: these
+    -- four are the "undercut" control and a diag line has to be able to say
+    -- which of them it is talking about.
+    ui.InputText(flat.g, "Aegis tab: undercut flat (g)")
+    ui.InputText(flat.s, "Aegis tab: undercut flat (s)")
+    ui.InputText(flat.c, "Aegis tab: undercut flat (c)")
     -- Percent, then the three coins. Only one of the two is on screen at a
     -- time -- ui.NextInputIn skips whichever the mode has hidden.
     ui.LinkTabOrder({ uc, flat.g, flat.s, flat.c })
@@ -16678,7 +16734,8 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         local bi = 1
         while bi <= table.getn(boxes) do
             local e = boxes[bi]
-            local name = (e.GetName and e:GetName()) or "(unnamed)"
+            local name = (e.GetName and e:GetName())
+                or e.aegisLabel or "(unnamed)"
             local got
             if e.GetTextColor then
                 local ok, r, g, b = pcall(function()
@@ -16686,12 +16743,19 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 end)
                 if ok and r then got = { r, g, b } end
             end
-            local bg
-            if e.GetBackdropColor then
+            -- THE FRAME THAT ACTUALLY HAS THE BACKGROUND, which on a pfUI
+            -- client is a child frame and not the box -- see ui.BackdropSource.
+            local src, where = ui.BackdropSource(e)
+            local bg, border
+            if src then
                 local ok, r, g, b = pcall(function()
-                    return e:GetBackdropColor()
+                    return src:GetBackdropColor()
                 end)
                 if ok and r then bg = { r, g, b } end
+                local ok2, br, bgn, bb = pcall(function()
+                    return src:GetBackdropBorderColor()
+                end)
+                if ok2 and br then border = { br, bgn, bb } end
             end
             local function rgb(c)
                 if not c then return "?" end
@@ -16699,11 +16763,11 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             end
             ChatMsg("    " .. name
                 .. "  text=" .. rgb(got)
-                .. "  want=" .. rgb(C.input)
-                .. "  bg=" .. rgb(bg)
-                .. "  skinned=" .. tostring(e.aegisSkinned and true or false)
+                .. "  bg=" .. rgb(bg) .. "(" .. where .. ")"
+                .. "  edge=" .. rgb(border)
                 .. "  \226\128\148 "
-                .. ui.InputDiagVerdict(e.aegisInputBox, got, C.input, bg))
+                .. ui.InputDiagVerdict(e.aegisInputBox, got, C.input, bg)
+                .. "  " .. ui.EdgeVerdict(border, C.panelBG))
             bi = bi + 1
         end
         ChatMsg("  C_Item=" .. tostring(C_Item ~= nil)
