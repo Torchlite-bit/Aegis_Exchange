@@ -2390,6 +2390,46 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Undercutting yourself — v1.53.26
+
+**A money bug, reported from a live client, and it compounds.** Post an item
+while already holding the cheapest listing of it and the suggested price
+stepped UNDER your own -- so posting repeatedly walked your price down a few
+percent at a time against nobody.
+
+**HALF THE FIX WAS ALREADY THERE, which is why it survived.**
+`sell.LowestListingUnit(true)` has always excluded your own rows, so the
+obvious reading -- "does it know which listings are mine" -- says yes. What it
+does when the answer is "all of them" is the gap: it returns nil, and the
+caller falls through to the price DB, which records what was SEEN and not who
+posted it. Your own auction comes back as the market and gets undercut.
+
+**"Excludes mine" is not the same as "handles being cheapest".** Excluding your
+rows answers "what is the competition asking"; it cannot answer "what should I
+charge" on its own, because with no competition the right answer is not a
+smaller number -- it is the price you already have.
+
+**A TIE MATCHES TOO**, and that is the same argument rather than a separate
+nicety: level with somebody else you are already as cheap as the market, and a
+step under buys nothing an equal price does not while inviting a step back.
+`<=`, not `<`.
+
+**The decision is pure and separate from the reading** -- `sell.PriceReference`
+takes two numbers and returns which to use and whether to go below it. Every
+way it can be wrong costs real money, which is exactly the shape that should
+not be buried inside a function that also does I/O.
+
+**The DB fallback still cannot tell.** No scan for the item means no owner
+data, and the price DB does not store one. That path is left as it was and
+says so in a comment rather than pretending -- it is also the uncommon one,
+since slotting an item on the Sell tab scans it.
+
+**Two smaller things.** The dressing room is parked against our right edge
+rather than left where the client puts UI panels, which is on top of the rows
+being clicked; and input text is a point smaller, with a floor, because
+InputBoxTemplate's font is the chat font at chat size and a 34x18 box is not
+chat.
+
 ### Something was over the box — v1.53.25
 
 **The owner diagnosed this one.** "I wonder if there is an overlay that is also

@@ -2555,24 +2555,25 @@ end
     # This is the mechanism two earlier fixes missed while re-arranging WHEN
     # the colour was set.
     ("input-font-object-not-detached", "ui/frame.lua",
-     """        local path, size, flags = e:GetFont()
-        if path then pcall(function() e:SetFont(path, size, flags) end) end""",
-     "        local _ = e",
+     "        if path then pcall(function() e:SetFont(path, size, flags) end) end",
+     "        local _ = path",
      "rowchrome"),
 
     # ...and the colour set BEFORE the font, which re-attaches the object and
     # throws the colour away again. Same two calls, wrong order, no error.
     ("input-colour-set-before-the-font", "ui/frame.lua",
-     """    if e.GetFont and e.SetFont then
-        local path, size, flags = e:GetFont()
-        if path then pcall(function() e:SetFont(path, size, flags) end) end
+     """        if path then pcall(function() e:SetFont(path, size, flags) end) end
     end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])""",
-     """    e:SetTextColor(C.input[1], C.input[2], C.input[3])
-    if e.GetFont and e.SetFont then
-        local path, size, flags = e:GetFont()
-        if path then pcall(function() e:SetFont(path, size, flags) end) end
+     """        if path then pcall(function() e:SetFont(path, size, flags) end) end
     end""",
+     "rowchrome"),
+
+    # The shrink applied with no floor, so a box whose font is already small
+    # is walked down every time the colour is re-asserted.
+    ("input-font-shrinks-without-a-floor", "ui/frame.lua",
+     "        if size and size > INPUT_FONT_MIN then",
+     "        if size then",
      "rowchrome"),
 
     # ---- the grouped Buy table's widgets (v1.53.2) -----------------------
@@ -5193,6 +5194,52 @@ end""",
      """    return nil
 end""",
      "purse"),
+
+    # ---- never undercut yourself (v1.53.26) -----------------------------
+
+    # THE REPORTED BUG, put back: your own cheapest listing undercut instead of
+    # matched, so posting the same item repeatedly walks your own price down a
+    # step at a time against nobody.
+    ("undercuts-your-own-listing", "core/sell.lua",
+     "        return lowestMine, false",
+     "        return lowestMine, true",
+     "sellslot"),
+
+    # ...and the tie. Level with somebody else you are already as cheap as the
+    # market; a step under buys nothing and they take it straight back.
+    ("undercut-war-on-a-tie", "core/sell.lua",
+     "    if lowestMine and (not lowestOther or lowestMine <= lowestOther) then",
+     "    if lowestMine and (not lowestOther or lowestMine < lowestOther) then",
+     "sellslot"),
+
+    # Your own listings ignored entirely, which is where this started: the
+    # reference comes back as the competition's and the self-undercut returns.
+    ("own-listings-not-consulted", "core/sell.lua",
+     "        if r.unit and r.unit > 0 and r.isMine then",
+     "        if r.unit and r.unit > 0 and not r.isMine then",
+     "sellslot"),
+
+    # Price-match quietly taking your OWN price into account, which would make
+    # it match a figure the competition never asked for.
+    ("price-match-counts-your-own", "core/sell.lua",
+     "    local low = sell.LowestListingUnit(true)",
+     "    local low = sell.LowestListingUnit(false)",
+     "sellslot"),
+
+    # ---- the dressing room's position (v1.53.26) ------------------------
+
+    # SetPoint ADDS a point on 1.12 rather than replacing one, so parking
+    # twice without clearing leaves the frame stretched between two anchors.
+    ("dressup-park-does-not-clear-points", "ui/frame.lua",
+     "        DressUpFrame:ClearAllPoints()",
+     "",
+     "buygroup"),
+
+    # The dressing room dragged around by a window that is not on screen.
+    ("dressup-parks-against-a-hidden-window", "ui/frame.lua",
+     "    if not ui.frame:IsVisible() then return false end",
+     "",
+     "buygroup"),
 
     # ---- the plate that was covering the text (v1.53.25) ----------------
 

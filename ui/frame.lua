@@ -693,6 +693,12 @@ end
 -- then sit it on a near-black backdrop. Nothing was wrong with it -- it had
 -- simply never been chosen.
 --
+-- How much smaller an input box's text sits than the font it inherits, and the
+-- floor it will not go below -- a box whose font is already tiny must not be
+-- shrunk into illegibility to satisfy a rule about boxes that are not.
+local INPUT_FONT_DELTA = -1
+local INPUT_FONT_MIN = 9
+
 -- A FUNCTION OF ITS OWN, not a line inside ui.FlattenEditBox, because three of
 -- this window's edit boxes keep the stock art and never go through it: the two
 -- search boxes and the settings percent field. That last one is the exact case
@@ -718,6 +724,15 @@ function ui.InputText(e, label)
     -- LOOKS changes here; the only thing that changes is who owns it.
     if e.GetFont and e.SetFont then
         local path, size, flags = e:GetFont()
+        -- ...AND A NOTCH SMALLER WHILE WE ARE HERE. InputBoxTemplate's font is
+        -- the client's chat font at chat size, and these boxes are not chat:
+        -- the undercut percent field is 34x18 and a two-digit number in it sat
+        -- against the edges. One point down fits without becoming small print,
+        -- and it rides the SetFont call that was already being made -- the
+        -- detach above has to happen anyway, for the colour to stick.
+        if size and size > INPUT_FONT_MIN then
+            size = size + INPUT_FONT_DELTA
+        end
         if path then pcall(function() e:SetFont(path, size, flags) end) end
     end
     e:SetTextColor(C.input[1], C.input[2], C.input[3])
@@ -3945,6 +3960,9 @@ end
 -- "Display on Character" -- try a result on, the way the stock AH does
 -- ---------------------------------------------------------------------------
 
+-- Air between our right edge and the dressing room parked against it.
+local DRESS_GAP = 4
+
 -- WHICH WAY this client can show an item on the character, if any.
 --
 -- 1.12's own auction house has this box, so the machinery is there -- but
@@ -3995,16 +4013,46 @@ function ui.TryDressUp(link)
     if not ui.CanDressUp(util.ItemInfo(link)) then return false end
     local how = ui.DressUpMethod()
     if how == "link" then
-        return pcall(function() DressUpItemLink(link) end) and true or false
+        local ok = pcall(function() DressUpItemLink(link) end) and true or false
+        if ok then ui.ParkDressUpFrame() end
+        return ok
     end
     if how == "model" then
-        return pcall(function()
+        local ok = pcall(function()
             if ShowUIPanel and DressUpFrame then ShowUIPanel(DressUpFrame) end
             if DressUpModel.SetUnit then DressUpModel:SetUnit("player") end
             DressUpModel:TryOn(link)
         end) and true or false
+        if ok then ui.ParkDressUpFrame() end
+        return ok
     end
     return false
+end
+
+-- Put the dressing room beside our window rather than wherever the client
+-- last left it.
+--
+-- IT OPENS AS A UI PANEL, which means the client places it -- generally over
+-- the middle of the screen, and with our window open that is on top of the
+-- results you are clicking. Re-anchoring it to our right edge keeps both
+-- readable at once, which is the only arrangement in which "click things and
+-- watch them" works at all.
+--
+-- CLEARALLPOINTS FIRST. SetPoint ADDS a point on 1.12 rather than replacing
+-- the existing one, and a frame with two anchors is stretched between them.
+--
+-- Guarded end to end: this is somebody else's frame, it may be positioned by
+-- another addon, and none of it is worth an error on a window that is only
+-- being moved for convenience.
+function ui.ParkDressUpFrame()
+    if not DressUpFrame or not ui.frame then return false end
+    if not ui.frame:IsVisible() then return false end
+    local ok = pcall(function()
+        DressUpFrame:ClearAllPoints()
+        DressUpFrame:SetPoint("TOPLEFT", ui.frame, "TOPRIGHT",
+                              DRESS_GAP, 0)
+    end)
+    return ok and true or false
 end
 
 -- The row that was clicked, tried on -- if the box is ticked.

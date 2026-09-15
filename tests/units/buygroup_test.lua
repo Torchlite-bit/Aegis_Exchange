@@ -63,6 +63,7 @@ for _, sig in ipairs({
     "function ui.DressUpMethod(",
     "function ui.CanDressUp(",
     "function ui.TryDressUp(",
+    "function ui.ParkDressUpFrame(",
     "function ui.ToggleBuyGroup(",
     "function ui.BuyGrouped(",
 }) do
@@ -564,6 +565,42 @@ do
     H.check("no link, no attempt", not ui.TryDressUp(nil))
     H.isNil("...and nothing was asked", asked)
     H.check("an empty link is the same", not ui.TryDressUp(""))
+
+    -- THE WINDOW IS PARKED BESIDE OURS, not left wherever the client put it.
+    -- It opens as a UI panel, which generally lands it over the middle of the
+    -- screen -- on top of the results you are clicking, which is the one
+    -- arrangement in which "click things and watch them" does not work.
+    do
+        local points
+        ui.frame = {
+            IsVisible = function() return true end,
+        }
+        DressUpFrame = {
+            ClearAllPoints = function() points = 0 end,
+            SetPoint = function() points = (points or 0) + 1 end,
+        }
+        asked = nil
+        H.check("it is tried on", ui.TryDressUp(link))
+        H.eq("...and the dressing room is re-anchored once", points, 1)
+
+        -- CLEARALLPOINTS FIRST, because SetPoint ADDS a point on 1.12 rather
+        -- than replacing one -- a frame with two anchors is stretched between
+        -- them. Parking twice must still leave exactly one.
+        ui.TryDressUp(link)
+        H.eq("...and parking again still leaves one anchor", points, 1)
+
+        -- Our window closed: leave the dressing room where it is. Anchoring to
+        -- a hidden frame would drag it off wherever that frame happens to sit.
+        ui.frame.IsVisible = function() return false end
+        points = nil
+        ui.ParkDressUpFrame()
+        H.isNil("nothing is moved while our window is hidden", points)
+
+        ui.frame = nil
+        H.check("no window, no parking", not ui.ParkDressUpFrame())
+        DressUpFrame = nil
+        H.check("no dressing room, no parking", not ui.ParkDressUpFrame())
+    end
 
     -- A client with no API at all refuses rather than erroring.
     DressUpItemLink = nil

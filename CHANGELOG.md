@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.26]
+
+### Fixed
+- **Aegis will not undercut you.** If the cheapest listing of an item is your
+  own, the suggested price now **matches** it instead of going under it.
+
+  Reported from a live client, and it compounds: post the same item again while
+  holding the cheapest listing and the price stepped down each time — competing
+  with nobody but yourself, a few percent per post, for as long as you kept
+  posting. A **tie** matches too: level with somebody else you're already as
+  cheap as the market, and a step under only invites a step back.
+
+  **Price match is unchanged** — it answers "what is the competition asking",
+  so it still ignores your own listings.
+
+### Changed
+- **The dressing room opens beside the Aegis window** instead of wherever the
+  client last put it, which was usually on top of the results you were
+  clicking.
+- **Input box text is a notch smaller**, so a two-digit undercut percentage
+  isn't pressed against the edges of its box. It won't shrink a font that is
+  already small.
+
+
 ## [1.53.25]
 
 ### Fixed
@@ -5734,6 +5758,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

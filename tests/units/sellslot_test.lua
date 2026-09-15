@@ -422,4 +422,105 @@ H.check("the bound clears a full book",
         "bound " .. sell.CANCEL_ALL_MAX_ROUNDS .. " cannot clear "
             .. sell.CAP .. " at " .. sell.OWNER_PAGE_SIZE .. " a page")
 
+-- ---------------------------------------------------------------------------
+H.section("Never undercut yourself")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED FROM A LIVE CLIENT: posting the same item repeatedly while holding
+-- the cheapest listing dropped the price a step each time -- a seller
+-- competing with nobody but themselves, a few percent at a time, for as long
+-- as they kept posting.
+--
+-- The reference is PURE and separated from the reading, because this is the
+-- whole of the decision and every way it can be wrong costs real money.
+
+-- Somebody else is cheaper: undercut them, which is the ordinary case.
+do
+    local ref, under = sell.PriceReference(500, 900)
+    H.eq("the competition sets the price", ref, 500)
+    H.check("...and we go under it", under)
+end
+
+-- YOURS IS CHEAPEST: match it. There is nobody to undercut, and the only
+-- thing an undercut achieves is walking your own price down.
+do
+    local ref, under = sell.PriceReference(900, 500)
+    H.eq("your own price is the reference", ref, 500)
+    H.check("...and it is MATCHED, not undercut", not under,
+            "this is the bug: posting against yourself walks your price down")
+end
+
+-- ONLY YOU ARE SELLING IT. Same answer, and the one the report was actually
+-- about -- an item nobody else lists at all.
+do
+    local ref, under = sell.PriceReference(nil, 500)
+    H.eq("with no competition your own price stands", ref, 500)
+    H.check("...matched", not under)
+end
+
+-- A TIE MATCHES TOO. Level with somebody else you are already as cheap as the
+-- market; a step under buys nothing an equal price does not, and it is a step
+-- they take straight back.
+do
+    local ref, under = sell.PriceReference(500, 500)
+    H.eq("a tie takes your own price", ref, 500)
+    H.check("...and matches rather than stepping under", not under,
+            "an undercut war with somebody who is already level")
+end
+
+-- Nothing of yours on the list: ordinary undercut.
+do
+    local ref, under = sell.PriceReference(500, nil)
+    H.eq("no listing of your own", ref, 500)
+    H.check("...so undercut", under)
+end
+
+-- Nothing at all: no reference, and the caller falls through to the price DB.
+do
+    local ref, under = sell.PriceReference(nil, nil)
+    H.isNil("an empty list has no reference", ref)
+    H.check("...and the caller is told to undercut whatever it finds", under)
+end
+
+-- ---- end to end, through the real listing table -------------------------
+
+do
+    -- Cheapest is SOMEBODY ELSE'S: undercut.
+    sell.listings = {
+        { unit = 500, isMine = nil },
+        { unit = 900, isMine = true },
+    }
+    local price = sell.UndercutUnit(7100)
+    H.check("with a cheaper rival we go under them", price < 500, price)
+
+    -- Cheapest is YOURS: match it exactly.
+    sell.listings = {
+        { unit = 500, isMine = true },
+        { unit = 900, isMine = nil },
+    }
+    H.eq("with your own cheapest we match it", sell.UndercutUnit(7100), 500)
+
+    -- Only yours on the list.
+    sell.listings = { { unit = 500, isMine = true } }
+    H.eq("...and with nothing else listed, the same",
+         sell.UndercutUnit(7100), 500)
+
+    -- POSTING AGAIN DOES NOT WALK IT DOWN, which is the report restated: the
+    -- answer has to be stable under repetition.
+    local first = sell.UndercutUnit(7100)
+    sell.listings = { { unit = first, isMine = true } }
+    H.eq("posting again returns the same price", sell.UndercutUnit(7100),
+         first)
+
+    -- Price MATCH is unchanged: it answers "what is the competition asking",
+    -- so it goes on ignoring your own listings.
+    sell.listings = {
+        { unit = 500, isMine = true },
+        { unit = 900, isMine = nil },
+    }
+    H.eq("price-match still means the competition", sell.MatchUnit(7100), 900)
+
+    sell.listings = nil
+end
+
 os.exit(H.report("sellslot"))

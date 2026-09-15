@@ -64,6 +64,18 @@ do
     local _, _, e = string.find(Source(), "ui%.EDGE_MIN%s*=%s*([%d%.]+)")
     assert(e, "no ui.EDGE_MIN in ui/frame.lua")
     ui.EDGE_MIN = tonumber(e)
+    -- ...and the two font constants ui.InputText reads. THE MINUS SIGN IS IN
+    -- THE PATTERN: the delta is negative, and a reader that only took digits
+    -- would find "1" in "-1" and shrink nothing -- or, here, find nothing at
+    -- all and leave a nil to be compared against a number.
+    local _, _, d = string.find(Source(),
+                                "local INPUT_FONT_DELTA%s*=%s*(%-?[%d%.]+)")
+    assert(d, "no INPUT_FONT_DELTA in ui/frame.lua")
+    INPUT_FONT_DELTA = tonumber(d)
+    local _, _, m = string.find(Source(),
+                                "local INPUT_FONT_MIN%s*=%s*(%-?[%d%.]+)")
+    assert(m, "no INPUT_FONT_MIN in ui/frame.lua")
+    INPUT_FONT_MIN = tonumber(m)
 end
 do
     local src = Source()
@@ -336,7 +348,25 @@ H.check("the box is given its own font", box.font ~= nil,
         "a box backed by a font OBJECT loses SetTextColor on the next redraw")
 H.eq("...which is the font it already had, not a new one",
      box.font[1], "Fonts\\ARIALN.TTF")
-H.eq("...at the size it already had", box.font[2], 12)
+-- ...AND ONE NOTCH SMALLER. InputBoxTemplate's font is the client's chat font
+-- at chat size, and these boxes are not chat: the undercut percent field is
+-- 34x18 and a two-digit number in it sat against the edges. The shrink rides
+-- the SetFont call that has to happen anyway for the colour to stick.
+H.eq("...a notch smaller than the font it inherited",
+     box.font[2], 12 + INPUT_FONT_DELTA)
+
+-- A FLOOR, so a box whose font is already tiny is not shrunk into illegibility
+-- to satisfy a rule about boxes that are not.
+do
+    local tiny = {
+        SetTextColor = function() end,
+        GetFont = function() return "Fonts\\ARIALN.TTF", INPUT_FONT_MIN, "" end,
+        SetFont = function(self, path, size) self.font = { path, size } end,
+    }
+    ui.InputText(tiny)
+    H.eq("a font already at the floor is left alone",
+         tiny.font[2], INPUT_FONT_MIN)
+end
 H.listEq("the font comes BEFORE the colour", box.order,
          { "font", "colour" })
 
