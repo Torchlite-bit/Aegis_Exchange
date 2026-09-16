@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.53.28)
+# Aegis: Exchange (v1.53.29)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -151,6 +151,15 @@ Some of these can't always answer, and they say so instead of quietly returning
 nothing — rows a filter couldn't judge are **counted and named in the status
 line, with the fix that works**: `3 skipped (no vendor-profit data — vendor
 prices are learned at a merchant)`.
+
+**These filters run on your client, so Aegis pages for you.** The server only
+knows about name, level, category and quality; everything above is applied to
+the fifty listings your client is holding, and 1.12 has no way to ask for more
+than a page at a time. A rare match therefore lands on whatever page the server
+put it on — `vendor-profit` on page 3 of 277 is normal. Rather than show you a
+blank page, Aegis keeps paging until one has matches, **stops the moment it
+does**, and tells you how far it went. It gives up after 25 pages; **▶** starts
+another run. (Settings → *Keep paging past pages a filter empties*.)
 
 </details>
 
@@ -538,7 +547,7 @@ which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.53.28`) — quote it.
+1. Check the **version** in the window's title bar (`v1.53.29`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.

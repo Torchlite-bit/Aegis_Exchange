@@ -2390,6 +2390,77 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The page a filter emptied is not an answer — v1.53.29
+
+**Reported as "the first few pages of the search are blank but page 3/277
+yields my first results — why doesn't it just show up on page 1?"** Nothing was
+broken, and that is exactly why it needed fixing: the honest explanation is
+architectural, and a player should never have to hold it in their head to use
+the tab.
+
+**The shape of it.** `QueryAuctionItems` filters on name, level, class,
+subclass, quality and usable-only. Every filter Aegis adds — `vendor-profit`,
+`tooltip:`, a unit-price cap, a stack size, buyout-only — is a POST-filter, and
+a post-filter can only judge the fifty rows the client is holding, because 1.12
+has no working `getAll` and a page is the largest thing anyone can ask for. So
+the server puts a rare match wherever it puts it, and page 0 is simply the
+first fifty rows the server had, not the best fifty. Two blank pages and a
+pager is indistinguishable from a search that does not work.
+
+**The status line already said the true thing and it was not enough.** v1.53.x
+shipped `"0 match(es) (of N) • filters removed this page's rows • try the next
+page"` precisely so an emptied page would not read as a broken filter. It was
+accurate, and the report came in anyway — because "try the next page" is an
+instruction, and an instruction the machine could carry out itself is a defect
+dressed as documentation.
+
+**So the engine keeps asking.** Three properties hold it together, and each one
+has a sabotage:
+
+- **It stops on the first page that HAS matches.** A sweep that paged past
+  results would be strictly worse than the blank page it replaced. The
+  sabotage that makes the stop condition `> 50` — "only stop when the page is
+  full", the page-size confusion — is caught.
+- **It is bounded** (`buy.SWEEP_MAX = 25`), so a filter matching nothing cannot
+  walk 277 pages unattended. It stops, says how far it got, and names the **▶**
+  button, which starts a fresh run.
+- **Every page goes out through `buy.GotoPage`**, so `CanSendAuctionQuery()`
+  gates each query exactly as it does a hand-clicked pager (HARD RULE 10). This
+  is not a faster scan. It is the same clicks.
+
+**`buy.Advance` exists only so the budget cannot refill.** `buy.NextPage`
+resets the sweep count — it is a player action, and a player who pressed the
+pager is asking for another run. The sweep therefore cannot call it: a sweep
+that spends a budget which resets on every spend never stops. That one-line
+distinction is the whole bound, so it gets its own sabotage
+(`sweep-spends-a-budget-that-refills`), and it is the reason the move is split
+out of the public function rather than guarded inside it.
+
+**The batch guard lives in ONE place, and that was a correction.** The first
+cut had `ReadPage` skip the sweep during a batch buyout *and* `SweepDecision`
+return `"off"` for the same condition. Two copies of one rule, one of them
+unreachable from any test — which is how they end up disagreeing. `ReadPage`
+now calls `SweepStep` unconditionally and the single guard sits where a suite
+can reach it.
+
+**A sabotage run is the only reason this suite is worth anything.** The file
+ended in `H.report("sweep")` instead of `os.exit(H.report("sweep"))`, so Lua
+exited 0 whatever the checks said. Eleven of fifteen sabotages came back
+MISSED, each one printing underneath it the failing check it had supposedly not
+noticed — the suite was right and nothing was listening. Both runners key off
+the exit code, so an unwrapped suite is invisible to both: `run.sh` would have
+printed its last line (a failure bullet) into a wall of `ALL PASS` and stayed
+green, and every sabotage aimed at it reads as a hole in the coverage.
+
+**`H.report` now calls `os.exit(1)` itself.** Reporting a failure and reporting
+it to the process are the same act, so they happen in the same place rather
+than depending on each suite's last line being written correctly. The wrapper
+stays on all thirty-seven suites and still works — `os.exit` never returns, so
+the outer call is simply unreachable on the failing path.
+
+And the general lesson: run the sabotages. A green suite that has never been
+asked to fail has not told you anything.
+
 ### The bag walk abandoned every remainder — v1.53.28
 
 **Reported as "if I scan all the items in the bag, it seems to break the

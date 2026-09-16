@@ -2311,6 +2311,19 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     end)
     ui.setKeepLeftovers = klChk
 
+    -- Keep paging past pages a filter emptied. Aegis's own filters can only
+    -- judge the page the client is holding (1.12 has no getAll), so a rare
+    -- match lands on whichever page the SERVER put it on -- see the sweep
+    -- block in core/buy.lua. Off restores the old behaviour: a blank page,
+    -- waiting for the pager.
+    local swChk = ui.MakeCheckBox(panel, 18, "AegisExchangeSetSweepEmptyPages")
+    swChk:SetPoint("TOPLEFT", klChk, "BOTTOMLEFT", 0, -6)
+    swChk:SetLabel("Keep paging past pages a filter empties", C.text)
+    swChk:SetScript("OnClick", function()
+        A.db.SetSetting("sweepEmptyPages", swChk:GetChecked() and true or false)
+    end)
+    ui.setSweepEmptyPages = swChk
+
     -- ---- Scan pacing -------------------------------------------------------
     -- "Auto" leans on the client's own CanSendAuctionQuery() gate, so a client
     -- running the AuctionQueryThrottle DLL scans as fast as the server answers
@@ -2321,7 +2334,8 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     -- line and Clear price data, all of which chain off thLbl -- on top of
     -- each other. Inserting a widget into an anchor chain means re-pointing
     -- the link BELOW it as well.
-    local thLbl = label("Scan pacing:", klChk, -12)
+    -- Anchored to swChk, the LAST checkbox above it -- see the note above.
+    local thLbl = label("Scan pacing:", swChk, -12)
 
     ui.setThrottleBtns = {}
     local modes = { { "Auto", "auto" }, { "Safe 4s", "safe" } }
@@ -2465,6 +2479,10 @@ function ui.RefreshSettings()
     if ui.setKeepLeftovers then
         ui.setKeepLeftovers:SetChecked(
             A.db.Setting("keepLeftovers") ~= false and 1 or nil)
+    end
+    if ui.setSweepEmptyPages then
+        ui.setSweepEmptyPages:SetChecked(
+            A.db.Setting("sweepEmptyPages") ~= false and 1 or nil)
     end
     if ui.setPfSkin then
         ui.setPfSkin:SetChecked(A.db.Setting("pfSkin") ~= false and 1 or nil)
@@ -7957,6 +7975,44 @@ end
 -- notices -- an off-by-one in the count, or a button that stays live with
 -- nothing ticked and clears something invisible.
 --
+-- The status line for a page a post-filter emptied, while the engine is
+-- skipping past it (see the sweep block in core/buy.lua). Returns nil when
+-- there is nothing to add and the ordinary "0 match(es)" text should stand.
+--
+-- SPELLED OUT rather than left to a spinner, because the two states a player
+-- has to tell apart look identical otherwise: "still looking, hold on" and
+-- "stopped looking, click again". Only the second one is asking for anything.
+function ui.SweepStatus(sweeping, steps, stop, page, totalPages)
+    if sweeping then
+        return "No matches on page " .. ((page or 0) + 1) .. "/"
+            .. (totalPages or 1) .. " \226\128\148 checking the next one ("
+            .. (steps or 0) .. " skipped)"
+    end
+    -- The budget ran out with pages still to go. Name the button, because
+    -- pressing it is the whole remedy and nothing else on screen says so.
+    if stop == "limit" then
+        return "No matches in " .. (steps or 0)
+            .. " pages \226\128\148 press \226\150\182 to keep looking"
+    end
+    -- Ran out of pages instead. Only worth saying when the sweep actually
+    -- covered ground: on a one-page search "that was the last page" is noise.
+    if stop == "end" and (steps or 0) > 0 then
+        return "No matches in the last " .. (steps or 0)
+            .. " pages \226\128\148 that was the last page"
+    end
+    return nil
+end
+
+-- " -- 2 pages skipped", or "" when the search landed on its first page. Sits
+-- on the line that DID find something, because "15 matches" on page 3 of 277
+-- is a different claim from "15 matches" on the page you asked for: it says
+-- the two pages before it were looked at and held nothing.
+function ui.SkippedNote(steps)
+    if not steps or steps < 1 then return "" end
+    local word = (steps == 1) and " page skipped" or " pages skipped"
+    return " \226\128\162 " .. steps .. word
+end
+
 -- The count mirrors "Buyout (3)" beside it on purpose: the pair reads as two
 -- things you can do to ONE selection rather than two adjacent buttons.
 function ui.ClearButtonState(nChecked)
@@ -8690,10 +8746,21 @@ function ui.UpdateBuyList()
                     -- if the real reason is that no owner name had arrived
                     -- yet and searching again would fix it.
                     t = t .. blindNote
-                    if totalPages and totalPages > 1 then
-                        t = t .. " \226\128\162 try the next page"
+                    -- The engine may already be on its way to the next page
+                    -- (see the sweep block in core/buy.lua). When it is,
+                    -- "try the next page" is advice for something nobody has
+                    -- to do -- say what is happening instead.
+                    local sweeping, steps, stop = A.buy.SweepState()
+                    local swept = ui.SweepStatus(sweeping, steps, stop, page,
+                                                 totalPages)
+                    if swept then
+                        ui.buyStatus:SetText(swept .. blindNote)
+                    else
+                        if totalPages and totalPages > 1 then
+                            t = t .. " \226\128\162 try the next page"
+                        end
+                        ui.buyStatus:SetText(t)
                     end
-                    ui.buyStatus:SetText(t)
                 else
                     ui.buyStatus:SetText("No auctions found.")
                 end
@@ -8724,6 +8791,10 @@ function ui.UpdateBuyList()
                         .. " skipped (stack size unknown)"
                 end
                 shown = shown .. blindNote
+                -- How many pages the engine looked through to get here, when
+                -- it looked through any. See ui.SkippedNote.
+                local _, swSteps = A.buy.SweepState()
+                shown = shown .. ui.SkippedNote(swSteps)
                 -- What you have bought this session, when these results are
                 -- about ONE item. Last, because it qualifies nothing above it
                 -- -- it is a fact about your bags, not about the search.

@@ -18,6 +18,32 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.29]
+
+### Fixed
+- **A filtered search no longer opens on a blank page and leaves you to click
+  through.** `vendor-profit`, `tooltip:`, a price cap, a stack size — those
+  filters run here, on your client, over the fifty listings the client is
+  holding. The server has no idea about them, so it sends page 1 the way it
+  always would, and a rare match sits on whatever page the server happened to
+  put it on. One report had `vendor-profit/1c` show two empty pages before
+  fifteen matches turned up on page 3 of 277.
+
+  Aegis now keeps paging for you instead of stopping on a page its own filter
+  emptied. It **stops the moment a page has matches**, so you're never carried
+  past what you were looking for, and the status line says what it's doing:
+  *"No matches on page 3/277 — checking the next one (2 skipped)"*, then
+  *"15 match(es) … • 2 pages skipped"* when it lands.
+
+  It's **bounded at 25 pages** so a filter that matches nothing can't walk the
+  whole auction house unattended — it stops, tells you how far it got, and the
+  **▶** button starts a fresh run. Every page still waits on the client's own
+  query gate, exactly as a page you click does; this is the same clicks, made
+  for you, not a faster scan.
+
+  New setting, **Settings → "Keep paging past pages a filter empties"**, on by
+  default. Turn it off for the old behaviour.
+
 ## [1.53.28]
 
 ### Fixed
@@ -5795,6 +5821,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

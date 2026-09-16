@@ -116,7 +116,20 @@ function H.report(suiteName)
         local f = H.failures[i]
         print("  - [" .. f.section .. "] " .. f.label)
     end
-    return 1
+    -- EXITS rather than returning 1, and the difference is not cosmetic.
+    --
+    -- Every suite ends `os.exit(H.report("name"))`, and tests/run.sh and
+    -- tests/sabotage.py both key off that EXIT CODE -- neither reads the
+    -- printed word. A suite that forgets the wrapper therefore exits 0 no
+    -- matter what it found: run.sh prints its last line into a wall of
+    -- "ALL PASS" and stays green, and every sabotage aimed at it comes back
+    -- MISSED while the output underneath shows the check it caught.
+    --
+    -- That happened, to sweep_test.lua, on the release that added it. The
+    -- suite was right about all fifteen planted bugs and nothing was
+    -- listening. Reporting a failure and reporting it to the process are the
+    -- same act, so they happen in the same place.
+    os.exit(1)
 end
 
 return H
