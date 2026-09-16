@@ -5195,6 +5195,56 @@ end""",
 end""",
      "purse"),
 
+    # ---- the bag walk and its leftovers (v1.53.28) ----------------------
+
+    # THE REPORTED BUG, put back: the walk moves on the moment a post finishes,
+    # so scanning your bags and walking them abandons every remainder. Post two
+    # stacks of ten out of twenty-five and the five left are skipped.
+    ("bag-walk-abandons-the-remainder", "ui/frame.lua",
+     "    return not kept",
+     "    return true",
+     "sellslot"),
+
+    # ...and the gate it used to carry, restored from the other side: leftovers
+    # never kept at all, which is the same outcome by a different route.
+    ("leftovers-never-kept", "ui/frame.lua",
+     "    return (left or 0) > 0",
+     "    return false",
+     "sellslot"),
+
+    # The walk stalling instead: it waits for a remainder it never actually
+    # managed to slot, so Post does nothing and the list never finishes.
+    ("bag-walk-stalls-on-a-failed-reslot", "ui/frame.lua",
+     "function ui.AdvanceAfterPost(inQueue, reason, kept)\n    if not inQueue then return false end",
+     "function ui.AdvanceAfterPost(inQueue, reason, kept)\n    if true then return false end",
+     "sellslot"),
+
+    # A cancel re-slotting the same item, which is the opposite of stopping.
+    ("cancel-reslots-the-item", "ui/frame.lua",
+     '    if reason == "cancelled" then return false end\n    return (left or 0) > 0',
+     "    return (left or 0) > 0",
+     "sellslot"),
+
+    # ...and a cancel stepping the walk on rather than stopping it.
+    ("cancel-advances-the-walk", "ui/frame.lua",
+     '    if reason == "cancelled" then return false end\n    return not kept',
+     "    return not kept",
+     "sellslot"),
+
+    # The setting ignored, so turning it off changes nothing.
+    ("keep-leftovers-setting-ignored", "ui/frame.lua",
+     "    if setting == false then return false end",
+     "",
+     "sellslot"),
+
+    # An unset setting read as OFF. Nobody has touched this option, so `nil`
+    # is every player who never opened the Aegis tab -- reading it as false
+    # turns the feature off for all of them.
+    ("keep-leftovers-defaults-off", "ui/frame.lua",
+     "    if setting == false then return false end",
+     "    if not setting then return false end",
+     "sellslot"),
+
     # ---- vendor flips (v1.53.27) ----------------------------------------
 
     # Nothing collected while the scan sweeps, so /aex flips is always empty

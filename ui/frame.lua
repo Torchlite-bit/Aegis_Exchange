@@ -15572,6 +15572,45 @@ function ui.DoSellMarked()
 end
 
 -- ---- post-scan sell queue ----------------------------------------------
+-- ---------------------------------------------------------------------------
+-- What happens after a post finishes
+-- ---------------------------------------------------------------------------
+
+-- Does the slot keep the REST of the item just posted?
+--
+-- "Post two stacks of ten out of twenty-five and the remaining five are
+-- re-slotted at the same price" -- so the small stack goes straight out
+-- without finding it in the bags and pricing it again.
+--
+-- NOT AFTER A CANCEL: the user asked to stop, and re-slotting the same item
+-- is the opposite of stopping.
+function ui.KeepLeftovers(setting, reason, left)
+    if setting == false then return false end
+    if reason == "cancelled" then return false end
+    return (left or 0) > 0
+end
+
+-- Does the bag walk move on to the next item?
+--
+-- ONLY ONCE THIS ITEM IS DONE, and that is the fix for a reported bug. The
+-- leftover re-slot used to be skipped entirely while a queue was running --
+-- "the queue owns what comes next" -- so scanning your bags and walking them
+-- with Post/Skip did this: twenty-five Linen Cloth, post two stacks of ten,
+-- and the walk jumped to the next item leaving five behind. You then had to
+-- come back for them by hand, which is the one thing the walk exists to avoid.
+--
+-- The queue still owns the ORDER. What changed is what "next" means: the rest
+-- of this item while any remains, and only then the next item. Skip is how you
+-- say "not this one" -- it always moves on, which is what that button is for.
+--
+-- TAKES `kept`, NOT "should keep": re-slotting can fail (the item moved, the
+-- bags shifted), and a walk that stalled because it believed it had kept
+-- something it had not would be worse than one that advanced too eagerly.
+function ui.AdvanceAfterPost(inQueue, reason, kept)
+    if not inQueue then return false end
+    if reason == "cancelled" then return false end
+    return not kept
+end
 -- After a bag scan, walk the bag items one at a time: the first is placed in
 -- the sell slot automatically, and Post or Skip moves on to the next.
 
@@ -15756,14 +15795,15 @@ function ui.DoPost()
                 -- thing this tab could do. It is only kept when the item we
                 -- just posted is the item now in the slot.
                 --
-                -- Not while walking a queue (the queue owns what comes next),
-                -- and not after a cancel (the user asked to stop).
+                -- THIS NOW HAPPENS DURING A BAG WALK TOO. It used to be
+                -- skipped whenever a queue was running, which meant scanning
+                -- your bags and walking them with Post/Skip abandoned every
+                -- remainder: post two stacks of ten out of twenty-five and the
+                -- walk moved on, leaving five behind for you to find by hand.
+                -- See ui.AdvanceAfterPost.
                 local left = p.itemId and A.sell.CountInBags(p.itemId) or 0
                 local kept = false
-                if A.db.Setting("keepLeftovers") ~= false
-                    and reason ~= "cancelled"
-                    and not ui.sellQueue
-                    and left > 0
+                if ui.KeepLeftovers(A.db.Setting("keepLeftovers"), reason, left)
                     and A.sell.PlaceItemById(p.itemId) then
                     kept = true
                     -- The holding is smaller now, so the stack controls
@@ -15780,9 +15820,10 @@ function ui.DoPost()
                 ChatMsg("Aegis: " .. msg)
                 ui.RefreshSell()
                 ui.RefreshBags()
-                -- Walking the post-scan bag list? Move to the next item
-                -- (unless the user cancelled, which should stop the walk).
-                if ui.sellQueue and reason ~= "cancelled" then
+                -- Walking the post-scan bag list? Move on -- but only once
+                -- this item is actually finished. While a remainder is in the
+                -- slot, "next" is the rest of what you were already posting.
+                if ui.AdvanceAfterPost(ui.sellQueue, reason, kept) then
                     ui.AdvanceSellQueue()
                 end
             end,

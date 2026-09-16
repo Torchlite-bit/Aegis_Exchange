@@ -2390,6 +2390,38 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### The bag walk abandoned every remainder — v1.53.28
+
+**Reported as "if I scan all the items in the bag, it seems to break the
+automatic reapplying of lesser stack of the item to post."** It did, and
+nothing was broken -- the behaviour was deliberate and wrong.
+
+**The leftover re-slot was gated on `not ui.sellQueue`**, with the comment "the
+queue owns what comes next". A bag scan is precisely what BUILDS that queue, so
+the two features were mutually exclusive by construction: the walk that exists
+to clear your bags turned off the feature that keeps a remainder in front of
+you. Twenty-five Linen Cloth, post two stacks of ten, and it moved on leaving
+five for you to find by hand.
+
+**The rule was right and its scope was wrong.** The queue does own the ORDER.
+What it does not get to decide is that "next" means "a different item" when
+what you were posting is still sitting in your bags. Now the walk advances only
+once nothing was kept -- Skip is how you say "not this one", which is what that
+button is for.
+
+**IT TAKES `kept`, NOT "should keep"**, and that is the part worth keeping an
+eye on: re-slotting can fail -- the item moved, the bags shifted -- and a walk
+that stalled because it believed it had kept something it had not would be
+worse than one that advanced too eagerly. One of the sabotages plants exactly
+that stall.
+
+**Neither the queue nor the leftover setting had a single test.** Both are
+plain decisions over four values and both had been shipping for releases on the
+strength of nobody reporting them. The first thing the new suite found was the
+default: `keepLeftovers` is unset for every player who has never opened the
+Aegis tab, so reading `nil` as "off" would have silently disabled the feature
+for most people -- which is now its own sabotage.
+
 ### Vendor flips, and answering the question that was asked — v1.53.27
 
 **I sent the owner at a feature that could not do what they wanted.** Asked for
