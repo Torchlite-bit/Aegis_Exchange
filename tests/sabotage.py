@@ -523,7 +523,7 @@ end""",
     # reason this entry has to follow the chain's TAIL rather than name a fixed
     # pair. It points at whichever widget the pacing label currently hangs off.
     ("settings-chain-forks-via-label", "ui/frame.lua",
-     '    local thLbl = label("Scan pacing:", klChk, -12)',
+     '    local thLbl = label("Scan pacing:", swChk, -12)',
      '    local thLbl = label("Scan pacing:", cpChk, -12)',
      "anchorchain"),
 
@@ -5744,6 +5744,118 @@ end""",
      'action("Reset", 54, ui.buyClearBtn,',
      'action("Clear", 54, ui.buyClearBtn,',
      "buychecks"),
+    # ---- sweeping past pages a post-filter emptied ------------------------
+    # A page with results is where the sweep MUST stop. "Only stop when the
+    # page is full" is the page-size confusion that would carry a buyer
+    # straight past what they searched for.
+    ("sweep-runs-past-matches", "core/buy.lua",
+     '    if (s.matched or 0) > 0 then return "matched" end',
+     '    if (s.matched or 0) > 50 then return "matched" end',
+     "sweep"),
+
+    # The other direction: >= 0 is true of every page, so the sweep never runs
+    # and the blank-page bug is back with a feature bolted over it.
+    ("sweep-never-moves", "core/buy.lua",
+     '    if (s.matched or 0) > 0 then return "matched" end',
+     '    if (s.matched or 0) >= 0 then return "matched" end',
+     "sweep"),
+
+    # Nothing the server matched means there is no next page to ask for.
+    ("sweep-pages-past-an-empty-search", "core/buy.lua",
+     '    if (s.rawTotal or 0) <= 0 then return "empty" end',
+     '    if (s.rawTotal or 0) < 0 then return "empty" end',
+     "sweep"),
+
+    # Off by one on the budget -- 26 pages for a limit of 25. Small, and the
+    # only thing standing between a filter that matches nothing and 277 pages.
+    ("sweep-budget-off-by-one", "core/buy.lua",
+     '    if (s.steps or 0) >= (s.limit or 0) then return "limit" end',
+     '    if (s.steps or 0) > (s.limit or 0) then return "limit" end',
+     "sweep"),
+
+    # "press the pager to keep looking" is a lie on the last page. Order
+    # matters: end is the true answer when both are true.
+    ("sweep-limit-beats-end", "core/buy.lua",
+     """    if not more then return "end" end
+    if (s.steps or 0) >= (s.limit or 0) then return "limit" end""",
+     """    if (s.steps or 0) >= (s.limit or 0) then return "limit" end
+    if not more then return "end" end""",
+     "sweep"),
+
+    # A semicolon query browses as ONE search, so the last page of term 1 of 3
+    # is not the end of anything. Reversed, the sweep stops at every boundary.
+    ("sweep-stops-at-a-term-boundary", "core/buy.lua",
+     "        or ((s.termIndex or 1) < (s.totalTerms or 1))",
+     "        or ((s.termIndex or 1) > (s.totalTerms or 1))",
+     "sweep"),
+
+    # A batch buyout re-queries its own page after every purchase; a sweep
+    # stepping in there pages the list out from under the next fingerprint
+    # lookup. Hardcoding the flag is the shape this goes wrong in.
+    ("sweep-ignores-a-running-batch", "core/buy.lua",
+     "        batch      = (buy.batch and buy.batch.active) and true or false,",
+     "        batch      = false,",
+     "sweep"),
+
+    # THE REASON buy.Advance is split out of buy.NextPage at all: NextPage
+    # resets the budget, so a sweep that calls it spends a budget that keeps
+    # refilling and never stops.
+    ("sweep-spends-a-budget-that-refills", "core/buy.lua",
+     "        st.sweeping   = buy.Advance()",
+     "        st.sweeping   = buy.NextPage()",
+     "sweep"),
+
+    # A move that did not go out is not a page in flight. Believing it leaves
+    # the status line saying "checking the next one" about a query nobody sent.
+    ("sweep-believes-a-blocked-move", "core/buy.lua",
+     '        if not st.sweeping then st.sweepStop = "busy" end',
+     '        st.sweepStop = "advance"',
+     "sweep"),
+
+    # The pager has to start a FRESH run -- it is what the status line tells
+    # the player to press when the budget runs out.
+    ("nextpage-keeps-the-spent-budget", "core/buy.lua",
+     """function buy.NextPage()
+    buy.ResetSweep()
+    return buy.Advance()
+end""",
+     """function buy.NextPage()
+    return buy.Advance()
+end""",
+     "sweep"),
+
+    # A new search carrying the last one's count reports pages it never looked
+    # at -- the same shape as the selection that survived a new search.
+    ("search-keeps-the-old-sweep-count", "core/buy.lua",
+     """    buy.ResetSweep()
+    buy.PushRecent(util.Trim(text or ""))""",
+     """    buy.PushRecent(util.Trim(text or ""))""",
+     "sweep"),
+
+    # page is 0-INDEXED (HARD RULE 9). Printed raw it is off by one against
+    # the pager sitting next to it.
+    ("sweep-status-prints-the-raw-page", "ui/frame.lua",
+     '        return "No matches on page " .. ((page or 0) + 1) .. "/"',
+     '        return "No matches on page " .. (page or 0) .. "/"',
+     "sweep"),
+
+    # The budget message exists to name the button. Without it the sweep just
+    # stops and nothing on screen says how to continue.
+    ("sweep-status-drops-the-pager", "ui/frame.lua",
+     '            .. " pages \\226\\128\\148 press \\226\\150\\182 to keep looking"',
+     '            .. " pages searched"',
+     "sweep"),
+
+    ("skipped-note-counts-zero", "ui/frame.lua",
+     "    if not steps or steps < 1 then return \"\" end",
+     "    if not steps or steps < 0 then return \"\" end",
+     "sweep"),
+
+    ("skipped-note-always-plural", "ui/frame.lua",
+     '    local word = (steps == 1) and " page skipped" or " pages skipped"',
+     '    local word = " pages skipped"',
+     "sweep"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -5790,6 +5902,7 @@ SUITES = {
     "shoplist": "tests/units/shoplist_test.lua",
     "bidpath": "tests/units/bidpath_test.lua",
     "purse": "tests/units/purse_test.lua",
+    "sweep": "tests/units/sweep_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

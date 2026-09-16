@@ -224,6 +224,15 @@ local SETTING_DEFAULTS = {
     -- over the game world and a feature that does that uninvited is one
     -- people turn off rather than find.
     dressUpOnClick = false,
+    -- Keep paging when a post-filter empties a page, instead of showing a
+    -- blank one and waiting to be clicked.
+    --
+    -- ON by default, because the alternative is what shipped and it reads as a
+    -- broken search: the server picks the page order, so a rare match --
+    -- anything found by /vendor-profit, /tooltip or a price cap -- lands
+    -- wherever it lands, and page 0 is just the first 50 rows the server had,
+    -- not the 50 most interesting. See the sweep block in core/buy.lua.
+    sweepEmptyPages = true,
     -- After posting, keep any REMAINING items of the same type in the sell
     -- slot at the same price, so the leftover stack can go straight out. Off
     -- clears the slot, which is what you want when posting one thing at a

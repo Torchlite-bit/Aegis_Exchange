@@ -24,6 +24,9 @@ local util = A.util
 buy.PAGE_SIZE   = 50
 buy.QUERY_DELAY = 0.5    -- polite gap before (re)querying a page
 buy.TIMEOUT     = 8      -- seconds to wait for a page reply before retrying
+-- How many pages ONE search may skip past on its own when a post-filter
+-- empties them. See the sweep block above buy.SweepDecision.
+buy.SWEEP_MAX   = 25
 
 buy.state = {
     phase      = "idle",   -- idle | wait_query | wait_results
@@ -38,6 +41,9 @@ buy.state = {
     cooldown   = 0,
     timeout    = 0,
     callbacks  = nil,      -- { onResults = fn(rows), onState = fn(phase) }
+    sweepSteps = 0,        -- pages this search has skipped past (see SweepDecision)
+    sweeping   = false,    -- a skipped page is in flight right now
+    sweepStop  = nil,      -- why the last sweep stopped, for the status line
 }
 
 buy.driver = CreateFrame("Frame", "AegisExchangeBuyDriver")
@@ -1626,6 +1632,7 @@ function buy.Search(text, callbacks)
     st.phase     = "wait_query"
     st.cooldown  = 0
     st.timeout   = 0
+    buy.ResetSweep()
     buy.PushRecent(util.Trim(text or ""))
     buy.driver:Show()
     Notify()
@@ -1670,16 +1677,135 @@ function buy.GotoTerm(termIndex)
     Notify()
 end
 
+-- ---------------------------------------------------------------------------
+-- Skipping pages a post-filter emptied
+--
+-- WHY THIS EXISTS. The server filters by name, level, class, quality and
+-- usable-only, and by nothing else. Everything Aegis adds on top --
+-- /vendor-profit, /tooltip, a stack size, buyout-only, a unit-price cap -- is a
+-- POST-filter, and a post-filter can only judge the 50 rows the client is
+-- holding at that moment. 1.12 has no working getAll, so one page is the
+-- largest thing anybody can ask for.
+--
+-- The consequence is the bug this fixes. A rare match sits wherever the SERVER
+-- happened to put it, and the page a search opens on is simply page 0 -- not
+-- "the best 50". A `vendor-profit` query over 277 pages can hold nothing until
+-- page 3, and that read as a broken search: two blank pages, then results only
+-- for somebody who kept clicking past them.
+--
+-- So the engine keeps asking. A page the post-filter emptied is not an answer,
+-- it is a page we have not finished looking through. Three things keep that
+-- honest:
+--   * it stops the instant a page HAS matches, so nobody is ever carried past
+--     what they were looking for;
+--   * it is BOUNDED (buy.SWEEP_MAX), so a filter that matches nothing at all
+--     cannot walk 277 pages unattended -- it stops, says how far it got, and
+--     the pager starts a fresh run;
+--   * every page still goes out through buy.GotoPage, so CanSendAuctionQuery()
+--     gates each query exactly as it does for a hand-clicked pager (HARD RULE
+--     10). This is not a faster scan. It is the same clicks, made for you.
+-- ---------------------------------------------------------------------------
+
+-- Is the sweep turned on? Defaults to ON, and answers true before the DB
+-- exists so the engine behaves the same in a test harness as in game.
+function buy.SweepEnabled()
+    if not A.db or not A.db.Setting then return true end
+    return A.db.Setting("sweepEmptyPages") ~= false
+end
+
+-- Forget how far the current run got. Called by every PLAYER-initiated move
+-- (a new search, either pager button) and by none of the sweep's own, which
+-- is the whole reason the move below is split out of buy.NextPage.
+function buy.ResetSweep()
+    local st = buy.state
+    st.sweepSteps = 0
+    st.sweeping   = false
+    st.sweepStop  = nil
+end
+
+-- PURE. Given what a page came back with, do we go on? Returns "advance" to
+-- move, or the reason we stopped: "matched" (this page has results),
+-- "empty" (the server matched nothing, so there is no next page and no filter
+-- to blame), "end" (no page and no term left), "limit" (budget spent) or
+-- "off" (switched off, or a batch buyout owns the pager).
+function buy.SweepDecision(s)
+    if not s.enabled then return "off" end
+    if s.batch then return "off" end
+    if (s.matched or 0) > 0 then return "matched" end
+    if (s.rawTotal or 0) <= 0 then return "empty" end
+    -- "end" is tested BEFORE "limit" on purpose: when the budget runs out on
+    -- the very last page, "that was the last page" is the true thing to say
+    -- and "press the pager to keep looking" would be an instruction that
+    -- cannot work.
+    local more = ((s.page or 0) + 1 < (s.totalPages or 0))
+        or ((s.termIndex or 1) < (s.totalTerms or 1))
+    if not more then return "end" end
+    if (s.steps or 0) >= (s.limit or 0) then return "limit" end
+    return "advance"
+end
+
+-- The page move itself, WITHOUT touching the sweep budget -- this is what the
+-- sweep spends, so it must not reset what it is spending. Returns whether a
+-- query actually went out.
+--
 -- Past the last page of the active term, roll into the next OR term rather
 -- than stopping -- a semicolon-separated query is meant to read as one
 -- combined browse, not N separate searches you have to notice and re-run.
-function buy.NextPage()
+function buy.Advance()
     local st = buy.state
+    -- The same guard buy.GotoPage makes, hoisted so the answer is truthful: a
+    -- scan starting mid-sweep must report "did not move", or the sweep sits
+    -- there believing a page is on its way.
+    if buy.IsBusy() then return false end
     if st.page + 1 < st.totalPages then
         buy.GotoPage(st.page + 1)
+        return true
     elseif st.termIndex < table.getn(st.terms) then
         buy.GotoTerm(st.termIndex + 1)
+        return true
     end
+    return false
+end
+
+function buy.NextPage()
+    buy.ResetSweep()
+    return buy.Advance()
+end
+
+-- Called once per page read. Records why the sweep did or did not move, so
+-- the status line can say it out loud rather than leave a player staring at
+-- "0 matches" wondering whether anything is still happening.
+function buy.SweepStep()
+    local st = buy.state
+    local d = buy.SweepDecision({
+        matched    = table.getn(st.rows),
+        rawTotal   = st.total,
+        page       = st.page,
+        totalPages = st.totalPages,
+        termIndex  = st.termIndex,
+        totalTerms = table.getn(st.terms),
+        steps      = st.sweepSteps or 0,
+        limit      = buy.SWEEP_MAX,
+        enabled    = buy.SweepEnabled(),
+        batch      = (buy.batch and buy.batch.active) and true or false,
+    })
+    st.sweepStop = d
+    if d == "advance" then
+        st.sweepSteps = (st.sweepSteps or 0) + 1
+        st.sweeping   = buy.Advance()
+        -- A move that did not go out is not a sweep in flight. Say so, and
+        -- give the reason the status line can use.
+        if not st.sweeping then st.sweepStop = "busy" end
+    else
+        st.sweeping = false
+    end
+    return st.sweepStop
+end
+
+-- sweeping, pages skipped, why it stopped.
+function buy.SweepState()
+    local st = buy.state
+    return st.sweeping and true or false, st.sweepSteps or 0, st.sweepStop
 end
 
 -- Symmetric with NextPage, EXCEPT crossing a term boundary backwards lands on
@@ -1689,6 +1815,7 @@ end
 -- page" isn't worth the complexity.
 function buy.PrevPage()
     local st = buy.state
+    buy.ResetSweep()
     if st.page > 0 then
         buy.GotoPage(st.page - 1)
     elseif st.termIndex > 1 then
@@ -1848,6 +1975,18 @@ function buy.ReadPage()
     st.rows  = rows
     st.phase = "idle"
     buy.driver:Hide()
+
+    -- A page a post-filter emptied is not an answer -- see the sweep block
+    -- above buy.SweepDecision. Decided and MOVED ON before the callbacks fire,
+    -- so the status line paints "still looking" rather than a 0-match page we
+    -- are already leaving.
+    --
+    -- Called unconditionally, INCLUDING during a batch buyout, because the one
+    -- guard that says "a batch owns the pager" belongs in SweepDecision where
+    -- a test can reach it. A second copy of the same condition here would be
+    -- an untested branch that silently disagrees with the first one.
+    buy.SweepStep()
+
     if st.callbacks and st.callbacks.onResults then
         st.callbacks.onResults(rows)
     end
