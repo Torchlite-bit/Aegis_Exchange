@@ -143,6 +143,62 @@ end
 -- tab's collector went on appending rows for its item and nothing ever emptied
 -- it, so sorting and copying that table came to take seconds. See the note
 -- above sell.ScanItem.
+-- ---------------------------------------------------------------------------
+-- Vendor flips: listings priced below what a merchant pays for them
+-- ---------------------------------------------------------------------------
+--
+-- WHY THIS IS COLLECTED DURING A SCAN rather than searched for. The Buy tab's
+-- `vendor-profit` post-filter answers the same question but judges ONE PAGE at
+-- a time, and an item listed below vendor is rare -- so on a realm with 294
+-- pages you would page for half an hour to find the two that qualify. The scan
+-- already visits every page; noticing on the way past costs one comparison per
+-- row and answers the whole auction house at once.
+--
+-- SESSION-ONLY, and deliberately not saved. These are live listings: the one
+-- worth buying is gone within the hour, and a saved list would be a page of
+-- auctions that no longer exist presented as things to go and buy.
+scan.flips = {}
+
+-- A guard, not a feature. Below-vendor listings are rare, so in practice this
+-- never binds -- but a realm with a mispriced vendor, or a bug in the price
+-- read, could otherwise grow this list for the length of a full scan.
+scan.FLIPS_MAX = 300
+
+-- Note one listing that a merchant pays more for than it is listed at.
+--
+-- CHEAP ENOUGH TO RUN PER ROW. db.GetVendor prefers ClassicAPI's C_Item, which
+-- is a cache-record read rather than a query; without it the answer comes from
+-- the harvested table, which is a table lookup. Neither is a client query, so
+-- this adds no cost of the kind HARD RULE 16 is about -- and it runs inside a
+-- loop the scanner already paces at 50 rows a page.
+function scan.NoteFlip(itemId, name, count, buyoutPrice)
+    if not itemId or not buyoutPrice or buyoutPrice <= 0 then return nil end
+    if table.getn(scan.flips) >= scan.FLIPS_MAX then return nil end
+    local n = (count and count > 0) and count or 1
+    local unit = math.floor(buyoutPrice / n)
+    local vendor = A.db and A.db.GetVendor and A.db.GetVendor(itemId)
+    local per, total = A.db.VendorFlip(unit, vendor, n)
+    if not per then return nil end
+    local row = { itemId = itemId, name = name, count = n, unit = unit,
+                  buyout = buyoutPrice, vendor = vendor,
+                  per = per, total = total }
+    table.insert(scan.flips, row)
+    return row
+end
+
+-- Best first, by what the whole stack makes -- which is what you spend a
+-- click on, rather than the per-unit margin.
+function scan.Flips()
+    local out = {}
+    local i = 1
+    while i <= table.getn(scan.flips) do
+        table.insert(out, scan.flips[i])
+        i = i + 1
+    end
+    table.sort(out, function(a, b) return a.total > b.total end)
+    return out
+end
+
 local function RecordVisiblePage(numOnPage, ours)
     local st = scan.state
     local onListing = ours and st.callbacks and st.callbacks.onListing
@@ -178,6 +234,13 @@ local function RecordVisiblePage(numOnPage, ours)
             if buyoutPrice and buyoutPrice > 0 and itemId then
                 A.db.RecordAuction(
                     itemId, math.floor(buyoutPrice / count), name)
+                -- ...and notice on the way past whether a merchant would pay
+                -- more for it than it is listed at. Only on OUR pages: a page
+                -- fetched by somebody else's browse is not ours to read, the
+                -- same rule the tally and onListing follow.
+                if ours then
+                    scan.NoteFlip(itemId, name, count, buyoutPrice)
+                end
             end
             if onListing then
                 onListing(itemId, name, count, buyoutPrice or 0,
@@ -423,6 +486,10 @@ function scan.Start(queryOrList, callbacks)
     st.retries        = 0
     st.waitOk         = 0
     st.tally          = NewTally()
+    -- EMPTIED HERE, not appended to. These are live listings from THIS sweep;
+    -- carrying the last scan's rows forward would present auctions that have
+    -- since been bought as things to go and buy.
+    scan.flips        = {}
     st.gateWait       = 0
     st.lastGate       = nil
     st.lastReply      = nil
