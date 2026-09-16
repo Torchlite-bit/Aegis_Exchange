@@ -24,6 +24,38 @@ local A = W.LoadCore()
 W.FireAddonLoaded(A)
 local sell = A.sell
 
+-- The two post-completion decisions live in ui/frame.lua, which no suite
+-- loads -- it wants a real client to mean anything. Extracted at run time
+-- rather than copied: a copy drifts, and the drift here is a bag walk that
+-- abandons remainders again.
+ui = {}
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    for _, sig in ipairs({
+        "function ui.KeepLeftovers(",
+        "function ui.AdvanceAfterPost(",
+    }) do
+        local body, grabbing = {}, false
+        for line in string.gfind(src, "([^\n]*)\n") do
+            if not grabbing then
+                if string.find(line, sig, 1, true) == 1 then
+                    grabbing = true
+                    table.insert(body, line)
+                end
+            else
+                table.insert(body, line)
+                if line == "end" then break end
+            end
+        end
+        assert(grabbing, "did not find: " .. sig)
+        local fn, err = loadstring(table.concat(body, "\n"), sig)
+        if not fn then error(sig .. " will not compile: " .. tostring(err)) end
+        fn()
+    end
+end
+
 local COPPER = "|Hitem:1:0:0:0|h[Copper Bar]|h"
 local SILK   = "|Hitem:2:0:0:0|h[Silk Cloth]|h"
 
@@ -521,6 +553,94 @@ do
     H.eq("price-match still means the competition", sell.MatchUnit(7100), 900)
 
     sell.listings = nil
+end
+
+
+-- ---------------------------------------------------------------------------
+H.section("After a post: leftovers, and when the bag walk moves on")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED: "if I scan all the items in the bag, it seems to break the
+-- automatic reapplying of lesser stack of the item to post."
+--
+-- It did, and deliberately. The leftover re-slot was gated on NOT being in a
+-- queue -- "the queue owns what comes next" -- so a bag scan, which is exactly
+-- what builds that queue, turned the feature off. Twenty-five Linen Cloth,
+-- post two stacks of ten, and the walk jumped to the next item leaving five
+-- behind: the one thing walking your bags exists to avoid.
+--
+-- The queue still owns the ORDER. What changed is what "next" means.
+
+-- ---- does the slot keep the rest of this item? --------------------------
+
+H.check("leftovers are re-slotted", ui.KeepLeftovers(true, nil, 5))
+H.check("...and the default (unset) counts as on",
+        ui.KeepLeftovers(nil, nil, 5),
+        "a player who never touched the setting should still get it")
+H.check("...including during a bag walk, which is the fix",
+        ui.KeepLeftovers(true, nil, 5),
+        "a bag scan used to turn this off entirely")
+
+H.check("nothing left, nothing to re-slot", not ui.KeepLeftovers(true, nil, 0))
+H.check("...nor on no count at all", not ui.KeepLeftovers(true, nil, nil))
+
+-- NOT AFTER A CANCEL. The user asked to stop, and re-slotting the same item is
+-- the opposite of stopping.
+H.check("a cancel does not re-slot", not ui.KeepLeftovers(true, "cancelled", 5))
+
+-- Turned off in the settings means off.
+H.check("the setting switches it off", not ui.KeepLeftovers(false, nil, 5))
+
+-- Other stop reasons are NOT cancels -- running out of items or hitting the
+-- auction cap still leave a remainder worth keeping in front of you.
+H.check("hitting the cap still keeps what is left",
+        ui.KeepLeftovers(true, "cap", 5))
+H.check("...and so does running out mid-stack",
+        ui.KeepLeftovers(true, "out", 5))
+
+-- ---- does the walk move on? ---------------------------------------------
+
+-- ONLY ONCE THIS ITEM IS DONE. While a remainder sits in the slot, "next" is
+-- the rest of what you were already posting.
+H.check("the walk waits while a remainder is slotted",
+        not ui.AdvanceAfterPost({ "q" }, nil, true),
+        "the remainder would be abandoned, which is the reported bug")
+H.check("...and moves on once nothing is kept",
+        ui.AdvanceAfterPost({ "q" }, nil, false))
+
+-- NOT IN A QUEUE, NOTHING TO ADVANCE. Posting a single item off the bag list
+-- must not start a walk that was never asked for.
+H.check("no queue, no advance", not ui.AdvanceAfterPost(nil, nil, false))
+
+-- A cancel stops the walk rather than stepping it on.
+H.check("a cancel stops the walk",
+        not ui.AdvanceAfterPost({ "q" }, "cancelled", false))
+
+-- IT TAKES `kept`, NOT "should keep", and that distinction is load-bearing:
+-- re-slotting can fail (the item moved, the bags shifted), and a walk that
+-- stalled because it believed it had kept something it had not would be worse
+-- than one that advanced too eagerly.
+H.check("a failed re-slot still advances the walk",
+        ui.AdvanceAfterPost({ "q" }, nil, false),
+        "the walk would stall on an item it could not slot")
+
+-- ---- and the two together, over a stack being worked down ---------------
+
+-- The shape of the reported case: 25 in bags, posting 10 at a time inside a
+-- bag walk. The walk must stay put until the item is gone.
+do
+    local left, moved = 25, 0
+    local i = 1
+    while i <= 4 and left >= 0 do
+        left = left - 10
+        if left < 0 then left = 0 end
+        local keep = ui.KeepLeftovers(true, nil, left)
+        if ui.AdvanceAfterPost({ "q" }, nil, keep) then moved = moved + 1 end
+        if left == 0 then break end
+        i = i + 1
+    end
+    H.eq("the stack is worked down to nothing", left, 0)
+    H.eq("...and the walk moved on exactly once, at the end", moved, 1)
 end
 
 os.exit(H.report("sellslot"))

@@ -18,6 +18,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.28]
+
+### Fixed
+- **Walking your bags no longer abandons what's left of an item.** Scan your
+  bags, walk them with **Post / Skip**, post two stacks of ten out of
+  twenty-five — and the walk used to jump straight to the next item, leaving
+  five behind for you to find by hand later.
+
+  The remainder now comes back into the slot at the same price, exactly as it
+  does outside a bag walk, and the walk moves on only once that item is
+  actually finished. **Skip still always moves on** — that's what it's for.
+
+  *(The leftover re-slot was switched off whenever a queue was running, on the
+  reasoning that the queue owns what comes next. It does own the order; what
+  changed is that "next" means the rest of what you're already posting while
+  any of it remains.)*
+
+
 ## [1.53.27]
 
 ### Added
@@ -5777,6 +5795,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
