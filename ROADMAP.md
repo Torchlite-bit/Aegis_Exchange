@@ -2390,6 +2390,54 @@ Worth noting what the mock hid again: `UnitFactionGroup` ignored its argument
 and always answered "Alliance", so a neutral auctioneer could not be modelled
 at all -- and the addon ignored that case for exactly as long.
 
+### Vendor flips, and answering the question that was asked — v1.53.27
+
+**I sent the owner at a feature that could not do what they wanted.** Asked for
+"items posted lower than vendor price for instant profit", I answered that
+`vendor-profit/1c` already does it. It does -- the predicate is correct and
+tested -- and it is useless for the question, because post-filters judge ONE
+PAGE at a time and a below-vendor listing is rare. Their screenshot came back
+"0 match(es) (of 14665) ... try the next page", page 1 of 294.
+
+**"The feature exists" is not "the question is answered."** I checked the
+component list rather than thinking about what 294 pages means: roughly 25
+minutes of clicking to find the two rows that qualify. The status line's "try
+the next page" is honest per page and bad advice at that scale.
+
+**The scan already goes everywhere, so it notices on the way past.** One
+comparison per row against `db.GetVendor` -- a cache read via ClassicAPI's
+C_Item, or a table lookup without it, neither a client query -- inside a loop
+already paced at 50 rows a page. The whole auction house answered in one
+sweep instead of 294 filtered pages.
+
+**SESSION-ONLY, DELIBERATELY.** These are live listings; the good ones are gone
+within the hour. A saved list would be a page of auctions that no longer exist
+presented as things to go and buy, which is worse than no list.
+
+**Sorted by what the STACK makes, not the per-unit margin** -- the stack is
+what a click costs you, and a 1c margin on twenty beats 15c on one.
+
+**Two facts a behavioural test cannot reach**, so they are source checks: that
+the page reader calls the collector at all, and that it only does so on OUR
+pages. The second is the rule the tally and `onListing` already follow, and
+the one the v1.51.1 callback leak was about.
+
+**A test that failed for a reason unrelated to the code.** `scan_leak_test`
+reloads the core twice and its second reload reassigns `sell` and `scan` but
+not `db` -- so a vendor price set through the stale namespace went into a table
+the scanner never reads, and six checks failed as though the feature were
+broken. **Rebind everything after a reload, or the suite tests a namespace that
+is no longer wired up.**
+
+**And a self-inflicted one worth recording.** Writing Lua escapes through a
+Python heredoc turned `\226\128\148` into raw bytes and broke the file; my
+first repair -- a blanket byte replace -- then damaged 16 legitimate em-dashes
+in comments elsewhere. `git checkout` on that one file was the right narrow
+tool, because everything uncommitted in it was a block I still had in hand.
+The lesson is the one the file already teaches about scripted edits: write the
+Lua to a file and splice it, rather than routing it through another language's
+string escaping.
+
 ### Undercutting yourself — v1.53.26
 
 **A money bug, reported from a live client, and it compounds.** Post an item

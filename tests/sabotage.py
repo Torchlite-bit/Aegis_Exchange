@@ -5195,6 +5195,70 @@ end""",
 end""",
      "purse"),
 
+    # ---- vendor flips (v1.53.27) ----------------------------------------
+
+    # Nothing collected while the scan sweeps, so /aex flips is always empty
+    # and the feature is a command that reports nothing.
+    ("flips-not-collected", "core/scan.lua",
+     "                    scan.NoteFlip(itemId, name, count, buyoutPrice)",
+     "",
+     "scan.leak"),
+
+    # Collected from pages somebody else's browse fetched -- the same rule the
+    # tally and onListing follow, and what the v1.51.1 callback leak was about.
+    ("flips-from-someone-elses-page", "core/scan.lua",
+     "                if ours then\n                    scan.NoteFlip",
+     "                if true then\n                    scan.NoteFlip",
+     "scan.leak"),
+
+    # The list carried between scans, so listings bought an hour ago are still
+    # presented as things to go and buy.
+    ("flips-carry-over-between-scans", "core/scan.lua",
+     "    scan.flips        = {}\n",
+     "",
+     "scan.leak"),
+
+    # The live list handed out instead of a copy, so a caller sorting it for
+    # display reorders what the scanner is still appending to -- the aliasing
+    # rule sell.CopyListings exists for.
+    ("flips-alias-the-live-list", "core/scan.lua",
+     """    local out = {}
+    local i = 1
+    while i <= table.getn(scan.flips) do
+        table.insert(out, scan.flips[i])
+        i = i + 1
+    end""",
+     "    local out = scan.flips",
+     "scan.leak"),
+
+    # Sorted by the per-unit margin rather than what the stack makes -- which
+    # is what a click actually costs you.
+    ("flips-sorted-by-unit-margin", "core/scan.lua",
+     "    table.sort(out, function(a, b) return a.total > b.total end)",
+     "    table.sort(out, function(a, b) return a.per > b.per end)",
+     "scan.leak"),
+
+    # The cap dropped. Rare in practice, which is exactly why an unbounded
+    # list would go unnoticed until a mispriced vendor filled it.
+    ("flips-uncapped", "core/scan.lua",
+     "    if table.getn(scan.flips) >= scan.FLIPS_MAX then return nil end",
+     "",
+     "scan.leak"),
+
+    # A WASH COUNTED AS A FLIP. An item a vendor pays exactly the buyout for
+    # is telling somebody to spend gold to stand still.
+    ("vendor-flip-counts-a-wash", "core/db.lua",
+     "    if per <= 0 then return nil end",
+     "    if per < 0 then return nil end",
+     "scan.leak"),
+
+    # The total ignoring the stack, so a stack of twenty reads as one item's
+    # margin -- and the list sorts by a number that is not what you make.
+    ("vendor-flip-total-ignores-the-stack", "core/db.lua",
+     "    return per, per * n",
+     "    return per, per",
+     "scan.leak"),
+
     # ---- never undercut yourself (v1.53.26) -----------------------------
 
     # THE REPORTED BUG, put back: your own cheapest listing undercut instead of

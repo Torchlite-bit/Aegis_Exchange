@@ -16997,6 +16997,11 @@ A.RegisterEvent("BAG_UPDATE", function()
     end
 end)
 
+-- How many flips /aex flips prints before summarising the rest. The chat
+-- frame holds a few dozen lines; three hundred would push everything else
+-- out of it to say what the first ten already said.
+local FLIP_LINES = 10
+
 SLASH_AEGISEXCHANGE1 = "/aex"
 SLASH_AEGISEXCHANGE2 = "/aegisexchange"
 SlashCmdList["AEGISEXCHANGE"] = function(msg)
@@ -17221,6 +17226,42 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 .. (A.db.Setting("harvest") and "ON" or "OFF")
                 .. " -- /aex sweep on | off | purge")
         end
+        return
+    end
+    -- WHAT THE LAST SCAN FOUND BELOW VENDOR PRICE. See scan.NoteFlip for why
+    -- this is collected on the way past rather than searched for: the
+    -- vendor-profit post-filter answers the same question one page at a time,
+    -- and on a realm with 294 pages that is half an hour of clicking to reach
+    -- the two rows that qualify.
+    if string.find(cmd, "flip", 1, true) then
+        local rows = A.scan.Flips()
+        local n = table.getn(rows)
+        if n == 0 then
+            ChatMsg("Aegis: nothing listed below vendor price in the last"
+                .. " scan. Run a full scan first \226\128\148 these are"
+                .. " collected while it sweeps, not looked up afterwards.")
+            return
+        end
+        ChatMsg("Aegis: " .. n .. " listing(s) below vendor price"
+            .. " \226\128\148 buy, then sell straight to a merchant:")
+        local i = 1
+        -- CAPPED IN THE OUTPUT as well as in the collection. The chat frame
+        -- holds a few dozen lines; three hundred would push everything else
+        -- out of it to say what the first ten already said.
+        while i <= n and i <= FLIP_LINES do
+            local r = rows[i]
+            ChatMsg("  " .. (r.name or "?")
+                .. ((r.count > 1) and (" x" .. r.count) or "")
+                .. "  buy " .. util.FormatMoney(r.buyout, true)
+                .. "  vendor " .. util.FormatMoney(r.vendor * r.count, true)
+                .. "  |cff40ff40+" .. util.FormatMoney(r.total, true) .. "|r")
+            i = i + 1
+        end
+        if n > FLIP_LINES then
+            ChatMsg("  ...and " .. (n - FLIP_LINES) .. " more.")
+        end
+        ChatMsg("  LIVE listings from that scan \226\128\148 the good ones go"
+            .. " quickly.")
         return
     end
     if string.find(cmd, "cache", 1, true) then

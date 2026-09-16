@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.53.26)
+# Aegis: Exchange (v1.53.27)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -460,6 +460,7 @@ That file just calls Aegis's own skinning routine, so both paths stay identical.
 | `/aex` | Hand the session back to the stock Blizzard AH |
 | **Blizzard UI** / **Aegis UI** buttons | The same swap, with a mouse |
 | `/aex shop` | The crafting shopping list, anywhere — no AH needed |
+| `/aex flips` | What the last scan found listed **below vendor price** — buy it, sell it straight to a merchant |
 | `/aex demo` | Fill the gold chart and Crafting tab with invented data, to see what they look like with a real history. Nothing is saved; `/reload` clears it |
 | `/aex diag <shift-click an item>` | Everything Aegis knows about that item, and how it knows it |
 | `/aex cache` | How many items Aegis has learned from the client |
@@ -537,7 +538,7 @@ which were learned the hard way.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.53.26`) — quote it.
+1. Check the **version** in the window's title bar (`v1.53.27`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about
    that item and every step it took: which modules loaded, what the client
    returned, the item level and where it came from, and the disenchant value.

@@ -18,6 +18,25 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.27]
+
+### Added
+- **`/aex flips` — what a scan found listed below vendor price.** Buy it, walk
+  to any merchant, sell it. The scan notices these on the way past and the
+  command lists them, best first, by what the whole stack makes.
+
+  **Why not just search for it.** The `vendor-profit` filter answers the same
+  question but judges **one page at a time**, and a listing below vendor is
+  rare — on a realm with 294 pages that's half an hour of clicking to reach the
+  two rows that qualify. A scan already visits every page, so noticing while
+  it sweeps costs one comparison per row and answers the whole auction house
+  at once.
+
+  These are **live listings from that scan**, not saved — the good ones go
+  quickly, and a remembered list would be a page of auctions that no longer
+  exist presented as things to go and buy. Run a scan, then ask.
+
+
 ## [1.53.26]
 
 ### Fixed
@@ -5758,6 +5777,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

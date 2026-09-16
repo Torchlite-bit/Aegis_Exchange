@@ -206,4 +206,156 @@ H.neq("mutating a returned row does not reach the cache",
 table.insert(sell.listings, { count = 1, buyout = 1, unit = 1 })
 H.eq("...and neither does appending", table.getn(sell.cache[6291].listings), 4)
 
+
+-- ---------------------------------------------------------------------------
+H.section("Vendor flips: listings a merchant pays more for")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS IS COLLECTED DURING A SCAN rather than searched for. The Buy tab's
+-- `vendor-profit` post-filter answers the same question but judges ONE PAGE at
+-- a time, and a listing below vendor price is rare -- so on a realm with 294
+-- pages you would page for half an hour to reach the two rows that qualify.
+-- The scan already visits every page; noticing on the way past costs one
+-- comparison per row and answers the whole auction house at once.
+
+-- THE SUITE RELOADS THE CORE TWICE ABOVE, and the second reload reassigns
+-- `sell` and `scan` but not `db` -- so by here the file-scope `db` points at a
+-- namespace the scanner no longer calls into. Rebind all three: a stale one
+-- puts the vendor price in a table nobody reads and this whole section fails
+-- for a reason that has nothing to do with the code under test.
+sell, scan, db = A.sell, A.scan, A.db
+
+-- ---- the arithmetic ----------------------------------------------------
+
+-- NO CUT ON EITHER SIDE, which is worth pinning because nearly every other
+-- money figure in this addon carries one: the 5% consignment cut is taken from
+-- a SALE at the auction house. Buying costs the buyout and a vendor pays its
+-- price, so the margin is the whole difference.
+do
+    local per, total = db.VendorFlip(100, 150, 1)
+    H.eq("the margin is the difference", per, 50)
+    H.eq("...and for one, the total is the same", total, 50)
+
+    -- THE TOTAL IS THE STACK, because you have to buy the whole stack to get
+    -- the margin -- a per-unit figure is not what the click costs you.
+    per, total = db.VendorFlip(100, 150, 20)
+    H.eq("per unit is unchanged by the stack", per, 50)
+    H.eq("...and the total is the stack's", total, 1000)
+end
+
+-- NO PROFIT IS NOT A FLIP. An item a vendor pays exactly the buyout for is a
+-- wash, and listing it tells somebody to spend gold to stand still.
+H.isNil("a wash is not a flip", db.VendorFlip(100, 100, 1))
+H.isNil("...and a loss certainly is not", db.VendorFlip(150, 100, 1))
+
+-- Missing either side is unanswerable, not zero.
+H.isNil("no vendor price, no answer", db.VendorFlip(100, nil, 1))
+H.isNil("...nor a zero one", db.VendorFlip(100, 0, 1))
+H.isNil("no buyout, no answer", db.VendorFlip(nil, 150, 1))
+H.isNil("...nor a zero one", db.VendorFlip(0, 150, 1))
+
+-- A count of nil or zero is one item, not a division by nothing.
+do
+    local _, total = db.VendorFlip(100, 150, nil)
+    H.eq("no count is a count of one", total, 50)
+    local _, t2 = db.VendorFlip(100, 150, 0)
+    H.eq("...and so is zero", t2, 50)
+end
+
+-- ---- what the scan records ---------------------------------------------
+
+do
+    scan.flips = {}
+    -- WHAT A MERCHANT PAYS, learned the way the addon learns it. The harness
+    -- has no C_Item, so db.GetVendor's ClassicAPI path answers nothing and the
+    -- harvested table is the only source -- which is also the path every
+    -- player without that DLL is on.
+    db.SetVendor(7100, 150)
+
+    -- A stack of five listed at 100 each, vendored at 150 each: 250 in it.
+    local row = scan.NoteFlip(7100, "Flippable", 5, 500)
+    H.check("a below-vendor listing is recorded", row ~= nil)
+    H.eq("...at the unit price it was listed at", row and row.unit, 100)
+    H.eq("...with the stack's margin", row and row.total, 250)
+    H.eq("...and it is on the list", table.getn(scan.flips), 1)
+
+    -- Listed ABOVE vendor: not a flip, and not recorded.
+    H.isNil("a listing above vendor is not recorded",
+            scan.NoteFlip(7100, "Flippable", 5, 5000))
+    H.eq("...and the list is unchanged", table.getn(scan.flips), 1)
+
+    -- No item id: nothing we can price.
+    H.isNil("no item id, no flip", scan.NoteFlip(nil, "Flippable", 5, 500))
+    -- Bid-only: no buyout to compare against.
+    H.isNil("no buyout, no flip", scan.NoteFlip(7100, "Flippable", 5, 0))
+end
+
+-- BEST FIRST, by what the whole stack makes -- which is what a click costs,
+-- rather than the per-unit margin.
+do
+    scan.flips = {}
+    scan.NoteFlip(7100, "Flippable", 1, 100)    -- +50
+    scan.NoteFlip(7100, "Flippable", 20, 2000)  -- +1000
+    scan.NoteFlip(7100, "Flippable", 4, 400)    -- +200
+    local rows = scan.Flips()
+    H.eq("three found", table.getn(rows), 3)
+    H.eq("the biggest stack margin leads", rows[1].total, 1000)
+    H.eq("...then the next", rows[2].total, 200)
+    H.eq("...then the smallest", rows[3].total, 50)
+
+    -- A COPY, not the live list. Handing out the internal table lets a caller
+    -- sorting it for display reorder what the scanner is still appending to --
+    -- the same aliasing rule sell.CopyListings exists for.
+    rows[1] = nil
+    H.eq("the list handed out is a copy", table.getn(scan.Flips()), 3)
+end
+
+-- THE GUARD. Below-vendor listings are rare so it never binds in practice,
+-- but a mispriced vendor or a bad price read could otherwise grow this for the
+-- length of a full scan.
+do
+    scan.flips = {}
+    local i = 1
+    while i <= scan.FLIPS_MAX + 20 do
+        scan.NoteFlip(7100, "Flippable", 1, 100)
+        i = i + 1
+    end
+    H.eq("the list is capped", table.getn(scan.flips), scan.FLIPS_MAX)
+end
+
+
+-- ---- and the scanner actually calls it ---------------------------------
+
+-- SOURCE CHECKS, because these are facts about WHERE a line sits rather than
+-- what a function returns, and the collection is only worth anything if the
+-- page reader reaches it.
+do
+    local f = assert(io.open("core/scan.lua", "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+
+    H.check("the page reader records flips",
+            string.find(src, "scan.NoteFlip(itemId, name, count, buyoutPrice)",
+                        1, true) ~= nil,
+            "nothing is collected while the scan sweeps")
+
+    -- ONLY OUR OWN PAGES. A page fetched by somebody else's browse is not
+    -- ours to read -- the same rule the tally and onListing follow, and the
+    -- one the v1.51.1 callback leak was about.
+    H.check("...only on pages we asked for",
+            string.find(src, "if ours then\n                    scan.NoteFlip",
+                        1, true) ~= nil,
+            "another addon's browse would feed our list")
+
+    -- EMPTIED WHEN A SCAN STARTS. These are live listings from one sweep;
+    -- carrying the last scan's rows forward presents auctions that have since
+    -- been bought as things to go and buy.
+    local at = string.find(src, "function scan.Start(", 1, true)
+    local body = string.sub(src, at or 1,
+                            string.find(src, "\nend\n", at or 1, true))
+    H.check("a new scan empties the list",
+            string.find(body, "scan.flips        = {}", 1, true) ~= nil,
+            "last scan's sold-out listings would still be on it")
+end
+
 os.exit(H.report("scan.leak"))

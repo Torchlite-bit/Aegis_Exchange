@@ -781,6 +781,31 @@ function db.GetVendor(itemId, info)
     return nil
 end
 
+-- What a listing is worth buying and selling straight to a merchant.
+--
+-- Returns (perUnit, total), or nil when there is no profit in it.
+--
+-- NO CUT ON EITHER SIDE, and that is worth stating because almost every other
+-- money figure in this addon carries one: the 5% consignment cut is taken from
+-- a SALE at the auction house. Buying costs the buyout and a vendor pays its
+-- price, so the margin here is the whole difference.
+--
+-- BOTH FIGURES PER UNIT, which is the only comparison that means anything
+-- across different stack sizes -- and the total is then the per-unit margin
+-- times the stack, because you have to buy the whole stack to get it.
+--
+-- Zero is not a margin. An item a vendor pays exactly the buyout for is a
+-- wash, and listing it would be telling somebody to spend gold to stand still.
+function db.VendorFlip(unitBuyout, vendorUnit, count)
+    if not unitBuyout or unitBuyout <= 0 then return nil end
+    if not vendorUnit or vendorUnit <= 0 then return nil end
+    local per = vendorUnit - unitBuyout
+    if per <= 0 then return nil end
+    local n = count or 1
+    if n < 1 then n = 1 end
+    return per, per * n
+end
+
 -- ---------------------------------------------------------------------------
 -- Vendor BUY prices -- what a merchant CHARGES
 -- ---------------------------------------------------------------------------
