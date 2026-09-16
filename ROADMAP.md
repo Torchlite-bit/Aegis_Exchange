@@ -14,9 +14,13 @@ implementation starts). Don't start Open items without confirming first.
 
 Inspiration credit: several ideas here (the historical-value algorithm's
 shape, the search query language) are inspired by
-[aux-addon](https://github.com/zanthor/aux-addon)'s design. Per CLAUDE.md's
-"Reference addons" note, that's **All Rights Reserved** — every item below
-means an original Aegis implementation of the *idea*, never ported code.
+[aux-addon](https://github.com/zanthor/aux-addon)'s design, and Phase 4 is
+drawn from **TradeSkillMaster**'s groups / operations / custom-price-string
+model. Per CLAUDE.md's "Reference addons" note, that's **All Rights
+Reserved** — every item below means an original Aegis implementation of the
+*idea*, never ported code. This applies to TSM exactly as it does to aux: its
+encoding scheme and its price-source definitions are read as a description of
+an approach, never copied.
 
 ---
 
@@ -4543,9 +4547,279 @@ flag already repaints once a frame behind rule 16's flush.
 
 ---
 
+## Phase 4 — The policy layer (what TSM actually is)
+
+**Where this came from.** A research pass on TradeSkillMaster, asking what it
+would take to build its shared price database for the 1.18.1 servers. The
+answer was that you cannot: TSM's auction data comes from **Blizzard's official
+Game Data API**, and the private servers have no such thing. When that API went
+down, TSM posted that it "is not able to provide updated AuctionDB data" — there
+is no crowdsourced fallback. On the Classic anniversary realms, which launched
+without the API, TSM's own community answer was *"use Auctionator or AHDB to
+scan the auction house yourself, then point TSM's value strings at that."*
+
+**Which is to say: TSM without the API is Aegis.** We already are the thing it
+falls back to, except we do our own scanning instead of borrowing another
+addon's. The pooled-data layer is not the hard part of TSM; it is a separate
+business that exists because Blizzard publishes an API.
+
+**What IS worth taking is everything TSM built on top of the data**, and none of
+it needs a server, a companion app or a byte of network traffic. It is the part
+players mean when they say they miss TSM, and all three items below are pure
+addon work.
+
+**Not a prerequisite for each other in the obvious order.** 4.3 is the one that
+unlocks the other two — a group with no price language attached is a list, and
+an operation with no price language is a checkbox. Build the language first even
+though groups are the visible feature.
+
+### 4.1 Groups
+
+A named set of items, saved account-wide, that the Sell and Buy tabs can act on
+as a unit. "Herbs", "Enchanting mats", "My flips".
+
+- Items added from bags, from a search result, from a shopping list, or by
+  shift-clicking a link — every path that already puts an item in front of you.
+- A group is just a set of item ids. It is NOT a price, a rule or a filter; the
+  moment it starts carrying behaviour it has become 4.2 and should live there.
+- Nested groups are how TSM does it and are **out of scope**. A flat list with
+  good add/remove is the whole feature; the tree is where the complexity went
+  in every addon that shipped one.
+
+### 4.2 Operations
+
+A named posting/buying policy, attached to one or more groups.
+
+- **Post:** undercut by X (percent or flat), floor at Y, cap at Z, stack size,
+  number of stacks, duration.
+- **Buy:** buy at or under X, up to N units.
+- **Cancel:** re-post when undercut by more than X.
+- One operation applies to many groups; a group has at most one operation per
+  kind. Many-to-many is where TSM's configuration becomes the thing people
+  complain about.
+
+**The Sell tab already computes every number an operation would set** —
+`sell.UndercutUnit`, `sell.MatchUnit`, `sell.DepositFor`, `sell.VendorCompare`,
+the cap and the cut. What is missing is *naming a combination of them and
+reusing it*. That is the whole phase: no new arithmetic, a place to put the
+arithmetic we have.
+
+### 4.3 Custom price strings
+
+A tiny expression language over our own price sources, which is the actual
+mechanism behind everything people praise TSM for:
+
+```
+max(minbuyout * 0.95, vendorsell * 3)
+min(market * 1.1, 200g)
+```
+
+- **Sources** are the ones `core/db.lua` already exposes: `market`,
+  `minbuyout`, `vendorsell` (what a merchant pays), `vendorbuy` (what it
+  charges), `disenchant`, and a literal money value.
+- **Operators**: `+ - * /`, `min()`, `max()`, parentheses. Nothing else. No
+  variables, no conditionals, no user-defined functions.
+- **Lua 5.0 parsing rules apply** — `string.find` with captures and
+  `string.gfind`, never `string.match`. `core/buy.lua`'s query parser is the
+  model and the precedent; this is the same trick pointed at pricing instead of
+  searching.
+- **It must be a pure function of (expression, itemId) → copper or nil**, with
+  no frame, no tooltip and no client call inside it, so the whole thing is
+  testable and sabotageable. A price language that can only be checked by
+  posting an auction is a price language nobody will trust.
+- **`nil` is a first-class answer.** `market` for an item nobody has scanned has
+  no value, and the expression must propagate that rather than substituting a
+  zero — a zero here posts an item for nothing. Every operand needs the
+  `Unanswered` treatment the post-filters already give.
+
+### 4.4 The rope encoding (enabling, not a feature)
+
+TSM stores each item's history as one string — `day:avg@count!day:avg@count`,
+every number base-N encoded through an alphabet table, decoded lazily when
+something asks — rather than as a nested Lua table. See
+`TradeSkillMaster_AuctionDB.lua`'s `encodeScans` / `decodeScans`.
+
+Two reasons it is worth adopting, in order:
+
+1. **SavedVariables size.** `db.Items()` writes a nested table per item per day,
+   `KEEP_DAYS = 30`. **Measure before acting** — this may be a non-problem, and
+   a rewrite of the storage format on a hunch is exactly how a working price DB
+   gets corrupted.
+2. It is the right wire format if export/import is ever unpinned (see
+   *Explicitly deferred*), and picking it now means not having to migrate a
+   format twice.
+
+**Not to be done speculatively.** Item 1 decides it; item 2 alone does not
+justify touching storage.
+
+---
+
+## Phase 5 — Aux-parity backlog
+
+**From a feature suggestion list checked item by item against the source.** Most
+of it already shipped; what follows is only what did not. Each entry names the
+function that already does most of the work, because in almost every case this
+is a small addition to something that exists rather than a new subsystem.
+
+### 5.1 Total quantity on a grouped result row
+
+`ui.FillGroupRow` prints `"8 auctions"`. `ui.BuyTreeRows` already carries
+`g.units` — the summed `r.count` across the group — and throws it away.
+
+Wanted: `Runecloth — 8 auctions, 129 items`. **The number is computed; only the
+label is missing.** Check the column width before assuming the text fits.
+
+### 5.2 Aegis tooltip lines on a chat link
+
+`tooltip.Install` hooks **`GameTooltip` only** — `GameTooltip[name] = ...`,
+per-object, deliberately never the shared metatable (HARD RULE 16's corollary).
+Clicking an item link in chat opens **`ItemRefTooltip`**, a different frame, so
+none of our lines appear on it.
+
+`tooltip.Extend(gtt, itemId, count)` already takes the frame as its first
+argument and `resolvers.SetHyperlink` already exists, so this is a second
+explicit per-object hook on `ItemRefTooltip:SetHyperlink` reusing both. Also
+worth covering `ItemRefShoppingTooltip1/2` if the client has them.
+
+**Verify the resize.** Our lines are added *during* the `Set*` call and the
+client shows the frame afterwards, which is why `GameTooltip` needs no
+`:Show()`. `ItemRefTooltip` is shown by `SetItemRef` on the same ordering, so it
+should behave — but that is reasoning, not observation, and a tooltip clipped at
+the bottom is exactly the class of bug no suite here can see.
+
+### 5.3 Below-vendor warning should compare NET, not gross
+
+`sell.VendorCompare(itemId, unitPrice)` compares the **list price** to the
+vendor price. What matters is what you actually keep:
+
+```
+net = unitPrice * (1 - cut) - depositPerUnit
+```
+
+With the 5% consignment cut and a deposit, an auction listed slightly above
+vendor still loses money, and the current warning says nothing. The cut and
+`sell.DepositFor` are both already in hand at the call site
+(`ui/frame.lua`, the Sell tab's vendor line).
+
+**This is a correctness fix, not a feature** — the existing warning is
+answering a question nobody asked. Keep the gross comparison available; add the
+net one and warn on it.
+
+### 5.4 Post All: a policy, not just a walk
+
+`ui.StartSellQueue` walks bags item by item and puts each in the slot for a
+manual Post or Skip. `ui.sellStackSize` / `ui.sellNumStacks` set stack shape
+**per item**, by hand. Missing:
+
+- A queue-wide stack mode: max stack / fixed size / singles / smart.
+- Profit comparison between stack sizes, so "smart" means something measurable.
+- Ordering the queue by expected profit rather than bag order.
+- A gate that refuses to post when 5.3's net is below vendor.
+
+**Depends on 4.2.** These are operation fields; building them as loose
+checkboxes on the Sell tab is how the tab ends up with fourteen controls and no
+way to save any of them. Leftover re-slotting already landed in v1.53.28 and is
+not part of this.
+
+### 5.5 Post All blacklist
+
+Nothing exists — no blacklist, no blocklist, nothing under either name in
+`core/` or `ui/`. Wanted: add from bags, drag-and-drop, icon and name in the
+list, easy remove and clear.
+
+**This is a group.** Building a bespoke blacklist store and then building 4.1
+means two item-set implementations that will disagree. Ship it as a
+built-in group the posting queue skips, or wait for 4.1.
+
+### 5.6 Sale details printed to chat
+
+`ui.ScanMailSales` records sales to the ledger, deduped via `A.MailTxnKey` +
+`db.WasSeen` (already correct, and already shared with Courier). It prints
+nothing.
+
+Wanted, optionally, on collection: item, quantity, sale price, deposit
+returned, net.
+
+**Buyer name is the hard one and may not be available.** `GetInboxHeaderInfo`
+gives the *sender*, which for auction mail is the auction house, not the buyer.
+The buyer appears in the mail **body**, which needs `GetInboxText` — a per-mail
+call in a `MAIL_INBOX_UPDATE` path, which is precisely what **HARD RULE 16**
+forbids inline. If it is done at all it must be on collection of one specific
+mail, never during a scan of the inbox. **Treat "buyer name, when available" as
+optional and be prepared to drop it.**
+
+### 5.7 Equipment comparison tooltips
+
+Nothing exists — no `ShoppingTooltip`, no `CompareItem` anywhere in `ui/`.
+Hovering a weapon or armour piece in the results should show the stock
+equipped-item comparison.
+
+Vanilla does this through `ShoppingTooltip1` / `ShoppingTooltip2` driven by
+`GameTooltip_ShowCompareItem`, gated on the "always compare" CVar or shift.
+**Read the 1.12 UI source before designing this** — it is one of the areas where
+the vanilla implementation differs most from every later client, and writing it
+from memory of retail is how it ends up subtly wrong.
+
+---
+
+### Already shipped — checked, not assumed
+
+Recorded so the same list does not get re-raised:
+
+| Suggested | Where it lives |
+|---|---|
+| Grouped results, one row per item, expandable | `ui.BuyTreeRows`, `ui.FillGroupRow` |
+| Collapse without clearing the search | Left-click toggles; selection and filters survive |
+| Purchase tracker for the AH visit | `buy.session`, `buy.SessionBought`, shown in the Buy status line |
+| "If everything sells" total, net of the cut | `sell.BookValue(rows, cut)`, Auctions tab |
+| Accurate vendor sell prices | `db.GetVendor` / `db.GetVendorBuy`, plus `C_Item` under ClassicAPI |
+| Reliable deposit and auction cut | `sell.LearnDepositRatio`, `sell.DepositFor`, the deposit watch, 5% cut |
+| Sale history without double-counting | `A.MailTxnKey` + `db.WasSeen` / `db.MarkSeen` |
+
+One gap inside a shipped feature: the purchase tracker counts **units and
+copper**, not **number of auctions bought**. Add it to `buy.session` when 5.x is
+touched, not on its own.
+
+---
+
 ## Explicitly deferred / out of scope for now
 
 - **Auto Buy** — decided out for Phase 2. Revisit only on explicit request.
 - **Courier reading Aegis's data, or two-way sync** — decided against in
   Phase 1; the integration is one-directional (Courier → Aegis) to keep the
   cross-repo maintenance surface to a single function signature.
+- **A shared price database across users, and export/import of scans** —
+  **PINNED**, not rejected. Researched in full; no option is cheap.
+
+  The 1.12 Lua sandbox has no network API, and neither ClassicAPI nor SuperWoW
+  changes that — ClassicAPI's manifest has no `io`, no `os`, no `require` and
+  no network namespace. So every route ends in a second program, or a file the
+  player drops in a folder and restarts for, or an addon-channel gossip
+  protocol at ~800 bytes/sec.
+
+  Three findings that would decide the design if it is ever revived:
+
+  1. **`min()` merge is indefensible against untrusted input.**
+     `db.RecordAuction` keeps the lowest price it has seen, which is idempotent
+     and order-independent for one trusted observer and catastrophic for pooled
+     data — one bad contributor floors every price permanently and no honest
+     scan afterwards can lift it. Fixing it needs per-contributor attribution
+     and a robust statistic, which is a schema change.
+  2. **The faction bucket is no longer a Turtle question.** Turtle's auction
+     house was merged cross-faction, which is why `core/db.lua` does not split
+     the price DB by faction. Octo WoW's **Y'Shaarj is faction-locked**, and if
+     that includes the auction house then the assumption is already wrong on a
+     live realm — **worth confirming for the LOCAL database regardless of
+     whether any of this is ever built.** `GetCVar("realmList")` is the server
+     discriminator; `TURTLE_WOW_VERSION` is not, since the 1.18.1 successors
+     run Turtle-derived cores and may all set it.
+  3. **Hosting anything is the expensive half and the risky half.** The
+     Undermine Journal closed over server costs; NexusHub's domain lapsed. And
+     Blizzard won a consent judgment and permanent injunction against Turtle
+     WoW on all seven counts (*Blizzard Entertainment, Inc. v. Turtle Wow*,
+     2:25-cv-08194, April 2026) whose terms reach donations, transferring
+     assets to a successor, and encouraging others. An addon on GitHub and a
+     hosted aggregation service are not the same risk.
+
+  If it is revived, the order is: local export/import first (§4.4's encoding is
+  the format), guild-scoped sharing second, and a service never.
