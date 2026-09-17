@@ -4532,24 +4532,174 @@ flag already repaints once a frame behind rule 16's flush.
 
 ---
 
-## Phase 3 — History & Price Intelligence polish
+## Phase 3 — History tab: TSM-grade chart and a Ledger window
 
-- **Line graph** of profit/loss over time on the History tab. No charting
-  primitive exists in 1.12 FrameXML — needs a short design spike (grid of
-  `Texture` pixels vs. a `StatusBar`-based sparkline) before committing to
-  an approach. **Phase 0.3 is settled (v1.4.0)**, so this is unblocked; read
-  its note about plotting a median before designing the axes.
-  - **§5.6 lands with this.** A sale is currently one item name and one
-    number; the ledger is meant to gain quantity, deposit and net alongside it.
-    Doing both in one pass means the tab is designed once around the data it
-    will actually hold — and it means the ledger schema settles before a chart
-    is drawn on top of the old one. Read §5.6 before designing the axes too:
-    "net collected" and "amount in the mail" are not the same series.
+**NEXT UP.** Set as the current focus alongside whatever small fixes are cheap
+enough to carry with it. Reference: TSM 4.x's Dashboard (a smooth filled line
+chart of gold over time, a figure row, and three stat blocks) and its Ledger (a
+per-item table of Sold / Avg Sell Price / Bought / Avg Buy Price / Avg Profit).
+
+**The old bullet here said the line graph "needs a short design spike".** It was
+stale by roughly forty releases. The chart exists: `ui.PlotColumns`,
+`ui.AxisMarks`, `ui.XAxisMarks`, `ui.BuildHistoryGraph`,
+`ui.UpdateHistoryGraph`, `ui.GrowPlotSpans`, the `HISTL` constants, a real
+gradient area fill from `art/gradient-fill.tga`, and 275 checks in
+`tests/units/histgraph_test.lua`. **Nothing below starts from nothing.**
+
+### 3.1 BLOCKING — decide what the chart is *of*
+
+TSM's dashboard chart is **"Player Gold"**: the account's gold *balance* over
+time, with an all-characters picker. Aegis's chart plots **income and spending**
+as two series on a shared scale. Different charts, different questions, and
+"like the reference" means the first one.
+
+`db.MoneySeries(from, step, n, who)` and `db.Purses` already hold balance over
+time, and the chart already has a character picker — so the data and the
+furniture exist either way. What does not exist is a decision:
+
+- **(a) Replace** flow with balance.
+- **(b) Add** balance as a third series — but one scale cannot honestly carry a
+  balance in the millions beside a day's income in the thousands. Read
+  `histgraph_test.lua`'s note on why both current series share one scale before
+  proposing a second axis.
+- **(c) A Gold / Flow toggle** on the chart's title bar, beside the period
+  buttons. Check `HISTL.graph_min` still holds the row if a control is added.
+
+**Open. Ask the owner.** §3.2 applies to whichever series wins so it is not
+blocked — but delete nothing until this is answered.
+
+### 3.2 The smooth line
+
+`ui.PlotColumns` emits one rectangle per column spanning y1→y2. That is a
+staircase; the reference is a 1px anti-aliased stroke.
+
+**Gate first: does 1.12 have texture rotation?** `histgraph_test.lua` asserts it
+does not, and the 1.12 API definitions list only the **4-argument**
+`Texture:SetTexCoord(minX, maxX, minY, maxY)` — not the 8-argument affine form
+later clients shear into diagonals, and `SetRotation` is far later. **Verify in
+client** before designing:
+
+```
+/run local t=UIParent:CreateTexture(); DEFAULT_CHAT_FRAME:AddMessage(tostring(pcall(t.SetTexCoord,t,0,0,0,1,1,0,1,1)))
+```
+
+If it succeeds, a true per-segment diagonal is available and this section gets
+simpler — say so and re-plan. If it errors, which is expected:
+
+- **Cheap pass first.** Drop `HISTL.col_w` toward 1 and look at it. More, thinner
+  spans may be enough, and it costs one constant to find out. **Budget it** —
+  `ui.GrowPlotSpans` pools and never shrinks, so a 600px plot at `col_w = 1` is
+  600 textures *per series*. `rowbudget_test.lua` is the precedent for treating a
+  widget count as a number with a limit.
+- **Then bake the angles into an asset.** A TGA strip of anti-aliased segments
+  at N fixed angles (start at 16, go to 32 if shallow slopes band), drawn white
+  and tinted per series exactly as `fill_art` is today. Per column: slope →
+  nearest cell → 4-arg `SetTexCoord` → position → tint. **The quantisation is
+  arithmetic and gets a test**, including a vertical slope, which has no angle
+  and must pick the steepest cell rather than divide by zero.
+- **The fill follows the line.** It already works; if the stroke smooths and the
+  fill keeps the old span tops, the two disagree by a pixel along every slope.
+
+### 3.3 Stat blocks
+
+A figure row and three blocks under the chart, matching the reference.
+
+| Figure | Source | State |
+|---|---|---|
+| HIGH / LOW | max/min of the plotted series | available now |
+| DAILY SALES / DAILY PURCHASES | ledger entries per day over the window | available now |
+| TOP SALE / TOP PURCHASE | largest single `amount` by kind | available now |
+
+Then **SALES**, **EXPENSES**, **PROFIT**, each with Total, Average per Day and
+Top Item, from `db.LedgerTotals(sinceEpoch)`.
+
+- **Top Item is not Top Sale.** One is the largest *summed* amount per item over
+  the window; the other is a single transaction. Name them so the code cannot
+  confuse them either.
+- Top Item is quality-coloured in the reference. `util.ItemInfo` /
+  `ui.CraftQualityOf` already solve that; never a fixed `GetItemInfo` index.
+- **Say which window a daily average is over.** "Average Profit per Day" across
+  All Time and across 1W are different numbers and the reference does not tell
+  you which it means.
+
+**Unblocked, and pure arithmetic over (ledger, window).** This is the part to
+build first.
+
+### 3.4 The Ledger window
+
+A **Ledger** button opening a per-item table: Item · Sold · Avg Sell Price ·
+Bought · Avg Buy Price · Avg Profit, with a keyword filter, a time range, and a
+footer reading *"N Items Resold · Xg Total Profit"*.
+
+**Today's ledger cannot produce this table.** `db.RecordTxn` stores
+`{t, kind, item, amount, id, who}` and **there is no quantity**. Every column but
+Item needs one: Sold and Bought are *unit* counts, the averages are per-unit, and
+"Items Resold" is `min(bought, sold)` per item. Built on transaction counts it
+produces a table that is wrong everywhere and looks right everywhere.
+
+**The two sides are not equally blocked, and that is the staging:**
+
+- **Buys have quantity today.** The purchase path already knows `count` —
+  `buy.session` records units. Add the field to `db.RecordTxn` and populate it
+  from the buy path now.
+- **Sales do not.** Quantity is in the mail body, needing `GetInboxText`, which
+  **HARD RULE 16 forbids inline in the inbox scan**. That is **§5.6**, and §3.4
+  cannot finish before it.
+
+Shipping §3.4 early is allowed with Bought live and Sold marked as awaiting
+data. **Never with guessed units.**
+
+Schema rules, all with precedent: quantity is additive and optional, missing
+means unknown and never 1 (`who` already set this rule — no backfill);
+**`A.RecordExternalTxn` silently drops fields it does not name**, so widen it in
+the same release or Courier-sourced sales can never carry quantity; and
+**`LEDGER_MAX` pruning makes "All Time" a lie past the cap** — say so in the UI
+or raise the cap deliberately.
+
+Window mechanics: `FauxScrollFrame_OnVerticalScroll` takes **2 args** on 1.12;
+pooled rows mean whatever one fill writes the other must clear; every colour
+through the palette. **"Filter by groups" depends on Phase 4** — leave the
+affordance out rather than stub a dropdown that filters nothing.
+
+### 3.5 Asset format
+
+`art/gradient-fill.tga` is the known-good recipe and any new art matches it:
+**uncompressed 32-bit BGRA, TGA type 2, top-origin (descriptor `0x28`),
+power-of-two dimensions**, referenced by path **without the extension**
+(`Interface\\AddOns\\Aegis_Exchange\\art\\<name>`), **white and tinted at
+runtime** so one asset serves every series colour.
+
+**Always ship a fallback for a file that will not load, and make it
+detectable.** `ui.histFillArt` plus its `/aex diag` line is the pattern — a
+chart that silently degraded and a chart that is meant to look that way are
+indistinguishable without it.
+
+**Adding art is NOT a restart release.** CLAUDE.md's restart rule is about
+adding a `.lua` file to the `.toc`; textures load by path and are not listed
+there.
+
+### 3.6 Order of work
+
+1. §3.1 answered.
+2. §3.2 cheap pass — `col_w` reduced, measured, judged by eye.
+3. §3.3 stat blocks — unblocked, useful immediately.
+4. §3.2 assets, only if the gate says no rotation and step 2 was not enough.
+5. §5.6 — sale quantity into the ledger.
+6. §3.4 Ledger window.
+
+**One MINOR for the push, PATCH per step.** Continuation of the 1.53 line unless
+the owner says otherwise — **ask before moving the MINOR**.
+
+### Also in this phase
+
 - **Disenchant value** in the tooltip — ✅ **DONE**. See 3k, which shipped all
   six of its phases between v1.29.0 and v1.49.2. This line said "building, §2 of
   3k, learning item levels from play is next" for twenty releases after that
   became untrue; the housekeeping pass caught 3k's own heading and missed the
-  forward reference to it here.
+  forward reference to it here. **The line-graph bullet above had rotted the
+  same way** — "needs a design spike" survived the spike, the implementation and
+  275 tests. When a phase says a thing is unbuilt, check the source before
+  believing it.
 
 ---
 
