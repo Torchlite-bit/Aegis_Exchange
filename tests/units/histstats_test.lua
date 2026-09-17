@@ -63,6 +63,8 @@ for _, sig in ipairs({
     "function ui.Trunc(",
     "function ui.FigureText(",
     "function ui.HistFigures(",
+    "function ui.BlockColumns(",
+    "function ui.HistBlocks(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -345,75 +347,165 @@ do
 end
 
 -- ---------------------------------------------------------------------------
-H.section("which figure sits on which row")
+H.section("the figure strip")
 -- ---------------------------------------------------------------------------
 
 do
     reset()
+    -- Two Silk sales beat the one Linen sale in TOTAL while losing to it on
+    -- any single transaction. Without that the strip's TOP SALE and a block's
+    -- Top Item hold the same number and swapping them is invisible.
     entry("sale", "Linen Cloth", 30000, NOW - DAY, 2589)
+    entry("sale", "Silk Cloth",  20000, NOW - DAY, 4306)
+    entry("sale", "Silk Cloth",  20000, NOW - DAY, 4306)
     entry("buy",  "Copper Bar",  10000, NOW - DAY, 2840)
     local st = db.LedgerStats(nil, NOW)
-    local rows = ui.HistFigures(st, 50000, 1000)
+    H.neq("the fixture separates the two questions",
+          st.topSale.amount, st.topSaleItem.total)
+    local cells = ui.HistFigures(st, 50000, 1000)
 
-    H.eq("three rows", table.getn(rows), 3)
-    H.eq("HIGH leads the first row", rows[1][1][1], "HIGH")
-    H.eq("...then LOW", rows[1][2][1], "LOW")
-    H.eq("the totals are the second row", rows[2][1][1], "SALES")
-    H.eq("...expenses", rows[2][2][1], "EXPENSES")
-    H.eq("...profit", rows[2][3][1], "PROFIT")
-    H.eq("the per-day figure leads the third", rows[3][1][1], "PER DAY")
+    H.eq("six cells", table.getn(cells), 6)
+    H.eq("HIGH", cells[1][1], "HIGH")
+    H.eq("LOW", cells[2][1], "LOW")
+    H.eq("SOLD", cells[3][1], "SOLD")
+    H.eq("BOUGHT", cells[4][1], "BOUGHT")
+    H.eq("TOP SALE", cells[5][1], "TOP SALE")
+    H.eq("TOP BUY", cells[6][1], "TOP BUY")
 
-    -- COUNTS ARE NOT MONEY. Running a transaction count through a money
-    -- formatter renders 14 as "14c" -- a wrong answer that looks right.
-    H.eq("sold is a plain count", rows[3][2][2], "1")
-    H.eq("bought is a plain count", rows[3][3][2], "1")
-    H.check("...and carries no money unit",
-            string.find(rows[3][2][2], "c", 1, true) == nil)
+    -- EACH LABEL CARRIES ITS OWN NUMBER, asserted by value. Checking only that
+    -- a figure "looks like money" is what let a sabotage swap income and
+    -- expenses under correct labels and pass every check.
+    H.eq("high carries the high", cells[1][2], util.ShortMoney(50000))
+    H.eq("low carries the low", cells[2][2], util.ShortMoney(1000))
 
-    -- EACH LABEL CARRIES ITS OWN NUMBER, asserted as the value and not as the
-    -- presence of a unit. Checking only that both figures "look like money"
-    -- is what let a sabotage swap income and expenses under correct labels and
-    -- pass all 87 checks -- the same miss as reading which palette NAME a fill
-    -- uses without checking the colours differ.
-    H.eq("sales carries the income", rows[2][1][2], util.ShortMoney(30000))
-    H.eq("expenses carries the spend", rows[2][2][2], util.ShortMoney(10000))
-    H.eq("profit carries the net", rows[2][3][2], util.ShortMoney(20000))
-    H.neq("and sales is not expenses", rows[2][1][2], rows[2][2][2])
+    -- COUNTS ARE NOT MONEY. Through a money formatter, 2 sales render as "2c".
+    H.eq("sold is a plain count", cells[3][2], "3")
+    H.eq("bought is a plain count", cells[4][2], "1")
 
-    -- Same rule on the first row: HIGH and LOW are two different numbers and
-    -- the pair must not be reversible.
-    H.eq("high carries the high", rows[1][1][2], util.ShortMoney(50000))
-    H.eq("low carries the low", rows[1][2][2], util.ShortMoney(1000))
+    -- The top SINGLE transaction of each kind, not the totals beside them.
+    H.eq("top sale is the biggest single sale",
+         cells[5][2], util.ShortMoney(30000))
+    H.eq("top buy is the biggest single buy",
+         cells[6][2], util.ShortMoney(10000))
 end
 
--- A loss keeps its sign all the way to the string.
+-- AN ABSENT FIGURE IS AN EM DASH, NOT A ZERO. "TOP SALE 0c" claims you sold
+-- something for nothing; the dash says the period holds no sale at all.
 do
     reset()
-    entry("sale", "Linen Cloth",  1000, NOW - DAY)
-    entry("buy",  "Copper Bar",  90000, NOW - DAY)
-    local st = db.LedgerStats(nil, NOW)
-    H.check("net is a loss", st.net < 0)
-    local rows = ui.HistFigures(st, 0, 0)
-    H.check("and the profit figure says so",
-            string.find(rows[2][3][2], "-", 1, true) ~= nil)
-    H.check("as does the per-day figure",
-            string.find(rows[3][1][2], "-", 1, true) ~= nil)
+    local cells = ui.HistFigures(db.LedgerStats(nil, NOW), 0, 0)
+    H.eq("no top sale is a dash", cells[5][2], "\226\128\148")
+    H.eq("no top buy is a dash", cells[6][2], "\226\128\148")
+    H.eq("but a count is still a zero", cells[3][2], "0")
 end
 
--- Nothing recorded must still render, because an empty period is the state the
+H.survives("no stats table at all still gives a strip", function()
+    ui.HistFigures(nil, 0, 0)
+end)
+
+-- ---------------------------------------------------------------------------
+H.section("the three blocks")
+-- ---------------------------------------------------------------------------
+
+do
+    reset()
+    -- The Reaper is the biggest SINGLE sale; the Cloth earns more in total.
+    -- Those numbers have to be the right way round or the assertion below
+    -- passes for the wrong reason.
+    entry("sale", "Arcanite Reaper", 50000, NOW - DAY, 12784)
+    entry("sale", "Linen Cloth",     30000, NOW - DAY, 2589)
+    entry("sale", "Linen Cloth",     30000, NOW - DAY, 2589)
+    entry("buy",  "Black Lotus",     30000, NOW - DAY, 13468)
+    local st = db.LedgerStats(nil, NOW)
+    local blocks = ui.HistBlocks(st)
+
+    H.eq("three blocks", table.getn(blocks), 3)
+    H.eq("sales", blocks[1].title, "SALES")
+    H.eq("expenses", blocks[2].title, "EXPENSES")
+    H.eq("profit", blocks[3].title, "PROFIT")
+    H.eq("three rows each", table.getn(blocks[1].rows), 3)
+
+    H.eq("the sales total", blocks[1].rows[1][2], util.ShortMoney(110000))
+    H.eq("the expenses total", blocks[2].rows[1][2], util.ShortMoney(30000))
+    H.eq("the profit total", blocks[3].rows[1][2], util.ShortMoney(80000))
+    H.neq("and sales is not expenses",
+          blocks[1].rows[1][2], blocks[2].rows[1][2])
+
+    -- TOP ITEM IS THE BIGGEST EARNER, not the biggest single sale. The Reaper
+    -- went for more than either Cloth; the Cloth earned more in total.
+    H.eq("the sales block names the biggest earner",
+         blocks[1].rows[3][2], "Linen Cloth")
+    H.eq("...and carries its id so the name can be quality-coloured",
+         blocks[1].rows[3][3], 2589)
+    H.neq("...which is NOT the biggest single sale",
+          blocks[1].rows[3][2], st.topSale.item)
+    H.eq("the expenses block names the biggest spend",
+         blocks[2].rows[3][2], "Black Lotus")
+
+    -- PROFIT'S THIRD ROW IS LABELLED FOR WHAT IT ACTUALLY IS. Per-item profit
+    -- needs what you paid for the thing you sold, and the ledger has no
+    -- quantity yet (ROADMAP 5.6), so it must not claim to be that.
+    H.eq("profit's item row does not claim to be profit per item",
+         blocks[3].rows[3][1], "Top seller")
+    H.neq("...unlike the sales block's", blocks[1].rows[3][1], "Top seller")
+end
+
+-- An empty period renders rather than erroring, because it is the state the
 -- tab opens in on a fresh install.
 do
     reset()
-    local rows = ui.HistFigures(db.LedgerStats(nil, NOW), 0, 0)
-    H.eq("still three rows", table.getn(rows), 3)
-    H.survives("and every row renders", function()
-        local i = 1
-        while i <= 3 do ui.FigureText(rows[i]); i = i + 1 end
-    end)
+    local blocks = ui.HistBlocks(db.LedgerStats(nil, NOW))
+    H.eq("still three blocks", table.getn(blocks), 3)
+    H.eq("and a missing top item is a dash", blocks[1].rows[3][2],
+         "\226\128\148")
+    H.isNil("...with no id to colour", blocks[1].rows[3][3])
 end
 
-H.survives("no stats table at all still renders", function()
-    ui.HistFigures(nil, 0, 0)
+H.survives("no stats table at all still gives blocks", function()
+    ui.HistBlocks(nil)
 end)
+
+-- ---------------------------------------------------------------------------
+H.section("laying the columns out")
+-- ---------------------------------------------------------------------------
+
+-- ARITHMETIC, NOT ANCHORS. Three blocks each anchored to the one before drift
+-- by a rounding error per gap, and the third comes up short -- which shows as
+-- the Profit block clipping and nothing else.
+do
+    local cols = ui.BlockColumns(300, 3, 0)
+    H.eq("three columns", table.getn(cols), 3)
+    H.eq("the first starts at zero", cols[1].x, 0)
+    H.eq("each is an equal share", cols[1].w, 100)
+    H.eq("the second follows the first", cols[2].x, 100)
+    H.eq("and the third the second", cols[3].x, 200)
+end
+
+do
+    local cols = ui.BlockColumns(320, 3, 10)
+    -- 320 less two 10px gaps is 300, so 100 each.
+    H.eq("gaps come out of the width first", cols[1].w, 100)
+    H.eq("...and are added between", cols[2].x, 110)
+    H.eq("the last column ends inside the width",
+         cols[3].x + cols[3].w, 320)
+end
+
+do
+    local six = ui.BlockColumns(600, 6, 10)
+    H.eq("six columns", table.getn(six), 6)
+    H.check("none runs past the width",
+            six[6].x + six[6].w <= 600, six[6].x + six[6].w)
+end
+
+-- Degenerate widths, for the reason every fit function has this section: this
+-- runs before UIParent has been measured on some logins, and a zero-width
+-- FontString is not laid out at all.
+do
+    local cols = ui.BlockColumns(0, 3, 10)
+    H.eq("an unmeasured width still gives three columns", table.getn(cols), 3)
+    H.check("...each at least a pixel", cols[3].w >= 1, cols[3].w)
+    cols = ui.BlockColumns(nil, nil, nil)
+    H.check("...and so do no arguments at all", table.getn(cols) >= 1)
+end
 
 os.exit(H.report("histstats"))

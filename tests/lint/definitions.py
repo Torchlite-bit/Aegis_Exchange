@@ -43,6 +43,19 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.54.0. The History tab was split -- a table on the left, a chart on
+    # the right -- and this divided the panel between them. Neither half had
+    # room, so they became two screens: the tab is the dashboard and the chart
+    # has the whole panel, and the table lives in ui.BuildLedgerWindow. With
+    # nothing to divide, there is nothing for this to compute.
+    # v1.54.0. Its two callers were the History tab's stat rows, which are a
+    # six-cell strip and three blocks now -- every figure its own FontString in
+    # its own column, so there is no run-together line to build.
+    "ui.StatLine": "v1.54.0 -- the figure rows became ui.PaintHistFigures' "
+                   "strip and blocks; nothing formats a line of pairs any more",
+    "ui.HistWidthsAt": "v1.54.0 -- the History tab is no longer split; the "
+                       "chart takes the whole panel and ui.HistPlotSizeAt "
+                       "measures it directly",
     # v1.53.7. The chart gained views whose series can go NEGATIVE -- a
     # cumulative balance below zero, a character down on the week -- so an
     # axis described by its maximum alone stopped being enough. ui.SeriesRange

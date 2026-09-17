@@ -4658,26 +4658,35 @@ Three decisions worth not re-litigating:
   collapse them. One 500g rare against four hundred sales of Linen Cloth is the
   same money and only one of them is a business.
 
-**Still to do — 3.3b, and it is blocked on layout, not arithmetic.**
-`LedgerStats` already returns everything the blocks need; what does not exist
-is anywhere to put them. The reference has three blocks of Total / Average per
-Day / Top Item plus a six-figure row — roughly 190px of chrome under the plot.
-`HISTL.plot_bot` is 78 and the graph pane is a fraction of a resizable window,
-so on a short window there is no room at all.
+**3.3b shipped in v1.54.0, with the restructure it was waiting on.** The tab is
+the dashboard now: `ui.HistFigures` returns the **six-cell strip** (HIGH, LOW,
+SOLD, BOUGHT, TOP SALE, TOP BUY) and `ui.HistBlocks` the **three blocks**
+(SALES / EXPENSES / PROFIT, each Total / Per day / Top item, quality-coloured).
+`ui.PaintHistFigures` places both from `ui.BlockColumns` — arithmetic, not a
+chain of anchors, because three blocks each anchored to the one before drift by
+a rounding error per gap and the third clips. `plot_bot` 78 → 104.
 
-That is the same question §3.4 forces, and it should be answered once: **the
-reference has two screens** — a Dashboard (chart + stats) and a Ledger (the
-table). Aegis has one tab holding both. If the table moves into §3.4's popup,
-the History tab becomes the dashboard and the blocks have the whole width.
-**Decide that before building 3.3b**, and do not grow `plot_bot` again in the
-meantime.
+Two things recorded so they are not re-litigated:
 
-Still missing from the reference's figure set, all of it available from
-`LedgerStats` the moment there is room: **TOP SALE**, **TOP PURCHASE**, the
-per-day breakdown for sales and expenses separately, and **Top Item** per block
-(quality-coloured — `util.ItemInfo`, never a fixed `GetItemInfo` index).
+- **Profit's third row is "Top seller", not "Top item".** Per-item profit needs
+  what you PAID for what you sold, and the ledger has no quantity yet (§5.6).
+  The label has to stop it claiming to be the other thing.
+- **An absent figure is an em dash, not a zero.** "TOP SALE 0c" claims you sold
+  something for nothing.
 
 ### 3.4 The Ledger window
+
+**The window itself shipped in v1.54.0** — the two-screen question §3.3b was
+waiting on is answered, and this is the answer. `ui.BuildLedgerWindow` builds a
+draggable, position-remembering frame parented to **UIParent** (not to the Aegis
+window, so it survives that closing and can sit beside the auction house), and
+`ui.BuildHistoryTab` parents the table's widgets to it with one word: `host`.
+The rows, headers, totals line and Clear button are otherwise unchanged, because
+what moved is where they live and not what they do. `ui.HistWidthsAt` and
+`ui.StatLine` went with the split.
+
+**What shipped is the OLD transaction table in a new window.** The PER-ITEM
+table below is still ahead, and still blocked on §5.6:
 
 A **Ledger** button opening a per-item table: Item · Sold · Avg Sell Price ·
 Bought · Avg Buy Price · Avg Profit, with a keyword filter, a time range, and a
@@ -4735,7 +4744,8 @@ there.
 1. §3.1 answered — ✅ gold balance, and already built.
 2. §3.2 cheap pass — `col_w` reduced, measured, judged by eye.
 3. §3.3a figures — ✅ **DONE** (v1.53.30).
-3b. §3.3b blocks — after the one-screen-or-two question below is answered.
+3b. §3.3b blocks — ✅ **DONE** (v1.54.0), with the two-screen restructure.
+3c. §3.4's window — ✅ **DONE** (v1.54.0). Its per-item TABLE is not.
 4. §3.2 sheared segments — affine `SetTexCoord` is available, so this is one
    small feather asset rather than a sprite strip. Skip if step 2 looked good
    enough.

@@ -3095,19 +3095,9 @@ end
     # other two up. The bug it plants is unchanged: two strings that can both
     # grow put back on one line, which is how "LOW 9g 14s 6c" and "IN 37s 92c"
     # became "LOWN0g 14s 6c".
-    ('stat-rows-share-a-line', 'ui/frame.lua',
-     '    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)\n    ui.histStatR:SetJustifyH("LEFT")',
-     '    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 32)\n    ui.histStatR:SetJustifyH("RIGHT")',
-     'histgraph'),
-
-    # The ledger table squeezed below its own columns, so the Amount column
+        # The ledger table squeezed below its own columns, so the Amount column
     # -- the rightmost thing in the window -- runs under the scrollbar.
-    ('table-columns-run-under-the-scrollbar', 'ui/frame.lua',
-     '    left_min   = 566,',
-     '    left_min   = 420,',
-     'histgraph'),
-
-    # ---- gold-only chart, longer history (v1.53.8) -----------------------
+        # ---- gold-only chart, longer history (v1.53.8) -----------------------
 
     # Compaction keeping the FIRST sample of each day rather than the last.
     # The series reader carries the last known figure forward, so a day has
@@ -3521,20 +3511,10 @@ end
 
     # The chart given the table's minimum width whatever the window, so it
     # never grows -- and the panel's two halves stop adding up.
-    ("hist-split-does-not-follow-the-window", "ui/frame.lua",
-     "    local graph = math.floor(inner * HISTL.graph_frac)",
-     "    local graph = HISTL.graph_min",
-     "histgraph"),
-
-    # The CHART winning the squeeze instead of the table. The table's columns
+        # The CHART winning the squeeze instead of the table. The table's columns
     # are fixed and its Amount column is the rightmost thing that can be
     # clipped.
-    ("hist-table-loses-the-squeeze", "ui/frame.lua",
-     "    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end",
-     "    local _ = inner",
-     "histgraph"),
-
-    # The plot measured off a two-corner-anchored frame, which reports the size
+        # The plot measured off a two-corner-anchored frame, which reports the size
     # it was created at -- so the chart keeps its first width however far the
     # window is dragged. This trap has taken five other things in this file.
     ("hist-plot-measures-a-stale-frame", "ui/frame.lua",
@@ -3545,12 +3525,7 @@ end
     # The table anchored corner to corner again -- the way every other list in
     # this window is built, and so the easy thing to "fix" it back to. It runs
     # the table under the chart.
-    ("hist-table-anchored-under-the-chart", "ui/frame.lua",
-     '    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,\n                    LISTBOX.hist.bot)',
-     '    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.hist.bot)',
-     "histgraph"),
-
-    # The chart never repainted with the table, so it keeps whichever period
+        # The chart never repainted with the table, so it keeps whichever period
     # was selected when the tab was built.
     ("hist-chart-not-repainted", "ui/frame.lua",
      "    ui.UpdateHistoryGraph()\nend",
@@ -5938,12 +5913,7 @@ end""",
 
     # Counts are not money: through a money formatter, 14 sales render as
     # "14c" -- a wrong answer that looks like a right one.
-    ("figures-format-counts-as-money", "ui/frame.lua",
-     '            { "SOLD",    tostring(st.saleN or 0) },',
-     '            { "SOLD",    util.ShortMoney(st.saleN or 0) },',
-     "histstats"),
-
-    # math.floor on a negative average reports a loss as bigger than it is.
+        # math.floor on a negative average reports a loss as bigger than it is.
     ("trunc-floors-a-loss", "ui/frame.lua",
      """    if v < 0 then return -math.floor(-v) end
     return math.floor(v)""",
@@ -5951,24 +5921,110 @@ end""",
      "histstats"),
 
     # The rows are an interface: 3.3b's grid reads them by position.
-    ("figures-swap-sales-and-expenses", "ui/frame.lua",
-     """            { "SALES",    util.ShortMoney(st.income or 0) },
-            { "EXPENSES", util.ShortMoney(st.spend or 0) },""",
-     """            { "SALES",    util.ShortMoney(st.spend or 0) },
-            { "EXPENSES", util.ShortMoney(st.income or 0) },""",
-     "histstats"),
-
-    ("figures-swap-high-and-low", "ui/frame.lua",
-     """            { "HIGH", util.ShortMoney(hi or 0) },
-            { "LOW",  util.ShortMoney(lo or 0) },""",
-     """            { "HIGH", util.ShortMoney(lo or 0) },
-            { "LOW",  util.ShortMoney(hi or 0) },""",
-     "histstats"),
-
-    # Pairs that run together read as a sentence rather than as figures.
+            # Pairs that run together read as a sentence rather than as figures.
     ("figuretext-loses-the-gap", "ui/frame.lua",
      '        if out ~= "" then out = out .. "   " end',
      '        if out ~= "" then out = out .. "" end',
+     "histstats"),
+
+    # ---- the two-screen History tab ---------------------------------------
+    # The table moved into its own window. Parenting it back to the panel puts
+    # it behind the chart, which now covers the whole tab.
+    ("hist-table-back-in-the-tab", "ui/frame.lua",
+     "    local host = ui.BuildLedgerWindow()",
+     "    local host = panel",
+     "histgraph"),
+
+    # A two-corner-anchored frame that ALSO has its width set ignores one of
+    # them -- the bug the old split had to avoid in the opposite direction.
+    ("hist-table-sets-its-own-width", "ui/frame.lua",
+     '    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",\n                    -HISTL.edge, HISTL.ledger_bot)',
+     '    scroll:SetWidth(HISTL.ledger_w)',
+     "histgraph"),
+
+    # SetPoint ADDS a point on 1.12. Without the clear, every repaint pulls the
+    # figure further right.
+    ("paintfigs-forgets-clearallpoints", "ui/frame.lua",
+     "        w.label:ClearAllPoints()\n        w.value:ClearAllPoints()",
+     "        local _ = w",
+     "histgraph"),
+
+    # Columns by arithmetic, not by chaining anchors.
+    ("paintfigs-chains-anchors", "ui/frame.lua",
+     "    local cols = ui.BlockColumns(plotW, HISTL.strip_cells, HISTL.col_gap)",
+     "    local cols = {}",
+     "histgraph"),
+
+    # The ledger window's height and its row count are one number.
+    ("ledger-height-forgets-its-rows", "ui/frame.lua",
+     "    return HISTL.ledger_top + HISTL.ledger_bot\n           + HIST_ROW_H * ui.LedgerRowCount()",
+     "    return HISTL.ledger_top + HISTL.ledger_bot",
+     "histgraph"),
+
+    # ---- the figure strip and the blocks ----------------------------------
+    ("figures-format-counts-as-money", "ui/frame.lua",
+     '        { "SOLD",     tostring(st.saleN or 0) },',
+     '        { "SOLD",     util.ShortMoney(st.saleN or 0) },',
+     "histstats"),
+
+    ("figures-swap-high-and-low", "ui/frame.lua",
+     '        { "HIGH",     util.ShortMoney(hi or 0) },\n        { "LOW",      util.ShortMoney(lo or 0) },',
+     '        { "HIGH",     util.ShortMoney(lo or 0) },\n        { "LOW",      util.ShortMoney(hi or 0) },',
+     "histstats"),
+
+    # An absent figure shown as a zero claims you sold something for nothing.
+    ("figures-show-absent-as-zero", "ui/frame.lua",
+     '        { "TOP SALE", st.topSale and util.ShortMoney(st.topSale.amount)\n                      or "\\226\\128\\148" },',
+     '        { "TOP SALE", util.ShortMoney(st.topSale and st.topSale.amount or 0) },',
+     "histstats"),
+
+    # Top Sale is the biggest single transaction; the strip must not show the
+    # summed total there -- that is the block's Top Item.
+    ("figures-topsale-shows-the-total", "ui/frame.lua",
+     '        { "TOP SALE", st.topSale and util.ShortMoney(st.topSale.amount)',
+     '        { "TOP SALE", st.topSaleItem and util.ShortMoney(st.topSaleItem.total)',
+     "histstats"),
+
+    ("blocks-swap-sales-and-expenses", "ui/frame.lua",
+     '                { "Total",   util.ShortMoney(st.income or 0) },',
+     '                { "Total",   util.ShortMoney(st.spend or 0) },',
+     "histstats"),
+
+    # A block's Top Item is the biggest EARNER; the biggest single sale is a
+    # different question and lives in the strip.
+    ("blocks-topitem-is-the-top-sale", "ui/frame.lua",
+     '                top(st.topSaleItem, "Top item"),',
+     '                top(st.topSale, "Top item"),',
+     "histstats"),
+
+    # Profit's item row cannot claim to be profit per item: the ledger has no
+    # quantity yet, so what you paid for what you sold is unknown.
+    ("blocks-profit-claims-per-item", "ui/frame.lua",
+     '                top(st.topSaleItem, "Top seller"),',
+     '                top(st.topSaleItem, "Top item"),',
+     "histstats"),
+
+    # The id is what lets a Top Item name be quality-coloured.
+    ("blocks-drop-the-item-id", "ui/frame.lua",
+     '        return { label, rec.item or "?", rec.itemId }',
+     '        return { label, rec.item or "?" }',
+     "histstats"),
+
+    ("blockcolumns-ignores-the-gap", "ui/frame.lua",
+     "    local avail = (width or 0) - gap * (n - 1)",
+     "    local avail = (width or 0)",
+     "histstats"),
+
+    ("blockcolumns-overlaps-columns", "ui/frame.lua",
+     "        table.insert(out, { x = (i - 1) * (w + gap), w = w })",
+     "        table.insert(out, { x = (i - 1) * w, w = w })",
+     "histstats"),
+
+    # Anchored on the line ABOVE it too: `if w < 1 then w = 1 end` appears in
+    # three functions and a bare match sabotages whichever comes first.
+    ("blockcolumns-can-return-zero-width", "ui/frame.lua",
+     "    local w = math.floor(avail / n)\n    -- NEVER ZERO",
+     "    local w = 0\n    -- NEVER ZERO",
      "histstats"),
 
 ]

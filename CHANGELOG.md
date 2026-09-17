@@ -18,6 +18,39 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.0]
+
+### Changed
+- **The History tab is now a dashboard, and the ledger table has its own
+  window.** They were sharing one tab and neither had room: the chart had to
+  fit an axis, a legend, a line and its figures into 46% of the panel, and the
+  table's Amount column ran under its own scrollbar below a fixed width.
+
+  **The chart now has the whole tab**, and the **Ledger** button beside its
+  heading opens the table in a window you can drag anywhere — including
+  alongside the auction house, since it isn't a child of the Aegis window and
+  survives closing it. It remembers where you put it.
+
+### Added
+- **A six-figure strip under the chart** — HIGH, LOW, SOLD, BOUGHT, TOP SALE,
+  TOP BUY — and **three blocks** beneath it: **SALES**, **EXPENSES** and
+  **PROFIT**, each with a Total, a Per day, and the item that earned or cost
+  the most. Item names are quality-coloured.
+
+  All of it follows the period buttons.
+
+  **Top Sale and Top Item answer different questions** and the tab says both:
+  one 500g rare and four hundred sales of Linen Cloth are the same money, and
+  only one of them is a business. The strip's TOP SALE is your biggest single
+  transaction; a block's Top item is what actually earns.
+
+  *(Profit's third row is labelled "Top seller", not "Top item" — per-item
+  profit needs what you paid for the thing you sold, and the ledger doesn't
+  record quantities yet.)*
+
+- **An absent figure reads as an em dash, not a zero.** "TOP SALE 0c" would
+  claim you sold something for nothing.
+
 ## [1.53.30]
 
 ### Added
@@ -5839,6 +5872,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

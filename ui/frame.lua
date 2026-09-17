@@ -12355,36 +12355,62 @@ local HIST_HEADER_DEFS = {
 local HISTL = {
     edge       = 10,
     gap        = 12,
-    -- The table's columns end at 512 plus the row padding and its scrollbar.
-    -- Below this the Amount column starts running under the scrollbar, which
-    -- is the clipping this number exists to prevent.
-    left_min   = 566,
+    -- THE LEDGER WINDOW'S WIDTH, and it used to be the table half's minimum
+    -- when the History tab was split. The number is the same for the same
+    -- reason: the table's columns end at 512 plus the row padding and its
+    -- scrollbar, and below this the Amount column runs under the scrollbar.
+    --
+    -- The tab is not split any more -- the chart has the whole panel and the
+    -- table lives in a window the Ledger button opens (ROADMAP 3.4). So this
+    -- is a fixed width now rather than a floor on a fraction, which is why
+    -- graph_frac and ui.HistWidthsAt are gone.
+    ledger_w   = 566,
+    -- Rows the ledger window opens at.
+    ledger_rows = 14,
+    -- Its chrome above and below the rows: title bar, the totals line, the
+    -- note, and the sortable column headers up top; a margin below.
+    ledger_top = 92,
+    ledger_bot = 14,
     -- WIDE ENOUGH FOR THE CHART'S OWN TITLE BAR, which is what it holds now:
     -- two side paddings, the heading, and five period buttons with their gaps.
     -- The geometry suite checks that sum rather than trusting this number, so
     -- adding a sixth period cannot quietly push the buttons off the edge.
+    --
+    -- Still a floor even though the chart has the whole panel, because the
+    -- window itself has a minimum and the arithmetic has to survive a width
+    -- of zero on a login where UIParent has not been measured yet.
     graph_min  = 300,
-    -- Raised from 0.36. The chart was the half that had to hold an axis, a
-    -- legend, a line and two rows of figures in whatever was left over, and it
-    -- was the half that ran out.
-    graph_frac = 0.46,
     -- Inside the chart box: two rows of chrome above the plot -- the title
     -- with the period buttons, then the character picker -- and the axis
     -- labels below it.
     plot_top   = 54,
     -- Room under the plot for the x labels AND the two stat rows.
     --
-    -- THREE ROWS as of the figure work: HIGH/LOW, then the Sales / Expenses /
-    -- Profit totals, then the per-day figure and the two counts. See
-    -- ui.HistFigures, which owns which figure sits on which row.
+    -- Room under the plot for the x labels, the six-cell figure strip, and the
+    -- three Sales / Expenses / Profit blocks.
     --
-    -- It was TWO, because one was two FontStrings anchored to opposite ends of
-    -- the same line and they ran into each other -- "LOW 9g 14s 6c" and "IN
-    -- 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window. Two strings
-    -- that can both grow cannot share a line; stacking them removes the
-    -- collision rather than making it less likely. Each row is ONE string for
-    -- the same reason, so a row may only ever grow to the right.
-    plot_bot   = 78,
+    -- IT GREW TWICE. It was 64 for two rows of running text, then 78 for
+    -- three, and it is 104 now that the chart has the whole panel and there is
+    -- width for a strip and columns. Each figure is its OWN FontString in its
+    -- own column, which is what finally removed the collision the two-row
+    -- version was working around -- "LOW 9g 14s 6c" and "IN 37s 92c" ran into
+    -- each other as "LOWN0g 14s 6c" because two strings that can both grow
+    -- shared a line.
+    plot_bot   = 104,
+    -- The figure strip: six cells across the plot's width.
+    strip_cells = 6,
+    -- ...and the three blocks under it, three rows each.
+    block_count = 3,
+    block_rows  = 3,
+    -- Gap between columns, in both the strip and the blocks.
+    col_gap    = 10,
+    -- One line of figures, and the baselines the strip and the blocks sit on
+    -- measured up from the box's bottom edge.
+    fig_line   = 13,
+    strip_y    = 62,
+    block_y    = 4,
+    -- The label column inside a block: "Per day" and its widest sibling.
+    block_label_w = 56,
     plot_side  = 10,
     -- The y-axis labels live to the LEFT of the drawing area, the way the
     -- reference chart has them -- so the plot starts this far in.
@@ -12421,6 +12447,9 @@ local HISTL = {
     fill_flip  = false,
     -- The chart's own title bar: the heading, and the period buttons beside
     -- it.
+    -- The Ledger button beside the chart's heading -- the way into the other
+    -- screen. Wider than a period button because it carries a word.
+    ledger_btn_w = 54,
     per_w      = 32,
     per_h      = 18,
     per_gap    = 3,
@@ -12453,21 +12482,6 @@ local HISTL = {
 --
 -- THE TABLE WINS THE SQUEEZE. Its columns are fixed and its Amount column is
 -- the rightmost thing in the window that can be clipped; the chart has no
--- fixed content and degrades to a narrower chart gracefully.
-function ui.HistWidthsAt(w)
-    local inner = ui.PanelWidthAt(w) - HISTL.edge * 2 - HISTL.gap
-    if inner < 2 then inner = 2 end
-    local graph = math.floor(inner * HISTL.graph_frac)
-    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end
-    if graph < HISTL.graph_min then graph = HISTL.graph_min end
-    -- ...but never to the point of taking the table away entirely. At a window
-    -- narrower than both minima together something has to give, and a chart
-    -- with no table beside it is not the History tab.
-    if graph > inner - 60 then graph = inner - 60 end
-    if graph < 1 then graph = 1 end
-    return inner - graph, graph
-end
-
 -- The time window the chart covers, divided into `n` buckets.
 --
 -- Returns from, step. This was ui.HistBuckets, which also bucketed the ledger
@@ -12635,7 +12649,12 @@ end
 -- Saved Searches columns and all six list row counts; measuring a two-corner
 -- frame is never the answer here.
 function ui.HistPlotSizeAt(winW, winH)
-    local _, graphW = ui.HistWidthsAt(winW)
+    -- THE WHOLE PANEL, less the box's own edges. The tab used to be split --
+    -- table on the left, chart on the right -- and ui.HistWidthsAt divided it.
+    -- The table is a window of its own now (ui.LedgerWindow), so the chart's
+    -- width is simply what the panel has.
+    local graphW = ui.PanelWidthAt(winW) - HISTL.edge * 2
+    if graphW < HISTL.graph_min then graphW = HISTL.graph_min end
     local w = graphW - HISTL.plot_side * 2 - HISTL.y_gutter
     local h = ui.PanelHeightAt(winH) - LISTBOX.hist.top - LISTBOX.hist.bot
               - HISTL.plot_top - HISTL.plot_bot
@@ -12901,6 +12920,157 @@ local function AuctionSoldItem(subject)
 end
 
 -- Scan the open mailbox for AH sale mails and log each one once (deduped by an
+-- ---------------------------------------------------------------------------
+-- The Ledger window
+--
+-- WHY THE TAB SPLIT IN TWO. The History tab used to hold a table on the left
+-- and a chart on the right, and neither had room. The chart had to fit an
+-- axis, a legend, a line and its figures into whatever was left of 46% of the
+-- panel; the table's Amount column ran under its own scrollbar below a fixed
+-- minimum width. Two screens that each want the whole window do not become one
+-- screen by being placed side by side.
+--
+-- So they are two screens now, the way the reference does it: the tab is the
+-- DASHBOARD -- the chart across the full width, with its figures and the
+-- Sales / Expenses / Profit blocks under it -- and the table is a window the
+-- Ledger button opens. Neither is squeezed and each is the size of the thing
+-- it shows.
+--
+-- IT IS NOT A CHILD OF THE MAIN WINDOW. Parented to UIParent and strata
+-- DIALOG, like the shopping list, so it survives the Aegis window being closed
+-- and can be dragged anywhere. A ledger you can put beside the auction house
+-- is more useful than one trapped inside it.
+-- ---------------------------------------------------------------------------
+
+-- How many rows the ledger window shows. FIXED, because the window is a fixed
+-- height -- and it is the same number ui.LedgerWindowHeight sizes the frame
+-- from, so a change to one cannot leave the other behind.
+function ui.LedgerRowCount()
+    local n = HISTL.ledger_rows
+    if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
+    if n < 1 then n = 1 end
+    return n
+end
+
+function ui.LedgerWindowHeight()
+    return HISTL.ledger_top + HISTL.ledger_bot
+           + HIST_ROW_H * ui.LedgerRowCount()
+end
+
+function ui.BuildLedgerWindow()
+    if ui.ledgerFrame then return ui.ledgerFrame end
+    local f = CreateFrame("Frame", "AegisExchangeLedger", UIParent)
+    f:SetWidth(HISTL.ledger_w)
+    f:SetHeight(ui.LedgerWindowHeight())
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    f:SetFrameStrata("DIALOG")
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.panelBG[1], C.panelBG[2], C.panelBG[3], 0.95)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function() f:StartMoving() end)
+    f:SetScript("OnDragStop", function()
+        f:StopMovingOrSizing()
+        ui.SaveLedgerPoint()
+    end)
+    f:Hide()
+    ui.ledgerFrame = f
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", HISTL.edge, -8)
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Ledger")
+
+    local close = ui.MakeButton(f, "quiet")
+    close:SetWidth(20); close:SetHeight(18)
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -HISTL.edge, -8)
+    close:SetText("X")
+    close:SetScript("OnClick", function() ui.HideLedgerWindow() end)
+
+    return f
+end
+
+function ui.SaveLedgerPoint()
+    if not ui.ledgerFrame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    local ok, point, _, relPoint, x, y = pcall(function()
+        return ui.ledgerFrame:GetPoint(1)
+    end)
+    if not ok or not point then return end
+    -- All four, for the reason ui.SaveWindowPoint spells out: a pair of
+    -- offsets means nothing without the point they are measured from.
+    s.ledgerPoint, s.ledgerRel = point, relPoint or point
+    s.ledgerX, s.ledgerY = math.floor(x or 0), math.floor(y or 0)
+end
+
+function ui.RestoreLedgerPoint()
+    if not ui.ledgerFrame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s or not s.ledgerPoint then return end
+    -- Same reachability check the main window and the shopping list make: a
+    -- point saved on a large screen and restored on a small one lands with the
+    -- title bar -- the only drag handle -- off the edge.
+    local sw = UIParent and UIParent:GetWidth() or 0
+    local sh = UIParent and UIParent:GetHeight() or 0
+    if not ui.PointIsReachable(s.ledgerPoint, s.ledgerRel, s.ledgerX, s.ledgerY,
+                               sw, sh, HISTL.ledger_w,
+                               ui.ledgerFrame:GetHeight() or 0) then
+        return
+    end
+    ui.ledgerFrame:ClearAllPoints()
+    ui.ledgerFrame:SetPoint(s.ledgerPoint, UIParent, s.ledgerRel,
+                            s.ledgerX, s.ledgerY)
+end
+
+function ui.ShowLedgerWindow()
+    ui.BuildHistoryTab()      -- the table lives in the window; build it first
+    ui.BuildLedgerWindow()
+    ui.RestoreLedgerPoint()
+    ui.ledgerFrame:Show()
+    ui.RefreshHistory()
+    ui.RefreshLedgerButton()
+end
+
+function ui.HideLedgerWindow()
+    if ui.ledgerFrame then ui.ledgerFrame:Hide() end
+    -- The button reads as pressed while the window is up, so it has to be told
+    -- when the window goes down -- including by its own X.
+    ui.RefreshLedgerButton()
+end
+
+function ui.ToggleLedgerWindow()
+    if ui.ledgerFrame and ui.ledgerFrame:IsShown() then
+        ui.HideLedgerWindow()
+    else
+        ui.ShowLedgerWindow()
+    end
+end
+
+-- The Ledger button's label and pressed state. PURE, so the pair cannot drift:
+-- a button that says "Ledger" while the window is open, or reads unpressed
+-- while it is, is the same class of bug as a Clear that repaints the bar and
+-- not the list.
+function ui.LedgerButtonState(shown)
+    if shown then return "Ledger", true end
+    return "Ledger", false
+end
+
+function ui.RefreshLedgerButton()
+    if not ui.histLedgerBtn then return end
+    local shown = ui.ledgerFrame and ui.ledgerFrame:IsShown() and true or false
+    local label, pressed = ui.LedgerButtonState(shown)
+    ui.histLedgerBtn:SetText(label)
+    ui.MarkChosen({ ui.histLedgerBtn }, function() return pressed end)
+end
+
 -- approximate arrival time so the same mail isn't re-counted across sessions).
 function ui.ScanMailSales()
     -- Stand down when a companion addon (Aegis: Courier) owns the mailbox.
@@ -12935,12 +13105,19 @@ function ui.BuildHistoryTab()
     ui.histBuilt = true
     ui.histPeriod = 2   -- default to 7d
 
+    -- THE TABLE'S WIDGETS ARE PARENTED TO THE LEDGER WINDOW, not to the panel.
+    -- Everything below that used to say `panel` for the list half now says
+    -- `host` -- that one word is what moved the table out of the tab. The
+    -- rows, their headers, the totals line and the Clear button are otherwise
+    -- identical, because what changed is where they live, not what they do.
+    local host = ui.BuildLedgerWindow()
+
     -- THE PERIOD BUTTONS ARE THE CHART'S NOW -- see ui.BuildHistoryGraph. They
     -- sat here, at the panel's top-left, a table's width away from the thing
     -- they change, so nothing about the layout said they were connected. The
     -- band they used to occupy is what LISTBOX.hist.top gave back to the
     -- table.
-    local clearBtn = ui.MakeButton(panel, "quiet")
+    local clearBtn = ui.MakeButton(host, "quiet")
     clearBtn:SetWidth(100); clearBtn:SetHeight(20)
     clearBtn:SetText("Clear history")
     clearBtn:SetScript("OnClick", function()
@@ -12949,12 +13126,12 @@ function ui.BuildHistoryTab()
     ui.histClearBtn = clearBtn
 
     -- Totals line.
-    ui.histTotals = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.histTotals:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -12)
+    ui.histTotals = host:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.histTotals:SetPoint("TOPLEFT", host, "TOPLEFT", HISTL.edge, -30)
     ui.histTotals:SetJustifyH("LEFT")
 
-    ui.histNote = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histNote:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -32)
+    ui.histNote = host:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histNote:SetPoint("TOPLEFT", host, "TOPLEFT", HISTL.edge, -50)
     ui.histNote:SetJustifyH("LEFT")
     ui.histNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
@@ -12968,19 +13145,19 @@ function ui.BuildHistoryTab()
     local rowLeft = 6
     ui.histSortKey = "when"
     ui.histSortDir = "desc"
-    ui.histHeaders = ui.MakeSortHeaders(panel, rowLeft, -54, HCX, HCW,
+    ui.histHeaders = ui.MakeSortHeaders(host, rowLeft, -70, HCX, HCW,
         function(key) ui.SetHistSort(key) end, HIST_HEADER_DEFS)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
-        panel, "FauxScrollFrameTemplate")
-    -- ANCHORED DOWN THE LEFT, not corner to corner. The panel is split now
-    -- and the table is its left half, so the width is set from
-    -- ui.HistWidthsAt rather than taken from a right-hand anchor -- a
-    -- BOTTOMRIGHT anchor here would put the table under the chart.
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.hist.top)
-    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,
-                    LISTBOX.hist.bot)
-    scroll:SetWidth(HISTL.left_min - HISTL.edge * 2)
+        host, "FauxScrollFrameTemplate")
+    -- CORNER TO CORNER of the ledger window, which is the whole reason the
+    -- table moved. It was anchored down the LEFT only, with its width set from
+    -- ui.HistWidthsAt, because a BOTTOMRIGHT anchor would have put it under
+    -- the chart it shared the panel with. Nothing shares this window, so both
+    -- corners are available and the width follows the frame.
+    scroll:SetPoint("TOPLEFT", host, "TOPLEFT", rowLeft, -HISTL.ledger_top)
+    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",
+                    -HISTL.edge, HISTL.ledger_bot)
 
     -- ANCHORED TO THE TABLE, not to the panel. Clear history used to sit at
     -- the panel's top-right, which is where the chart is now -- and the
@@ -12993,7 +13170,7 @@ function ui.BuildHistoryTab()
     -- the only thing that follows the split and then placed into the one band
     -- that was already occupied.
     clearBtn:ClearAllPoints()
-    clearBtn:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, LISTBOX.hist.top - 8)
+    clearBtn:SetPoint("TOPRIGHT", host, "TOPRIGHT", -HISTL.edge - 26, -30)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -13011,7 +13188,7 @@ ui.GrowHistRows = function(n)
             -- enabled at all, so they received no hover events of any kind --
             -- a ledger line is not clickable, but it should still light up
             -- under the cursor like every other row in the window.
-            local row = CreateFrame("Button", nil, panel)
+            local row = CreateFrame("Button", nil, host)
             row:SetHeight(HIST_ROW_H)
             -- A LIST ROW, so pfUI must not plate it. SkinWidget gives
             -- every Button its generic plate, and on a row that border is
@@ -13049,11 +13226,14 @@ end
 -- warning. Splitting a tab's widgets across two functions splits its upvalue
 -- count too.
 function ui.BuildHistoryGraph(panel)
+    -- ALL FOUR CORNERS. It used to be anchored down the RIGHT with a width
+    -- set from the split; the tab is the dashboard now and the chart has the
+    -- whole panel, so there is no width to compute and no left edge to leave
+    -- room at.
     local box = CreateFrame("Frame", nil, panel)
-    box:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -HISTL.edge, -LISTBOX.hist.top)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", HISTL.edge, -LISTBOX.hist.top)
     box:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
                  -HISTL.edge, LISTBOX.hist.bot)
-    box:SetWidth(HISTL.graph_min)
     ui.MakeWell(panel, box, 4)
     ui.histGraph = box
 
@@ -13087,6 +13267,18 @@ function ui.BuildHistoryGraph(panel)
     -- invented figures has to be unmistakable at a glance -- the whole risk of
     -- a preview mode is someone reading it as their own gold.
     ui.histHeading = heading
+
+    -- THE OTHER SCREEN. The table used to sit to the left of this chart; it is
+    -- its own window now (ui.BuildLedgerWindow) and this is the way in. Beside
+    -- the heading rather than out at the right edge, because the period
+    -- buttons own that end and a button that opens a window is not one of a
+    -- set of five that change this one.
+    local ledgerBtn = ui.MakeButton(box, "quiet")
+    ledgerBtn:SetWidth(HISTL.ledger_btn_w); ledgerBtn:SetHeight(HISTL.per_h)
+    ledgerBtn:SetPoint("LEFT", heading, "RIGHT", 12, 0)
+    ledgerBtn:SetText("Ledger")
+    ledgerBtn:SetScript("OnClick", function() ui.ToggleLedgerWindow() end)
+    ui.histLedgerBtn = ledgerBtn
 
     ui.histPerBtns = {}
     local prev = nil
@@ -13197,15 +13389,49 @@ function ui.BuildHistoryGraph(panel)
     -- are the plotted line's own; earned, spent and net come from the same
     -- ledger totals the table's heading uses, so the two halves of this tab
     -- cannot disagree about the period.
-    ui.histStatL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 32)
-    ui.histStatL:SetJustifyH("LEFT")
-    ui.histStatR = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)
-    ui.histStatR:SetJustifyH("LEFT")
-    ui.histStat3 = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStat3:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
-    ui.histStat3:SetJustifyH("LEFT")
+    -- THE FIGURE STRIP AND THE BLOCKS UNDER IT. Created here with no points:
+    -- both are laid out in COLUMNS whose width follows the window, so
+    -- ui.PaintHistFigures places them on every repaint. See ui.BlockColumns
+    -- for why that is arithmetic rather than a chain of anchors.
+    --
+    -- Three rows of running text is what this was while the chart shared the
+    -- tab with the ledger table and had no width for a strip.
+    local function cell(parent, font)
+        local fs = parent:CreateFontString(nil, "OVERLAY",
+            font or "GameFontHighlightSmall")
+        fs:SetJustifyH("LEFT")
+        return fs
+    end
+
+    ui.histStrip = {}
+    local si = 1
+    while si <= HISTL.strip_cells do
+        ui.histStrip[si] = { label = cell(box), value = cell(box) }
+        si = si + 1
+    end
+
+    -- The caveat that rides on the strip -- "alts as last seen". Its own
+    -- string because it is right-aligned against the far edge while the strip
+    -- runs from the left, and two strings that can both grow may not share a
+    -- line from opposite ends. That is the collision the old two-row layout
+    -- was built around; it is still true, and this is the one case left.
+    ui.histNoteFS = cell(box)
+    ui.histNoteFS:SetJustifyH("RIGHT")
+    ui.histNoteFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.histBlocks = {}
+    local bi = 1
+    while bi <= HISTL.block_count do
+        local blk = { title = cell(box), rows = {} }
+        blk.title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        local ri = 1
+        while ri <= HISTL.block_rows do
+            blk.rows[ri] = { label = cell(box), value = cell(box) }
+            ri = ri + 1
+        end
+        ui.histBlocks[bi] = blk
+        bi = bi + 1
+    end
 
     -- THE HOVER READOUT: a vertical rule under the cursor and the figure it
     -- crosses. Drawn in OVERLAY so it sits above the fill and the line.
@@ -13510,14 +13736,12 @@ end
 
 -- Place the two halves at the current window width, and draw the chart.
 function ui.UpdateHistoryGraph()
-    if not ui.histGraph or not ui.histScroll then return end
-    local tableW, graphW = ui.HistWidthsAt(ui.WindowW())
-    -- The table is anchored top and bottom, so its WIDTH is what moves. The
-    -- opposite of the Auctions split, and for the opposite reason: there the
-    -- height was the variable, so the frame could not be anchored at both
-    -- ends; here the height is fixed and the width is set.
-    ui.histScroll:SetWidth(tableW - HISTL.edge * 2)
-    ui.histGraph:SetWidth(graphW)
+    if not ui.histGraph then return end
+    -- NO WIDTHS SET HERE ANY MORE. Both frames are anchored by two corners --
+    -- the chart to the panel, the table to the ledger window -- so each one
+    -- follows its container without arithmetic. This used to divide the panel
+    -- between them through ui.HistWidthsAt, which is the function the split
+    -- took with it.
 
     -- The menu is rebuilt here rather than at build time: the list of
     -- characters grows the first time an alt is seen.
@@ -13635,12 +13859,7 @@ function ui.UpdateHistoryGraph()
     -- wants changes the renderer and leaves the arithmetic alone.
     local since = (period.secs > 0) and (time() - period.secs) or nil
     local st = A.db.LedgerStats(since)
-    local rows = ui.HistFigures(st, hi, lo)
-    local top = ui.FigureText(rows[1])
-    if note then top = top .. "   |cff8c7a4e" .. note .. "|r" end
-    ui.histStatL:SetText(top)
-    ui.histStatR:SetText(ui.FigureText(rows[2]))
-    ui.histStat3:SetText(ui.FigureText(rows[3]))
+    ui.PaintHistFigures(st, hi, lo, pw, note)
 end
 
 -- Track the cursor across the plot. Called every frame the plot is shown; it
@@ -13676,13 +13895,18 @@ end
 --
 -- Pure, and it takes its pairs as plain arguments rather than a table so the
 -- call site reads as the line it produces. Lua 5.0 has no `select`, so the
--- The figures under the chart, as ROWS of { label, value } pairs.
+-- The figure strip under the chart: SIX { label, value } cells in one row,
+-- the same six the reference carries above its blocks.
 --
--- PURE, and it returns rows rather than a finished string, because how many
--- figures share a line is a layout decision and the layout is the half that
--- keeps changing. A caller that wants three short rows and one that wants a
--- six-cell grid (ROADMAP 3.3b, with the Sales / Expenses / Profit blocks) ask
--- this same function and disagree only about the rendering.
+-- PURE, and it hands back cells rather than a finished string, because how
+-- they are laid out is a layout decision and the layout is the half that keeps
+-- changing. It returned three stacked rows while the chart was sharing the tab
+-- with the ledger table and had no width for a strip; the table is its own
+-- window now (ui.BuildLedgerWindow) and the chart has the panel.
+--
+-- AN ABSENT FIGURE IS AN EM DASH, not a zero. "TOP SALE 0c" claims you sold
+-- something for nothing; the dash says the period holds no sale at all, which
+-- is the true thing and the one the empty chart beside it is already saying.
 --
 -- VALUES ARE ALREADY STRINGS. util.ShortMoney is what the axis uses -- "12g",
 -- "4.2kg" -- and the whole reason these figures fit at all is that they are
@@ -13694,27 +13918,15 @@ end
 -- answer that looks like a right one.
 function ui.HistFigures(st, hi, lo)
     st = st or {}
-    local days = st.days or 1
     return {
-        {
-            { "HIGH", util.ShortMoney(hi or 0) },
-            { "LOW",  util.ShortMoney(lo or 0) },
-        },
-        {
-            { "SALES",    util.ShortMoney(st.income or 0) },
-            { "EXPENSES", util.ShortMoney(st.spend or 0) },
-            { "PROFIT",   util.ShortMoney(st.net or 0) },
-        },
-        {
-            -- Rounded toward zero BEFORE formatting. A per-day average is a
-            -- fraction of a copper and ShortMoney would print its floor
-            -- anyway; doing it here means a loss of 1.6c per day reads as
-            -- "-1c" rather than as "-2c", which is what flooring a negative
-            -- gives you.
-            { "PER DAY", util.ShortMoney(ui.Trunc(A.db.PerDay(st.net or 0, days))) },
-            { "SOLD",    tostring(st.saleN or 0) },
-            { "BOUGHT",  tostring(st.buyN or 0) },
-        },
+        { "HIGH",     util.ShortMoney(hi or 0) },
+        { "LOW",      util.ShortMoney(lo or 0) },
+        { "SOLD",     tostring(st.saleN or 0) },
+        { "BOUGHT",   tostring(st.buyN or 0) },
+        { "TOP SALE", st.topSale and util.ShortMoney(st.topSale.amount)
+                      or "\226\128\148" },
+        { "TOP BUY",  st.topBuy and util.ShortMoney(st.topBuy.amount)
+                      or "\226\128\148" },
     }
 end
 
@@ -13744,26 +13956,197 @@ function ui.FigureText(row)
     return out
 end
 
--- varargs arrive in `arg` -- see HARD RULE 4.
-function ui.StatLine(...)
-    local out = ""
+-- Equal columns across a width. Returns { {x, w}, ... }, left to right.
+--
+-- ARITHMETIC, NOT ANCHORS. Three blocks each anchored to the one before it
+-- drift by a rounding error per gap and the third ends up short -- which shows
+-- as the Profit block's figures clipping and nothing else. One divide, three
+-- positions, and the geometry suite can ask what they are.
+--
+-- A width too small for the gaps alone still returns positive columns, because
+-- this runs before UIParent has been measured on some logins and a zero-width
+-- FontString is not laid out at all.
+function ui.BlockColumns(width, n, gap)
+    local out = {}
+    n = n or 1
+    if n < 1 then n = 1 end
+    gap = gap or 0
+    local avail = (width or 0) - gap * (n - 1)
+    local w = math.floor(avail / n)
+    -- NEVER ZERO, and not merely never negative: a FontString given a width of
+    -- zero is not laid out at all, so a column that collapses takes its text
+    -- with it rather than clipping it.
+    if w < 1 then w = 1 end
     local i = 1
-    while i + 1 <= arg.n do
-        local cap, v = arg[i], arg[i + 1]
-        if out ~= "" then out = out .. "   " end
-        local money
-        if v and v < 0 then money = "-" .. util.FormatMoney(-v, true)
-        else money = util.FormatMoney(v or 0, true) end
-        out = out .. "|cff8c7a4e" .. cap .. "|r " .. money
-        i = i + 2
+    while i <= n do
+        table.insert(out, { x = (i - 1) * (w + gap), w = w })
+        i = i + 1
     end
     return out
+end
+
+-- The three stat blocks, as data: { title, rows = { {label, value, itemId} } }.
+--
+-- SAME SHAPE AS ui.HistFigures AND FOR THE SAME REASON -- the renderer is the
+-- half that keeps changing, so the arithmetic hands back values and says
+-- nothing about where they go.
+--
+-- TOP ITEM CARRIES ITS ITEM ID as a third element, because the reference
+-- colours that name by quality and a name alone cannot be coloured. It is nil
+-- for an item recorded before ids were kept, which ui.QualityColor already
+-- treats as a real state rather than an error.
+--
+-- PROFIT'S TOP ITEM IS THE TOP SELLER, not a per-item profit. Profit per item
+-- needs what you PAID for the thing you sold, and the ledger does not record a
+-- quantity yet -- see ROADMAP 5.6. Labelled "Top seller" so it does not claim
+-- to be the other thing.
+function ui.HistBlocks(st)
+    st = st or {}
+    local days = st.days or 1
+    local function top(rec, label)
+        if not rec then return { label, "\226\128\148" } end
+        return { label, rec.item or "?", rec.itemId }
+    end
+    return {
+        {
+            title = "SALES",
+            rows = {
+                { "Total",   util.ShortMoney(st.income or 0) },
+                { "Per day", util.ShortMoney(
+                    ui.Trunc(A.db.PerDay(st.income or 0, days))) },
+                top(st.topSaleItem, "Top item"),
+            },
+        },
+        {
+            title = "EXPENSES",
+            rows = {
+                { "Total",   util.ShortMoney(st.spend or 0) },
+                { "Per day", util.ShortMoney(
+                    ui.Trunc(A.db.PerDay(st.spend or 0, days))) },
+                top(st.topBuyItem, "Top item"),
+            },
+        },
+        {
+            title = "PROFIT",
+            rows = {
+                { "Total",   util.ShortMoney(st.net or 0) },
+                { "Per day", util.ShortMoney(
+                    ui.Trunc(A.db.PerDay(st.net or 0, days))) },
+                top(st.topSaleItem, "Top seller"),
+            },
+        },
+    }
+end
+
+-- Place and fill the figure strip and the three blocks.
+--
+-- POSITIONS SET ON EVERY PAINT, because the columns are a fraction of a width
+-- that moves with the window. ClearAllPoints first: SetPoint ADDS a point on
+-- 1.12, so a second call without it leaves a FontString pulled between two
+-- places -- which renders as text drifting a little further right every time
+-- the window is dragged.
+function ui.PaintHistFigures(st, hi, lo, plotW, note)
+    if not ui.histStrip or not ui.histBlocks then return end
+    local box = ui.histGraph
+    if not box then return end
+    local left = HISTL.plot_side + HISTL.y_gutter
+
+    -- ---- the strip -------------------------------------------------------
+    local cells = ui.HistFigures(st, hi, lo)
+    local cols = ui.BlockColumns(plotW, HISTL.strip_cells, HISTL.col_gap)
+    local i = 1
+    while i <= HISTL.strip_cells do
+        local w = ui.histStrip[i]
+        local cell, col = cells[i], cols[i]
+        w.label:ClearAllPoints()
+        w.value:ClearAllPoints()
+        if cell and col then
+            w.label:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                             left + col.x, HISTL.strip_y + HISTL.fig_line)
+            w.label:SetWidth(col.w)
+            w.label:SetText(cell[1])
+            w.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            w.value:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                             left + col.x, HISTL.strip_y)
+            w.value:SetWidth(col.w)
+            w.value:SetText(cell[2])
+            w.value:SetTextColor(C.text[1], C.text[2], C.text[3])
+            w.label:Show(); w.value:Show()
+        else
+            w.label:Hide(); w.value:Hide()
+        end
+        i = i + 1
+    end
+
+    -- The alts-as-last-seen caveat, on the strip's own line and out at the
+    -- right where it qualifies the row rather than any one figure.
+    if ui.histNoteFS then
+        ui.histNoteFS:ClearAllPoints()
+        ui.histNoteFS:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT",
+                               -HISTL.plot_side,
+                               HISTL.strip_y + HISTL.fig_line)
+        ui.histNoteFS:SetText(note or "")
+    end
+
+    -- ---- the blocks ------------------------------------------------------
+    local blocks = ui.HistBlocks(st)
+    local bcols = ui.BlockColumns(plotW, HISTL.block_count, HISTL.col_gap)
+    local b = 1
+    while b <= HISTL.block_count do
+        local w, data, col = ui.histBlocks[b], blocks[b], bcols[b]
+        local topY = HISTL.block_y + HISTL.fig_line * HISTL.block_rows
+        w.title:ClearAllPoints()
+        w.title:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                         left + col.x, topY)
+        w.title:SetWidth(col.w)
+        w.title:SetText(data and data.title or "")
+        local r = 1
+        while r <= HISTL.block_rows do
+            local pair = w.rows[r]
+            local row = data and data.rows[r]
+            local y = topY - HISTL.fig_line * r
+            pair.label:ClearAllPoints()
+            pair.value:ClearAllPoints()
+            if row then
+                pair.label:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                                     left + col.x, y)
+                pair.label:SetWidth(HISTL.block_label_w)
+                pair.label:SetText(row[1])
+                pair.label:SetTextColor(C.goldDim[1], C.goldDim[2],
+                                         C.goldDim[3])
+                pair.value:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                                     left + col.x + HISTL.block_label_w, y)
+                pair.value:SetWidth(col.w - HISTL.block_label_w)
+                pair.value:SetText(row[2])
+                -- A TOP ITEM CARRIES ITS QUALITY COLOUR; every other figure is
+                -- a number and reads in the ordinary text colour. row[3] is
+                -- the item id, nil for anything recorded before ids were kept,
+                -- which ui.QualityColor already answers for.
+                if row[3] then
+                    local q = ui.CraftQualityOf(row[3])
+                    local cr, cg, cb = ui.QualityColor(q)
+                    pair.value:SetTextColor(cr, cg, cb)
+                else
+                    pair.value:SetTextColor(C.text[1], C.text[2], C.text[3])
+                end
+                pair.label:Show(); pair.value:Show()
+            else
+                pair.label:Hide(); pair.value:Hide()
+            end
+            r = r + 1
+        end
+        b = b + 1
+    end
 end
 
 function ui.RefreshHistory()
     if not ui.histBuilt then return end
     -- Highlight the active period button.
     ui.MarkChosen(ui.histPerBtns, function(b) return b.idx == ui.histPeriod end)
+    -- ...and the Ledger button, which reads as pressed while its window is up.
+    -- Done on every repaint rather than only on the toggle, because the window
+    -- can also be closed by its own X.
+    ui.RefreshLedgerButton()
 
     local secs = HIST_PERIODS[ui.histPeriod].secs
     local since = (secs > 0) and (time() - secs) or nil
@@ -13823,8 +14206,11 @@ function ui.UpdateHistoryList()
     local rows = ui.SortHistory(ui.histView or {}, sortKey, dir)
     ui.PaintSortHeaders(ui.histHeaders, sortKey, dir)
     local total = table.getn(rows)
-    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.hist,
-        HIST_ROW_H, HIST_ROWS_MAX)
+    -- FROM THE LEDGER WINDOW, which is a fixed height, and no longer from the
+    -- main window -- the table does not live in it any more. ui.ListRowsAt
+    -- measured the Aegis window's panel, so leaving it here would have grown
+    -- and shrunk the ledger's rows as the OTHER window was dragged.
+    local vis = ui.LedgerRowCount()
     ui.GrowHistRows(vis)
     ui.SkinNewRows(ui.histRows)
     FauxScrollFrame_Update(ui.histScroll, total, vis, HIST_ROW_H)

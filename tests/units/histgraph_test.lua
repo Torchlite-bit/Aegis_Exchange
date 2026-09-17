@@ -126,11 +126,28 @@ HIST_ALL_PLAYERS = strConstant("HIST_ALL_PLAYERS")
 PANEL_H_INSET = 40
 PANEL_V_INSET = 108
 LISTBOX = { hist = { top = 100, bot = 10 } }
+HIST_ROWS_MAX = constant("HIST_ROWS_MAX")
+-- `local HIST_ROWS, HIST_ROW_H = 10, 26` declares two names on one line, which
+-- the single-name reader above cannot see. Read out of the source all the
+-- same, for its reason: a copy keeps passing after the real one moves.
+HIST_ROW_H = (function()
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local v
+    for line in f:lines() do
+        local _, _, got = string.find(line,
+            "^local HIST_ROWS, HIST_ROW_H%s*=%s*%d+,%s*(%d+)")
+        if got then v = tonumber(got); break end
+    end
+    f:close()
+    if not v then error("did not find: local HIST_ROWS, HIST_ROW_H") end
+    return v
+end)()
 loadTable("HISTL")
 for _, sig in ipairs({
     "function ui.PanelWidthAt(",
     "function ui.PanelHeightAt(",
-    "function ui.HistWidthsAt(",
+    "function ui.LedgerRowCount(",
+    "function ui.LedgerWindowHeight(",
     "function ui.HistPlotSizeAt(",
     "function ui.HistBucketCount(",
     "function ui.SeriesRange(",
@@ -424,47 +441,64 @@ H.check("...and is never zero", ui.PlotColumnCount(0) >= 1,
         ui.PlotColumnCount(0))
 
 -- ---------------------------------------------------------------------------
-H.section("splitting the panel")
+H.section("the chart has the whole panel")
 -- ---------------------------------------------------------------------------
+
+-- THE TAB IS NOT SPLIT ANY MORE. It held a table on the left and a chart on
+-- the right, and neither had room: the chart had to fit an axis, a legend, a
+-- line and its figures into 46% of the panel, and the table's Amount column
+-- ran under its own scrollbar below a fixed minimum. They are two screens now
+-- -- the tab is the dashboard, the table is ui.BuildLedgerWindow -- so
+-- ui.HistWidthsAt is gone and the plot measures the panel directly.
 
 local MIN_W, MAX_W = 1000, 1400
 
 for _, winW in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
-    local tw, gw = ui.HistWidthsAt(winW)
-    H.eq("the two halves fill the panel at " .. winW,
-         tw + gw + HISTL.edge * 2 + HISTL.gap, ui.PanelWidthAt(winW))
-    H.check("the table gets its minimum at " .. winW, tw >= HISTL.left_min,
-            tw)
-    H.check("the chart gets its minimum at " .. winW, gw >= HISTL.graph_min,
-            gw)
+    local w = ui.HistPlotSizeAt(winW, 700)
+    -- The plot is the panel less the box's edges, the plot's own side padding
+    -- and the y-axis gutter. Never wider than the panel that holds it.
+    H.check("the plot fits the panel at " .. winW,
+            w <= ui.PanelWidthAt(winW), w)
+    H.check("...and has the width the split used to deny it at " .. winW,
+            w > ui.PanelWidthAt(winW) * 0.5, w)
 end
 
--- THE TABLE WINS THE SQUEEZE. Its columns are fixed and its Amount column is
--- the rightmost thing in the window that can be clipped; the chart has no
--- fixed content and narrows gracefully.
 do
-    local tw = ui.HistWidthsAt(MIN_W)
-    H.eq("at the smallest window the table gets exactly its minimum",
-         tw, HISTL.left_min)
-end
-
--- A wider window gives the chart more, which is the assertion a hard-coded
--- width fails.
-do
-    local _, g1 = ui.HistWidthsAt(MIN_W)
-    local _, g2 = ui.HistWidthsAt(MAX_W)
-    H.check("a wider window widens the chart", g2 > g1, g1 .. " -> " .. g2)
+    local w1 = ui.HistPlotSizeAt(MIN_W, 700)
+    local w2 = ui.HistPlotSizeAt(MAX_W, 700)
+    H.check("a wider window widens the plot", w2 > w1, w1 .. " -> " .. w2)
 end
 
 -- Degenerate widths, for the reason every other fit function has this section:
 -- this runs before UIParent has been measured on some logins.
 do
-    local tw, gw = ui.HistWidthsAt(0)
-    H.check("an unmeasured window still leaves a table", tw >= 1, tw)
-    H.check("...and a chart", gw >= 1, gw)
-    tw, gw = ui.HistWidthsAt(nil)
-    H.check("...and so does a nil one", tw >= 1 and gw >= 1, tw .. "/" .. gw)
+    local w, h = ui.HistPlotSizeAt(0, 0)
+    H.check("an unmeasured window still leaves a plot", w >= 1, w)
+    H.check("...with height", h >= 1, h)
+    w, h = ui.HistPlotSizeAt(nil, nil)
+    H.check("...and so does a nil one", w >= 1 and h >= 1, w .. "/" .. h)
 end
+
+-- ---------------------------------------------------------------------------
+H.section("the ledger window")
+-- ---------------------------------------------------------------------------
+
+-- A FIXED HEIGHT, and its row count is the number that height was built from.
+-- Two places holding the same number is how a window ends up with a scroll bar
+-- for rows it has no room to draw.
+do
+    local rows = ui.LedgerRowCount()
+    H.check("it shows at least a few rows", rows >= 5, rows)
+    H.eq("the frame is sized from exactly that many",
+         ui.LedgerWindowHeight(),
+         HISTL.ledger_top + HISTL.ledger_bot + HIST_ROW_H * rows)
+end
+
+-- Its width is the table's own, which is what the old split's left_min was for
+-- -- the columns end at 512 plus padding and a scrollbar, and below that the
+-- Amount column runs under the bar.
+H.check("the window is wide enough for the columns",
+        HISTL.ledger_w >= 566, HISTL.ledger_w)
 
 -- ---------------------------------------------------------------------------
 H.section("the area under the line")
@@ -864,9 +898,11 @@ do
     H.check("the chart's floor holds its own title bar",
             HISTL.graph_min >= need,
             HISTL.graph_min .. " < " .. need)
-    -- ...and at every real window width, not just the floor.
+    -- ...and at every real window width, not just the floor. The chart is the
+    -- whole panel now, so the question is whether the PANEL holds the title
+    -- bar rather than whether a fraction of it did.
     for _, winW in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
-        local _, gw = ui.HistWidthsAt(winW)
+        local gw = ui.PanelWidthAt(winW) - HISTL.edge * 2
         H.check("the title bar fits at " .. winW, gw >= need, gw)
     end
 end
@@ -1158,17 +1194,36 @@ do
     H.check("...after being cleared, because SetPoint ADDS a point",
             says(dropdown, "row.label:ClearAllPoints()"))
 
-    -- TWO STRINGS THAT CAN BOTH GROW CANNOT SHARE A LINE. These were anchored
-    -- to opposite ends of one line and ran into each other -- "LOW 9g 14s 6c"
-    -- and "IN 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window.
-    -- Stacking removes the collision rather than making it less likely.
+    -- TWO STRINGS THAT CAN BOTH GROW CANNOT SHARE A LINE. The figures used to
+    -- be rows of running text anchored to opposite ends of one line, and they
+    -- ran into each other -- "LOW 9g 14s 6c" and "IN 37s 92c" overlapped into
+    -- "LOWN0g 14s 6c" on a narrow window.
+    --
+    -- Every figure is its own FontString in its own column now, which removes
+    -- the collision rather than working around it. The ONE string still
+    -- anchored from the right is the caveat, and nothing grows toward it.
     local build = bodyOf("function ui.BuildHistoryGraph(")
-    H.check("both stat rows hang off the same edge",
-            says(build, 'ui.histStatL:SetPoint("BOTTOMLEFT"')
-            and says(build, 'ui.histStatR:SetPoint("BOTTOMLEFT"'),
-            "opposite ends of one line is how they collided")
-    H.check("...and neither is right-justified into the other",
-            not says(build, 'ui.histStatR:SetJustifyH("RIGHT")'))
+    H.check("the figure strip is built", says(build, "ui.histStrip[si] ="))
+    H.check("...and the three blocks", says(build, "ui.histBlocks[bi] = blk"))
+
+    -- SETPOINT ADDS A POINT ON 1.12, and these are re-placed on every repaint
+    -- because their columns follow the window. Without ClearAllPoints a
+    -- FontString ends up pulled between two places, which reads as text
+    -- drifting further right every time the window is dragged.
+    local paint = bodyOf("function ui.PaintHistFigures(")
+    H.check("the painter exists", paint ~= "")
+    -- ALL THREE, named distinctly. The strip's cells, the blocks' titles and
+    -- the blocks' rows are three separate loops and each has to clear.
+    H.check("...and clears points before setting them",
+            says(paint, "w.label:ClearAllPoints()")
+            and says(paint, "w.title:ClearAllPoints()")
+            and says(paint, "pair.label:ClearAllPoints()"),
+            "SetPoint adds rather than replaces on 1.12")
+    -- BOTH column runs, because checking one leaves the other free to be
+    -- replaced by a chain of anchors -- which is exactly what a sabotage did.
+    H.check("...and places columns by arithmetic, not by chaining anchors",
+            says(paint, "ui.BlockColumns(plotW, HISTL.strip_cells")
+            and says(paint, "ui.BlockColumns(plotW, HISTL.block_count"))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1187,8 +1242,8 @@ do
     local w2, h2 = ui.HistPlotSizeAt(MAX_W, MAX_H)
     H.check("a wider window widens the plot", w2 > w1, w1 .. " -> " .. w2)
     H.check("a taller window heightens it", h2 > h1, h1 .. " -> " .. h2)
-    -- The plot sits INSIDE the chart box, which sits inside the panel.
-    local _, gw = ui.HistWidthsAt(MIN_W)
+    -- The plot sits INSIDE the chart box, which is now the whole panel.
+    local gw = ui.PanelWidthAt(MIN_W) - HISTL.edge * 2
     H.check("the plot is inside its box", w1 <= gw, w1 .. " vs " .. gw)
     H.check("...and inside the panel vertically",
             h1 <= ui.PanelHeightAt(MIN_H), h1)
@@ -1224,15 +1279,25 @@ do
         return string.find(body, needle, 1, true) ~= nil
     end
 
-    -- THE TABLE IS THE LEFT HALF NOW. A BOTTOMRIGHT anchor on its scroll
-    -- frame -- which is how every other list in this window is built, and so
-    -- the easy thing to "fix" it back to -- runs it under the chart.
+    -- THE TABLE LIVES IN ITS OWN WINDOW NOW, and these three assertions used
+    -- to say the opposite -- that the scroll frame is anchored down the LEFT
+    -- only and has its width SET, because it was the left half of a split
+    -- panel and a BOTTOMRIGHT anchor would have run it under the chart.
+    --
+    -- Inverted rather than deleted: the failure they guard is the same shape
+    -- in both designs -- a frame whose anchors and whose width disagree about
+    -- who decides its size -- and it points the other way now.
     local build = bodyOf("function ui.BuildHistoryTab(")
     H.check("the History tab is built at all", build ~= "")
-    H.check("the ledger table is anchored down the left, not corner to corner",
-            not says(build, 'scroll:SetPoint("BOTTOMRIGHT"'),
-            "its width is the split; a right-hand anchor discards SetWidth")
-    H.check("...and its width is set", says(build, "scroll:SetWidth("))
+    H.check("the table's widgets are parented to the ledger window",
+            says(build, "local host = ui.BuildLedgerWindow()"),
+            "a table parented to the panel is still in the tab")
+    H.check("the table is anchored corner to corner",
+            says(build, 'scroll:SetPoint("BOTTOMRIGHT", host'),
+            "nothing shares that window, so both corners are available")
+    H.check("...and its width is NOT set",
+            not says(build, "scroll:SetWidth("),
+            "a two-corner frame that also has SetWidth ignores one of them")
 
     -- ONE REPAINT, ONE LEDGER, ONE PERIOD. Driving the chart from its own
     -- path is how the two halves of one tab come to disagree about what week
@@ -1250,8 +1315,14 @@ do
     H.check("...sized by arithmetic, not by measuring a frame",
             says(graph, "ui.HistPlotSizeAt(") and not says(graph, ":GetWidth()"),
             "a two-corner-anchored frame reports its creation size")
-    H.check("...and both halves are placed from one split",
-            says(graph, "ui.HistWidthsAt(ui.WindowW())"))
+    -- NO WIDTHS SET IN THE REPAINT AT ALL. Both frames are anchored by two
+    -- corners -- the chart to the panel, the table to the ledger window -- so
+    -- each follows its container without arithmetic. This used to divide the
+    -- panel between them through ui.HistWidthsAt, which went with the split.
+    H.check("the repaint sets no widths",
+            not says(graph, "ui.histGraph:SetWidth(")
+            and not says(graph, "ui.histScroll:SetWidth("),
+            "a two-corner-anchored frame does not want a width")
 
     -- The spans are TEXTURES on the plot, not frames. A few hundred textures
     -- on one frame is a list of rows' worth of draw objects; a few hundred
