@@ -4546,27 +4546,21 @@ stale by roughly forty releases. The chart exists: `ui.PlotColumns`,
 gradient area fill from `art/gradient-fill.tga`, and 275 checks in
 `tests/units/histgraph_test.lua`. **Nothing below starts from nothing.**
 
-### 3.1 BLOCKING — decide what the chart is *of*
+### 3.1 The chart's subject — ✅ **SETTLED, and it was already built**
 
-TSM's dashboard chart is **"Player Gold"**: the account's gold *balance* over
-time, with an all-characters picker. Aegis's chart plots **income and spending**
-as two series on a shared scale. Different charts, different questions, and
-"like the reference" means the first one.
+**Decided: gold balance.** And it already is one. `ui.UpdateHistoryGraph` sets
+the heading to `"Player Gold"`, pulls a single series from `ui.HistGoldSeries`
+→ `db.MoneySeries`, fills it, and clears series 2. The character picker chooses
+*whose* gold. There is a design note above `HIST_ALL_PLAYERS` saying so in as
+many words: *"THE CHART SHOWS ONE THING: GOLD HELD, over time"*, and that
+income and spending are what the table beside it is for.
 
-`db.MoneySeries(from, step, n, who)` and `db.Purses` already hold balance over
-time, and the chart already has a character picker — so the data and the
-furniture exist either way. What does not exist is a decision:
-
-- **(a) Replace** flow with balance.
-- **(b) Add** balance as a third series — but one scale cannot honestly carry a
-  balance in the millions beside a day's income in the thousands. Read
-  `histgraph_test.lua`'s note on why both current series share one scale before
-  proposing a second axis.
-- **(c) A Gold / Flow toggle** on the chart's title bar, beside the period
-  buttons. Check `HISTL.graph_min` still holds the row if a control is added.
-
-**Open. Ask the owner.** §3.2 applies to whichever series wins so it is not
-blocked — but delete nothing until this is answered.
+**This section originally said the chart plots income and spending and asked
+which it should be.** That came from `histgraph_test.lua`'s header — *"a line
+graph of income and spending"* — and not from `ui.UpdateHistoryGraph`. **Third
+time**: the same file's rotation claim (§3.2) and this phase's own "needs a
+design spike" bullet both rotted the same way. The rule this earns: **a comment
+in this repo is a lead, not a source.** Open the function.
 
 ### 3.2 The smooth line
 
@@ -4640,28 +4634,48 @@ fill keeps the old span tops, the two disagree by a pixel along every slope.
 
 ### 3.3 Stat blocks
 
-A figure row and three blocks under the chart, matching the reference.
+**3.3a shipped in v1.53.30.** The engine is done and the figure rows are live.
 
-| Figure | Source | State |
-|---|---|---|
-| HIGH / LOW | max/min of the plotted series | available now |
-| DAILY SALES / DAILY PURCHASES | ledger entries per day over the window | available now |
-| TOP SALE / TOP PURCHASE | largest single `amount` by kind | available now |
+`db.LedgerStats(sinceEpoch, now)` walks the ledger **once** and returns income,
+spend, net, the two transaction counts, the day span, the biggest single
+transaction of each kind, and the item with the biggest summed total of each
+kind. Supporting it: `db.WindowDays`, `db.PerDay`, `db.TopOf`. On the UI side
+`ui.HistFigures(st, hi, lo)` returns **rows of `{label, value}` pairs** and
+`ui.FigureText` renders one. 92 checks in `tests/units/histstats_test.lua`,
+17 sabotages.
 
-Then **SALES**, **EXPENSES**, **PROFIT**, each with Total, Average per Day and
-Top Item, from `db.LedgerTotals(sinceEpoch)`.
+Three decisions worth not re-litigating:
 
-- **Top Item is not Top Sale.** One is the largest *summed* amount per item over
-  the window; the other is a single transaction. Name them so the code cannot
-  confuse them either.
-- Top Item is quality-coloured in the reference. `util.ItemInfo` /
-  `ui.CraftQualityOf` already solve that; never a fixed `GetItemInfo` index.
-- **Say which window a daily average is over.** "Average Profit per Day" across
-  All Time and across 1W are different numbers and the reference does not tell
-  you which it means.
+- **The per-day denominator is the later of the window's start and the first
+  entry that exists**, never the raw period. A one-year window over three days
+  of history divided by 365 is a rounding error wearing a label. It is also
+  never zero, because everything divides by it.
+- **Items are keyed by NAME, not by id-or-name.** The obvious choice splits an
+  item whose history straddles the release where ids started being recorded,
+  and neither half reaches the top spot. The id is carried alongside for
+  colouring and backfills from whichever entry has one.
+- **Top Sale and Top Item are different questions** and the code may not
+  collapse them. One 500g rare against four hundred sales of Linen Cloth is the
+  same money and only one of them is a business.
 
-**Unblocked, and pure arithmetic over (ledger, window).** This is the part to
-build first.
+**Still to do — 3.3b, and it is blocked on layout, not arithmetic.**
+`LedgerStats` already returns everything the blocks need; what does not exist
+is anywhere to put them. The reference has three blocks of Total / Average per
+Day / Top Item plus a six-figure row — roughly 190px of chrome under the plot.
+`HISTL.plot_bot` is 78 and the graph pane is a fraction of a resizable window,
+so on a short window there is no room at all.
+
+That is the same question §3.4 forces, and it should be answered once: **the
+reference has two screens** — a Dashboard (chart + stats) and a Ledger (the
+table). Aegis has one tab holding both. If the table moves into §3.4's popup,
+the History tab becomes the dashboard and the blocks have the whole width.
+**Decide that before building 3.3b**, and do not grow `plot_bot` again in the
+meantime.
+
+Still missing from the reference's figure set, all of it available from
+`LedgerStats` the moment there is room: **TOP SALE**, **TOP PURCHASE**, the
+per-day breakdown for sales and expenses separately, and **Top Item** per block
+(quality-coloured — `util.ItemInfo`, never a fixed `GetItemInfo` index).
 
 ### 3.4 The Ledger window
 
@@ -4718,9 +4732,10 @@ there.
 
 ### 3.6 Order of work
 
-1. §3.1 answered.
+1. §3.1 answered — ✅ gold balance, and already built.
 2. §3.2 cheap pass — `col_w` reduced, measured, judged by eye.
-3. §3.3 stat blocks — unblocked, useful immediately.
+3. §3.3a figures — ✅ **DONE** (v1.53.30).
+3b. §3.3b blocks — after the one-screen-or-two question below is answered.
 4. §3.2 sheared segments — affine `SetTexCoord` is available, so this is one
    small feather asset rather than a sprite strip. Skip if step 2 looked good
    enough.

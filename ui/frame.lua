@@ -12374,12 +12374,17 @@ local HISTL = {
     plot_top   = 54,
     -- Room under the plot for the x labels AND the two stat rows.
     --
-    -- TWO ROWS, because one was two FontStrings anchored to opposite ends of
+    -- THREE ROWS as of the figure work: HIGH/LOW, then the Sales / Expenses /
+    -- Profit totals, then the per-day figure and the two counts. See
+    -- ui.HistFigures, which owns which figure sits on which row.
+    --
+    -- It was TWO, because one was two FontStrings anchored to opposite ends of
     -- the same line and they ran into each other -- "LOW 9g 14s 6c" and "IN
     -- 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window. Two strings
     -- that can both grow cannot share a line; stacking them removes the
-    -- collision rather than making it less likely.
-    plot_bot   = 64,
+    -- collision rather than making it less likely. Each row is ONE string for
+    -- the same reason, so a row may only ever grow to the right.
+    plot_bot   = 78,
     plot_side  = 10,
     -- The y-axis labels live to the LEFT of the drawing area, the way the
     -- reference chart has them -- so the plot starts this far in.
@@ -13193,11 +13198,14 @@ function ui.BuildHistoryGraph(panel)
     -- ledger totals the table's heading uses, so the two halves of this tab
     -- cannot disagree about the period.
     ui.histStatL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)
+    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 32)
     ui.histStatL:SetJustifyH("LEFT")
     ui.histStatR = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
+    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)
     ui.histStatR:SetJustifyH("LEFT")
+    ui.histStat3 = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histStat3:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
+    ui.histStat3:SetJustifyH("LEFT")
 
     -- THE HOVER READOUT: a vertical rule under the cursor and the figure it
     -- crosses. Drawn in OVERLAY so it sits above the fill and the line.
@@ -13620,13 +13628,19 @@ function ui.UpdateHistoryGraph()
     ui.histFrom, ui.histStep, ui.histN = from, step, n
 
     -- The figures a chart cannot be read precisely enough to give you.
+    --
+    -- ONE PASS over the ledger for all of them (A.db.LedgerStats), rather than
+    -- LedgerTotals plus a walk per figure. Which row each figure sits on is
+    -- ui.HistFigures' business, not this function's -- so the grid that 3.3b
+    -- wants changes the renderer and leaves the arithmetic alone.
     local since = (period.secs > 0) and (time() - period.secs) or nil
-    local earned, spent = A.db.LedgerTotals(since)
-    local top = ui.StatLine("HIGH", hi, "LOW", lo)
+    local st = A.db.LedgerStats(since)
+    local rows = ui.HistFigures(st, hi, lo)
+    local top = ui.FigureText(rows[1])
     if note then top = top .. "   |cff8c7a4e" .. note .. "|r" end
     ui.histStatL:SetText(top)
-    ui.histStatR:SetText(ui.StatLine("IN", earned, "OUT", spent,
-                                     "NET", earned - spent))
+    ui.histStatR:SetText(ui.FigureText(rows[2]))
+    ui.histStat3:SetText(ui.FigureText(rows[3]))
 end
 
 -- Track the cursor across the plot. Called every frame the plot is shown; it
@@ -13662,6 +13676,74 @@ end
 --
 -- Pure, and it takes its pairs as plain arguments rather than a table so the
 -- call site reads as the line it produces. Lua 5.0 has no `select`, so the
+-- The figures under the chart, as ROWS of { label, value } pairs.
+--
+-- PURE, and it returns rows rather than a finished string, because how many
+-- figures share a line is a layout decision and the layout is the half that
+-- keeps changing. A caller that wants three short rows and one that wants a
+-- six-cell grid (ROADMAP 3.3b, with the Sales / Expenses / Profit blocks) ask
+-- this same function and disagree only about the rendering.
+--
+-- VALUES ARE ALREADY STRINGS. util.ShortMoney is what the axis uses -- "12g",
+-- "4.2kg" -- and the whole reason these figures fit at all is that they are
+-- said the short way. util.FormatMoney's "1,240g 17s 3c" is longer than the
+-- narrowest the graph pane is allowed to be.
+--
+-- COUNTS ARE NOT MONEY. "SOLD 14" is a number of transactions, and running it
+-- through a money formatter would render it as 14 copper, which is a wrong
+-- answer that looks like a right one.
+function ui.HistFigures(st, hi, lo)
+    st = st or {}
+    local days = st.days or 1
+    return {
+        {
+            { "HIGH", util.ShortMoney(hi or 0) },
+            { "LOW",  util.ShortMoney(lo or 0) },
+        },
+        {
+            { "SALES",    util.ShortMoney(st.income or 0) },
+            { "EXPENSES", util.ShortMoney(st.spend or 0) },
+            { "PROFIT",   util.ShortMoney(st.net or 0) },
+        },
+        {
+            -- Rounded toward zero BEFORE formatting. A per-day average is a
+            -- fraction of a copper and ShortMoney would print its floor
+            -- anyway; doing it here means a loss of 1.6c per day reads as
+            -- "-1c" rather than as "-2c", which is what flooring a negative
+            -- gives you.
+            { "PER DAY", util.ShortMoney(ui.Trunc(A.db.PerDay(st.net or 0, days))) },
+            { "SOLD",    tostring(st.saleN or 0) },
+            { "BOUGHT",  tostring(st.buyN or 0) },
+        },
+    }
+end
+
+-- Truncate toward zero. math.floor rounds DOWN, which for a negative average
+-- is away from zero -- and a loss reported as bigger than it is, in the one
+-- figure on this tab that is allowed to be negative, is the wrong direction to
+-- be wrong in.
+function ui.Trunc(v)
+    v = v or 0
+    if v < 0 then return -math.floor(-v) end
+    return math.floor(v)
+end
+
+-- One row of { label, value } pairs as the coloured string a FontString takes.
+-- Labels dim, values plain, three spaces between pairs -- the spacing the two
+-- stat rows already used before there were three of them.
+function ui.FigureText(row)
+    local out = ""
+    local i = 1
+    while i <= table.getn(row or {}) do
+        local pair = row[i]
+        if out ~= "" then out = out .. "   " end
+        out = out .. "|cff8c7a4e" .. (pair[1] or "") .. "|r "
+            .. (pair[2] or "")
+        i = i + 1
+    end
+    return out
+end
+
 -- varargs arrive in `arg` -- see HARD RULE 4.
 function ui.StatLine(...)
     local out = ""

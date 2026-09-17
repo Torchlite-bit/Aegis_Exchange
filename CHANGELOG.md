@@ -18,6 +18,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.53.30]
+
+### Added
+- **The History tab's chart now carries real figures under it.** Three rows
+  instead of two, and they answer the questions the chart is too coarse to:
+
+  - **HIGH / LOW** — the most and least gold held over the period.
+  - **SALES / EXPENSES / PROFIT** — the totals, replacing the old IN/OUT/NET.
+  - **PER DAY / SOLD / BOUGHT** — profit per day, and how many transactions of
+    each kind.
+
+  All of it follows the period buttons, so 1W and All Time give different
+  answers to the same three rows.
+
+  **"Per day" divides by the days you actually have, not by the period.**
+  Picking 1Y three days after installing divides by the three — the other 362
+  are days the addon wasn't running, not days you earned nothing.
+
 ## [1.53.29]
 
 ### Fixed
@@ -5821,6 +5839,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

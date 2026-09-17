@@ -1541,6 +1541,146 @@ function db.LedgerByChar(sinceEpoch)
     return names, anon
 end
 
+-- ---------------------------------------------------------------------------
+-- The History tab's figures
+-- ---------------------------------------------------------------------------
+
+-- The denominator for a per-day average.
+--
+-- `from` is the window's start (nil for "all time"), `oldest` the earliest
+-- entry that actually exists, `now` the present.
+--
+-- THE SPAN STARTS AT WHICHEVER IS LATER, and that is the whole judgement in
+-- this function. A one-year window over three days of history divided by 365
+-- is not an average, it is a rounding error wearing a label: the other 362
+-- days are not days you earned nothing, they are days the addon was not
+-- installed. And an "all time" window has no start of its own, so the data's
+-- own beginning is the only honest one available.
+--
+-- NEVER ZERO. Everything recorded in the last hour is a span of ONE day, not
+-- of none -- the caller divides by this, and a chart that errors is worse than
+-- one that rounds.
+function db.WindowDays(from, oldest, now)
+    now = now or time()
+    local start = from
+    if not start or (oldest and oldest > start) then start = oldest end
+    if not start or start > now then return 1 end
+    local days = math.floor((now - start) / 86400) + 1
+    if days < 1 then return 1 end
+    return days
+end
+
+-- A per-day average. Separate from the division only because `days` is the
+-- interesting half and deserves to be wrong in one place rather than four.
+function db.PerDay(total, days)
+    if not days or days < 1 then days = 1 end
+    return (total or 0) / days
+end
+
+-- Everything the History tab's figure row and stat blocks need, in ONE pass.
+--
+-- Returns a table:
+--   income, spend, net          copper over the window
+--   saleN, buyN                 how many transactions of each kind
+--   days                        the denominator above
+--   oldest                      epoch of the earliest entry in the window
+--   topSale, topBuy             the biggest SINGLE transaction of each kind,
+--                               as { item, itemId, amount }
+--   topSaleItem, topBuyItem     the item with the biggest SUMMED amount,
+--                               as { item, itemId, total }
+--
+-- TOP SALE AND TOP ITEM ARE DIFFERENT QUESTIONS and the names have to keep
+-- saying so. One is "the best thing that ever happened once"; the other is
+-- "what actually earns here". A single 500g sale of a rare and 400 sales of
+-- Linen Cloth are the same money and only one of them is a business.
+--
+-- ITEMS ARE KEYED BY NAME, NOT BY ID, and that is deliberate. The obvious
+-- choice -- id where there is one, name otherwise -- SPLITS an item whose
+-- history straddles the point where ids started being recorded: the same Linen
+-- Cloth arrives as key 2589 from one entry and as "Linen Cloth" from another,
+-- and its total lands in two buckets, neither of which reaches the top spot.
+-- `item` is set on every entry (db.RecordTxn defaults it to "?"), `id` is not,
+-- so the name is the only key every row can offer. The id is carried alongside
+-- for quality colouring, where a missing one costs nothing.
+function db.LedgerStats(sinceEpoch, now)
+    now = now or time()
+    local st = {
+        income = 0, spend = 0, net = 0,
+        saleN = 0, buyN = 0,
+        oldest = nil, days = 1,
+    }
+    local saleBy, buyBy = {}, {}
+
+    local led = db.Ledger()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        local t = e.t
+        if not sinceEpoch or (t and t >= sinceEpoch) then
+            local amount = e.amount or 0
+            if amount > 0 then
+                if t and (not st.oldest or t < st.oldest) then st.oldest = t end
+                local key = e.item or "?"
+                local bucket, top, topName
+                if e.kind == "sale" then
+                    st.income = st.income + amount
+                    st.saleN  = st.saleN + 1
+                    bucket = saleBy
+                    if not st.topSale or amount > st.topSale.amount then
+                        st.topSale = { item = e.item, itemId = e.id,
+                                       amount = amount }
+                    end
+                elseif e.kind == "buy" then
+                    st.spend = st.spend + amount
+                    st.buyN  = st.buyN + 1
+                    bucket = buyBy
+                    if not st.topBuy or amount > st.topBuy.amount then
+                        st.topBuy = { item = e.item, itemId = e.id,
+                                      amount = amount }
+                    end
+                end
+                if bucket then
+                    local rec = bucket[key]
+                    if not rec then
+                        rec = { item = e.item, itemId = e.id, total = 0 }
+                        bucket[key] = rec
+                    end
+                    -- An id learned on a LATER entry backfills the record, so
+                    -- an item whose early history predates id recording still
+                    -- gets its colour from whichever entry carried one.
+                    if not rec.itemId and e.id then rec.itemId = e.id end
+                    rec.total = rec.total + amount
+                end
+            end
+        end
+        i = i + 1
+    end
+
+    st.net  = st.income - st.spend
+    st.days = db.WindowDays(sinceEpoch, st.oldest, now)
+    st.topSaleItem = db.TopOf(saleBy)
+    st.topBuyItem  = db.TopOf(buyBy)
+    return st
+end
+
+-- The highest-`total` record in a keyed table, or nil when it is empty.
+--
+-- TIES GO TO THE LOWER KEY, sorted as a string, so the answer does not change
+-- between two repaints of the same data. `pairs` has no order, and a figure
+-- that flickers between two items on a timer is a bug somebody will chase for
+-- an hour before realising it is the iteration.
+function db.TopOf(bucket)
+    local best, bestKey = nil, nil
+    for key, rec in pairs(bucket or {}) do
+        local k = tostring(key)
+        if not best or rec.total > best.total
+            or (rec.total == best.total and k < bestKey) then
+            best, bestKey = rec, k
+        end
+    end
+    return best
+end
+
 function db.ClearLedger()
     if not db.account then return end
     db.account.ledger = {}

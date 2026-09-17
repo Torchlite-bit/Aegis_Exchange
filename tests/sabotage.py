@@ -3091,9 +3091,13 @@ end
 
     # The two stat strings back on one line, anchored to opposite ends. Both
     # can grow, so on a narrow window they overlapped into 'LOWN0g 14s 6c'.
+    # Re-pointed when the figure work added a THIRD stat row and moved the
+    # other two up. The bug it plants is unchanged: two strings that can both
+    # grow put back on one line, which is how "LOW 9g 14s 6c" and "IN 37s 92c"
+    # became "LOWN0g 14s 6c".
     ('stat-rows-share-a-line', 'ui/frame.lua',
-     '    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)\n    ui.histStatR:SetJustifyH("LEFT")',
-     '    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 18)\n    ui.histStatR:SetJustifyH("RIGHT")',
+     '    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)\n    ui.histStatR:SetJustifyH("LEFT")',
+     '    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 32)\n    ui.histStatR:SetJustifyH("RIGHT")',
      'histgraph'),
 
     # The ledger table squeezed below its own columns, so the Amount column
@@ -5856,6 +5860,117 @@ end""",
      '    local word = " pages skipped"',
      "sweep"),
 
+    # ---- History tab figures ----------------------------------------------
+    # The denominator can never be zero -- everything divides by it.
+    ("windowdays-drops-the-touched-day", "core/db.lua",
+     "    local days = math.floor((now - start) / 86400) + 1",
+     "    local days = math.floor((now - start) / 86400)",
+     "histstats"),
+
+    # A year-long window over three days of history must divide by the three.
+    ("windowdays-ignores-short-history", "core/db.lua",
+     "    if not start or (oldest and oldest > start) then start = oldest end",
+     "    if not start then start = oldest end",
+     "histstats"),
+
+    # ...and the other way: a short window over long history uses the window.
+    ("windowdays-ignores-the-window", "core/db.lua",
+     "    if not start or (oldest and oldest > start) then start = oldest end",
+     "    if oldest then start = oldest end",
+     "histstats"),
+
+    ("perday-divides-by-zero", "core/db.lua",
+     "    if not days or days < 1 then days = 1 end",
+     "    days = days or 1",
+     "histstats"),
+
+    # THE CENTRAL ONE. Top sale and top item are different questions; code
+    # that answers both with the biggest single transaction is wrong in a way
+    # no screenshot shows.
+    ("topitem-collapses-into-topsale", "core/db.lua",
+     "    st.topSaleItem = db.TopOf(saleBy)",
+     "    st.topSaleItem = st.topSale",
+     "histstats"),
+
+    # Keying by id-or-name splits an item whose history straddles the release
+    # where ids started being recorded, and the split loses the top spot.
+    ("topitem-keyed-by-id-splits-history", "core/db.lua",
+     '                local key = e.item or "?"',
+     '                local key = e.id or e.item or "?"',
+     "histstats"),
+
+    # pairs has no order, so a tie must break the same way every repaint.
+    ("topof-tie-breaks-backwards", "core/db.lua",
+     "            or (rec.total == best.total and k < bestKey) then",
+     "            or (rec.total == best.total and k > bestKey) then",
+     "histstats"),
+
+    ("stats-counts-zero-amounts", "core/db.lua",
+     "            if amount > 0 then",
+     "            if amount >= 0 then",
+     "histstats"),
+
+    ("stats-net-backwards", "core/db.lua",
+     "    st.net  = st.income - st.spend",
+     "    st.net  = st.spend - st.income",
+     "histstats"),
+
+    # An undated entry cannot be placed in a window, so a bounded one must not
+    # quietly include it.
+    ("stats-window-swallows-undated", "core/db.lua",
+     "        if not sinceEpoch or (t and t >= sinceEpoch) then",
+     "        if not sinceEpoch or not t or t >= sinceEpoch then",
+     "histstats"),
+
+    ("stats-buys-bucket-as-sales", "core/db.lua",
+     """                    st.spend = st.spend + amount
+                    st.buyN  = st.buyN + 1
+                    bucket = buyBy""",
+     """                    st.spend = st.spend + amount
+                    st.buyN  = st.buyN + 1
+                    bucket = saleBy""",
+     "histstats"),
+
+    ("stats-oldest-is-newest", "core/db.lua",
+     "                if t and (not st.oldest or t < st.oldest) then st.oldest = t end",
+     "                if t and (not st.oldest or t > st.oldest) then st.oldest = t end",
+     "histstats"),
+
+    # Counts are not money: through a money formatter, 14 sales render as
+    # "14c" -- a wrong answer that looks like a right one.
+    ("figures-format-counts-as-money", "ui/frame.lua",
+     '            { "SOLD",    tostring(st.saleN or 0) },',
+     '            { "SOLD",    util.ShortMoney(st.saleN or 0) },',
+     "histstats"),
+
+    # math.floor on a negative average reports a loss as bigger than it is.
+    ("trunc-floors-a-loss", "ui/frame.lua",
+     """    if v < 0 then return -math.floor(-v) end
+    return math.floor(v)""",
+     """    return math.floor(v)""",
+     "histstats"),
+
+    # The rows are an interface: 3.3b's grid reads them by position.
+    ("figures-swap-sales-and-expenses", "ui/frame.lua",
+     """            { "SALES",    util.ShortMoney(st.income or 0) },
+            { "EXPENSES", util.ShortMoney(st.spend or 0) },""",
+     """            { "SALES",    util.ShortMoney(st.spend or 0) },
+            { "EXPENSES", util.ShortMoney(st.income or 0) },""",
+     "histstats"),
+
+    ("figures-swap-high-and-low", "ui/frame.lua",
+     """            { "HIGH", util.ShortMoney(hi or 0) },
+            { "LOW",  util.ShortMoney(lo or 0) },""",
+     """            { "HIGH", util.ShortMoney(lo or 0) },
+            { "LOW",  util.ShortMoney(hi or 0) },""",
+     "histstats"),
+
+    # Pairs that run together read as a sentence rather than as figures.
+    ("figuretext-loses-the-gap", "ui/frame.lua",
+     '        if out ~= "" then out = out .. "   " end',
+     '        if out ~= "" then out = out .. "" end',
+     "histstats"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -5903,6 +6018,7 @@ SUITES = {
     "bidpath": "tests/units/bidpath_test.lua",
     "purse": "tests/units/purse_test.lua",
     "sweep": "tests/units/sweep_test.lua",
+    "histstats": "tests/units/histstats_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
