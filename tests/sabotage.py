@@ -4517,13 +4517,13 @@ end
     # The guard removed, which is the bug as reported: the client refuses a
     # link and the error carries OUR file name for a link we never touched.
     ("tooltip-hook-rethrows-client-refusal", "ui/tooltip.lua",
-     """        local ok, r1, r2 = pcall(tooltip.orig[name], self, a1, a2)
+     """        local ok, r1, r2 = pcall(store[name], self, a1, a2)
         if not ok then
             tooltip.failures = (tooltip.failures or 0) + 1
             tooltip.lastFailure = { method = name, err = r1 }
             return
         end""",
-     "        local r1, r2 = tooltip.orig[name](self, a1, a2)",
+     "        local r1, r2 = store[name](self, a1, a2)",
      "tooltip.hook"),
 
     # Guarded but silent: the refusal never reaches /aex diag, so a link storm
@@ -6192,6 +6192,66 @@ end""",
      "                    local q = row[4] or ui.CraftQualityOf(row[3])",
      "                    local q = ui.CraftQualityOf(row[3]) or row[4]",
      "histgraph"),
+
+    # ---- what a sale nets, and the vendor warning --------------------------
+    # The cut comes off. Compared gross, an item listed at exactly vendor price
+    # reads "at vendor" while netting 95% of it.
+    ("netunit-forgets-the-cut", "core/sell.lua",
+     "    return math.floor(unitPrice * (1 - cut))",
+     "    return math.floor(unitPrice)",
+     "sellslot"),
+
+    # ...and the deposit must NOT come off: it is refunded when the auction
+    # sells. ROADMAP 5.3 asked for this formula and was wrong.
+    ("netunit-subtracts-a-deposit", "core/sell.lua",
+     "function sell.NetUnit(unitPrice, cut)\n    if not unitPrice or unitPrice <= 0 then return nil end\n    cut = cut or sell.CUT\n    return math.floor(unitPrice * (1 - cut))",
+     "function sell.NetUnit(unitPrice, cut)\n    if not unitPrice or unitPrice <= 0 then return nil end\n    cut = cut or sell.CUT\n    return math.floor(unitPrice * (1 - cut)) - 500",
+     "sellslot"),
+
+    ("vendorcompare-reads-it-backwards", "core/sell.lua",
+     "        above  = unitPrice >= vendor,",
+     "        above  = unitPrice <= vendor,",
+     "sellslot"),
+
+    # The warning has to be handed the NET. Handing it the gross is the bug.
+    ("sell-warning-compares-the-gross", "ui/frame.lua",
+     "    local vc = A.sell.VendorCompare(it.itemId, netPerItem)",
+     "    local vc = A.sell.VendorCompare(it.itemId, unitBuy)",
+     "sellslot"),
+
+    # ---- a group row's two counts ------------------------------------------
+    # Eight auctions of Runecloth might be eight singles or eight stacks of
+    # twenty, and the row said only the first.
+    ("grouprow-drops-the-item-count", "ui/frame.lua",
+     '    if units and units > listings then\n        txt = txt .. ", " .. units .. " items"\n    end',
+     "    local _ = units",
+     "buygroup"),
+
+    # ...and must not say the same number twice on a group of singles.
+    ("grouprow-repeats-the-same-number", "ui/frame.lua",
+     "    if units and units > listings then",
+     "    if units then",
+     "buygroup"),
+
+    ("grouprow-stops-using-the-helper", "ui/frame.lua",
+     "        row.left:SetText(ui.GroupCountText(e.listings, e.units))",
+     '        row.left:SetText((e.listings or 0) .. " auctions")',
+     "buygroup"),
+
+    # ---- the chat-link tooltip ---------------------------------------------
+    # ItemRefTooltip is a different frame; without its own hook none of our
+    # price lines reach a link clicked in chat.
+    ("chatlink-tooltip-not-hooked", "ui/tooltip.lua",
+     '    HookRef("SetHyperlink", "link")',
+     "    local _ = HookRef",
+     "tooltip.hook"),
+
+    # Two frames need two stores: one table keyed by method name cannot hold
+    # two originals under "SetHyperlink", and the second overwrites the first.
+    ("chatlink-shares-one-store", "ui/tooltip.lua",
+     "    HookOn(ItemRefTooltip, name, source, tooltip.origRef)",
+     "    HookOn(ItemRefTooltip, name, source, tooltip.orig)",
+     "tooltip.hook"),
 
 ]
 

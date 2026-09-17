@@ -130,4 +130,27 @@ while i <= table.getn(expected) do
     i = i + 1
 end
 
+-- ---------------------------------------------------------------------------
+H.section("the chat-link tooltip")
+-- ---------------------------------------------------------------------------
+
+-- CLICKING AN ITEM LINK IN CHAT opens ItemRefTooltip, a DIFFERENT frame from
+-- GameTooltip -- so none of our price lines reached it, for the whole life of
+-- the hook.
+H.check("ItemRefTooltip's SetHyperlink is hooked too",
+        tooltip.origRef and tooltip.origRef.SetHyperlink ~= nil)
+
+-- TWO FRAMES NEED TWO STORES. One table keyed by method name cannot hold two
+-- originals under "SetHyperlink", and the second would overwrite the first --
+-- which would leave GameTooltip calling ItemRefTooltip's method.
+H.neq("the two originals are kept apart",
+      tooltip.orig.SetHyperlink, tooltip.origRef.SetHyperlink)
+
+-- PER-OBJECT, NEVER THE METATABLE. Assigning to the shared widget metatable
+-- would put this code in the path of every tooltip in the session, including
+-- our own scanning ones -- the corollary to HARD RULE 16, and how a bounded
+-- scan becomes an unbounded one.
+H.neq("the hook is on the frame, not the shared metatable",
+      ItemRefTooltip.SetHyperlink, tooltip.origRef.SetHyperlink)
+
 os.exit(H.report("tooltip.hook"))

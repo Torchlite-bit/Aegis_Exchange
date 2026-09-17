@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.5]
+
+### Fixed
+- **The below-vendor warning was comparing the wrong number.** It checked your
+  buyout against the vendor price *before* the auction house takes its 5% — so
+  an item listed at exactly vendor price read as "at vendor" while actually
+  netting 95% of it, and anything in that band lost you money without a word.
+  It now compares what you'd keep, and says so: **"Nets below vendor price"**.
+
+  *(Your deposit is not counted against a sale, because it comes back when the
+  item sells — it's only lost if the auction expires or you cancel.)*
+
+- **The category scanner no longer shows the tab behind it.** Same frame-level
+  fix the Ledger got in 1.54.1.
+
+### Added
+- **Grouped results say how many items, not just how many auctions.**
+  `Runecloth — 8 auctions, 129 items`. Eight auctions might be eight singles or
+  eight stacks of twenty, and the row only ever told you the first. It stays
+  quiet when the two are the same.
+- **Aegis price lines now appear on item links clicked in chat.** Those open a
+  different tooltip frame from the one hovering a bag item uses, which had
+  never been hooked.
+
 ## [1.54.4]
 
 ### Fixed
@@ -5947,6 +5971,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

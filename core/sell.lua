@@ -1382,6 +1382,24 @@ function sell.GroupListings(rows, marketValue)
 end
 
 -- How a per-unit price compares to the item's vendor sell price. Returns
+-- What ONE unit actually nets you from a sale, after the auction house takes
+-- its consignment cut.
+--
+-- THE DEPOSIT IS NOT IN HERE, and that is a fact about the game rather than an
+-- omission: a deposit is REFUNDED in full when the auction sells, and
+-- forfeited only when it expires or you cancel. So it is a risk you carry
+-- while the auction is up, not a cost of selling -- and subtracting it from a
+-- successful sale would understate every price on the tab.
+--
+-- (ROADMAP 5.3 said otherwise -- `unitPrice * 0.95 - deposit` -- and the entry
+-- has been corrected. The number it asked for would have been wrong in the
+-- other direction from the one it was replacing.)
+function sell.NetUnit(unitPrice, cut)
+    if not unitPrice or unitPrice <= 0 then return nil end
+    cut = cut or sell.CUT
+    return math.floor(unitPrice * (1 - cut))
+end
+
 -- { vendor, pct, above, mult } or nil when we have no vendor data.
 function sell.VendorCompare(itemId, unitPrice)
     local vendor = A.db.GetVendor(itemId)

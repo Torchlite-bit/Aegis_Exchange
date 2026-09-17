@@ -476,14 +476,15 @@ end
 -- FIRST (so tooltip.current is set while the original runs — that is when the
 -- client calls SetTooltipMoney), then calls the original, then appends our
 -- lines.
-local function HookMethod(name, source)
+local function HookOn(frame, name, source, store)
     -- Only hook a method that actually exists on this client; otherwise we'd
     -- install a replacement whose "original" is nil and error the moment it is
     -- called (e.g. GameTooltip:SetHyperlink on some 1.12 builds).
-    local orig = GameTooltip[name]
+    if not frame then return end
+    local orig = frame[name]
     if type(orig) ~= "function" then return end
-    tooltip.orig[name] = orig
-    GameTooltip[name] = function(self, a1, a2)
+    store[name] = orig
+    frame[name] = function(self, a1, a2)
         local id, count = resolvers[name](a1, a2)
         if id then
             tooltip.current = { id = id, count = count, source = source }
@@ -522,7 +523,7 @@ local function HookMethod(name, source)
         -- than one that misattributes it. Our own lines are skipped on a
         -- failure, because the tooltip is then in a state we did not build and
         -- cannot reason about.
-        local ok, r1, r2 = pcall(tooltip.orig[name], self, a1, a2)
+        local ok, r1, r2 = pcall(store[name], self, a1, a2)
         if not ok then
             tooltip.failures = (tooltip.failures or 0) + 1
             tooltip.lastFailure = { method = name, err = r1 }
@@ -535,8 +536,27 @@ local function HookMethod(name, source)
     end
 end
 
+-- GameTooltip's hooks, which is what every existing caller means by "hooked".
+-- tooltip.orig is keyed by method name and stays exactly as it was.
+local function HookMethod(name, source)
+    HookOn(GameTooltip, name, source, tooltip.orig)
+end
+
+-- ...and the same for a DIFFERENT frame, with its own store of originals.
+--
+-- PER-OBJECT, NEVER THE METATABLE. Assigning to the shared widget metatable
+-- would put this code in the path of every tooltip in the session, including
+-- our own scanning ones -- which is the corollary to HARD RULE 16 spelled out
+-- in CLAUDE.md, and how a bounded scan becomes an unbounded one. A second
+-- frame means a second explicit hook, and a second store: one table keyed by
+-- method name cannot hold two frames' originals under "SetHyperlink".
+tooltip.origRef = {}
+local function HookRef(name, source)
+    HookOn(ItemRefTooltip, name, source, tooltip.origRef)
+end
+
 -- Times the client refused an argument inside one of our hooks, and the last
--- one it refused. Read by /aex diag. See HookMethod for why they exist.
+-- one it refused. Read by /aex diag. See HookOn for why they exist.
 tooltip.failures = 0
 tooltip.lastFailure = nil
 
@@ -557,6 +577,12 @@ function tooltip.Install()
     HookMethod("SetTradeSkillItem",  "tradeskill")
     HookMethod("SetCraftItem",       "craft")
     HookMethod("SetCraftSpell",      "craft")
+
+    -- CLICKING AN ITEM LINK IN CHAT opens ItemRefTooltip, which is a different
+    -- frame -- so none of our lines reached it. tooltip.Extend already takes
+    -- the frame as its first argument and resolvers.SetHyperlink already
+    -- exists, so this is the same hook pointed somewhere else.
+    HookRef("SetHyperlink", "link")
 
     -- Vendor-price collection. 1.12's GetItemInfo has no sell price; the only
     -- source is the money line the client adds to bag-item tooltips while a

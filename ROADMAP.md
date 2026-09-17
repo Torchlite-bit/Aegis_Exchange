@@ -4915,7 +4915,15 @@ of it already shipped; what follows is only what did not. Each entry names the
 function that already does most of the work, because in almost every case this
 is a small addition to something that exists rather than a new subsystem.
 
-### 5.1 Total quantity on a grouped result row
+### 5.1 Total quantity on a grouped result row — ✅ **DONE** (v1.54.5)
+
+`ui.GroupCountText(listings, units)`. It says both counts only when they
+differ: a group where every listing is a single would otherwise print the same
+number twice, and a column that repeats itself teaches the eye to stop reading
+it. A `units` figure below the listing count cannot happen, so it is treated as
+absent rather than printed.
+
+#### Original entry
 
 `ui.FillGroupRow` prints `"8 auctions"`. `ui.BuyTreeRows` already carries
 `g.units` — the summed `r.count` across the group — and throws it away.
@@ -4923,7 +4931,20 @@ is a small addition to something that exists rather than a new subsystem.
 Wanted: `Runecloth — 8 auctions, 129 items`. **The number is computed; only the
 label is missing.** Check the column width before assuming the text fits.
 
-### 5.2 Aegis tooltip lines on a chat link
+### 5.2 Aegis tooltip lines on a chat link — ✅ **DONE** (v1.54.5)
+
+`HookMethod` became `HookOn(frame, name, source, store)`, with `HookMethod` and
+`HookRef` as the two callers. **Two frames need two stores**: one table keyed by
+method name cannot hold two originals under `SetHyperlink`, and the second
+would overwrite the first — leaving GameTooltip calling ItemRefTooltip's
+method. `tooltip.orig` is unchanged, so every existing caller and test is
+untouched; `tooltip.origRef` is the new one.
+
+Still per-object, never the metatable. The harness gained an `ItemRefTooltip`,
+without which the hook installs on nothing and the suite passes for the wrong
+reason.
+
+#### Original entry
 
 `tooltip.Install` hooks **`GameTooltip` only** — `GameTooltip[name] = ...`,
 per-object, deliberately never the shared metatable (HARD RULE 16's corollary).
@@ -4941,23 +4962,30 @@ client shows the frame afterwards, which is why `GameTooltip` needs no
 should behave — but that is reasoning, not observation, and a tooltip clipped at
 the bottom is exactly the class of bug no suite here can see.
 
-### 5.3 Below-vendor warning should compare NET, not gross
+### 5.3 Below-vendor warning should compare NET, not gross — ✅ **DONE** (v1.54.5)
 
-`sell.VendorCompare(itemId, unitPrice)` compares the **list price** to the
-vendor price. What matters is what you actually keep:
+`sell.VendorCompare` was handed the **gross** buyout, so an item listed at
+exactly the vendor price reported "at vendor" while netting 95% of it — and
+everything inside that 5% band lost money without a word. It now gets
+`netPerItem`, which the disenchant comparison two lines above was already
+reading correctly.
+
+**THIS ENTRY ASKED FOR THE WRONG FORMULA.** It said:
 
 ```
 net = unitPrice * (1 - cut) - depositPerUnit
 ```
 
-With the 5% consignment cut and a deposit, an auction listed slightly above
-vendor still loses money, and the current warning says nothing. The cut and
-`sell.DepositFor` are both already in hand at the call site
-(`ui/frame.lua`, the Sell tab's vendor line).
+**The deposit does not belong there.** A deposit is refunded in full when an
+auction SELLS, and forfeited only when it expires or is cancelled — so it is a
+risk carried while the auction is up, not a cost of selling. Subtracting it
+would have understated every price on the tab, which is wrong in the opposite
+direction from the bug being fixed. `sell.NetUnit` takes a price and a cut and
+nothing else, and a sabotage plants the deposit back in so the wrong formula
+cannot return.
 
-**This is a correctness fix, not a feature** — the existing warning is
-answering a question nobody asked. Keep the gross comparison available; add the
-net one and warn on it.
+The lesson is the same one this file keeps recording: **the entry was written
+from a plausible reading and not checked.** One search settled it.
 
 ### 5.4 Post All: a policy, not just a walk
 

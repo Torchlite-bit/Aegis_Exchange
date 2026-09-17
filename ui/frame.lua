@@ -3809,6 +3809,21 @@ end
 -- because on a parent with several listings TIME LEFT IS GENUINELY UNDEFINED
 -- -- they all have different ones -- so that cell is free. A parent with
 -- exactly ONE listing has a real time left, and shows it: there is nothing to
+-- "8 auctions, 129 items" -- or just the auctions when the count adds nothing.
+--
+-- A GROUP WHERE EVERY LISTING IS A SINGLE says the same number twice, and a
+-- column that repeats itself teaches the eye to stop reading it. Same reason
+-- the unit column is blank on a group: a figure that cannot differ is not a
+-- figure.
+function ui.GroupCountText(listings, units)
+    listings = listings or 0
+    local txt = listings .. " auctions"
+    if units and units > listings then
+        txt = txt .. ", " .. units .. " items"
+    end
+    return txt
+end
+
 -- summarise and the row is that auction.
 function ui.FillGroupRow(row, e)
     row.entry = e
@@ -3849,7 +3864,11 @@ function ui.FillGroupRow(row, e)
         end
         row.left:SetText(tl)
     else
-        row.left:SetText((e.listings or 0) .. " auctions")
+        -- AUCTIONS *AND* ITEMS. `e.units` is the summed count across the
+        -- group, computed by ui.BuyTreeRows and discarded here until now --
+        -- and the two are different questions: eight auctions of Runecloth
+        -- might be eight singles or eight stacks of twenty.
+        row.left:SetText(ui.GroupCountText(e.listings, e.units))
     end
 
     -- A PARENT QUOTES ONE PRICE: the lowest you can actually pay. Bid is blank
@@ -15765,13 +15784,26 @@ function ui.RefreshSell()
     local deWorth = A.de and A.de.ShouldDisenchant
         and A.de.ShouldDisenchant(it.itemId, bestSale, A.de.MarketPrice) or nil
 
-    local vc = A.sell.VendorCompare(it.itemId, unitBuy)
+    -- AGAINST THE NET, not the gross. `netPerItem` is what you actually keep
+    -- once the consignment cut is taken, and it is already computed two lines
+    -- up for the disenchant comparison -- which was reading it correctly while
+    -- this read the raw buyout. An auction listed at exactly vendor price
+    -- therefore reported "at vendor" while netting 95% of it, and everything
+    -- in that band lost money without a word.
+    --
+    -- The deposit stays out of it: it is refunded in full when the auction
+    -- sells and forfeited only when it expires, so it is a risk carried while
+    -- the auction is up rather than a cost of selling.
+    local vc = A.sell.VendorCompare(it.itemId, netPerItem)
     if deWorth then
         ui.sellVendor:SetText("Worth more disenchanted: "
             .. util.FormatMoney(deWorth, true))
     elseif vc and not vc.above then
+        -- NAMED as what it compares. "Below vendor price" over a gross figure
+        -- and over a net one are two different claims, and the percentage
+        -- moved when this changed.
         ui.sellVendor:SetText(string.format(
-            "Below vendor price (%d%%)", vc.pct))
+            "Nets below vendor price (%d%%)", vc.pct))
     else
         ui.sellVendor:SetText("")
     end
@@ -16686,7 +16718,12 @@ function ui.BuildCategoryPicker()
     local picker = CreateFrame("Frame", "AegisExchangePicker", ui.frame)
     picker:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
     picker:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
-    picker:SetFrameLevel(ui.content:GetFrameLevel() + 5)
+    -- WELL ABOVE THE CONTENT. This was +5, and a panel's widgets are children
+    -- of children -- each nesting level is another +1 -- so the deepest of
+    -- them drew THROUGH the picker: the Aegis tab's settings were legible
+    -- behind "Scan which categories?". Same number the ledger overlay uses,
+    -- for the same reason; see ui.BuildLedgerWindow.
+    picker:SetFrameLevel(ui.content:GetFrameLevel() + 50)
     picker:EnableMouse(true)   -- swallow clicks so they don't fall through
     picker:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",

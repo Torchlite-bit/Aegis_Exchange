@@ -66,6 +66,7 @@ for _, sig in ipairs({
     "function ui.ParkDressUpFrame(",
     "function ui.ToggleBuyGroup(",
     "function ui.BuyGrouped(",
+    "function ui.GroupCountText(",
 }) do
     local fn, err = loadstring(extract("ui/frame.lua", sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -609,5 +610,40 @@ do
     H.check("no API, no attempt", not ui.TryDressUp(link))
     DressUpItemLink, DressUpModel = realLink, realModel
 end
+
+-- ---------------------------------------------------------------------------
+H.section("what a group row counts")
+-- ---------------------------------------------------------------------------
+
+-- AUCTIONS AND ITEMS ARE DIFFERENT QUESTIONS. Eight auctions of Runecloth
+-- might be eight singles or eight stacks of twenty, and the row said only the
+-- first -- while ui.BuyTreeRows had computed the second and thrown it away.
+H.eq("both counts when they differ",
+     ui.GroupCountText(8, 129), "8 auctions, 129 items")
+
+-- ...AND NOT WHEN THEY DO NOT. A group of singles says the same number twice,
+-- and a column that repeats itself teaches the eye to stop reading it.
+H.eq("singles say it once", ui.GroupCountText(8, 8), "8 auctions")
+H.eq("...and so does a group with no count at all",
+     ui.GroupCountText(8, nil), "8 auctions")
+
+-- A units figure BELOW the listing count cannot happen -- every auction holds
+-- at least one item -- so it is treated as the absent case rather than
+-- printed as a smaller number than the one beside it.
+H.eq("a nonsense count is not printed", ui.GroupCountText(8, 3), "8 auctions")
+
+-- ...AND THE ROW HAS TO CALL IT. A helper nothing uses is a tested function
+-- and an unchanged screen.
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    H.check("the group row uses the helper",
+            string.find(src, "ui.GroupCountText(e.listings, e.units)",
+                        1, true) ~= nil)
+end
+
+H.eq("no listings is still a sentence", ui.GroupCountText(0, 0), "0 auctions")
+H.eq("nils do not error", ui.GroupCountText(nil, nil), "0 auctions")
 
 os.exit(H.report("buygroup"))

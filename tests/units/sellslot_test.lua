@@ -643,4 +643,75 @@ do
     H.eq("...and the walk moved on exactly once, at the end", moved, 1)
 end
 
+-- ---------------------------------------------------------------------------
+H.section("what a sale actually nets")
+-- ---------------------------------------------------------------------------
+
+-- THE CUT COMES OFF, and that is the whole of it. The below-vendor warning
+-- compared the GROSS buyout to the vendor price, so an item listed at exactly
+-- vendor reported "at vendor" while netting 95% of it -- and everything inside
+-- that 5% band lost money without a word.
+H.eq("a sale nets the price less the cut", sell.NetUnit(10000, 0.05), 9500)
+H.eq("...at the addon's own rate", sell.NetUnit(10000), 9500)
+H.eq("a zero cut nets the lot", sell.NetUnit(10000, 0), 10000)
+
+-- THE DEPOSIT IS NOT IN HERE, and that is a fact about the game: a deposit is
+-- refunded in full when the auction SELLS, and forfeited only when it expires
+-- or is cancelled. It is a risk carried while the auction is up, not a cost of
+-- selling, and subtracting it would understate every price on the tab.
+--
+-- ROADMAP 5.3 asked for `price * 0.95 - deposit` and was wrong; the entry is
+-- corrected. This check is here so the wrong formula cannot come back.
+H.eq("the deposit does not come off a sale", sell.NetUnit(10000, 0.05), 9500)
+
+H.isNil("no price is no net", sell.NetUnit(nil))
+H.isNil("a zero price is no net", sell.NetUnit(0))
+
+-- ---------------------------------------------------------------------------
+H.section("comparing against the vendor")
+-- ---------------------------------------------------------------------------
+
+do
+    A.db.SetVendor(1234, 1000)
+
+    -- Gross ABOVE vendor but net BELOW it: the exact band the warning missed.
+    local gross = 1020
+    local net = sell.NetUnit(gross, 0.05)       -- 969
+    H.check("the gross reads as above vendor",
+            sell.VendorCompare(1234, gross).above)
+    H.check("...while the net is below it",
+            not sell.VendorCompare(1234, net).above,
+            net .. " vs 1000")
+
+    -- ...and the percentage is the net one, so the figure in the warning
+    -- matches the claim the warning makes.
+    H.eq("the percentage is of the net", sell.VendorCompare(1234, net).pct, 96)
+
+    -- Comfortably above stays above.
+    H.check("a real profit still reads as above",
+            sell.VendorCompare(1234, sell.NetUnit(2000, 0.05)).above)
+end
+
+-- THE CALL SITE HAS TO HAND IT THE NET. Everything above is about a function
+-- that will happily compare whichever number it is given, so the arithmetic
+-- can be perfect while the tab still shows the old warning. Read out of the
+-- source, because the Sell tab's repaint wants a real client to mean anything.
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    H.check("the Sell tab compares the net, not the buyout",
+            string.find(src, "A.sell.VendorCompare(it.itemId, netPerItem)",
+                        1, true) ~= nil,
+            "handing it unitBuy is the bug this release fixes")
+    H.check("...and says so",
+            string.find(src, "Nets below vendor price", 1, true) ~= nil,
+            "the old wording claimed something the figure no longer means")
+end
+
+-- An item no merchant has been seen to buy has no comparison to make, and a
+-- warning invented from nothing is worse than none.
+H.isNil("an unknown item compares to nothing", sell.VendorCompare(999999, 500))
+H.isNil("...and so does a missing price", sell.VendorCompare(1234, nil))
+
 os.exit(H.report("sellslot"))
