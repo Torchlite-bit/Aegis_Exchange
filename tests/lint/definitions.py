@@ -51,6 +51,14 @@ REMOVED_ON_PURPOSE = {
     # v1.54.0. Its two callers were the History tab's stat rows, which are a
     # six-cell strip and three blocks now -- every figure its own FontString in
     # its own column, so there is no run-together line to build.
+    # v1.54.1. The ledger became an overlay over the window's content, the way
+    # the category picker is, so there is no floating frame to drag, no point
+    # to remember, and no height to compute -- it is anchored by two corners.
+    "ui.SaveLedgerPoint":    "v1.54.1 -- the ledger is an in-window overlay; "
+                             "nothing to drag, so nothing to save",
+    "ui.RestoreLedgerPoint": "v1.54.1 -- ditto; it is anchored to ui.content",
+    "ui.LedgerWindowHeight": "v1.54.1 -- two-corner anchored, so its height is "
+                             "the content area's and not a sum of rows",
     "ui.StatLine": "v1.54.0 -- the figure rows became ui.PaintHistFigures' "
                    "strip and blocks; nothing formats a line of pairs any more",
     "ui.HistWidthsAt": "v1.54.0 -- the History tab is no longer split; the "

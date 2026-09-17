@@ -4676,14 +4676,31 @@ Two things recorded so they are not re-litigated:
 
 ### 3.4 The Ledger window
 
-**The window itself shipped in v1.54.0** — the two-screen question §3.3b was
-waiting on is answered, and this is the answer. `ui.BuildLedgerWindow` builds a
-draggable, position-remembering frame parented to **UIParent** (not to the Aegis
-window, so it survives that closing and can sit beside the auction house), and
-`ui.BuildHistoryTab` parents the table's widgets to it with one word: `host`.
-The rows, headers, totals line and Clear button are otherwise unchanged, because
-what moved is where they live and not what they do. `ui.HistWidthsAt` and
-`ui.StatLine` went with the split.
+**The window itself shipped in v1.54.0, and became an OVERLAY in v1.54.1.**
+The two-screen question §3.3b was waiting on is answered, and this is the
+answer. `ui.BuildHistoryTab` parents the table's widgets to it with one word,
+`host`; the rows, headers, totals line and Clear button are otherwise
+unchanged, because what moved is where they live and not what they do.
+`ui.HistWidthsAt` and `ui.StatLine` went with the split.
+
+**It shipped as a floating frame on UIParent and that was wrong.** Draggable,
+position-remembering, able to sit beside the auction house — and at the size a
+ledger wants it covered the chart it was launched from, where a backdrop over a
+bright filled area chart is a backdrop you can see straight through. A ledger
+you cannot read is not worth being able to move. `ui.SaveLedgerPoint`,
+`ui.RestoreLedgerPoint` and `ui.LedgerWindowHeight` went with it.
+
+**It is now built the way `ui.BuildCategoryPicker` is**: two-corner anchored
+over `ui.content`, click-swallowing, with Clear history and Close on a bottom
+button row. Two details are load-bearing and both have sabotages:
+
+- **Frame level `+50`, not the picker's `+5`.** A panel's widgets are children
+  of children and each nesting level is another `+1`, so a small bump leaves
+  the deepest of them drawing THROUGH the overlay — which is exactly why the
+  shipped category picker can still be read through. **That picker has the same
+  bug and this fix has not been applied to it.**
+- **A solid fill under the backdrop.** A tiling background texture at alpha 1
+  is only as opaque as the texture is.
 
 **What shipped is the OLD transaction table in a new window.** The PER-ITEM
 table below is still ahead, and still blocked on §5.6:

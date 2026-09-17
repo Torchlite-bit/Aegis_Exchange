@@ -5955,10 +5955,33 @@ end""",
      "    local cols = {}",
      "histgraph"),
 
-    # The ledger window's height and its row count are one number.
-    ("ledger-height-forgets-its-rows", "ui/frame.lua",
-     "    return HISTL.ledger_top + HISTL.ledger_bot\n           + HIST_ROW_H * ui.LedgerRowCount()",
-     "    return HISTL.ledger_top + HISTL.ledger_bot",
+    # The overlay's rows follow the window, the way every other list's do. A
+    # fixed count is what it had while the ledger was a floating frame of its
+    # own size, and under a full-height panel it leaves rows' worth of empty
+    # space below the table.
+    ("ledger-rows-stop-following-the-window", "ui/frame.lua",
+     "    return ui.ListRowsAt(ui.WindowH(), LEDGERBOX, HIST_ROW_H, HIST_ROWS_MAX)",
+     "    return 14",
+     "histgraph"),
+
+    # The bottom inset has to clear the divider and the button row, or the last
+    # row draws through Close.
+    ("ledger-bottom-inset-clips-the-buttons", "ui/frame.lua",
+     "    ledger_bot = 52,",
+     "    ledger_bot = 14,",
+     "histgraph"),
+
+    # An overlay five levels above the content is what the category picker
+    # does, and it is why you can still read the settings behind that one.
+    ("ledger-overlay-sits-too-low", "ui/frame.lua",
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)",
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)",
+     "histgraph"),
+
+    # Clicks that fall through an overlay land on whatever it is covering.
+    ("ledger-overlay-lets-clicks-through", "ui/frame.lua",
+     "    f:EnableMouse(true)   -- swallow clicks so they don't fall through",
+     "    f:EnableMouse(false)",
      "histgraph"),
 
     # ---- the figure strip and the blocks ----------------------------------

@@ -143,11 +143,14 @@ HIST_ROW_H = (function()
     return v
 end)()
 loadTable("HISTL")
+-- After HISTL, because it is derived from it.
+loadTable("LEDGERBOX")
 for _, sig in ipairs({
     "function ui.PanelWidthAt(",
     "function ui.PanelHeightAt(",
     "function ui.LedgerRowCount(",
-    "function ui.LedgerWindowHeight(",
+    "function ui.ListRowsAt(",
+    "function ui.WindowH(",
     "function ui.HistPlotSizeAt(",
     "function ui.HistBucketCount(",
     "function ui.SeriesRange(",
@@ -483,22 +486,33 @@ end
 H.section("the ledger window")
 -- ---------------------------------------------------------------------------
 
--- A FIXED HEIGHT, and its row count is the number that height was built from.
--- Two places holding the same number is how a window ends up with a scroll bar
--- for rows it has no room to draw.
+-- IT COVERS THE WINDOW'S CONTENT, so its rows follow the window exactly as
+-- every other list's do. A fixed count -- which is what it had while the
+-- ledger was a floating frame of its own size -- leaves rows' worth of empty
+-- space under the table on a tall window.
 do
-    local rows = ui.LedgerRowCount()
-    H.check("it shows at least a few rows", rows >= 5, rows)
-    H.eq("the frame is sized from exactly that many",
-         ui.LedgerWindowHeight(),
-         HISTL.ledger_top + HISTL.ledger_bot + HIST_ROW_H * rows)
+    -- Own heights: MIN_H / MAX_H are declared further down, and a section that
+    -- reads a local from below it is the exact fault tests/lint/scoping.py
+    -- exists to catch in the addon.
+    local SHORT, TALL = 492, 900
+    ui.frame = { GetHeight = function() return SHORT end }
+    local small = ui.LedgerRowCount()
+    ui.frame = { GetHeight = function() return TALL end }
+    local big = ui.LedgerRowCount()
+    H.check("it shows at least a few rows at the smallest window",
+            small >= 5, small)
+    H.check("a taller window shows more rows", big > small,
+            small .. " -> " .. big)
+    H.check("...but never more than the row pool holds",
+            big <= HIST_ROWS_MAX, big)
+    ui.frame = nil
 end
 
--- Its width is the table's own, which is what the old split's left_min was for
--- -- the columns end at 512 plus padding and a scrollbar, and below that the
--- Amount column runs under the bar.
-H.check("the window is wide enough for the columns",
-        HISTL.ledger_w >= 566, HISTL.ledger_w)
+-- Its insets are the chrome above and below the rows, and the bottom one has
+-- to clear the divider and the button row the category picker puts there --
+-- otherwise the last row draws through Close.
+H.check("the bottom inset clears the button row",
+        HISTL.ledger_bot >= 42, HISTL.ledger_bot)
 
 -- ---------------------------------------------------------------------------
 H.section("the area under the line")
@@ -1203,6 +1217,28 @@ do
     -- the collision rather than working around it. The ONE string still
     -- anchored from the right is the caveat, and nothing grows toward it.
     local build = bodyOf("function ui.BuildHistoryGraph(")
+    -- THE OVERLAY HAS TO ACTUALLY COVER WHAT IT SITS ON. Both of these are
+    -- faults that compile, load, and show only as a table you read through.
+    local ledger = bodyOf("function ui.BuildLedgerWindow(")
+    H.check("the ledger overlay is built", ledger ~= "")
+    H.check("...anchored over the window's content",
+            says(ledger, 'f:SetPoint("TOPLEFT", ui.content')
+            and says(ledger, 'f:SetPoint("BOTTOMRIGHT", ui.content'))
+    -- A panel's widgets are children of children, and each nesting level is
+    -- another +1. The category picker's +5 is why it can still be read
+    -- through, which is the whole complaint this overlay answers.
+    H.check("...well above the content it covers",
+            says(ledger, "ui.content:GetFrameLevel() + 50"),
+            "a small bump leaves the deepest widgets drawing through it")
+    H.check("...and swallowing clicks",
+            says(ledger, "f:EnableMouse(true)"),
+            "clicks that fall through land on whatever it is covering")
+    -- Two layers of near-black, because a tiling background texture at alpha 1
+    -- is only as opaque as the texture is and this is read over a bright
+    -- filled area chart.
+    H.check("...with a solid fill under the backdrop",
+            says(ledger, 'fill:SetTexture(C.well[1], C.well[2], C.well[3])'))
+
     H.check("the figure strip is built", says(build, "ui.histStrip[si] ="))
     H.check("...and the three blocks", says(build, "ui.histBlocks[bi] = blk"))
 

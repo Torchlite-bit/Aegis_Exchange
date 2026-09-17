@@ -12367,10 +12367,11 @@ local HISTL = {
     ledger_w   = 566,
     -- Rows the ledger window opens at.
     ledger_rows = 14,
-    -- Its chrome above and below the rows: title bar, the totals line, the
-    -- note, and the sortable column headers up top; a margin below.
+    -- Its chrome above and below the rows: title, the totals line, the note
+    -- and the sortable column headers up top; the divider and button row
+    -- below. Read through LEDGERBOX, which ui.ListRowsAt takes.
     ledger_top = 92,
-    ledger_bot = 14,
+    ledger_bot = 52,
     -- WIDE ENOUGH FOR THE CHART'S OWN TITLE BAR, which is what it holds now:
     -- two side paddings, the heading, and five period buttons with their gaps.
     -- The geometry suite checks that sum rather than trusting this number, so
@@ -12475,6 +12476,18 @@ local HISTL = {
     bucket_min = 8,
     bucket_max = 400,
 }
+
+-- The ledger overlay's insets, in the shape ui.ListRowsAt takes. A table of
+-- its own rather than another LISTBOX entry, because LISTBOX is declared long
+-- before HISTL and these two numbers live with the rest of the ledger's
+-- layout.
+-- Multi-line on purpose: the geometry suite reads this table out of the source
+-- rather than copying it, and its reader wants a brace per line.
+local LEDGERBOX = {
+    top = HISTL.ledger_top,
+    bot = HISTL.ledger_bot,
+}
+ui.LEDGERBOX = LEDGERBOX     -- read by the geometry suite
 
 -- The two halves of the History panel at window width `w`. Returns tableW,
 -- graphW -- both in panel pixels, and they plus the edges and gap are the
@@ -12942,107 +12955,92 @@ end
 -- is more useful than one trapped inside it.
 -- ---------------------------------------------------------------------------
 
--- How many rows the ledger window shows. FIXED, because the window is a fixed
--- height -- and it is the same number ui.LedgerWindowHeight sizes the frame
--- from, so a change to one cannot leave the other behind.
+-- How many rows the ledger overlay shows. It covers the window's content area,
+-- so the count follows the window exactly as every other list in here does.
+--
+-- It was a fixed number while the ledger was a floating frame of its own size.
+-- Covering the content instead means there is a height to measure, and a
+-- fixed count under a full-height panel would have left rows' worth of empty
+-- space below the table on a tall window.
 function ui.LedgerRowCount()
-    local n = HISTL.ledger_rows
-    if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
-    if n < 1 then n = 1 end
-    return n
-end
-
-function ui.LedgerWindowHeight()
-    return HISTL.ledger_top + HISTL.ledger_bot
-           + HIST_ROW_H * ui.LedgerRowCount()
+    return ui.ListRowsAt(ui.WindowH(), LEDGERBOX, HIST_ROW_H, HIST_ROWS_MAX)
 end
 
 function ui.BuildLedgerWindow()
     if ui.ledgerFrame then return ui.ledgerFrame end
-    local f = CreateFrame("Frame", "AegisExchangeLedger", UIParent)
-    f:SetWidth(HISTL.ledger_w)
-    f:SetHeight(ui.LedgerWindowHeight())
-    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    f:SetFrameStrata("DIALOG")
+
+    -- AN OVERLAY OVER THE WINDOW'S CONTENT, built the way the category picker
+    -- is (ui.BuildCategoryPicker) -- same two-corner anchoring to ui.content,
+    -- same click-swallowing, same "the tab strip stays visible above it".
+    --
+    -- It was a floating frame parented to UIParent, which could be dragged
+    -- beside the auction house. That sounded better than it read: at the size
+    -- a ledger wants it covered the chart it was launched from, and a backdrop
+    -- over a bright green area chart is a backdrop you can see straight
+    -- through. A ledger you cannot read is not worth being able to move.
+    local f = CreateFrame("Frame", "AegisExchangeLedger", ui.frame)
+    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    -- WELL ABOVE THE CONTENT, and the picker's +5 is why this is +50. Frame
+    -- level decides who draws on top within a strata, and a panel's own
+    -- widgets are children of children -- each nesting level is another +1, so
+    -- a small bump leaves the deepest of them drawing THROUGH the overlay.
+    -- That is what the shipped picker does, and it is the "you can still see
+    -- the settings behind it" this window exists not to do.
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)
+    f:EnableMouse(true)   -- swallow clicks so they don't fall through
     f:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 16,
+        tile = true, tileSize = 16, edgeSize = 14,
         insets = { left = 4, right = 4, top = 4, bottom = 4 },
     })
-    f:SetBackdropColor(C.panelBG[1], C.panelBG[2], C.panelBG[3], 0.95)
+    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
     f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
-    f:EnableMouse(true)
-    f:SetMovable(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function() f:StartMoving() end)
-    f:SetScript("OnDragStop", function()
-        f:StopMovingOrSizing()
-        ui.SaveLedgerPoint()
-    end)
+    -- A SOLID FILL UNDER THE BACKDROP AS WELL, because a tiling background
+    -- texture at alpha 1 is only as opaque as the texture is, and this one is
+    -- read over a bright filled area chart. Two layers of near-black is the
+    -- difference between a table you read and a table you squint at.
+    local fill = f:CreateTexture(nil, "BACKGROUND")
+    fill:SetPoint("TOPLEFT", f, "TOPLEFT", 3, -3)
+    fill:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, 3)
+    fill:SetTexture(C.well[1], C.well[2], C.well[3])
     f:Hide()
     ui.ledgerFrame = f
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOPLEFT", f, "TOPLEFT", HISTL.edge, -8)
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     title:SetText("Ledger")
 
-    local close = ui.MakeButton(f, "quiet")
-    close:SetWidth(20); close:SetHeight(18)
-    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -HISTL.edge, -8)
-    close:SetText("X")
-    close:SetScript("OnClick", function() ui.HideLedgerWindow() end)
+    -- The picker's own furniture: a rule above the button row, and Close at
+    -- the far right of it.
+    local divider = f:CreateTexture(nil, "ARTWORK")
+    divider:SetHeight(1)
+    divider:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 42)
+    divider:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 42)
+    divider:SetTexture(C.border[1], C.border[2], C.border[3])
+
+    local closeBtn = ui.MakeButton(f, "quiet", "AegisExchangeLedgerCloseButton")
+    closeBtn:SetWidth(80); closeBtn:SetHeight(22)
+    closeBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.HideLedgerWindow() end)
 
     return f
 end
 
-function ui.SaveLedgerPoint()
-    if not ui.ledgerFrame or not A.db or not A.db.char then return end
-    local s = A.db.char.ui
-    if not s then s = {}; A.db.char.ui = s end
-    local ok, point, _, relPoint, x, y = pcall(function()
-        return ui.ledgerFrame:GetPoint(1)
-    end)
-    if not ok or not point then return end
-    -- All four, for the reason ui.SaveWindowPoint spells out: a pair of
-    -- offsets means nothing without the point they are measured from.
-    s.ledgerPoint, s.ledgerRel = point, relPoint or point
-    s.ledgerX, s.ledgerY = math.floor(x or 0), math.floor(y or 0)
-end
-
-function ui.RestoreLedgerPoint()
-    if not ui.ledgerFrame or not A.db or not A.db.char then return end
-    local s = A.db.char.ui
-    if not s or not s.ledgerPoint then return end
-    -- Same reachability check the main window and the shopping list make: a
-    -- point saved on a large screen and restored on a small one lands with the
-    -- title bar -- the only drag handle -- off the edge.
-    local sw = UIParent and UIParent:GetWidth() or 0
-    local sh = UIParent and UIParent:GetHeight() or 0
-    if not ui.PointIsReachable(s.ledgerPoint, s.ledgerRel, s.ledgerX, s.ledgerY,
-                               sw, sh, HISTL.ledger_w,
-                               ui.ledgerFrame:GetHeight() or 0) then
-        return
-    end
-    ui.ledgerFrame:ClearAllPoints()
-    ui.ledgerFrame:SetPoint(s.ledgerPoint, UIParent, s.ledgerRel,
-                            s.ledgerX, s.ledgerY)
-end
-
 function ui.ShowLedgerWindow()
-    ui.BuildHistoryTab()      -- the table lives in the window; build it first
+    ui.BuildHistoryTab()      -- the table lives in the overlay; build it first
     ui.BuildLedgerWindow()
-    ui.RestoreLedgerPoint()
     ui.ledgerFrame:Show()
     ui.RefreshHistory()
-    ui.RefreshLedgerButton()
 end
 
 function ui.HideLedgerWindow()
     if ui.ledgerFrame then ui.ledgerFrame:Hide() end
-    -- The button reads as pressed while the window is up, so it has to be told
-    -- when the window goes down -- including by its own X.
+    -- The button reads as pressed while the overlay is up, so it has to be
+    -- told when the overlay goes down -- including by its own Close.
     ui.RefreshLedgerButton()
 end
 
@@ -13169,8 +13167,11 @@ function ui.BuildHistoryTab()
     -- sits between the totals line and the rows -- the button was anchored to
     -- the only thing that follows the split and then placed into the one band
     -- that was already occupied.
+    -- ON THE BOTTOM BUTTON ROW, beside Close, which is where the category
+    -- picker puts its own pair. It was top-right, clearing an X that the
+    -- overlay does not have.
     clearBtn:ClearAllPoints()
-    clearBtn:SetPoint("TOPRIGHT", host, "TOPRIGHT", -HISTL.edge - 26, -30)
+    clearBtn:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 12, 12)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)

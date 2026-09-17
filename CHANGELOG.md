@@ -18,6 +18,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.1]
+
+### Changed
+- **The Ledger now covers the whole Aegis window**, the way the category
+  scanner does, instead of floating as a small frame over the chart. It is
+  **opaque** — two layers of near-black and a frame level well above the panel
+  — so nothing behind it shows through.
+
+  The floating version could be dragged beside the auction house, which sounded
+  better than it read: at the size a ledger wants, it covered the chart it was
+  launched from, and a backdrop over a bright filled area chart is a backdrop
+  you can see straight through. A ledger you can't read isn't worth being able
+  to move.
+
+  **Clear history** and **Close** sit on a button row at the bottom, where the
+  category scanner puts its own, and the table's rows follow the window's
+  height like every other list in here.
+
 ## [1.54.0]
 
 ### Changed
@@ -5872,6 +5890,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
