@@ -4782,6 +4782,127 @@ touched, not on its own.
 
 ---
 
+## Phase 6 — Profession cooldowns across alts, and a machine-readable log
+
+**Asked for as:** *"For crafts with cooldown I'd like a craft log to know when to
+log on to that character. I have multiple alts doing this. A text log file
+written live, consumable by other tools — maybe expanded to everything
+bought/sold and at what price."*
+
+Two requests wearing one coat, and they separate cleanly. The **goal** — knowing
+which alt to log onto — needs no file at all. The **file** is a different
+feature with a hard constraint in front of it.
+
+### 6.0 The constraint, because it shapes everything below
+
+**A 1.12 addon cannot write a file.** No `io`, no `os`, no `require` — and no
+DLL closes that gap: ClassicAPI's manifest backports 550+ functions across 45
+`C_*` namespaces and contains none of them. SavedVariables is the only way data
+reaches disk, and the client writes it **on logout or `/reload`**, never
+continuously. 1.12 has no flush API.
+
+**The chat-log route does not work, and the version that does must not be
+built.** `LoggingChat(1)` makes the client write `Logs\WoWChatLog.txt` live, so
+it looks like the answer — but `DEFAULT_CHAT_FRAME:AddMessage()` **is not
+captured by it**. Only real chat events are. Landing a line in that file means
+calling `SendChatMessage` — whispering yourself or posting to a channel on every
+craft and every sale. That is rate-limited, visible to other players, visible to
+the server's own logs, and on a private server it looks exactly like botting.
+**Decided: no.** Not as an option, not behind a setting.
+
+**So "live" is not available, and the honest question is whether it was ever
+needed.** For the stated purpose it is not: you want to know an alt's cooldown
+*while you are on a different character*, which means the interesting data was
+written when you logged that alt out. The flush happens at precisely the moment
+the data becomes worth reading.
+
+### 6.1 Capturing a cooldown
+
+Two independent signals, and we want both because each covers the other's blind
+spot.
+
+- **`GetTradeSkillCooldown(index)`** exists in 1.12 — confirmed against the 1.12
+  API definitions, alongside `GetSpellCooldown` and the rest of the `*Cooldown`
+  family. It returns **seconds remaining** for the selected trade skill recipe.
+  - **There is NO `GetCraftCooldown`.** The Craft window (Enchanting, Beast
+    Training) has no cooldown function in 1.12 at all. Enchanting has no
+    cooldowns in vanilla so this costs nothing — but do not write the Craft path
+    assuming symmetry with TradeSkill, because there is none.
+  - **Only readable while the profession window is open**, and the index is into
+    the currently open list. So this is a capture-on-open, not a poll.
+  - **Store `time() + remaining`, never `remaining`.** A remaining-seconds value
+    is meaningless the moment you log out, which is the only moment this feature
+    exists to serve.
+- **`craft.ParseCreate`** already detects every craft — the client prints
+  `"You create: <link>"` to `CHAT_MSG_LOOT`, and we already parse it for the
+  craft counter. It is O(1), the event does not storm, and it fires **whether or
+  not the profession window is open**. Paired with a table of known cooldown
+  lengths it answers for a recipe the player crafted and walked away from.
+
+**HARD RULE 16 applies to the capture.** `TRADE_SKILL_UPDATE` fires repeatedly
+while a profession window settles. A handler that walks the whole recipe list
+calling `GetTradeSkillCooldown` per index is an unbounded rescan inline in a
+stormable handler — the exact shape that froze Courier. **Dirty flag, flushed
+once per frame from an existing `OnUpdate`**, and nothing per-recipe inline.
+
+### 6.2 The alt view (the actual feature)
+
+`AegisExchangeDB` is already account-wide and `db.CharKey()` already exists —
+the ledger has used it since it shipped. So cross-character cooldowns need no
+new plumbing, just a table:
+
+```
+cooldowns[charKey][itemId] = readyAtEpoch
+```
+
+The view is a list sorted by ready time, across every character the account has
+ever opened a profession window on:
+
+```
+Bronn     Transmute: Arcanite      ready now
+Merrily   Mooncloth                ready in 2h 14m
+Bronn     Salt Shaker              ready tomorrow 09:40
+```
+
+**This is the thing that was actually asked for**, and it is better than a text
+file for the stated purpose, because it is in the client where you act on it.
+Build this first and ship it on its own; 6.3 is optional on top.
+
+**Open:** where it lives. A Crafting-tab panel is the obvious home; a one-line
+reminder at login ("2 profession cooldowns are ready") may be the thing people
+actually use. Needs a call before building.
+
+### 6.3 The machine-readable log
+
+For the "consumed by other tools" half. **A separate SavedVariables file**,
+declared in the `.toc` (restart release), never the main DB:
+
+- **`AegisExchangeLog`**, flat and append-only, with a **schema version** as its
+  first field and a documented shape that is treated as an interface — the whole
+  point is that something outside the game parses it, and a silent shape change
+  breaks a tool we cannot see.
+- Separate from `AegisExchangeDB` for two reasons. It keeps the parser away from
+  a structure that exists to serve the History tab and will change when that tab
+  does; and the main DB carries gold, inventory and character names, so a file a
+  player hands to a tool should not be the file that holds all of it.
+- **Most of the content already exists.** `db.RecordTxn` records
+  `{t, kind, item, amount, id, who}` for every buy and sale, deduped against
+  mail via `A.MailTxnKey`. This phase mirrors it into the log file and adds
+  craft events alongside; it is not new capture.
+- **Say the latency out loud, in the file's own header comment.** Written on
+  logout or `/reload`. A tool reading it is reading the last flush, not the live
+  session — and someone building against it should learn that from the file
+  rather than from a bug report.
+- **`LEDGER_MAX` pruning must not silently truncate the log.** The in-game
+  ledger caps and drops the oldest, which is right for a UI and wrong for an
+  export. Decide the retention deliberately and write it down; an append-only
+  log that quietly forgets is worse than one that stops.
+
+**Depends on 6.2 only for the craft events.** The buy/sell half could ship
+first, and probably should — it is a serialization of data we already hold.
+
+---
+
 ## Explicitly deferred / out of scope for now
 
 - **Auto Buy** — decided out for Phase 2. Revisit only on explicit request.
