@@ -65,6 +65,7 @@ for _, sig in ipairs({
     "function ui.HistFigures(",
     "function ui.BlockColumns(",
     "function ui.HistBlocks(",
+    "function ui.FigureSlot(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -464,6 +465,43 @@ end
 H.survives("no stats table at all still gives blocks", function()
     ui.HistBlocks(nil)
 end)
+
+-- ---------------------------------------------------------------------------
+H.section("where a band figure sits")
+-- ---------------------------------------------------------------------------
+
+-- PAIRED DOWN THE COLUMNS, not along the rows, which is how the reference
+-- groups them: the chart's own extremes together, then the two counts, then
+-- the two biggest transactions. Reading across would put HIGH beside SOLD,
+-- which are not two answers to one question.
+do
+    local c, r = ui.FigureSlot(1)
+    H.eq("HIGH is column one, row one", c .. "," .. r, "1,1")
+    c, r = ui.FigureSlot(2)
+    H.eq("LOW is under it", c .. "," .. r, "1,2")
+    c, r = ui.FigureSlot(3)
+    H.eq("SOLD starts column two", c .. "," .. r, "2,1")
+    c, r = ui.FigureSlot(4)
+    H.eq("BOUGHT is under it", c .. "," .. r, "2,2")
+    c, r = ui.FigureSlot(5)
+    H.eq("TOP SALE starts column three", c .. "," .. r, "3,1")
+    c, r = ui.FigureSlot(6)
+    H.eq("TOP BUY is under it", c .. "," .. r, "3,2")
+end
+
+-- Every figure lands somewhere, and no two land in the same place.
+do
+    local seen, clash = {}, false
+    local i = 1
+    while i <= 6 do
+        local c, r = ui.FigureSlot(i)
+        local key = c .. "," .. r
+        if seen[key] then clash = true end
+        seen[key] = true
+        i = i + 1
+    end
+    H.check("no two figures share a slot", not clash)
+end
 
 -- ---------------------------------------------------------------------------
 H.section("laying the columns out")

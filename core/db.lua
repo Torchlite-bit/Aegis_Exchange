@@ -1204,13 +1204,46 @@ function db.DemoSeed(name)
     return seed
 end
 
+-- The phases a demo purse moves through, and how long one lasts.
+--
+-- REGIMES, NOT NOISE, and that is the whole difference between this chart and
+-- the one it replaced. An independent draw per bucket averages out into a
+-- straight line with fuzz on it; a walk that stays in one regime for twenty
+-- buckets gives the shape a real purse has -- a long climb, a cliff, a
+-- plateau. It is what makes the reference chart worth copying.
+db.DEMO_PHASES = {
+    { drift =  0.020, noise = 0.010 },   -- grow: the ordinary week
+    { drift =  0.070, noise = 0.020 },   -- boom: a good run
+    { drift = -0.090, noise = 0.030 },   -- bust: the cliff
+    { drift =  0.000, noise = 0.008 },   -- flat: the plateau
+}
+db.DEMO_PHASE_MIN  = 8     -- shortest a regime lasts, in buckets
+db.DEMO_PHASE_SPAN = 26    -- ...and how much longer it can run
+-- A purse below this is broke, and earns a wage until it is not.
+db.DEMO_POOR = 40000
+db.DEMO_WAGE = 9000
+-- The one flat cost -- a mount, an epic, a stack of bars.
+db.DEMO_BIG_BUY = 400000
+
 -- One character's gold across `n` buckets.
 --
--- A RANDOM WALK THAT LOOKS LIKE TRADING: a gentle upward drift, noise on every
--- bucket, and an occasional large drop for a purchase. A pure upward line
--- would exercise none of the things worth looking at -- the fill's gradient
--- over a varying height, the axis labels at different magnitudes, the hover
--- readout on a slope.
+-- A RANDOM WALK THAT LOOKS LIKE TRADING: phases of growth, of loss and of
+-- nothing much, with noise inside each and an occasional large purchase. A
+-- pure upward line would exercise none of the things worth looking at -- the
+-- fill's gradient over a varying height, the axis labels at different
+-- magnitudes, the hover readout on a slope.
+--
+-- THE BIG PURCHASE IS A FLAT COST, not a fraction of the purse, and that is
+-- deliberate: a fraction can never take you below zero, so the floor
+-- underneath would be a guard nothing could reach -- worse than no guard at
+-- all. It is the only thing in here that can drive a purse to the floor, which
+-- is what makes `if held < 0` a branch the suite actually exercises.
+--
+-- AND A BROKE PURSE EARNS ITS WAY BACK. Without that, a purse that reaches the
+-- floor stays on it: every phase is multiplicative and a percentage of nothing
+-- is nothing. That is not a hypothetical -- the version before this one spent
+-- five of seven days flat on zero, which is exactly the variety a demo exists
+-- to have.
 --
 -- Never negative: gold held cannot be, and a chart drawn from data its own
 -- reader could not produce is testing the wrong thing.
@@ -1219,30 +1252,35 @@ function db.DemoSeries(from, step, n, who)
     n = n or 0
     local names = db.DEMO_CHARS
     if who then names = { who } end
+    local phases = table.getn(db.DEMO_PHASES)
     local ci = 1
     while ci <= table.getn(names) do
         local seed = db.DemoSeed(names[ci])
         -- A different starting purse per character, so the account total is
         -- not four copies of one line.
         local held = 20000 + math.mod(seed, 900000)
+        local phase, left = 1, 0
         local b = 1
         while b <= n do
             seed = db.DemoNext(seed)
             local r = seed / db.DEMO_MOD
-            if r < 0.02 then
-                -- A BIG FIXED PURCHASE -- a mount, an epic, a stack of bars.
-                -- A flat cost rather than a fraction of the purse, because
-                -- that is what a real one is, and because a fraction can never
-                -- take you below zero: the floor underneath would be a guard
-                -- nothing could reach, which is worse than no guard at all.
-                held = held - 400000
-            elseif r < 0.06 then
-                held = held - held * (0.15 + r * 4)
-            else
-                held = held + held * (r - 0.42) * 0.06
+            if left <= 0 then
+                seed = db.DemoNext(seed)
+                phase = math.mod(seed, phases) + 1
+                left = db.DEMO_PHASE_MIN
+                       + math.mod(math.floor(seed / 97), db.DEMO_PHASE_SPAN)
+                -- A broke purse does not enter a bust. It has nothing left to
+                -- lose and the line would sit on the floor for the length of
+                -- the regime.
+                if held < db.DEMO_POOR then phase = 1 end
             end
-            -- ...and it CAN, which is why this is here.
+            local ph = db.DEMO_PHASES[phase]
+            held = held + held * (ph.drift + (r - 0.5) * ph.noise)
+            if r < 0.01 then held = held - db.DEMO_BIG_BUY end
+            -- ...and it CAN go below zero, which is why this is here.
             if held < 0 then held = 0 end
+            if held < db.DEMO_POOR then held = held + db.DEMO_WAGE end
+            left = left - 1
             out[b] = (out[b] or 0) + math.floor(held)
             b = b + 1
         end

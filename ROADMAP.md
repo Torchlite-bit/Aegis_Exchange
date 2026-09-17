@@ -4674,6 +4674,21 @@ Two things recorded so they are not re-litigated:
 - **An absent figure is an em dash, not a zero.** "TOP SALE 0c" claims you sold
   something for nothing.
 
+**v1.54.2 took the reference's visual treatment.** The band is three columns of
+two in a well (`ui.FigureSlot` pairs DOWN the columns -- the chart's extremes
+together, then the counts, then the extremes -- because reading across pairs
+HIGH with SOLD, which are not two answers to one question), the blocks sit in a
+well of their own, and values are right-aligned to their column so a column can
+be compared down. A block's Top item hovers for its tooltip.
+
+**The blocks stayed SIDE BY SIDE rather than stacked, and that is a deliberate
+divergence from the reference.** TSM stacks them because its stats pane is
+585px wide. Aegis's panel is well over twice that, so stacking would waste two
+thirds of the width -- and it costs 12 lines of height instead of 4, which at
+the window's minimum height (`ui.PanelHeightAt(492)`) leaves the plot nothing.
+Same treatment, better use of the space available. **If the stacked look is
+wanted anyway, the plot has to give up its minimum first.**
+
 ### 3.4 The Ledger window
 
 **The window itself shipped in v1.54.0, and became an OVERLAY in v1.54.1.**

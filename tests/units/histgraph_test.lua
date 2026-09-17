@@ -1258,8 +1258,42 @@ do
     -- BOTH column runs, because checking one leaves the other free to be
     -- replaced by a chain of anchors -- which is exactly what a sabotage did.
     H.check("...and places columns by arithmetic, not by chaining anchors",
-            says(paint, "ui.BlockColumns(plotW, HISTL.strip_cells")
-            and says(paint, "ui.BlockColumns(plotW, HISTL.block_count"))
+            says(paint, "ui.BlockColumns(bandW")
+            and says(paint, "ui.BlockColumns(statsW"))
+    -- VALUES RIGHT-ALIGNED TO THEIR COLUMN'S FAR EDGE, the way the reference
+    -- sets both boxes. A value that starts wherever its label ended does not
+    -- line up, and a column you cannot compare down is most of what a column
+    -- of figures is for.
+    H.check("...right-aligning the values",
+            says(paint, 'w.value:SetPoint("TOPRIGHT"')
+            and says(paint, 'pair.value:SetPoint("TOPRIGHT"'))
+    -- The Top item's hover target exists only when the row names an item, so
+    -- an em dash cannot be hovered for a tooltip about nothing.
+    H.check("...and only arms the tooltip when there is an item",
+            says(paint, "if last and last[3] then")
+            and says(paint, "w.hot.itemId = nil"))
+
+    -- THE BAND AND THE BLOCKS ARE IN WELLS, and their contents are CHILDREN of
+    -- those wells. A child frame draws above ALL of its parent's regions
+    -- whatever layer they are on -- FontStrings left on the chart box with a
+    -- well over them would be behind it, which is the same rule that makes
+    -- pfUI's backdrop cover an edit box's text.
+    H.check("the band and the blocks each get a well",
+            says(build, "ui.histBand  = well(")
+            and says(build, "ui.histStats = well("))
+    H.check("...with their contents parented INTO them",
+            says(build, "{ label = cell(ui.histBand),")
+            and says(build, "{ label = cell(ui.histStats),"),
+            "a FontString on the chart box would draw behind the well")
+
+    -- THE LEDGER BELONGS TO HISTORY. It covers the whole content area, so left
+    -- open on a tab change it sits over whichever tab you switched to -- the
+    -- same fault the category picker and the vendor list are guarded against
+    -- two lines above it, and it reads as the window being stuck.
+    local pick = bodyOf("function ui.SelectSubTab(")
+    H.check("leaving History closes the ledger",
+            says(pick, 'if name ~= "History" then')
+            and says(pick, "ui.HideLedgerWindow()"))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1404,18 +1438,36 @@ do
             says(graph, "ui.HistBucketCount(pw)"),
             "a fixed count is what made the line a staircase")
 
-    -- THE PERIOD BUTTONS ARE THE CHART'S. Built right-to-left because the row
-    -- is anchored by its RIGHT edge -- the chart's width moves with the window
-    -- and the periods have to stay against its far side.
+    -- THE PERIOD BUTTONS ARE THE CHART'S, and the LEDGER'S -- the overlay
+    -- covers the chart's row, and a ledger you cannot change the period on
+    -- shows one week forever. Both rows come from one builder, so a sixth
+    -- period cannot be added to one and forgotten in the other.
     local gbuild = bodyOf("function ui.BuildHistoryGraph(")
-    H.check("the chart owns the period buttons",
-            says(gbuild, "ui.histPerBtns[pi] = b"),
+    local row = bodyOf("function ui.MakePeriodRow(")
+    H.check("there is one period-row builder", row ~= "")
+    H.check("the chart uses it", says(gbuild, "ui.histPerBtns = ui.MakePeriodRow(box"),
             "they sat a table's width away from what they change")
-    H.check("...anchored against the chart's right edge",
-            says(gbuild, 'b:SetPoint("TOPRIGHT", box, "TOPRIGHT"'))
+    H.check("...and so does the ledger",
+            says(bodyOf("function ui.BuildLedgerWindow("),
+                 "ui.ledgerPerBtns = ui.MakePeriodRow(f"))
+    -- Built right-to-left because the row is anchored by its RIGHT edge: its
+    -- container's width moves with the window and the periods have to stay
+    -- against its far side.
+    H.check("...anchored against its container's right edge",
+            says(row, 'b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", x, y)'))
+    -- ONE PERIOD, TWO ROWS. Both must drive the same state and the same
+    -- repaint, or the ledger and the chart disagree about what week it is.
+    H.check("every row drives the one period", says(row, "ui.histPeriod = b.idx")
+            and says(row, "ui.RefreshHistory()"))
+    -- ...and both must be MARKED, or the ledger shows five unpressed buttons
+    -- over the period it is drawing.
+    local refresh = bodyOf("function ui.RefreshHistory(")
+    H.check("both rows are highlighted",
+            says(refresh, "ui.MarkChosen(ui.histPerBtns, chosen)")
+            and says(refresh, "ui.MarkChosen(ui.ledgerPerBtns, chosen)"))
     H.check("...and the tab no longer builds its own",
             not says(bodyOf("function ui.BuildHistoryTab("),
-                     "ui.histPerBtns[pi] = b"))
+                     "ui.MakePeriodRow("))
 
     -- A FLAT WASH, NOT A GRADIENT. v1.53.11 tried SetGradientAlpha guarded by
     -- a pcall with the flat fill as its fallback. The call SUCCEEDED and did

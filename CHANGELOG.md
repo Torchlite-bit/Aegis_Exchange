@@ -18,6 +18,29 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.2]
+
+### Added
+- **The Ledger has its own period buttons.** It covers the whole window, so the
+  chart's row was behind it — a ledger you couldn't change the period on showed
+  one week forever. Both rows drive the same period and the same repaint.
+- **Hover a block's Top item for its tooltip.** Only when the row actually
+  names an item; an em dash isn't hoverable.
+
+### Changed
+- **The figures under the chart are boxed now**, like the reference: the six
+  figures in a bordered band as **three columns of two** — the chart's extremes
+  together, then the two counts, then the two biggest transactions — and the
+  three blocks in a box below it. **Values are right-aligned to their column**,
+  so a column of figures can be compared straight down.
+- **Leaving the History tab closes the Ledger.** It covers the content area, so
+  left open it sat over whichever tab you switched to.
+- **`/aex demo` draws a far more varied chart.** It moved in *regimes* now —
+  long climbs, cliffs, plateaus — instead of an independent draw per bucket,
+  which averaged into a collapse to zero followed by five flat days. A purse
+  that hits the floor also earns its way back, because every phase is
+  multiplicative and a percentage of nothing is nothing.
+
 ## [1.54.1]
 
 ### Changed
@@ -5890,6 +5913,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

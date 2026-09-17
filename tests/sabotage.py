@@ -2886,9 +2886,30 @@ end
     # The period row anchored by its LEFT edge. The chart's width moves with
     # the window and the buttons have to stay against its far side; anchored
     # left they run straight through the heading.
+    # Re-pointed at ui.MakePeriodRow, which both the chart and the ledger
+    # overlay now build their rows from. The bug is unchanged: a row anchored
+    # by its LEFT edge does not stay against a container whose width moves.
     ('periods-left-on-the-tab', 'ui/frame.lua',
-     '            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)',
-     '            b:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -5)',
+     '            b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", x, y)',
+     '            b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)',
+     'histgraph'),
+
+    # Two rows, one period. A ledger whose buttons drive their own state
+    # disagrees with the chart about what week it is.
+    ('ledger-periods-are-not-marked', 'ui/frame.lua',
+     '    ui.MarkChosen(ui.ledgerPerBtns, chosen)',
+     '    local _ = chosen',
+     'histgraph'),
+
+    # The ledger covers the whole content area, so left open on a tab change it
+    # sits over whichever tab you switched to.
+    ('ledger-survives-a-tab-change', 'ui/frame.lua',
+     '''    if name ~= "History" then
+        ui.HideLedgerWindow()
+    end''',
+     '''    if false then
+        ui.HideLedgerWindow()
+    end''',
      'histgraph'),
 
     # The chart's floor dropped below what its own title bar needs, so the
@@ -5951,9 +5972,36 @@ end""",
 
     # Columns by arithmetic, not by chaining anchors.
     ("paintfigs-chains-anchors", "ui/frame.lua",
-     "    local cols = ui.BlockColumns(plotW, HISTL.strip_cells, HISTL.col_gap)",
-     "    local cols = {}",
+     "    local cols = ui.BlockColumns(bandW - HISTL.fig_pad * 2,",
+     "    local cols = ui.NoSuchThing(",
      "histgraph"),
+
+    # Values that start wherever their label ended do not line up, and a column
+    # you cannot compare down is most of what a column of figures is for.
+    ("paintfigs-left-aligns-the-values", "ui/frame.lua",
+     '            w.value:SetPoint("TOPRIGHT", ui.histBand, "TOPLEFT",',
+     '            w.value:SetPoint("TOPLEFT", ui.histBand, "TOPLEFT",',
+     "histgraph"),
+
+    # An em dash must not be hoverable for a tooltip about nothing.
+    ("paintfigs-arms-the-tooltip-on-nothing", "ui/frame.lua",
+     "        if last and last[3] then",
+     "        if last then",
+     "histgraph"),
+
+    # Contents parented to the chart box instead of INTO the well draw behind
+    # it -- the same rule that makes pfUI's backdrop cover an edit box's text.
+    ("figures-parented-outside-their-well", "ui/frame.lua",
+     "        ui.histStrip[si] = { label = cell(ui.histBand),\n                             value = cell(ui.histBand) }",
+     "        ui.histStrip[si] = { label = cell(box), value = cell(box) }",
+     "histgraph"),
+
+    # Reading across pairs HIGH with SOLD, which are not two answers to one
+    # question.
+    ("figureslot-fills-rows-not-columns", "ui/frame.lua",
+     "    return math.floor(i / 2) + 1, math.mod(i, 2) + 1",
+     "    return math.mod(i, 3) + 1, math.floor(i / 3) + 1",
+     "histstats"),
 
     # The overlay's rows follow the window, the way every other list's do. A
     # fixed count is what it had while the ledger was a floating frame of its

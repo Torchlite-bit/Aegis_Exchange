@@ -12397,19 +12397,25 @@ local HISTL = {
     -- version was working around -- "LOW 9g 14s 6c" and "IN 37s 92c" ran into
     -- each other as "LOWN0g 14s 6c" because two strings that can both grow
     -- shared a line.
-    plot_bot   = 104,
+    plot_bot   = 136,
     -- The figure strip: six cells across the plot's width.
     strip_cells = 6,
+    -- ...three columns of two in the band,
+    band_cols  = 3,
     -- ...and the three blocks under it, three rows each.
     block_count = 3,
     block_rows  = 3,
     -- Gap between columns, in both the strip and the blocks.
     col_gap    = 10,
-    -- One line of figures, and the baselines the strip and the blocks sit on
-    -- measured up from the box's bottom edge.
+    -- One line of figures, and the two boxes under the plot, measured up from
+    -- the chart box's bottom edge. The reference puts both in their own
+    -- bordered wells, which is what band_* and stats_* size.
     fig_line   = 13,
-    strip_y    = 62,
-    block_y    = 4,
+    fig_pad    = 6,
+    band_y     = 78,
+    band_h     = 32,
+    stats_y    = 8,
+    stats_h    = 64,
     -- The label column inside a block: "Per day" and its widest sibling.
     block_label_w = 56,
     plot_side  = 10,
@@ -13021,6 +13027,10 @@ function ui.BuildLedgerWindow()
     divider:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 42)
     divider:SetTexture(C.border[1], C.border[2], C.border[3])
 
+    -- ITS OWN PERIOD ROW. The chart's is behind this overlay, and a ledger you
+    -- cannot change the period on is a ledger showing one week forever.
+    ui.ledgerPerBtns = ui.MakePeriodRow(f, -12, -8)
+
     local closeBtn = ui.MakeButton(f, "quiet", "AegisExchangeLedgerCloseButton")
     closeBtn:SetWidth(80); closeBtn:SetHeight(22)
     closeBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
@@ -13225,6 +13235,46 @@ end
 -- ITS OWN BUILDER, like ui.BuildBidsHalf, and for the same reason -- see the
 -- BUYL note on the 32-upvalue ceiling, which is a load failure rather than a
 -- warning. Splitting a tab's widgets across two functions splits its upvalue
+-- One row of period buttons, anchored by its RIGHT edge at (x, y) inside
+-- `parent`. Returns the array, indexed by period so ui.MarkChosen can find the
+-- chosen one.
+--
+-- EXTRACTED BECAUSE THERE ARE TWO OF THEM. The chart has a row in its title
+-- bar, and the ledger -- which covers the whole content area, so the chart's
+-- row is behind it -- needs its own. Two copies of this loop is two places for
+-- a sixth period to be forgotten.
+--
+-- BUILT RIGHT TO LEFT, because the row is anchored by its right edge: its
+-- container's width moves with the window and the periods have to stay against
+-- its far side.
+--
+-- EVERY ROW DRIVES THE SAME `ui.histPeriod` and calls the same repaint, so the
+-- two can never disagree about what week it is.
+function ui.MakePeriodRow(parent, x, y)
+    local out = {}
+    local prev = nil
+    local pi = table.getn(HIST_PERIODS)
+    while pi >= 1 do
+        local b = ui.MakeButton(parent, "quiet")
+        b:SetWidth(HISTL.per_w); b:SetHeight(HISTL.per_h)
+        if prev then
+            b:SetPoint("RIGHT", prev, "LEFT", -HISTL.per_gap, 0)
+        else
+            b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", x, y)
+        end
+        b:SetText(HIST_PERIODS[pi].label)
+        b.idx = pi
+        b:SetScript("OnClick", function()
+            ui.histPeriod = b.idx
+            ui.RefreshHistory()
+        end)
+        out[pi] = b
+        prev = b
+        pi = pi - 1
+    end
+    return out
+end
+
 -- count too.
 function ui.BuildHistoryGraph(panel)
     -- ALL FOUR CORNERS. It used to be anchored down the RIGHT with a width
@@ -13281,30 +13331,7 @@ function ui.BuildHistoryGraph(panel)
     ledgerBtn:SetScript("OnClick", function() ui.ToggleLedgerWindow() end)
     ui.histLedgerBtn = ledgerBtn
 
-    ui.histPerBtns = {}
-    local prev = nil
-    local pi = table.getn(HIST_PERIODS)
-    -- BUILT RIGHT TO LEFT, because the row is anchored by its right edge --
-    -- the chart's width moves with the window and the periods have to stay
-    -- against its far side.
-    while pi >= 1 do
-        local b = ui.MakeButton(box, "quiet")
-        b:SetWidth(HISTL.per_w); b:SetHeight(HISTL.per_h)
-        if prev then
-            b:SetPoint("RIGHT", prev, "LEFT", -HISTL.per_gap, 0)
-        else
-            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)
-        end
-        b:SetText(HIST_PERIODS[pi].label)
-        b.idx = pi
-        b:SetScript("OnClick", function()
-            ui.histPeriod = b.idx
-            ui.RefreshHistory()
-        end)
-        ui.histPerBtns[pi] = b
-        prev = b
-        pi = pi - 1
-    end
+    ui.histPerBtns = ui.MakePeriodRow(box, -HISTL.plot_side, -5)
 
     -- ROW TWO: whose gold. The picker's own button says which, so there is no
     -- second label repeating it.
@@ -13404,10 +13431,31 @@ function ui.BuildHistoryGraph(panel)
         return fs
     end
 
+    -- TWO WELLS, the way the reference frames these: the figure band in one,
+    -- the three blocks in another. Their contents are CHILDREN of the wells
+    -- rather than siblings, because a child frame draws above ALL of its
+    -- parent's regions whatever layer they are on -- the same rule that makes
+    -- pfUI's backdrops cover an edit box's text (see ui.skin's EditBoxPlate).
+    -- FontStrings on `box` with a well frame over them would be behind it.
+    local function well(h, y)
+        local f = CreateFrame("Frame", nil, box)
+        f:SetHeight(h)
+        f:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                   HISTL.plot_side + HISTL.y_gutter, y)
+        f:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, y)
+        local w = ui.MakeWell(box, f, 3)
+        f:SetFrameLevel(w:GetFrameLevel() + 1)
+        return f
+    end
+    ui.histBand  = well(HISTL.band_h,  HISTL.band_y)
+    ui.histStats = well(HISTL.stats_h, HISTL.stats_y)
+
     ui.histStrip = {}
     local si = 1
     while si <= HISTL.strip_cells do
-        ui.histStrip[si] = { label = cell(box), value = cell(box) }
+        ui.histStrip[si] = { label = cell(ui.histBand),
+                             value = cell(ui.histBand) }
+        ui.histStrip[si].value:SetJustifyH("RIGHT")
         si = si + 1
     end
 
@@ -13423,13 +13471,36 @@ function ui.BuildHistoryGraph(panel)
     ui.histBlocks = {}
     local bi = 1
     while bi <= HISTL.block_count do
-        local blk = { title = cell(box), rows = {} }
+        local blk = { title = cell(ui.histStats), rows = {} }
         blk.title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
         local ri = 1
         while ri <= HISTL.block_rows do
-            blk.rows[ri] = { label = cell(box), value = cell(box) }
+            blk.rows[ri] = { label = cell(ui.histStats),
+                             value = cell(ui.histStats) }
+            blk.rows[ri].value:SetJustifyH("RIGHT")
             ri = ri + 1
         end
+        -- A HOVER TARGET OVER THE LAST ROW'S VALUE, which is the Top item. A
+        -- FontString takes no mouse events, so the tooltip needs a frame of
+        -- its own sitting on top of it -- placed and shown by the painter,
+        -- because only it knows whether that row has an item at all.
+        local hot = CreateFrame("Button", nil, ui.histStats)
+        hot:SetHeight(HISTL.fig_line)
+        hot:Hide()
+        hot:SetScript("OnEnter", function()
+            if not hot.itemId then return end
+            GameTooltip:SetOwner(hot, "ANCHOR_RIGHT")
+            local shown = false
+            if GameTooltip.SetHyperlink then
+                shown = pcall(function()
+                    GameTooltip:SetHyperlink("item:" .. hot.itemId .. ":0:0:0")
+                end)
+            end
+            if not shown then GameTooltip:SetText(hot.itemName or "") end
+            GameTooltip:Show()
+        end)
+        hot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        blk.hot = hot
         ui.histBlocks[bi] = blk
         bi = bi + 1
     end
@@ -14039,36 +14110,57 @@ function ui.HistBlocks(st)
     }
 end
 
--- Place and fill the figure strip and the three blocks.
+-- Where figure `i` of the band sits: column, row.
+--
+-- PAIRED DOWN THE COLUMNS, not along the rows, which is how the reference
+-- groups them: the chart's own extremes together, then the two counts, then
+-- the two biggest transactions. Reading across would put HIGH beside SOLD,
+-- which are not two answers to one question.
+function ui.FigureSlot(i)
+    i = (i or 1) - 1
+    return math.floor(i / 2) + 1, math.mod(i, 2) + 1
+end
+
+-- Place and fill the figure band and the three blocks.
 --
 -- POSITIONS SET ON EVERY PAINT, because the columns are a fraction of a width
 -- that moves with the window. ClearAllPoints first: SetPoint ADDS a point on
 -- 1.12, so a second call without it leaves a FontString pulled between two
 -- places -- which renders as text drifting a little further right every time
 -- the window is dragged.
+--
+-- LABEL LEFT, VALUE RIGHT-ALIGNED TO THE COLUMN'S FAR EDGE, the way the
+-- reference sets both its band and its blocks. Values that start wherever
+-- their label happens to end do not line up, and a column of figures you
+-- cannot compare down is most of what a figure column is for.
 function ui.PaintHistFigures(st, hi, lo, plotW, note)
-    if not ui.histStrip or not ui.histBlocks then return end
+    if not ui.histBand or not ui.histStats then return end
     local box = ui.histGraph
     if not box then return end
-    local left = HISTL.plot_side + HISTL.y_gutter
+    local bandW  = ui.histBand:GetWidth() or 0
+    if bandW < 1 then bandW = plotW or 1 end
 
-    -- ---- the strip -------------------------------------------------------
+    -- ---- the band: three columns of two -------------------------------
     local cells = ui.HistFigures(st, hi, lo)
-    local cols = ui.BlockColumns(plotW, HISTL.strip_cells, HISTL.col_gap)
+    local cols = ui.BlockColumns(bandW - HISTL.fig_pad * 2,
+                                 HISTL.band_cols, HISTL.col_gap)
     local i = 1
     while i <= HISTL.strip_cells do
         local w = ui.histStrip[i]
-        local cell, col = cells[i], cols[i]
+        local cell = cells[i]
+        local ci, ri = ui.FigureSlot(i)
+        local col = cols[ci]
         w.label:ClearAllPoints()
         w.value:ClearAllPoints()
         if cell and col then
-            w.label:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
-                             left + col.x, HISTL.strip_y + HISTL.fig_line)
+            local y = -(HISTL.fig_pad + (ri - 1) * HISTL.fig_line)
+            w.label:SetPoint("TOPLEFT", ui.histBand, "TOPLEFT",
+                             HISTL.fig_pad + col.x, y)
             w.label:SetWidth(col.w)
             w.label:SetText(cell[1])
             w.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-            w.value:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
-                             left + col.x, HISTL.strip_y)
+            w.value:SetPoint("TOPRIGHT", ui.histBand, "TOPLEFT",
+                             HISTL.fig_pad + col.x + col.w, y)
             w.value:SetWidth(col.w)
             w.value:SetText(cell[2])
             w.value:SetTextColor(C.text[1], C.text[2], C.text[3])
@@ -14079,44 +14171,45 @@ function ui.PaintHistFigures(st, hi, lo, plotW, note)
         i = i + 1
     end
 
-    -- The alts-as-last-seen caveat, on the strip's own line and out at the
-    -- right where it qualifies the row rather than any one figure.
+    -- The alts-as-last-seen caveat, above the band and out at the right where
+    -- it qualifies the whole row rather than any one figure.
     if ui.histNoteFS then
         ui.histNoteFS:ClearAllPoints()
         ui.histNoteFS:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT",
                                -HISTL.plot_side,
-                               HISTL.strip_y + HISTL.fig_line)
+                               HISTL.band_y + HISTL.band_h + 2)
         ui.histNoteFS:SetText(note or "")
     end
 
-    -- ---- the blocks ------------------------------------------------------
+    -- ---- the blocks ----------------------------------------------------
     local blocks = ui.HistBlocks(st)
-    local bcols = ui.BlockColumns(plotW, HISTL.block_count, HISTL.col_gap)
+    local statsW = ui.histStats:GetWidth() or 0
+    if statsW < 1 then statsW = plotW or 1 end
+    local bcols = ui.BlockColumns(statsW - HISTL.fig_pad * 2,
+                                  HISTL.block_count, HISTL.col_gap)
     local b = 1
     while b <= HISTL.block_count do
         local w, data, col = ui.histBlocks[b], blocks[b], bcols[b]
-        local topY = HISTL.block_y + HISTL.fig_line * HISTL.block_rows
+        local x = HISTL.fig_pad + col.x
         w.title:ClearAllPoints()
-        w.title:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
-                         left + col.x, topY)
+        w.title:SetPoint("TOPLEFT", ui.histStats, "TOPLEFT", x, -HISTL.fig_pad)
         w.title:SetWidth(col.w)
         w.title:SetText(data and data.title or "")
         local r = 1
         while r <= HISTL.block_rows do
             local pair = w.rows[r]
             local row = data and data.rows[r]
-            local y = topY - HISTL.fig_line * r
+            local y = -(HISTL.fig_pad + HISTL.fig_line * r)
             pair.label:ClearAllPoints()
             pair.value:ClearAllPoints()
             if row then
-                pair.label:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
-                                     left + col.x, y)
+                pair.label:SetPoint("TOPLEFT", ui.histStats, "TOPLEFT", x, y)
                 pair.label:SetWidth(HISTL.block_label_w)
                 pair.label:SetText(row[1])
                 pair.label:SetTextColor(C.goldDim[1], C.goldDim[2],
-                                         C.goldDim[3])
-                pair.value:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
-                                     left + col.x + HISTL.block_label_w, y)
+                                        C.goldDim[3])
+                pair.value:SetPoint("TOPRIGHT", ui.histStats, "TOPLEFT",
+                                    x + col.w, y)
                 pair.value:SetWidth(col.w - HISTL.block_label_w)
                 pair.value:SetText(row[2])
                 -- A TOP ITEM CARRIES ITS QUALITY COLOUR; every other figure is
@@ -14136,14 +14229,36 @@ function ui.PaintHistFigures(st, hi, lo, plotW, note)
             end
             r = r + 1
         end
+
+        -- THE HOVER TARGET follows the last row's value, and only exists when
+        -- that row names an item. Hidden otherwise, so an em dash cannot be
+        -- hovered for a tooltip about nothing.
+        local last = data and data.rows[HISTL.block_rows]
+        w.hot:ClearAllPoints()
+        if last and last[3] then
+            w.hot.itemId = last[3]
+            w.hot.itemName = last[2]
+            w.hot:SetPoint("TOPLEFT", ui.histStats, "TOPLEFT",
+                           x + HISTL.block_label_w,
+                           -(HISTL.fig_pad + HISTL.fig_line * HISTL.block_rows))
+            w.hot:SetWidth(col.w - HISTL.block_label_w)
+            w.hot:Show()
+        else
+            w.hot.itemId = nil
+            w.hot:Hide()
+        end
         b = b + 1
     end
 end
 
 function ui.RefreshHistory()
     if not ui.histBuilt then return end
-    -- Highlight the active period button.
-    ui.MarkChosen(ui.histPerBtns, function(b) return b.idx == ui.histPeriod end)
+    -- Highlight the active period button -- in BOTH rows. The chart has one
+    -- and the ledger overlay has one, and marking only the chart's leaves the
+    -- ledger showing five unpressed buttons over the period it is drawing.
+    local chosen = function(b) return b.idx == ui.histPeriod end
+    ui.MarkChosen(ui.histPerBtns, chosen)
+    ui.MarkChosen(ui.ledgerPerBtns, chosen)
     -- ...and the Ledger button, which reads as pressed while its window is up.
     -- Done on every repaint rather than only on the toggle, because the window
     -- can also be closed by its own X.
@@ -16712,6 +16827,12 @@ function ui.SelectSubTab(name)
     -- The vendor list belongs to the Sell tab; don't leave it over another.
     if name ~= "Sell" then
         ui.HideVendorList()
+    end
+    -- ...and the ledger belongs to History. It covers the whole content area,
+    -- so left open it would sit over whichever tab you switched to -- the same
+    -- fault as the picker above, and it reads as the window being stuck.
+    if name ~= "History" then
+        ui.HideLedgerWindow()
     end
     -- ...and an open dropdown belongs to whatever form you just left. Not
     -- conditional on the tab: no dropdown should survive a tab change, and
