@@ -448,6 +448,13 @@ do
     -- quantity yet (ROADMAP 5.6), so it must not claim to be that.
     H.eq("profit's item row does not claim to be profit per item",
          blocks[3].rows[3][1], "Top seller")
+
+    -- A REAL ledger row states no quality -- the client answers for it -- so
+    -- the fourth element is absent and the painter falls through to
+    -- ui.CraftQualityOf. Asserted so the demo path cannot quietly become the
+    -- only one that colours anything.
+    H.isNil("a real row leaves the quality to the client",
+            blocks[1].rows[3][4])
     H.neq("...unlike the sales block's", blocks[1].rows[3][1], "Top seller")
 end
 
@@ -460,6 +467,7 @@ do
     H.eq("and a missing top item is a dash", blocks[1].rows[3][2],
          "\226\128\148")
     H.isNil("...with no id to colour", blocks[1].rows[3][3])
+    H.isNil("...and no quality either", blocks[1].rows[3][4])
 end
 
 H.survives("no stats table at all still gives blocks", function()
@@ -548,6 +556,16 @@ do
     H.check("the top sold item can be hovered", st.topSaleItem.itemId ~= nil)
     H.check("the top bought item can be hovered", st.topBuyItem.itemId ~= nil)
 
+    -- AND EACH STATES ITS QUALITY. ui.CraftQualityOf asks the CLIENT, and the
+    -- client only answers for items it has cached -- which for an item the
+    -- player has never seen or linked is none of them. The colour therefore
+    -- appeared only AFTER hovering, because the tooltip is what fetches the
+    -- item. Stating it means the name is purple the moment the tab opens.
+    H.eq("the sales side states epic", st.topSaleItem.quality, 4)
+    H.eq("the buys side states rare", st.topBuyItem.quality, 3)
+    H.eq("...and so does the single biggest sale", st.topSale.quality, 4)
+    H.eq("...and the single biggest buy", st.topBuy.quality, 3)
+
     -- DETERMINISTIC, AND NOT MERELY WITHIN ONE SECOND. Figures that changed
     -- between two repaints of the same window could not be read -- and a seed
     -- taken from the clock looks perfectly stable to a test that calls twice
@@ -587,6 +605,45 @@ do
         p = p + 1
     end
     H.check("no demo item id is used twice", not clash)
+end
+
+-- THE QUALITY REACHES THE RENDERER, not just the stats table. It travels as
+-- the FOURTH element of a Top item row, and a `top()` that drops it would
+-- leave the demo exactly as it was.
+do
+    db.demo = true
+    local blocks = ui.HistBlocks(db.LedgerStats(nil, NOW))
+    H.eq("the sales block carries epic through", blocks[1].rows[3][4], 4)
+    H.eq("the expenses block carries rare through", blocks[2].rows[3][4], 3)
+    H.check("...and still names the items",
+            blocks[1].rows[3][2] ~= blocks[2].rows[3][2])
+    db.demo = nil
+end
+
+-- EVERY ENTRY IN EACH POOL, not just whichever one the seed picked. A pool of
+-- two where one has the wrong quality is a coin toss over whether any check
+-- notices -- and that is exactly how a sabotage flipping Arcanite Reaper to
+-- epic passed all 162 of them.
+do
+    local bad = nil
+    local i = 1
+    while i <= table.getn(db.DEMO_EPICS) do
+        if db.DEMO_EPICS[i].quality ~= 4 then bad = db.DEMO_EPICS[i].item end
+        i = i + 1
+    end
+    H.isNil("every demo epic is quality 4", bad)
+
+    bad = nil
+    i = 1
+    while i <= table.getn(db.DEMO_RARES) do
+        if db.DEMO_RARES[i].quality ~= 3 then bad = db.DEMO_RARES[i].item end
+        i = i + 1
+    end
+    H.isNil("every demo rare is quality 3", bad)
+
+    -- ...and each pool holds more than one, or "random" is a constant.
+    H.check("there is a choice of epics", table.getn(db.DEMO_EPICS) > 1)
+    H.check("...and of rares", table.getn(db.DEMO_RARES) > 1)
 end
 
 H.isNil("picking from an empty pool is nothing", db.DemoPick({}, 3))

@@ -18,6 +18,18 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.4]
+
+### Fixed
+- **Demo items are quality-coloured the moment the tab opens**, instead of only
+  after you hover each one. The colour comes from the client, and the client
+  only answers for items it has cached — which for an item you've never seen or
+  linked is none of them. Hovering fetched it, which is why the purple turned
+  up a moment later. The demo now states the quality it already knows.
+
+  Real items are unaffected: they keep asking the client, which knows about
+  anything you've actually traded.
+
 ## [1.54.3]
 
 ### Fixed
@@ -5935,6 +5947,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

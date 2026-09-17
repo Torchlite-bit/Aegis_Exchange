@@ -14108,9 +14108,14 @@ end
 function ui.HistBlocks(st)
     st = st or {}
     local days = st.days or 1
+    -- { label, name, itemId, quality }. The quality is the FOURTH element and
+    -- is usually nil: a real ledger row does not record one, and the client
+    -- answers for it through ui.CraftQualityOf. Demo rows DO carry it, because
+    -- the client has never seen those items and so cannot answer -- which is
+    -- how three invented epics drew in the ordinary text colour.
     local function top(rec, label)
         if not rec then return { label, "\226\128\148" } end
-        return { label, rec.item or "?", rec.itemId }
+        return { label, rec.item or "?", rec.itemId, rec.quality }
     end
     return {
         {
@@ -14247,10 +14252,16 @@ function ui.PaintHistFigures(st, hi, lo, plotW, note)
                 pair.value:SetText(row[2])
                 -- A TOP ITEM CARRIES ITS QUALITY COLOUR; every other figure is
                 -- a number and reads in the ordinary text colour. row[3] is
-                -- the item id, nil for anything recorded before ids were kept,
-                -- which ui.QualityColor already answers for.
-                if row[3] then
-                    local q = ui.CraftQualityOf(row[3])
+                -- the item id, nil for anything recorded before ids were kept.
+                --
+                -- A STATED QUALITY WINS OVER THE CLIENT'S. row[4] is set only
+                -- where the caller already knows -- demo rows, whose items the
+                -- client has never cached and so cannot answer for. Asking
+                -- ui.CraftQualityOf first would get nil and fall back to the
+                -- default colour, which is the honest answer to "I do not
+                -- know" and the wrong one for data we invented ourselves.
+                if row[3] or row[4] then
+                    local q = row[4] or ui.CraftQualityOf(row[3])
                     local cr, cg, cb = ui.QualityColor(q)
                     pair.value:SetTextColor(cr, cg, cb)
                 else

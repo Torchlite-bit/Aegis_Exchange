@@ -1649,13 +1649,19 @@ end
 --
 --   16984 Black Dragonscale Boots  epic   12784 Arcanite Reaper      rare
 --   17193 Sulfuron Hammer          epic   12940 Dal'Rend's Sacred..  rare
+--
+-- EACH CARRIES ITS QUALITY, and that is not redundancy. ui.CraftQualityOf asks
+-- the CLIENT, and the client only answers for items it has cached -- which for
+-- a demo item the player has never seen or linked is none of them. So the
+-- names drew in the default colour, which is the honest answer to "I do not
+-- know" and the wrong one for data we made up ourselves and do know.
 db.DEMO_EPICS = {
-    { item = "Black Dragonscale Boots", itemId = 16984 },
-    { item = "Sulfuron Hammer",         itemId = 17193 },
+    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4 },
+    { item = "Sulfuron Hammer",         itemId = 17193, quality = 4 },
 }
 db.DEMO_RARES = {
-    { item = "Arcanite Reaper",             itemId = 12784 },
-    { item = "Dal'Rend's Sacred Charge",    itemId = 12940 },
+    { item = "Arcanite Reaper",          itemId = 12784, quality = 3 },
+    { item = "Dal'Rend's Sacred Charge", itemId = 12940, quality = 3 },
 }
 
 -- Pick one, deterministically, from `seed`. Demo data that changed between two
@@ -1699,12 +1705,16 @@ function db.DemoStats(sinceEpoch, now)
         days   = days,
         oldest = now - span,
         topSale = { item = epic.item, itemId = epic.itemId,
+                    quality = epic.quality,
                     amount = math.floor(income * 0.31) },
         topBuy  = { item = rare.item, itemId = rare.itemId,
+                    quality = rare.quality,
                     amount = math.floor(spend * 0.42) },
         topSaleItem = { item = epic.item, itemId = epic.itemId,
+                        quality = epic.quality,
                         total = math.floor(income * 0.55) },
         topBuyItem  = { item = rare.item, itemId = rare.itemId,
+                        quality = rare.quality,
                         total = math.floor(spend * 0.61) },
     }
 end

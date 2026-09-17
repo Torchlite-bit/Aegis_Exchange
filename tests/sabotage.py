@@ -6077,7 +6077,7 @@ end""",
 
     # The id is what lets a Top Item name be quality-coloured.
     ("blocks-drop-the-item-id", "ui/frame.lua",
-     '        return { label, rec.item or "?", rec.itemId }',
+     '        return { label, rec.item or "?", rec.itemId, rec.quality }',
      '        return { label, rec.item or "?" }',
      "histstats"),
 
@@ -6158,6 +6158,39 @@ end""",
     ("hover-target-gets-plated", "ui/frame.lua",
      "        hot.aegisNoSkin = true",
      "        hot.aegisNoSkin = nil",
+     "histgraph"),
+
+    # ---- stated quality ----------------------------------------------------
+    # ui.CraftQualityOf asks the CLIENT, which only answers for items it has
+    # cached. A demo item the player has never seen is not one, so the name
+    # drew in the default colour until the tooltip fetched it.
+    ("demostats-drops-the-quality", "core/db.lua",
+     "        topSaleItem = { item = epic.item, itemId = epic.itemId,\n                        quality = epic.quality,",
+     "        topSaleItem = { item = epic.item, itemId = epic.itemId,",
+     "histstats"),
+
+    ("demo-epics-are-not-epic", "core/db.lua",
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4 },',
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 3 },',
+     "histstats"),
+
+    ("demo-rares-are-not-rare", "core/db.lua",
+     '    { item = "Arcanite Reaper",          itemId = 12784, quality = 3 },',
+     '    { item = "Arcanite Reaper",          itemId = 12784, quality = 4 },',
+     "histstats"),
+
+    # The quality has to reach the RENDERER, not just the stats table -- it
+    # travels as the fourth element of a Top item row.
+    ("histblocks-drops-the-quality", "ui/frame.lua",
+     '        return { label, rec.item or "?", rec.itemId, rec.quality }',
+     '        return { label, rec.item or "?", rec.itemId }',
+     "histstats"),
+
+    # A STATED quality wins over the client's. Asking the client first gets nil
+    # for an uncached item and falls back to the default colour.
+    ("painter-asks-the-client-first", "ui/frame.lua",
+     "                    local q = row[4] or ui.CraftQualityOf(row[3])",
+     "                    local q = ui.CraftQualityOf(row[3]) or row[4]",
      "histgraph"),
 
 ]

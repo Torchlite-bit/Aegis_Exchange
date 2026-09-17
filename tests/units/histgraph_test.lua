@@ -1267,6 +1267,14 @@ do
     H.check("...right-aligning the values",
             says(paint, 'w.value:SetPoint("TOPRIGHT"')
             and says(paint, 'pair.value:SetPoint("TOPRIGHT"'))
+    -- A STATED QUALITY WINS OVER THE CLIENT'S. ui.CraftQualityOf answers only
+    -- for items the client has cached, so asking it FIRST gets nil for a demo
+    -- item nobody has ever seen and falls back to the default colour -- which
+    -- is how three invented epics drew in ordinary tan until each was hovered.
+    H.check("...preferring a stated quality over the client's",
+            says(paint, "local q = row[4] or ui.CraftQualityOf(row[3])"),
+            "asking the client first gets nil for an uncached item")
+
     -- The Top item's hover target exists only when the row names an item, so
     -- an em dash cannot be hovered for a tooltip about nothing.
     -- THE HOVER TARGET IS NOT A BUTTON TO LOOK AT. ui.skin plates every Button
