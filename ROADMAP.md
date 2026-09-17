@@ -4895,6 +4895,13 @@ belong in the **sales ledger**, landing with Phase 3's History graph work so the
 tab gains the detail and the chart in one pass rather than growing a second
 notification channel nobody asked to subscribe to.
 
+**§3.4 is blocked on this section, and specifically on quantity.** The Ledger
+window's Sold column and both per-unit averages are unit counts; without the
+quantity added here, that table can only be built from transaction counts, which
+are wrong everywhere and look right everywhere. Buys can be populated ahead of
+it — the purchase path already knows `count` — so this section gates the SALES
+half alone.
+
 Wanted per sale: item, **quantity**, sale price, **deposit returned**, **net
 collected**, and buyer where it can be had.
 
