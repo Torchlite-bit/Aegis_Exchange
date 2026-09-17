@@ -4539,6 +4539,12 @@ flag already repaints once a frame behind rule 16's flush.
   `Texture` pixels vs. a `StatusBar`-based sparkline) before committing to
   an approach. **Phase 0.3 is settled (v1.4.0)**, so this is unblocked; read
   its note about plotting a median before designing the axes.
+  - **§5.6 lands with this.** A sale is currently one item name and one
+    number; the ledger is meant to gain quantity, deposit and net alongside it.
+    Doing both in one pass means the tab is designed once around the data it
+    will actually hold — and it means the ledger schema settles before a chart
+    is drawn on top of the old one. Read §5.6 before designing the axes too:
+    "net collected" and "amount in the mail" are not the same series.
 - **Disenchant value** in the tooltip — ✅ **DONE**. See 3k, which shipped all
   six of its phases between v1.29.0 and v1.49.2. This line said "building, §2 of
   3k, learning item levels from play is next" for twenty releases after that
@@ -4731,22 +4737,54 @@ list, easy remove and clear.
 means two item-set implementations that will disagree. Ship it as a
 built-in group the posting queue skips, or wait for 4.1.
 
-### 5.6 Sale details printed to chat
+### 5.6 Richer sale records — in the ledger, not in chat
 
-`ui.ScanMailSales` records sales to the ledger, deduped via `A.MailTxnKey` +
-`db.WasSeen` (already correct, and already shared with Courier). It prints
-nothing.
+**Revised.** This started as "print sale details to chat when the mail is
+opened". The decision is now that chat is the wrong destination: the numbers
+belong in the **sales ledger**, landing with Phase 3's History graph work so the
+tab gains the detail and the chart in one pass rather than growing a second
+notification channel nobody asked to subscribe to.
 
-Wanted, optionally, on collection: item, quantity, sale price, deposit
-returned, net.
+Wanted per sale: item, **quantity**, sale price, **deposit returned**, **net
+collected**, and buyer where it can be had.
 
-**Buyer name is the hard one and may not be available.** `GetInboxHeaderInfo`
-gives the *sender*, which for auction mail is the auction house, not the buyer.
-The buyer appears in the mail **body**, which needs `GetInboxText` — a per-mail
-call in a `MAIL_INBOX_UPDATE` path, which is precisely what **HARD RULE 16**
-forbids inline. If it is done at all it must be on collection of one specific
-mail, never during a scan of the inbox. **Treat "buyer name, when available" as
-optional and be prepared to drop it.**
+**What exists.** `ui.ScanMailSales` reads `GetInboxHeaderInfo` only — subject
+and money — dedupes via `A.MailTxnKey` + `db.WasSeen`, and calls
+`db.RecordTxn("sale", item, money)`. The ledger row is
+`{t, kind, item, amount, id, who}`. So today a sale is *one item name and one
+number*, and every field above except the name is either missing or conflated.
+
+Four things have to be settled before any of it is built, and three are traps:
+
+- **Establish what `money` in that mail actually IS.** Net of the 5% cut? Does
+  it include the returned deposit? Until that is known, splitting one number
+  into three is guesswork. **I could not confirm the 1.12 mail body format from
+  public sources** — this needs a real client and a real sale. If the mail does
+  not break it down, note that Aegis can *reconstruct* the deposit from its own
+  record of what it paid, which is a better answer than parsing prose.
+- **Quantity and buyer live in the mail BODY**, which needs `GetInboxText` —
+  a per-mail call. **HARD RULE 16 forbids that inline in the inbox scan**, which
+  is a `MAIL_INBOX_UPDATE` path and the exact shape that froze Courier. It must
+  happen on opening **one** mail, never while walking the inbox. Keep buyer name
+  optional and be ready to drop it.
+- **`A.RecordExternalTxn` silently discards anything it does not name.** It
+  validates `{kind, amount, item, itemId, key}` and calls `db.RecordTxn` with
+  four of them. **Courier is the thorough mail reader** — it is precisely the
+  caller that would *have* quantity and buyer — so widening the ledger without
+  widening this function means the richer fields can only ever arrive from
+  Aegis's own header-only path, the one path that cannot see them. **Widen the
+  contract in the same release.** It is additive, so an older Courier keeps
+  working unchanged.
+- **Old ledger rows will not have the new fields**, and there is precedent for
+  handling that correctly: `who` already has this problem, and `db.RecordTxn`'s
+  own comment says every reader must treat a missing one as unknown rather than
+  as any particular value. Same rule, no migration pass, no backfill.
+
+**While `AuctionSoldItem` is open, fix its localisation.** It hardcodes
+`"Auction successful: "` and so returns nil on any non-English client — every
+sale silently unlogged. `craft.CreatePrefix` is the pattern: read the client's
+own global, fall back to the English literal, derive the prefix from the format
+string.
 
 ### 5.7 Equipment comparison tooltips
 
@@ -4761,6 +4799,36 @@ the vanilla implementation differs most from every later client, and writing it
 from memory of retail is how it ends up subtly wrong.
 
 ---
+
+### 5.8 Purchase receipt window
+
+A small button on the Buy tab that pops out a receipt of what this run has
+bought, replacing the one-line status-bar tally. Per row: item name, quantity,
+**number of auctions**, total spent. A total at the foot, and a Clear.
+
+**Most of the data is already there.** `buy.session` holds
+`itemId -> {n = units, spent = copper, name}`, fed by the purchase path rather
+than inferred from bags, and `buy.SessionBought` reads it. Two gaps:
+
+- **Auction count is not tracked** — `n` is units. Add a third counter
+  incremented once per purchase; it is the one genuinely new number.
+- **The status line only shows the tally when the results are about ONE item**
+  (`buy.SoleItemId`). A window has no such constraint, which is most of why it
+  is better: a crafting run buys six things, and the current surface can only
+  talk about a search that narrowed to one.
+
+**Open — and it contradicts a settled decision, so it needs a call.** The
+request says *"for the current auction-house visit"*. `buy.session` deliberately
+does **not** clear on `AUCTION_HOUSE_CLOSED`; `craft.made` carries the reasoning
+verbatim — *"a crafting run spans several trips to the auctioneer, so a counter
+that cleared on the way out would clear in the middle of the thing it counts."*
+
+Per-visit and per-run are different features and the existing choice was
+deliberate. **Recommendation: keep the session semantics**, label the window
+honestly ("This session"), and let Clear be the reset — a button the player
+presses is a boundary they chose, which is what "visit" was reaching for anyway.
+Changing it to per-visit means changing `craft.made` to match or leaving two
+counters on the same screen that reset on different rules.
 
 ### Already shipped — checked, not assumed
 
@@ -4777,8 +4845,9 @@ Recorded so the same list does not get re-raised:
 | Sale history without double-counting | `A.MailTxnKey` + `db.WasSeen` / `db.MarkSeen` |
 
 One gap inside a shipped feature: the purchase tracker counts **units and
-copper**, not **number of auctions bought**. Add it to `buy.session` when 5.x is
-touched, not on its own.
+copper**, not **number of auctions bought**, and only surfaces at all when a
+search narrowed to one item. Both are addressed by §5.8 rather than on their
+own.
 
 ---
 
