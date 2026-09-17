@@ -4784,8 +4784,9 @@ there.
 5. §5.6 — sale quantity into the ledger.
 6. §3.4 Ledger window.
 
-**One MINOR for the push, PATCH per step.** Continuation of the 1.53 line unless
-the owner says otherwise — **ask before moving the MINOR**.
+**One MINOR for the push, PATCH per step.** The MINOR moved to **1.54.0** at
+the owner's call when the two-screen restructure landed, and stays there for
+the rest of this phase.
 
 ### Also in this phase
 
