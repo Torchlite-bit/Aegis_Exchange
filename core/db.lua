@@ -1639,8 +1639,79 @@ end
 -- and its total lands in two buckets, neither of which reaches the top spot.
 -- `item` is set on every entry (db.RecordTxn defaults it to "?"), `id` is not,
 -- so the name is the only key every row can offer. The id is carried alongside
+-- Items the demo's figures name, by quality.
+--
+-- REAL IDS, CHECKED, NOT REMEMBERED. The tooltip these arm is the client's own
+-- and the colour comes from the client's own quality, so an id that is not
+-- what it claims shows as a tooltip for the wrong item -- which is exactly the
+-- failure demo mode exists to make visible. Verified against the Classic item
+-- database rather than written from memory, which has been wrong here before.
+--
+--   16984 Black Dragonscale Boots  epic   12784 Arcanite Reaper      rare
+--   17193 Sulfuron Hammer          epic   12940 Dal'Rend's Sacred..  rare
+db.DEMO_EPICS = {
+    { item = "Black Dragonscale Boots", itemId = 16984 },
+    { item = "Sulfuron Hammer",         itemId = 17193 },
+}
+db.DEMO_RARES = {
+    { item = "Arcanite Reaper",             itemId = 12784 },
+    { item = "Dal'Rend's Sacred Charge",    itemId = 12940 },
+}
+
+-- Pick one, deterministically, from `seed`. Demo data that changed between two
+-- repaints of the same window could not be looked at.
+function db.DemoPick(pool, seed)
+    local n = table.getn(pool or {})
+    if n == 0 then return nil end
+    return pool[math.mod(math.floor(seed or 0), n) + 1]
+end
+
+-- The History tab's figures, for demo mode.
+--
+-- SAME SHAPE AS db.LedgerStats, field for field, so ui.HistFigures and
+-- ui.HistBlocks cannot tell the difference. A demo that returned a narrower
+-- table would exercise the renderer's nil paths rather than its real ones,
+-- which is the opposite of what a preview is for.
+--
+-- An EPIC on the sales side and a RARE on the buys side, so both quality
+-- colours are on screen at once and the Top item hover can be checked against
+-- two different tooltips. PROFIT's "Top seller" names the same item SALES does
+-- -- it reads the same field, because until the ledger records quantities
+-- (ROADMAP 5.6) the top earner IS the answer to both.
+function db.DemoStats(sinceEpoch, now)
+    now = now or time()
+    local seed = db.DemoNext(db.DemoSeed("stats"))
+    local span = sinceEpoch and (now - sinceEpoch) or (86400 * 30)
+    local days = math.floor(span / 86400) + 1
+    if days < 1 then days = 1 end
+
+    local epic = db.DemoPick(db.DEMO_EPICS, seed)
+    local rare = db.DemoPick(db.DEMO_RARES, math.floor(seed / 7))
+
+    local income = 180000 + math.mod(seed, 900000)
+    local spend  =  60000 + math.mod(math.floor(seed / 13), 500000)
+    return {
+        income = income,
+        spend  = spend,
+        net    = income - spend,
+        saleN  = 12 + math.mod(math.floor(seed / 3), 200),
+        buyN   = 30 + math.mod(math.floor(seed / 11), 400),
+        days   = days,
+        oldest = now - span,
+        topSale = { item = epic.item, itemId = epic.itemId,
+                    amount = math.floor(income * 0.31) },
+        topBuy  = { item = rare.item, itemId = rare.itemId,
+                    amount = math.floor(spend * 0.42) },
+        topSaleItem = { item = epic.item, itemId = epic.itemId,
+                        total = math.floor(income * 0.55) },
+        topBuyItem  = { item = rare.item, itemId = rare.itemId,
+                        total = math.floor(spend * 0.61) },
+    }
+end
+
 -- for quality colouring, where a missing one costs nothing.
 function db.LedgerStats(sinceEpoch, now)
+    if db.demo then return db.DemoStats(sinceEpoch, now) end
     now = now or time()
     local st = {
         income = 0, spend = 0, net = 0,
@@ -1687,6 +1758,15 @@ function db.LedgerStats(sinceEpoch, now)
                     -- an item whose early history predates id recording still
                     -- gets its colour from whichever entry carried one.
                     if not rec.itemId and e.id then rec.itemId = e.id end
+                    -- ...and failing that, the name->id map, which every scan,
+                    -- search and browse feeds. EVERY mail-logged sale before
+                    -- v1.54.3 stored a name and no id, so without this the
+                    -- Sales and Profit blocks could never colour or hover
+                    -- their Top item while the Expenses block -- fed by the
+                    -- Buy tab, which knows the id -- always could.
+                    if not rec.itemId then
+                        rec.itemId = db.IdFromName(rec.item)
+                    end
                     rec.total = rec.total + amount
                 end
             end
@@ -1694,6 +1774,14 @@ function db.LedgerStats(sinceEpoch, now)
         i = i + 1
     end
 
+    -- The biggest SINGLE transaction of each kind gets the same backfill, for
+    -- the same reason: it is displayed by name and hovered by id.
+    if st.topSale and not st.topSale.itemId then
+        st.topSale.itemId = db.IdFromName(st.topSale.item)
+    end
+    if st.topBuy and not st.topBuy.itemId then
+        st.topBuy.itemId = db.IdFromName(st.topBuy.item)
+    end
     st.net  = st.income - st.spend
     st.days = db.WindowDays(sinceEpoch, st.oldest, now)
     st.topSaleItem = db.TopOf(saleBy)

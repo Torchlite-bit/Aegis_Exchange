@@ -1269,6 +1269,17 @@ do
             and says(paint, 'pair.value:SetPoint("TOPRIGHT"'))
     -- The Top item's hover target exists only when the row names an item, so
     -- an em dash cannot be hovered for a tooltip about nothing.
+    -- THE HOVER TARGET IS NOT A BUTTON TO LOOK AT. ui.skin plates every Button
+    -- it is given, and on an invisible target sitting over a FontString that
+    -- drew a bar straight through the item's name. tests/lint/rowskin.py
+    -- cannot see this one: it keys on ui.AddRowChrome, which marks a LIST row,
+    -- and this is not one.
+    H.check("the hover target opts out of the button skinner",
+            says(build, "hot.aegisNoSkin = true"),
+            "a plate over a FontString draws through the text")
+    H.check("...and takes mouse events at all",
+            says(build, "hot:EnableMouse(true)"))
+
     H.check("...and only arms the tooltip when there is an item",
             says(paint, "if last and last[3] then")
             and says(paint, "w.hot.itemId = nil"))
@@ -1447,9 +1458,18 @@ do
     H.check("there is one period-row builder", row ~= "")
     H.check("the chart uses it", says(gbuild, "ui.histPerBtns = ui.MakePeriodRow(box"),
             "they sat a table's width away from what they change")
+    local ledgerBody = bodyOf("function ui.BuildLedgerWindow(")
     H.check("...and so does the ledger",
-            says(bodyOf("function ui.BuildLedgerWindow("),
-                 "ui.ledgerPerBtns = ui.MakePeriodRow(f"))
+            says(ledgerBody, "ui.ledgerPerBtns = ui.MakePeriodRow(perBar"))
+    -- BOTH ROWS ON THE SAME GROUND. A button's plate is translucent, so the
+    -- chosen one reads filled over the chart's well and outlined over this
+    -- overlay's opaque near-black. Same kind, same ui.MarkChosen, two
+    -- different-looking rows -- unless both sit in a well.
+    H.check("...with its button rows in wells, so the plates match",
+            says(ledgerBody, "local well = ui.MakeWell(f, box, 3)")
+            and says(ledgerBody, "local perBar = bar(")
+            and says(ledgerBody, "ui.ledgerFootBar = footBar"),
+            "lightening the overlay is not the fix; being opaque is its point")
     -- Built right-to-left because the row is anchored by its RIGHT edge: its
     -- container's width moves with the window and the periods have to stay
     -- against its far side.

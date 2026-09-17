@@ -18,6 +18,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.3]
+
+### Fixed
+- **Top item now hovers on the Sales and Profit blocks, not just Expenses.**
+  The 1.12 mailbox gives a subject line and no item link, so every sale logged
+  from mail stored a name and nothing else — while buys, which come through the
+  Buy tab, always knew the item. That's why one block out of three had a
+  tooltip. Aegis now resolves the name against everything it has seen, so
+  existing history works too, and new mail sales record the id directly.
+- **The hovered name no longer has a bar drawn through it.** The invisible
+  hover target was a Button, and the pfUI skinner plates every Button it's
+  given.
+
+### Changed
+- **The Ledger's buttons match the chart's.** A button's plate is translucent,
+  so the chosen period read *filled* on the chart and *outlined* on the
+  ledger's opaque backdrop — same button, different ground. Both rows sit in
+  wells now, and **Clear history** and **Close** share one at the bottom.
+- **`/aex demo` fills in the figures too**, with an epic on the sales side and
+  a rare on the buys side, so both quality colours are on screen at once and
+  the Top item hover can be checked against two real tooltips.
+
 ## [1.54.2]
 
 ### Added
@@ -5913,6 +5935,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

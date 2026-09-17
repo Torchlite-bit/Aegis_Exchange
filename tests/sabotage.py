@@ -6098,6 +6098,68 @@ end""",
      "    local w = 0\n    -- NEVER ZERO",
      "histstats"),
 
+    # ---- the Top item hover ------------------------------------------------
+    # The 1.12 inbox gives a subject and no link, so a mail-logged sale stores
+    # a name and nothing else. Without the name->id map the Sales and Profit
+    # blocks can never colour or hover their Top item while Expenses -- fed by
+    # the Buy tab, which knows the id -- always can.
+    ("stats-drops-the-name-lookup", "core/db.lua",
+     "                    if not rec.itemId then\n                        rec.itemId = db.IdFromName(rec.item)\n                    end",
+     "                    local _ = rec",
+     "histstats"),
+
+    ("stats-topsale-drops-the-name-lookup", "core/db.lua",
+     "    if st.topSale and not st.topSale.itemId then\n        st.topSale.itemId = db.IdFromName(st.topSale.item)\n    end",
+     "    local _ = st",
+     "histstats"),
+
+    # A recorded id came off the actual transaction; the name map is a lookup
+    # of last resort and must not overwrite it.
+    ("stats-name-lookup-beats-the-real-id", "core/db.lua",
+     "                    if not rec.itemId then\n                        rec.itemId = db.IdFromName(rec.item)\n                    end",
+     "                    rec.itemId = db.IdFromName(rec.item) or rec.itemId",
+     "histstats"),
+
+    # ---- demo figures ------------------------------------------------------
+    ("demostats-not-used-in-demo-mode", "core/db.lua",
+     "    if db.demo then return db.DemoStats(sinceEpoch, now) end",
+     "    local _ = sinceEpoch",
+     "histstats"),
+
+    # An epic on the sales side and a rare on the buys side, so both quality
+    # colours are on screen and the hover can be checked against two tooltips.
+    ("demostats-uses-one-quality-for-both", "core/db.lua",
+     "    local rare = db.DemoPick(db.DEMO_RARES, math.floor(seed / 7))",
+     "    local rare = db.DemoPick(db.DEMO_EPICS, math.floor(seed / 7))",
+     "histstats"),
+
+    # Every demo item carries an id, or the hover the mode exists to let you
+    # check is armed on nothing.
+    ("demostats-drops-the-item-ids", "core/db.lua",
+     "        topSaleItem = { item = epic.item, itemId = epic.itemId,",
+     "        topSaleItem = { item = epic.item,",
+     "histstats"),
+
+    # Figures that changed between two repaints of the same window could not be
+    # read.
+    ("demostats-is-not-deterministic", "core/db.lua",
+     '    local seed = db.DemoNext(db.DemoSeed("stats"))',
+     "    local seed = db.DemoNext(time())",
+     "histstats"),
+
+    ("demopick-runs-off-the-pool", "core/db.lua",
+     "    return pool[math.mod(math.floor(seed or 0), n) + 1]",
+     "    return pool[math.floor(seed or 0) + 1]",
+     "histstats"),
+
+    # ---- the hover target itself -------------------------------------------
+    # ui.skin plates every Button it is given, and on an invisible hover target
+    # over a FontString that drew a bar straight through the item's name.
+    ("hover-target-gets-plated", "ui/frame.lua",
+     "        hot.aegisNoSkin = true",
+     "        hot.aegisNoSkin = nil",
+     "histgraph"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.

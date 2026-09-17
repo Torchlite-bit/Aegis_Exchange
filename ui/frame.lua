@@ -13019,21 +13019,40 @@ function ui.BuildLedgerWindow()
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     title:SetText("Ledger")
 
-    -- The picker's own furniture: a rule above the button row, and Close at
-    -- the far right of it.
-    local divider = f:CreateTexture(nil, "ARTWORK")
-    divider:SetHeight(1)
-    divider:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 42)
-    divider:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 42)
-    divider:SetTexture(C.border[1], C.border[2], C.border[3])
+    -- THE BUTTON ROWS SIT IN WELLS, and that is not decoration -- it is what
+    -- makes them match the chart's.
+    --
+    -- A button's plate is TRANSLUCENT, so what it reads as depends on the
+    -- ground behind it. The chart's periods sit on a well (0.85 alpha over the
+    -- window's parchment); these sit on this overlay, which is deliberately
+    -- opaque near-black. Same kind, same ui.MarkChosen, two different-looking
+    -- rows -- the chosen one reading filled on the chart and outlined here.
+    -- Giving both rows the same ground is the fix; lightening the overlay is
+    -- not, because being opaque is the whole point of it.
+    local function bar(h, w)
+        local box = CreateFrame("Frame", nil, f)
+        box:SetHeight(h); box:SetWidth(w)
+        local well = ui.MakeWell(f, box, 3)
+        box:SetFrameLevel(well:GetFrameLevel() + 1)
+        return box
+    end
 
-    -- ITS OWN PERIOD ROW. The chart's is behind this overlay, and a ledger you
-    -- cannot change the period on is a ledger showing one week forever.
-    ui.ledgerPerBtns = ui.MakePeriodRow(f, -12, -8)
+    local perW = HISTL.per_w * table.getn(HIST_PERIODS)
+                 + HISTL.per_gap * (table.getn(HIST_PERIODS) - 1) + 8
+    local perBar = bar(HISTL.per_h + 8, perW)
+    perBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -8)
+    ui.ledgerPerBtns = ui.MakePeriodRow(perBar, -4, -4)
 
-    local closeBtn = ui.MakeButton(f, "quiet", "AegisExchangeLedgerCloseButton")
+    -- ...and the same for Clear history and Close. ui.BuildHistoryTab anchors
+    -- Clear into this, which is why it is kept on `ui`.
+    local footBar = bar(30, 200)
+    footBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
+    ui.ledgerFootBar = footBar
+
+    local closeBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangeLedgerCloseButton")
     closeBtn:SetWidth(80); closeBtn:SetHeight(22)
-    closeBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+    closeBtn:SetPoint("RIGHT", footBar, "RIGHT", -4, 0)
     closeBtn:SetText("Close")
     closeBtn:SetScript("OnClick", function() ui.HideLedgerWindow() end)
 
@@ -13099,7 +13118,14 @@ function ui.ScanMailSales()
             local key = A.MailTxnKey(subject, money, daysLeft)
             if not A.db.WasSeen(key) then
                 A.db.MarkSeen(key)
-                A.db.RecordTxn("sale", item, money)
+                -- WITH AN ITEM ID WHERE ONE CAN BE FOUND. The 1.12 inbox
+                -- gives a subject line and no link, so the id has to come from
+                -- the name -- db.IdFromName exists for exactly this. Without
+                -- it every mail-logged sale stored a name and nothing else,
+                -- which is why the History tab's Top item could be hovered on
+                -- the Expenses side (bought through the Buy tab, which knows
+                -- the id) and not on the Sales side.
+                A.db.RecordTxn("sale", item, money, A.db.IdFromName(item))
             end
         end
         i = i + 1
@@ -13177,11 +13203,12 @@ function ui.BuildHistoryTab()
     -- sits between the totals line and the rows -- the button was anchored to
     -- the only thing that follows the split and then placed into the one band
     -- that was already occupied.
-    -- ON THE BOTTOM BUTTON ROW, beside Close, which is where the category
-    -- picker puts its own pair. It was top-right, clearing an X that the
-    -- overlay does not have.
+    -- ON THE LEDGER'S FOOT BAR, beside Close, sharing its well so the two read
+    -- as one row on one ground -- see the note there about why the ground is
+    -- what makes a button's plate match.
     clearBtn:ClearAllPoints()
-    clearBtn:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 12, 12)
+    clearBtn:SetHeight(22)
+    clearBtn:SetPoint("LEFT", ui.ledgerFootBar, "LEFT", 4, 0)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -13486,6 +13513,12 @@ function ui.BuildHistoryGraph(panel)
         -- because only it knows whether that row has an item at all.
         local hot = CreateFrame("Button", nil, ui.histStats)
         hot:SetHeight(HISTL.fig_line)
+        -- NOT A BUTTON TO LOOK AT. It is an invisible hover target over a
+        -- FontString, and ui.skin's SkinWidget plates every Button it is given
+        -- -- which drew a blue bar straight through the item's name. Same
+        -- opt-out list rows use; see tests/lint/rowskin.py.
+        hot.aegisNoSkin = true
+        hot:EnableMouse(true)
         hot:Hide()
         hot:SetScript("OnEnter", function()
             if not hot.itemId then return end

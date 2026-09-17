@@ -467,6 +467,132 @@ H.survives("no stats table at all still gives blocks", function()
 end)
 
 -- ---------------------------------------------------------------------------
+H.section("the name -> id backfill")
+-- ---------------------------------------------------------------------------
+
+-- EVERY MAIL-LOGGED SALE BEFORE v1.54.3 STORED A NAME AND NO ID. The 1.12
+-- inbox gives a subject line and no link, so ui.ScanMailSales called
+-- db.RecordTxn with three arguments. The Expenses block -- fed by the Buy tab,
+-- which knows the id -- could colour and hover its Top item; the Sales and
+-- Profit blocks never could, on the same screen.
+do
+    reset()
+    db.account.names["Clam Meat"] = 5503
+    entry("sale", "Clam Meat", 7300, NOW - DAY)          -- no id, as mail logs
+    local st = db.LedgerStats(nil, NOW)
+    H.eq("an id-less sale still finds its item",
+         st.topSaleItem.itemId, 5503)
+    H.eq("...and so does the single biggest sale", st.topSale.itemId, 5503)
+end
+
+-- A name nothing has ever seen stays unresolved rather than guessing, and the
+-- painter already treats a missing id as "no colour, no hover".
+do
+    reset()
+    entry("sale", "Never Scanned", 500, NOW - DAY)
+    local st = db.LedgerStats(nil, NOW)
+    H.isNil("an unknown name resolves to nothing", st.topSaleItem.itemId)
+end
+
+-- A recorded id still wins: it came off the actual transaction, and the name
+-- map is a lookup of last resort.
+do
+    reset()
+    db.account.names["Clam Meat"] = 9999
+    entry("sale", "Clam Meat", 500, NOW - DAY, 5503)
+    H.eq("a recorded id beats the name map",
+         db.LedgerStats(nil, NOW).topSaleItem.itemId, 5503)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("demo figures")
+-- ---------------------------------------------------------------------------
+
+-- SAME SHAPE AS THE REAL ONES, field for field, or the renderer exercises its
+-- nil paths instead of its real ones -- which is the opposite of a preview.
+do
+    db.demo = true
+    local st = db.LedgerStats(nil, NOW)
+    H.check("income", st.income > 0, st.income)
+    H.check("spend", st.spend > 0, st.spend)
+    H.eq("net is the difference", st.net, st.income - st.spend)
+    H.check("a sale count", st.saleN > 0)
+    H.check("a buy count", st.buyN > 0)
+    H.check("a day span that can be divided by", st.days >= 1)
+    H.check("a top sale", st.topSale ~= nil)
+    H.check("a top buy", st.topBuy ~= nil)
+    H.check("a top sold item", st.topSaleItem ~= nil)
+    H.check("a top bought item", st.topBuyItem ~= nil)
+
+    -- AN EPIC ON THE SALES SIDE, A RARE ON THE BUYS SIDE, so both quality
+    -- colours are on screen at once and the hover can be checked against two
+    -- different tooltips.
+    local isEpic, isRare = false, false
+    local i = 1
+    while i <= table.getn(db.DEMO_EPICS) do
+        if db.DEMO_EPICS[i].itemId == st.topSaleItem.itemId then isEpic = true end
+        i = i + 1
+    end
+    i = 1
+    while i <= table.getn(db.DEMO_RARES) do
+        if db.DEMO_RARES[i].itemId == st.topBuyItem.itemId then isRare = true end
+        i = i + 1
+    end
+    H.check("the sales side names an epic", isEpic, st.topSaleItem.item)
+    H.check("the buys side names a rare", isRare, st.topBuyItem.item)
+    H.check("...which are not the same item",
+            st.topSaleItem.itemId ~= st.topBuyItem.itemId)
+
+    -- EVERY DEMO ITEM CARRIES AN ID, or the hover this mode exists to let you
+    -- check is armed on nothing.
+    H.check("the top sold item can be hovered", st.topSaleItem.itemId ~= nil)
+    H.check("the top bought item can be hovered", st.topBuyItem.itemId ~= nil)
+
+    -- DETERMINISTIC, AND NOT MERELY WITHIN ONE SECOND. Figures that changed
+    -- between two repaints of the same window could not be read -- and a seed
+    -- taken from the clock looks perfectly stable to a test that calls twice
+    -- in a row, which is how the first version of this check passed a sabotage
+    -- that replaced the seed with time().
+    local realTime = time
+    time = function() return 1000000000 end
+    local a = db.LedgerStats(nil, NOW)
+    time = function() return 1999999999 end
+    local b = db.LedgerStats(nil, NOW)
+    time = realTime
+    H.eq("the same window gives the same figures at any hour", a.income, b.income)
+    H.eq("...and the same items", a.topSaleItem.itemId, b.topSaleItem.itemId)
+    H.eq("...and the same counts", a.saleN, b.saleN)
+
+    -- It must not be reading the ledger at all.
+    reset()
+    H.eq("an empty ledger changes nothing in demo mode",
+         db.LedgerStats(nil, NOW).income, st.income)
+    db.demo = nil
+end
+
+-- Every id in the pools is distinct, so "random" cannot pick the same item for
+-- both sides and hide the whole point of having two.
+do
+    local seen, clash = {}, false
+    local pools = { db.DEMO_EPICS, db.DEMO_RARES }
+    local p = 1
+    while p <= 2 do
+        local i = 1
+        while i <= table.getn(pools[p]) do
+            local id = pools[p][i].itemId
+            if seen[id] then clash = true end
+            seen[id] = true
+            i = i + 1
+        end
+        p = p + 1
+    end
+    H.check("no demo item id is used twice", not clash)
+end
+
+H.isNil("picking from an empty pool is nothing", db.DemoPick({}, 3))
+H.check("picking is in range", db.DemoPick(db.DEMO_EPICS, 99999) ~= nil)
+
+-- ---------------------------------------------------------------------------
 H.section("where a band figure sits")
 -- ---------------------------------------------------------------------------
 
