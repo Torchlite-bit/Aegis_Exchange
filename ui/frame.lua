@@ -12483,9 +12483,18 @@ local HISTL = {
     -- not a guess: nothing in tests/ can measure a FontString, so the fit
     -- check needs a number it can add up. Generous by a few pixels on purpose.
     head_w     = 80,
-    -- One column of the rasterised line. FOUR PIXELS is the whole compromise
-    -- described above: one per data point is a staircase, one per pixel is
-    -- hundreds of textures.
+    -- One column of the rasterised line.
+    --
+    -- TWO PIXELS, AND MEASURED, not a compromise anyone picked. (This comment
+    -- said FOUR while the value was 2, which is its own small lesson.) At 2px
+    -- a 1400px window costs 637 spans; at 1px, 1274.
+    --
+    -- GOING TO 1 BUYS NOTHING, and that is the finding: bucket_px puts a DATA
+    -- point every 3 pixels, so columns 2px apart are already sampling finer
+    -- than the series they draw -- consecutive columns frequently interpolate
+    -- between the same two points. Halving this doubles the texture count and
+    -- adds no information. What is left is aliasing on the diagonal EDGES,
+    -- which no amount of horizontal subdivision touches. See ROADMAP 3.2.
     col_w      = 2,
     line_h     = 2,
     -- HOW WIDE ONE BUCKET IS, in pixels -- not how many there are.

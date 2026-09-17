@@ -4619,9 +4619,31 @@ slope:
   stretches within it. Read it before fighting a sheared segment that will not
   sit where it is put.
 
-**Still do the free thing first and measure.** Drop `HISTL.col_w` toward 1 and
-look at it. If thinner spans are enough, the whole section is one constant, and
-that is worth ten minutes before writing a rasteriser.
+**MEASURED (v1.54.5), and the free thing does not help.** `HISTL.col_w` was
+already **2**, not the 4 its own comment claimed. The span cost:
+
+| window | plot width | spans @2px | spans @1px | data points |
+|---|---|---|---|---|
+| 1000 | 874 | 437 | 874 | 291 |
+| 1200 | 1074 | 537 | 1074 | 358 |
+| 1400 | 1274 | 637 | 1274 | 400 (capped) |
+| 1920 | 1794 | 897 | 1794 | 400 (capped) |
+
+**Columns are already finer than the data.** `bucket_px = 3` puts one data
+point every three pixels, so 2px columns frequently interpolate between the
+same two points; halving to 1px doubles the texture count and adds no
+information at all. **Do not do it.** What is left is aliasing on the diagonal
+EDGES — vertical bars have square ends — and no amount of horizontal
+subdivision touches that.
+
+**A cheaper lever turned up while measuring: `bucket_max = 400` is BITING.** At
+1400px the plot asks for 424 buckets and gets 400; at 1920px it asks for 598.
+So above roughly 1200px the chart is drawing fewer real points than it has room
+for, and raising that cap adds genuine detail for one walk of `db.MoneySeries`
+— far less work than a rasteriser, and it should be tried before one.
+
+**So the order is: raise `bucket_max` and look; then sheared segments if it
+still reads jagged.**
 
 **Arithmetic that gets a test and a sabotage:** segment endpoints → the eight
 texcoords, including a **vertical segment** (no angle — must not divide by zero)
@@ -4774,7 +4796,8 @@ there.
 ### 3.6 Order of work
 
 1. §3.1 answered — ✅ gold balance, and already built.
-2. §3.2 cheap pass — `col_w` reduced, measured, judged by eye.
+2. §3.2 cheap pass — ✅ **MEASURED** (v1.54.5): `col_w` is already finer than
+   the data, so reducing it buys nothing. `bucket_max` is the live lever.
 3. §3.3a figures — ✅ **DONE** (v1.53.30).
 3b. §3.3b blocks — ✅ **DONE** (v1.54.0), with the two-screen restructure.
 3c. §3.4's window — ✅ **DONE** (v1.54.0). Its per-item TABLE is not.
