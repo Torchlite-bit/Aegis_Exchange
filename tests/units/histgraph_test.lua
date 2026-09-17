@@ -12,10 +12,26 @@
 --     on `now`, which is one past the last bucket unless somebody says so.
 --   * THE SCALE. Both series share one, because the question the chart
 --     answers is whether one line is above the other.
---   * THE RASTERISER. 1.12 has no line primitive and no texture rotation, so
---     the line is built from thin vertical spans. Every span has to stay
---     INSIDE the plot: these are textures on the chart frame and nothing
---     clips a texture that overruns it.
+--   * THE RASTERISER. 1.12 has no line primitive, so the line is built from
+--     thin vertical spans. Every span has to stay INSIDE the plot: these are
+--     textures on the chart frame and nothing clips a texture that overruns
+--     it.
+--
+--     THIS COMMENT USED TO SAY "and no texture rotation", and that was wrong.
+--     It was written in the same commit as the rasteriser it describes, with
+--     nothing behind it, and it is most likely the REASON the line is built
+--     from vertical spans. 1.12 has affine SetTexCoord: the eight-argument
+--     overload is declared in the 1.12 API definitions, GetTexCoord is
+--     documented as returning 8 coordinates as of 1.11, and a readback on a
+--     real client confirms it --
+--
+--         t:SetTexCoord(0,1,1,1,0,0,1,0)  ->  GetTexCoord() = 8 values,
+--         0,1,1,1,0,0,1,0
+--
+--     So a sheared one-texture-per-segment stroke is available and ROADMAP
+--     3.2 plans it. The clipping rule above survives the change and gets
+--     HARDER: a sheared parallelogram can overrun on both axes, not just
+--     vertically.
 --   * THE SPLIT. The table's columns are fixed and its Amount column is the
 --     rightmost thing that can be clipped, so the table wins the squeeze.
 

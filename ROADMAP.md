@@ -4594,15 +4594,18 @@ reason the line is blocky. **Correct that comment once the readback below
 confirms**, and not before: replacing one unsourced claim with another is how
 this happened the first time.
 
-**Confirm with a readback** (`select()` does not exist on 5.0, hence
-`{f()}` + `table.getn`):
+**CONFIRMED on a real client.** The readback returns eight values, exactly
+those set:
 
 ```
 /run local t=UIParent:CreateTexture() t:SetTexCoord(0,1,1,1,0,0,1,0) local r={t:GetTexCoord()} DEFAULT_CHAT_FRAME:AddMessage("n="..table.getn(r).." "..table.concat(r,","))
+
+n=8 0,1,1,1,0,0,1,0
 ```
 
-`n=8` echoing those values proves it. `n=4` means the extra arguments were
-dropped and the fallback at the end of this section applies instead.
+(`select()` does not exist on 5.0, hence `{f()}` + `table.getn`.) The
+`histgraph_test.lua` comment has been corrected to say so and to cite this
+output, so the question does not get re-opened from the same bad premise.
 
 **The design this unlocks, which is better than the sprite sheet on every
 axis.** One texture per **line segment**, sheared into a parallelogram along the
@@ -4631,11 +4634,6 @@ texcoords, including a **vertical segment** (no angle — must not divide by zer
 and a **zero-length segment** (two identical points, which must draw nothing or
 a dot, never NaN). Both have wrong answers that still draw something plausible,
 which is this suite's whole reason for existing.
-
-**Fallback, only if the readback says `n=4`:** bake the angles into a TGA strip
-of anti-aliased segments at N fixed angles (16, then 32 if shallow slopes band),
-pick the nearest cell per column, and test the slope → cell quantisation
-including the vertical case.
 
 **The fill follows the line.** It already works; if the stroke smooths and the
 fill keeps the old span tops, the two disagree by a pixel along every slope.
