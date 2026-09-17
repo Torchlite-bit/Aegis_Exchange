@@ -4573,32 +4573,72 @@ blocked — but delete nothing until this is answered.
 `ui.PlotColumns` emits one rectangle per column spanning y1→y2. That is a
 staircase; the reference is a 1px anti-aliased stroke.
 
-**Gate first: does 1.12 have texture rotation?** `histgraph_test.lua` asserts it
-does not, and the 1.12 API definitions list only the **4-argument**
-`Texture:SetTexCoord(minX, maxX, minY, maxY)` — not the 8-argument affine form
-later clients shear into diagonals, and `SetRotation` is far later. **Verify in
-client** before designing:
+**1.12 HAS affine `SetTexCoord`, and the repo said otherwise.** The 1.12 API
+definitions declare the eight-argument overload explicitly —
 
-```
-/run local t=UIParent:CreateTexture(); DEFAULT_CHAT_FRAME:AddMessage(tostring(pcall(t.SetTexCoord,t,0,0,0,1,1,0,1,1)))
+```lua
+---@overload fun(ULx, ULy, LLx, LLy, URx, URy, LRx, LRy)
+function Texture:SetTexCoord(minX, maxX, minY, maxY) end
 ```
 
-If it succeeds, a true per-segment diagonal is available and this section gets
-simpler — say so and re-plan. If it errors, which is expected:
+— and document `Texture:GetTexCoord()` as *"gets the **8** texture coordinates
+that map to the Texture's corners — New in 1.11"*. An in-client `pcall` of the
+eight-argument form returns true.
 
-- **Cheap pass first.** Drop `HISTL.col_w` toward 1 and look at it. More, thinner
-  spans may be enough, and it costs one constant to find out. **Budget it** —
-  `ui.GrowPlotSpans` pools and never shrinks, so a 600px plot at `col_w = 1` is
-  600 textures *per series*. `rowbudget_test.lua` is the precedent for treating a
-  widget count as a number with a limit.
-- **Then bake the angles into an asset.** A TGA strip of anti-aliased segments
-  at N fixed angles (start at 16, go to 32 if shallow slopes band), drawn white
-  and tinted per series exactly as `fill_art` is today. Per column: slope →
-  nearest cell → 4-arg `SetTexCoord` → position → tint. **The quantisation is
-  arithmetic and gets a test**, including a vertical slope, which has no angle
-  and must pick the steepest cell rather than divide by zero.
-- **The fill follows the line.** It already works; if the stroke smooths and the
-  fill keeps the old span tops, the two disagree by a pixel along every slope.
+**Where the wrong claim came from.** `histgraph_test.lua`'s header asserts
+"1.12 has no line primitive and no texture rotation". It appears exactly once,
+in a comment, introduced by `7e4eca8` — **the same commit that built the
+vertical-span rasteriser**. There is no in-client note behind it and no
+diagnostic. It reads as an assumption that was written down and then became the
+reason the line is blocky. **Correct that comment once the readback below
+confirms**, and not before: replacing one unsourced claim with another is how
+this happened the first time.
+
+**Confirm with a readback** (`select()` does not exist on 5.0, hence
+`{f()}` + `table.getn`):
+
+```
+/run local t=UIParent:CreateTexture() t:SetTexCoord(0,1,1,1,0,0,1,0) local r={t:GetTexCoord()} DEFAULT_CHAT_FRAME:AddMessage("n="..table.getn(r).." "..table.concat(r,","))
+```
+
+`n=8` echoing those values proves it. `n=4` means the extra arguments were
+dropped and the fallback at the end of this section applies instead.
+
+**The design this unlocks, which is better than the sprite sheet on every
+axis.** One texture per **line segment**, sheared into a parallelogram along the
+slope:
+
+- **Arbitrary angles**, not quantised to 16 or 32 cells. No banding to tune.
+- **One texture per segment, not per pixel column.** The budget worry is gone:
+  a 600px plot is one texture per data point, not 600 per series, so
+  `ui.GrowPlotSpans`' never-shrinking pool stops mattering.
+- **One tiny asset, not a sprite strip**: a symmetric alpha-feathered bar
+  (a few pixels tall, opaque centre, transparent edges) sheared along each
+  segment gives the anti-aliased stroke. Power-of-two, white, tinted at runtime —
+  see §3.5. `gradient-fill.tga` cannot serve; it is a one-way ramp and this
+  needs a symmetric one.
+- **`SetTexCoordModifiesRect(enableFlag)` is new in 1.11 and is relevant here** —
+  it decides whether a texcoord change modifies the display rectangle or
+  stretches within it. Read it before fighting a sheared segment that will not
+  sit where it is put.
+
+**Still do the free thing first and measure.** Drop `HISTL.col_w` toward 1 and
+look at it. If thinner spans are enough, the whole section is one constant, and
+that is worth ten minutes before writing a rasteriser.
+
+**Arithmetic that gets a test and a sabotage:** segment endpoints → the eight
+texcoords, including a **vertical segment** (no angle — must not divide by zero)
+and a **zero-length segment** (two identical points, which must draw nothing or
+a dot, never NaN). Both have wrong answers that still draw something plausible,
+which is this suite's whole reason for existing.
+
+**Fallback, only if the readback says `n=4`:** bake the angles into a TGA strip
+of anti-aliased segments at N fixed angles (16, then 32 if shallow slopes band),
+pick the nearest cell per column, and test the slope → cell quantisation
+including the vertical case.
+
+**The fill follows the line.** It already works; if the stroke smooths and the
+fill keeps the old span tops, the two disagree by a pixel along every slope.
 
 ### 3.3 Stat blocks
 
@@ -4683,7 +4723,9 @@ there.
 1. §3.1 answered.
 2. §3.2 cheap pass — `col_w` reduced, measured, judged by eye.
 3. §3.3 stat blocks — unblocked, useful immediately.
-4. §3.2 assets, only if the gate says no rotation and step 2 was not enough.
+4. §3.2 sheared segments — affine `SetTexCoord` is available, so this is one
+   small feather asset rather than a sprite strip. Skip if step 2 looked good
+   enough.
 5. §5.6 — sale quantity into the ledger.
 6. §3.4 Ledger window.
 
