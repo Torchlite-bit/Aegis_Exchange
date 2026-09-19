@@ -475,6 +475,58 @@ H.survives("no stats table at all still gives blocks", function()
 end)
 
 -- ---------------------------------------------------------------------------
+H.section("quantity on a ledger row")
+-- ---------------------------------------------------------------------------
+
+-- ABSENT MEANS UNKNOWN, NEVER ONE. Every row written before v1.54.6 has no
+-- quantity, and so does every sale logged from mail -- the 1.12 inbox does not
+-- say how many were in the stack. A reader that substitutes 1 turns "I do not
+-- know" into a number it can average, which is exactly how the Ledger table
+-- (ROADMAP 3.4) would come out wrong everywhere and look right everywhere.
+do
+    reset()
+    db.RecordTxn("buy", "Linen Cloth", 2000, 2589, 20)
+    db.RecordTxn("buy", "Silk Cloth", 3000, 4306)          -- no quantity
+    local led = db.Ledger()
+    H.eq("a stack records its count", led[1].qty, 20)
+    H.isNil("...and one with none records none", led[2].qty)
+end
+
+-- A quantity that cannot be a divisor is not stored as one.
+do
+    reset()
+    db.RecordTxn("buy", "A", 100, 1, 0)
+    db.RecordTxn("buy", "B", 100, 2, -5)
+    db.RecordTxn("buy", "C", 100, 3, "twenty")
+    db.RecordTxn("buy", "D", 100, 4, 2.7)
+    local led = db.Ledger()
+    H.isNil("zero is not a count", led[1].qty)
+    H.isNil("...nor is a negative", led[2].qty)
+    H.isNil("...nor a word", led[3].qty)
+    H.eq("...and a fraction is floored", led[4].qty, 2)
+end
+
+-- THE EXTERNAL SEAM CARRIES IT. A.RecordExternalTxn dropped every field it did
+-- not name, and Courier is the thorough mail reader -- so without this the new
+-- field would be reachable only from Aegis's own header-only path, which is
+-- the one path that cannot see it.
+do
+    reset()
+    local ok = A.RecordExternalTxn({ kind = "sale", item = "Mageweave",
+                                     amount = 5000, itemId = 4338, qty = 12 })
+    H.check("the push was accepted", ok)
+    H.eq("...and the quantity came through", db.Ledger()[1].qty, 12)
+end
+
+-- Additive: a caller that does not know about quantity still works.
+do
+    reset()
+    H.check("an older caller is still accepted",
+            A.RecordExternalTxn({ kind = "sale", item = "X", amount = 1 }))
+    H.isNil("...and records no quantity", db.Ledger()[1].qty)
+end
+
+-- ---------------------------------------------------------------------------
 H.section("the name -> id backfill")
 -- ---------------------------------------------------------------------------
 

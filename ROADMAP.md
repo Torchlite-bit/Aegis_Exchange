@@ -5044,6 +5044,63 @@ belong in the **sales ledger**, landing with Phase 3's History graph work so the
 tab gains the detail and the chart in one pass rather than growing a second
 notification channel nobody asked to subscribe to.
 
+---
+
+### 5.6a — the schema and the buy side — ✅ **DONE** (v1.54.6)
+
+`db.RecordTxn(kind, item, amount, itemId, qty)`. **Absent means UNKNOWN, never
+one** — a reader that substitutes 1 turns "I do not know" into a number it can
+average, which is precisely how §3.4's table would come out wrong everywhere
+and look right everywhere. Zero, negative, and non-numeric are all stored as
+absent; a fraction is floored. `A.RecordExternalTxn` passes `txn.qty` through,
+additively, so an older Courier is unaffected.
+
+Both buy paths now record it. `buy.RecordPurchase` had always taken
+`row.count`; the ledger threw it away. `buy.BatchStep`'s `onStep` callback was
+not handed `info.stack` or `info.itemId` at all, so a batch purchase wrote a
+thinner row than a single buyout did for the same kind of purchase.
+
+### 5.6b — the sale side. TWO FINDINGS, one of them a trap.
+
+**USE `GetInboxInvoiceInfo`, NOT THE MAIL BODY.** It exists on 1.12 — it is in
+the 1.12 API definitions alongside `GetInboxText` — and it returns structured
+data rather than prose:
+
+```
+invoiceType, itemName, playerName, bid, buyout, deposit, consignment
+```
+
+For a sale that is `"seller"`, the **buyer's name**, what it went for, the
+**deposit** and the **consignment cut** — four of the five fields this section
+wants, with no string parsing and no locale problem. It retires the plan to
+read the body with `GetInboxText`, and it retires the "buyer name may not be
+available, be prepared to drop it" caveat.
+
+**⚠ AND IT MARKS THE MAIL AS READ.** The vanilla wiki warns that calling it
+*"also reads the inbox item, thus reducing its timeout to 3 days or less."*
+
+**So it must never be called while walking the inbox.** That was already the
+rule for performance (HARD RULE 16); it is now a rule for a much worse reason —
+a scan that touched every mail would silently shorten the life of the player's
+entire mailbox, including mail Aegis has nothing to do with. **Data loss, not
+lag.** One mail, on open or on take, and never a loop.
+
+*(Confidence: the side effect is documented on the vanilla wiki and I have not
+verified the exact retention rule in a client. Treat it as true — the downside
+of being wrong in the cautious direction is nothing.)*
+
+**QUANTITY IS STILL NOT THERE.** The invoice carries no stack size, the subject
+line ("Auction successful: <item>") carries none, and a sold auction's mail has
+no attachment to count — the buyer got the items. **There is no way to read the
+quantity of a sale out of the mailbox.**
+
+The only honest source is **what Aegis posted**: `core/sell.lua` knows the item,
+the stack size and the price at post time, so a record of outgoing auctions
+could be matched back when the sale mail arrives. That is a real design —
+matching needs a key that survives days and a partial match when several stacks
+of one item are up — and it is the remaining blocker on §3.4's Sold column.
+**Decide it before building the table**, not during.
+
 **§3.4 is blocked on this section, and specifically on quantity.** The Ledger
 window's Sold column and both per-unit averages are unit counts; without the
 quantity added here, that table can only be built from transaction counts, which

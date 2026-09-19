@@ -8943,11 +8943,18 @@ function ui.DoBatchBuyout()
             ui.RefreshBuyMoney()
             if ui.selectedSubTab == "History" then ui.RefreshHistory() end
         end,
-        function(bought, want, name, price)
+        function(bought, want, name, price, stack, itemId)
             -- Booked per purchase, not once at the end: a batch that aborts
             -- halfway has still spent the gold on what it did buy, and the
             -- ledger has to match the bag.
-            if name then A.db.RecordTxn("buy", name, price) end
+            --
+            -- WITH THE STACK AND THE ID, which buy.BatchStep has and this
+            -- callback was not being handed. Booking a batch purchase without
+            -- them wrote a thinner row than the single-buyout path did for the
+            -- same kind of purchase.
+            if name then
+                A.db.RecordTxn("buy", name, price, itemId, stack)
+            end
             if ui.buyCheckTotal then
                 ui.buyCheckTotal:SetText("Buying " .. bought .. " / " .. want
                     .. " \226\128\166")
@@ -12508,7 +12515,20 @@ local HISTL = {
     -- invent.
     bucket_px  = 3,
     bucket_min = 8,
-    bucket_max = 400,
+    -- THE CEILING, and it was BITING at every window wider than about 1200px:
+    -- a 1400px window asks for 424 buckets and a 1920px one for 598, so the
+    -- chart was drawing fewer real points than it had room for and
+    -- interpolating across the difference.
+    --
+    -- 900 covers an ultrawide (a 2560px window's plot wants ~811) with room
+    -- over. The cost is one more pass per character in db.MoneySeries, which
+    -- walks its samples once and fills n buckets -- linear in this number and
+    -- measured in thousands of iterations on a repaint, not millions.
+    --
+    -- A CEILING IS STILL WANTED. MoneySeries allocates a table of n per call
+    -- and the Buy tab is not the only thing repainting; an uncapped count tied
+    -- to a resizable window is a number nobody has a bound for.
+    bucket_max = 900,
 }
 
 -- The ledger overlay's insets, in the shape ui.ListRowsAt takes. A table of

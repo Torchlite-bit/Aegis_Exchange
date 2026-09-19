@@ -145,6 +145,12 @@ H.eq("...as money OUT", led[1].kind, "buy")
 H.eq("...for the price paid", led[1].amount, 10000)
 H.eq("...naming the item", led[1].item, "Silk Cloth")
 H.eq("...with its id, so the tooltip can match it", led[1].id, 4306)
+-- ...AND THE STACK COUNT. buy.RecordPurchase on the line above has always
+-- taken row.count -- the ledger simply threw it away, which is what left the
+-- per-item Ledger table (ROADMAP 3.4) with no units to divide by. The session
+-- tally below counts the same twenty; two readers of one purchase that
+-- disagree about how many it was are worse than one that does not say.
+H.eq("...and how many were in it", led[1].qty, 20)
 
 -- ...and the session tally agrees with it, which is the whole reason they are
 -- written in one place.

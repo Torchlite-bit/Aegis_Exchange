@@ -3201,6 +3201,13 @@ end
      '    local _ = n',
      'histgraph'),
 
+    # A ceiling a normal window reaches is a resolution limit wearing a safety
+    # rail's name: 400 capped a 1400px window (424) and a 1920px one (598).
+    ("bucket-cap-bites-a-real-window", "ui/frame.lua",
+     "    bucket_max = 900,",
+     "    bucket_max = 400,",
+     "histgraph"),
+
     # Columns wider than the gap between data points, so the interpolation is
     # wasted -- two points inside one column is one of them thrown away.
     ('columns-wider-than-a-bucket', 'ui/frame.lua',
@@ -3314,8 +3321,8 @@ end
     # Ledger entries written with no character, so the per-character
     # breakdown has nothing to break down.
     ('ledger-txn-unattributed', 'core/db.lua',
-     '        amount = amount, id = itemId, who = db.CharKey() })',
-     '        amount = amount, id = itemId })',
+     '        amount = amount, id = itemId, qty = n, who = db.CharKey() })',
+     '        amount = amount, id = itemId, qty = n })',
      'purse'),
 
     # The unattributed entries not reported. History from before this feature
@@ -3446,8 +3453,8 @@ end
     # route into buy.Buyout spends the gold and never reaches History --
     # which the graph on that tab now reads.
     ('buyout-ledger-write-left-to-the-caller', 'core/buy.lua',
-     '    if A.db and A.db.RecordTxn then\n        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)\n    end',
-     '    local _ = row',
+     '    if A.db and A.db.RecordTxn then\n        -- WITH THE STACK COUNT. row.count is the number of items in the',
+     '    if false then\n        -- WITH THE STACK COUNT. row.count is the number of items in the',
      'bidpath'),
 
     # ...or booked for a purchase that was REFUSED, which is a number the
@@ -6252,6 +6259,38 @@ end""",
      "    HookOn(ItemRefTooltip, name, source, tooltip.origRef)",
      "    HookOn(ItemRefTooltip, name, source, tooltip.orig)",
      "tooltip.hook"),
+
+    # ---- quantity on a ledger row ------------------------------------------
+    # Absent means UNKNOWN, never one. Substituting 1 turns "I do not know"
+    # into a number a reader can average, which is how the Ledger table would
+    # come out wrong everywhere and look right everywhere.
+    ("recordtxn-defaults-quantity-to-one", "core/db.lua",
+     "    if n and n > 0 then n = math.floor(n) else n = nil end",
+     "    if n and n > 0 then n = math.floor(n) else n = 1 end",
+     "histstats"),
+
+    ("recordtxn-stores-a-zero-quantity", "core/db.lua",
+     "    local n = tonumber(qty)\n    if n and n > 0 then n = math.floor(n) else n = nil end",
+     "    local n = tonumber(qty)",
+     "histstats"),
+
+    ("recordtxn-drops-the-quantity", "core/db.lua",
+     "        amount = amount, id = itemId, qty = n, who = db.CharKey() })",
+     "        amount = amount, id = itemId, who = db.CharKey() })",
+     "histstats"),
+
+    # A.RecordExternalTxn dropped every field it did not name, and Courier is
+    # the thorough mail reader -- the one caller that would HAVE a quantity.
+    ("external-txn-drops-the-quantity", "core/db.lua",
+     "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId, txn.qty)",
+     "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId)",
+     "histstats"),
+
+    # buy.RecordPurchase has always taken row.count; the ledger threw it away.
+    ("buy-ledger-drops-the-stack", "core/buy.lua",
+     '        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId, row.count)',
+     '        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)',
+     "bidpath"),
 
 ]
 

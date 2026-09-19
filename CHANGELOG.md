@@ -18,6 +18,22 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.6]
+
+### Changed
+- **The gold chart draws more of the detail it has room for.** Above roughly a
+  1200px window it was capped at 400 points and interpolating across the rest —
+  a 1920px window was asking for 598. Raised to 900, which covers an ultrawide.
+
+### Added
+- **Purchases now record how many items were in the stack**, not just what they
+  cost. Both ways of buying record it; batch buyouts were writing a thinner
+  entry than single ones for the same purchase. Groundwork for the per-item
+  Ledger table.
+
+  Sales don't record it yet, and an entry without one says *unknown* rather
+  than guessing 1.
+
 ## [1.54.5]
 
 ### Fixed
@@ -5971,6 +5987,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

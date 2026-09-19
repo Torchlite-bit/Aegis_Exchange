@@ -212,6 +212,20 @@ H.check("...and a nil one", ui.HistBucketCount(nil) >= HISTL.bucket_min,
 H.eq("an absurd plot is capped", ui.HistBucketCount(100000),
      HISTL.bucket_max)
 
+-- ...BUT NOT AT A WIDTH ANYONE ACTUALLY PLAYS AT. The cap was 400, which a
+-- 1400px window (424 buckets) and a 1920px one (598) both ran into -- so the
+-- chart drew fewer real points than it had room for and interpolated across
+-- the difference. A ceiling that a normal window reaches is a resolution
+-- limit wearing a safety rail's name.
+do
+    local widest = 1794    -- the plot inside a 1920px window
+    H.check("a full-screen window is not capped",
+            ui.HistBucketCount(widest) < HISTL.bucket_max,
+            ui.HistBucketCount(widest) .. " vs cap " .. HISTL.bucket_max)
+    -- An ultrawide still is, and that is the point of having one.
+    H.eq("an ultrawide still is", ui.HistBucketCount(4000), HISTL.bucket_max)
+end
+
 -- THE COLUMNS HAVE TO BE NARROWER THAN THE GAP BETWEEN POINTS, or the
 -- interpolation is wasted: two data points inside one column is one of them
 -- thrown away.

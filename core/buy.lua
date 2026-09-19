@@ -2320,7 +2320,10 @@ function buy.BatchStep()
     -- one as it happens. Booking the whole batch at the end would lose
     -- everything bought before an abort -- and an abort is the case where an
     -- accurate ledger matters most.
-    if b.onStep then b.onStep(b.bought, b.want, info.name, info.price) end
+    if b.onStep then
+        b.onStep(b.bought, b.want, info.name, info.price, info.stack,
+                 info.itemId)
+    end
     return true
 end
 
@@ -2348,7 +2351,10 @@ function buy.Buyout(row)
     -- with; the batch path books its own per purchase and never comes
     -- through here.
     if A.db and A.db.RecordTxn then
-        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)
+        -- WITH THE STACK COUNT. row.count is the number of items in the
+        -- auction, and buy.RecordPurchase on the line above has always taken
+        -- it -- the ledger simply threw it away. See db.RecordTxn.
+        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId, row.count)
     end
     return true
 end

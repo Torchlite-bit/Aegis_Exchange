@@ -984,13 +984,24 @@ end
 -- ENTRIES WRITTEN BEFORE v1.53.7 HAVE NO `who` AT ALL, and there is no way to
 -- recover it. Every reader has to treat a missing one as unknown rather than
 -- as any particular character; see db.LedgerByChar.
-function db.RecordTxn(kind, item, amount, itemId)
+function db.RecordTxn(kind, item, amount, itemId, qty)
     if not db.account then return end
     if not amount or amount <= 0 then return end
     local led = db.account.ledger
     if not led then led = {}; db.account.ledger = led end
+    -- QUANTITY IS OPTIONAL AND ABSENT MEANS UNKNOWN, NEVER ONE. Every entry
+    -- written before v1.54.6 has none, and so does every sale logged from
+    -- mail -- the 1.12 inbox does not say how many were in the stack. A reader
+    -- that substitutes 1 turns "I do not know" into a number it can average,
+    -- which is the Ledger table's whole failure mode (ROADMAP 3.4). Same rule
+    -- `who` already carries; see db.LedgerByChar.
+    --
+    -- Stored only when it is a sane positive count, so a nil, a zero or a
+    -- string cannot become a divisor later.
+    local n = tonumber(qty)
+    if n and n > 0 then n = math.floor(n) else n = nil end
     table.insert(led, { t = time(), kind = kind, item = item or "?",
-        amount = amount, id = itemId, who = db.CharKey() })
+        amount = amount, id = itemId, qty = n, who = db.CharKey() })
     -- Prune oldest beyond the cap.
     while table.getn(led) > LEDGER_MAX do
         table.remove(led, 1)
@@ -1494,7 +1505,12 @@ function A.RecordExternalTxn(txn)
         if db.WasSeen(txn.key) then return false, "duplicate" end
         db.MarkSeen(txn.key)
     end
-    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId)
+    -- QUANTITY PASSED THROUGH. A.RecordExternalTxn used to drop every field it
+    -- did not name, and Courier is the thorough mail reader -- so widening the
+    -- ledger without widening this would have left the new field reachable
+    -- only from Aegis's own header-only path, which is the one path that
+    -- cannot see it. Additive, so an older Courier keeps working unchanged.
+    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId, txn.qty)
     return true
 end
 
