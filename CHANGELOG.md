@@ -18,6 +18,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.7]
+
+### Added
+- **Sales now record how many were in the stack.** The mailbox can't tell you —
+  it isn't in the subject line or the invoice, and a sold auction has no
+  attachment left to count. So Aegis remembers what it posted and matches the
+  sale back to it.
+
+  When several stacks of one item are up **at the same size**, the answer is
+  that size whichever one sold. When they're **different sizes**, there's no
+  way to know which sold, so it records nothing rather than guessing — an
+  entry with no count says *unknown*.
+
+  Expired auctions coming back are read too, so an item that expired at one
+  size and then sold at another still gets counted correctly.
+
+### Fixed
+- **Sale mail is recognised on non-English clients.** The subject line was
+  matched against hardcoded English, so everywhere else every sale went
+  unlogged — and silently, because "no sales" and "didn't recognise the
+  subject" look identical from the outside.
+
 ## [1.54.6]
 
 ### Changed
@@ -5987,6 +6009,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

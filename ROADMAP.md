@@ -5094,12 +5094,40 @@ line ("Auction successful: <item>") carries none, and a sold auction's mail has
 no attachment to count — the buyer got the items. **There is no way to read the
 quantity of a sale out of the mailbox.**
 
-The only honest source is **what Aegis posted**: `core/sell.lua` knows the item,
-the stack size and the price at post time, so a record of outgoing auctions
-could be matched back when the sale mail arrives. That is a real design —
-matching needs a key that survives days and a partial match when several stacks
-of one item are up — and it is the remaining blocker on §3.4's Sold column.
-**Decide it before building the table**, not during.
+The only honest source is **what Aegis posted** — and that is what it does now
+(v1.54.7). `db.RecordPosting` remembers every stack at the moment
+`StartAuction` fires, from **both** posting paths; `db.MatchPosting` answers the
+sale mail. Per character, because that is who posted and who the mail comes to.
+
+**THE MATCH IS A MULTISET, NOT AN IDENTITY.** There is no auction id on 1.12,
+so "which of my three stacks sold" is unanswerable — and it is also the wrong
+question:
+
+- **All the same size → that size is the answer**, whichever one sold. Consume
+  one.
+- **Different sizes → nil, and consume NOTHING.** Picking one is a number the
+  player reconciles against their own mail and finds wrong, and consuming would
+  throw away the evidence that we had guessed. `db.RecordTxn` already treats
+  absent as unknown rather than as one.
+
+Same reasoning as the batch buyout's fingerprints, written down here because it
+is the second time identity has been unobtainable on this client and a multiset
+has been sufficient.
+
+**Expiry mail is read for exactly one reason.** An auction that came back
+unsold is not waiting on a sale mail, and leaving it in the book turns a book
+of one stack size into a mixed one — which costs the *next* sale of that item
+its quantity. Post 20, it expires, post 5, it sells: without consuming the
+expiry, that sale cannot say how many it was. Both suites assert it both ways.
+
+**Bounded**: 33 days (72h auction + 30 days of mail) and a 500-row cap, oldest
+dropped first.
+
+**Still open for §3.4.** The book only helps from v1.54.7 onward. Sales already
+in the ledger have no quantity and never will, so the Sold column has to render
+a row with no count as **unknown** rather than dropping it — and the table's
+"N Items Resold" footer is a sum over rows that may be partly unknown. **Decide
+how that reads before building the table.**
 
 **§3.4 is blocked on this section, and specifically on quantity.** The Ledger
 window's Sold column and both per-unit averages are unit counts; without the

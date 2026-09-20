@@ -6292,6 +6292,72 @@ end""",
      '        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)',
      "bidpath"),
 
+    # ---- the posting book --------------------------------------------------
+    # Several stacks of one item at DIFFERENT sizes cannot say which sold --
+    # there is no auction id on 1.12 to ask with -- so nil is the answer.
+    # Picking one is a number the player reconciles against their mail and
+    # finds wrong.
+    ("postbook-guesses-a-mixed-book", "core/db.lua",
+     "    if not firstAt or mixed then return nil end",
+     "    if not firstAt then return nil end",
+     "postbook"),
+
+    # ...and consuming on a guess throws away the evidence that we guessed.
+    ("postbook-consumes-on-a-guess", "core/db.lua",
+     "            if qty == nil then qty = p.qty\n            elseif p.qty ~= qty then mixed = true end",
+     "            if qty == nil then qty = p.qty end",
+     "postbook"),
+
+    # A match has to CONSUME, or one stack answers for every later sale of the
+    # same item.
+    ("postbook-never-consumes", "core/db.lua",
+     "    table.remove(book, firstAt)\n    return qty",
+     "    return qty",
+     "postbook"),
+
+    # An expired auction is not waiting on a sale mail. Left in the book it
+    # turns one stack size into a mixed one and costs the NEXT sale its count.
+    ("postbook-ignores-expiries", "core/db.lua",
+     "function db.ExpirePosting(name, now)\n    return db.MatchPosting(name, now)",
+     "function db.ExpirePosting(name, now)\n    return nil",
+     "postbook"),
+
+    # A posting older than the longest auction plus the longest mail life is a
+    # leak, not a record.
+    ("postbook-keeps-stale-postings", "core/db.lua",
+     "        if not p.t or (now - p.t) > db.POSTED_KEEP then",
+     "        if false then",
+     "postbook"),
+
+    # ...and one with no timestamp can never age out at all.
+    ("postbook-keeps-undated-postings", "core/db.lua",
+     "        if not p.t or (now - p.t) > db.POSTED_KEEP then",
+     "        if p.t and (now - p.t) > db.POSTED_KEEP then",
+     "postbook"),
+
+    # The cap has to drop the OLDEST: the newest are the ones a sale is most
+    # likely to be about.
+    ("postbook-cap-drops-the-newest", "core/db.lua",
+     "    while table.getn(book) > db.POSTED_MAX do\n        table.remove(book, 1)\n    end",
+     "    while table.getn(book) > db.POSTED_MAX do\n        table.remove(book)\n    end",
+     "postbook"),
+
+    ("postbook-records-a-zero-stack", "core/db.lua",
+     "    if not n or n < 1 then return false end",
+     "    if not n then return false end",
+     "postbook"),
+
+    # ---- posting and matching are wired to the real paths ------------------
+    ("sell-post-does-not-remember", "core/sell.lua",
+     "        A.db.RecordPosting(it.name, it.itemId, count)",
+     "        local _ = count",
+     "postbook"),
+
+    ("sell-queue-does-not-remember", "core/sell.lua",
+     "                A.db.RecordPosting(it.name, job.itemId, job.stackSize)",
+     "                local _ = job",
+     "postbook"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -6339,6 +6405,7 @@ SUITES = {
     "bidpath": "tests/units/bidpath_test.lua",
     "purse": "tests/units/purse_test.lua",
     "sweep": "tests/units/sweep_test.lua",
+    "postbook": "tests/units/postbook_test.lua",
     "histstats": "tests/units/histstats_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"

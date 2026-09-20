@@ -12977,13 +12977,48 @@ local HIST_PERIODS = {
     { label = "All", secs = 0 },
 }
 
--- Pull the item name out of an AH "sold" mail subject. enUS: the subject is
--- "Auction successful: <item>". Returns the item name, or nil for other mail.
-local function AuctionSoldItem(subject)
-    if not subject then return nil end
-    local s, e = string.find(subject, "Auction successful: ", 1, true)
+-- The fixed part of a mail subject, taken from the CLIENT'S OWN format string
+-- where it has one.
+--
+-- These were hardcoded English, so on any other client every sale went
+-- unlogged -- silently, because "no sale mail" and "did not recognise the
+-- subject" look identical from outside. Same treatment craft.CreatePrefix
+-- gives the "You create:" line, and for the same reason.
+--
+-- PLAIN find for "%s", so the needle is the two literal characters. Escaping
+-- it as "%%s" is right for a PATTERN and wrong here: with plain matching it
+-- would look for two percent signs, never match, and every locale would
+-- silently fall back to the English prefix.
+local function MailPrefix(fmt, fallback)
+    fmt = fmt or fallback
+    local at = string.find(fmt, "%s", 1, true)
+    if not at or at < 2 then return fallback end
+    return string.sub(fmt, 1, at - 1)
+end
+
+-- The item name out of a mail subject with `prefix`, or nil for other mail.
+local function SubjectItem(subject, prefix)
+    if not subject or not prefix then return nil end
+    local s, e = string.find(subject, prefix, 1, true)
     if s == 1 then return string.sub(subject, e + 1) end
     return nil
+end
+
+-- "Auction successful: <item>" -- the seller's copy of a completed sale.
+local function AuctionSoldItem(subject)
+    return SubjectItem(subject, MailPrefix(AUCTION_SOLD_MAIL_SUBJECT,
+                                           "Auction successful: "))
+end
+
+-- "Auction expired: <item>" -- an auction that came back unsold.
+--
+-- NOT LOGGED AS ANYTHING; no money moved. It is read for one reason: an
+-- expired posting is no longer waiting on a sale mail, and leaving it in the
+-- book is what turns a book of one stack size into a mixed one -- which costs
+-- the NEXT sale of that item its quantity.
+local function AuctionExpiredItem(subject)
+    return SubjectItem(subject, MailPrefix(AUCTION_EXPIRED_MAIL_SUBJECT,
+                                           "Auction expired: "))
 end
 
 -- Scan the open mailbox for AH sale mails and log each one once (deduped by an
@@ -13159,6 +13194,11 @@ function ui.ScanMailSales()
     while i <= n do
         local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
         local item = AuctionSoldItem(subject)
+        -- HEADER ONLY, STILL. GetInboxInvoiceInfo would give the buyer, the
+        -- deposit and the cut -- and it MARKS THE MAIL AS READ, which shortens
+        -- its timeout. Calling it here would do that to every mail in the box,
+        -- including mail Aegis has nothing to do with. It belongs on opening
+        -- ONE mail, never in this loop. See ROADMAP 5.6b.
         if item and money and money > 0 then
             -- Key built through the shared helper, which Courier also calls --
             -- that is what stops a mail Aegis already logged from being
@@ -13173,7 +13213,30 @@ function ui.ScanMailSales()
                 -- which is why the History tab's Top item could be hovered on
                 -- the Expenses side (bought through the Buy tab, which knows
                 -- the id) and not on the Sales side.
-                A.db.RecordTxn("sale", item, money, A.db.IdFromName(item))
+                -- HOW MANY, from what we posted. The mailbox cannot say --
+                -- not in the subject, not in the invoice, and a sold auction
+                -- has no attachment to count. db.MatchPosting returns nil when
+                -- this character has several stacks of the item up at
+                -- different sizes, and db.RecordTxn treats that as unknown
+                -- rather than as one.
+                --
+                -- INSIDE THE DEDUPE, deliberately: matching CONSUMES a
+                -- posting, so the same call outside this guard would eat one
+                -- per re-scan of a mail already logged.
+                local qty = A.db.MatchPosting(item)
+                A.db.RecordTxn("sale", item, money, A.db.IdFromName(item), qty)
+            end
+        end
+        -- An auction that came back unsold stops waiting for a sale mail.
+        -- Deduped through the same seen-set, because this loop runs on every
+        -- MAIL_INBOX_UPDATE and an expiry consumed twice eats a posting that
+        -- is still up.
+        local back = AuctionExpiredItem(subject)
+        if back then
+            local ekey = A.MailTxnKey(subject, money or 0, daysLeft)
+            if not A.db.WasSeen(ekey) then
+                A.db.MarkSeen(ekey)
+                A.db.ExpirePosting(back)
             end
         end
         i = i + 1

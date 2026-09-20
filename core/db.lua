@@ -268,12 +268,115 @@ function db.SetSetting(key, value)
     db.account.settings[key] = value
 end
 
+-- ---------------------------------------------------------------------------
+-- The posting book: what this character put up, so a sale can say how many
+--
+-- WHY THIS EXISTS. A sale's quantity cannot be read from the mailbox. It is
+-- not in the invoice (GetInboxInvoiceInfo returns a name and prices, no stack
+-- size), not in the subject line, and a sold auction's mail has no attachment
+-- to count -- the buyer got the items. The only place the number ever exists
+-- is the moment we posted it.
+--
+-- PER CHARACTER, because that is who posted and who the mail comes to. The
+-- ledger is account-wide; this is not.
+--
+-- THE MATCH IS BY NAME, NOT BY IDENTITY. There is no auction id on 1.12, so
+-- "which of my three stacks sold" is unanswerable -- and it is also the wrong
+-- question. If every outstanding posting of an item is the same size, that
+-- size is the answer whichever one sold. If they are NOT all the same size,
+-- the honest answer is that we do not know, and db.RecordTxn already treats
+-- absent as unknown rather than as one. Same reasoning as the batch buyout's
+-- fingerprints: identity is unobtainable and a multiset is sufficient.
+-- ---------------------------------------------------------------------------
+
+-- 72h is the longest auction Turtle allows, and mail then sits for up to 30
+-- days. A posting older than the two together cannot still be waiting on a
+-- sale mail, so it is a leak rather than a record.
+db.POSTED_KEEP = 33 * 86400
+-- ...and a cap, because "one per posted stack" is unbounded for a player who
+-- posts all day and never opens their mail.
+db.POSTED_MAX  = 500
+
+function db.Postings()
+    if not db.char then return {} end
+    if not db.char.posted then db.char.posted = {} end
+    return db.char.posted
+end
+
+-- Drop postings too old to be waiting on anything, and trim to the cap.
+-- OLDEST FIRST on the trim: the newest are the ones a sale is most likely to
+-- be about.
+function db.PrunePostings(now)
+    now = now or time()
+    local book = db.Postings()
+    local i = 1
+    while i <= table.getn(book) do
+        local p = book[i]
+        if not p.t or (now - p.t) > db.POSTED_KEEP then
+            table.remove(book, i)
+        else
+            i = i + 1
+        end
+    end
+    while table.getn(book) > db.POSTED_MAX do
+        table.remove(book, 1)
+    end
+end
+
+-- Remember that `qty` of `name` went up for auction.
+function db.RecordPosting(name, itemId, qty, now)
+    if not db.char or not name or name == "" then return false end
+    local n = tonumber(qty)
+    if not n or n < 1 then return false end
+    local book = db.Postings()
+    table.insert(book, { name = name, id = itemId, qty = math.floor(n),
+                         t = now or time() })
+    db.PrunePostings(now)
+    return true
+end
+
+-- How many were in the stack that just sold, or nil when we cannot say.
+--
+-- CONSUMES ONE POSTING on a confident answer and NONE otherwise. Consuming on
+-- an ambiguous match would be picking a stack size at random and then throwing
+-- away the evidence that we had guessed.
+function db.MatchPosting(name, now)
+    if not db.char or not name then return nil end
+    db.PrunePostings(now)
+    local book = db.Postings()
+    local firstAt, qty, mixed = nil, nil, false
+    local i = 1
+    while i <= table.getn(book) do
+        local p = book[i]
+        if p.name == name then
+            if not firstAt then firstAt = i end
+            if qty == nil then qty = p.qty
+            elseif p.qty ~= qty then mixed = true end
+        end
+        i = i + 1
+    end
+    if not firstAt or mixed then return nil end
+    table.remove(book, firstAt)
+    return qty
+end
+
+-- An auction that came BACK unsold is not waiting on a sale mail either, and
+-- leaving it in the book is what turns a book of one stack size into a mixed
+-- one -- which costs the NEXT sale its quantity. Same consume rule: only on an
+-- unambiguous match.
+function db.ExpirePosting(name, now)
+    return db.MatchPosting(name, now)
+end
+
 -- Default shape of the per-character DB.
 local function DefaultCharDB()
     return {
         version  = DB_VERSION,
         ui       = {},    -- window position, open tab, column widths, ...
         lastScan = nil,   -- { when = epoch, pages = n, auctions = n }
+        -- What this character has up for auction, so a sale mail can say how
+        -- many were in the stack -- the mailbox cannot. See db.RecordPosting.
+        posted   = {},
     }
 end
 

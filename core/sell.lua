@@ -1713,6 +1713,12 @@ function sell.Post(unitBuyout, unitStart, minutes)
         return false, "Start bid can't exceed the buyout."
     end
     sell.ArmDepositWatch(minutes)
+    -- REMEMBERED BEFORE IT IS FIRED, because this is the only moment the stack
+    -- size exists anywhere: the sale mail carries a name and money and no
+    -- count. See db.RecordPosting.
+    if A.db and A.db.RecordPosting then
+        A.db.RecordPosting(it.name, it.itemId, count)
+    end
     StartAuction(start, buyout, minutes)
     return true
 end
@@ -2124,6 +2130,12 @@ function sell.PostTick(dt)
             local start  = math.floor(job.unitStart * job.stackSize)
             if start < 1 then start = 1 end
             sell.ArmDepositWatch(job.minutes)
+            -- ...and the same for every stack a multi-post puts up. One
+            -- posting per StartAuction, or a run of ten stacks leaves nine
+            -- sales unable to say how many they were.
+            if A.db and A.db.RecordPosting then
+                A.db.RecordPosting(it.name, job.itemId, job.stackSize)
+            end
             StartAuction(start, buyout, job.minutes)   -- posts, clears slot
             job.posted = job.posted + 1
             job.remaining = job.remaining - 1
