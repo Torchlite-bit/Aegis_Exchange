@@ -5966,7 +5966,7 @@ end""",
     # A two-corner-anchored frame that ALSO has its width set ignores one of
     # them -- the bug the old split had to avoid in the opposite direction.
     ("hist-table-sets-its-own-width", "ui/frame.lua",
-     '    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",\n                    -HISTL.edge, HISTL.ledger_bot)',
+     '    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",\n                    -HISTL.ledger_scroll_r, HISTL.ledger_bot)',
      '    scroll:SetWidth(HISTL.ledger_w)',
      "histgraph"),
 
@@ -6046,26 +6046,26 @@ end""",
      "histstats"),
 
     ("figures-swap-high-and-low", "ui/frame.lua",
-     '        { "HIGH",     util.ShortMoney(hi or 0) },\n        { "LOW",      util.ShortMoney(lo or 0) },',
-     '        { "HIGH",     util.ShortMoney(lo or 0) },\n        { "LOW",      util.ShortMoney(hi or 0) },',
+     '        { "HIGH",     util.ShortMoneyColored(hi or 0) },\n        { "LOW",      util.ShortMoneyColored(lo or 0) },',
+     '        { "HIGH",     util.ShortMoneyColored(lo or 0) },\n        { "LOW",      util.ShortMoneyColored(hi or 0) },',
      "histstats"),
 
     # An absent figure shown as a zero claims you sold something for nothing.
     ("figures-show-absent-as-zero", "ui/frame.lua",
-     '        { "TOP SALE", st.topSale and util.ShortMoney(st.topSale.amount)\n                      or "\\226\\128\\148" },',
-     '        { "TOP SALE", util.ShortMoney(st.topSale and st.topSale.amount or 0) },',
+     '        { "TOP SALE", st.topSale and util.ShortMoneyColored(st.topSale.amount)\n                      or "\\226\\128\\148" },',
+     '        { "TOP SALE", util.ShortMoneyColored(st.topSale and st.topSale.amount or 0) },',
      "histstats"),
 
     # Top Sale is the biggest single transaction; the strip must not show the
     # summed total there -- that is the block's Top Item.
     ("figures-topsale-shows-the-total", "ui/frame.lua",
-     '        { "TOP SALE", st.topSale and util.ShortMoney(st.topSale.amount)',
-     '        { "TOP SALE", st.topSaleItem and util.ShortMoney(st.topSaleItem.total)',
+     '        { "TOP SALE", st.topSale and util.ShortMoneyColored(st.topSale.amount)',
+     '        { "TOP SALE", st.topSaleItem and util.ShortMoneyColored(st.topSaleItem.total)',
      "histstats"),
 
     ("blocks-swap-sales-and-expenses", "ui/frame.lua",
-     '                { "Total",   util.ShortMoney(st.income or 0) },',
-     '                { "Total",   util.ShortMoney(st.spend or 0) },',
+     '                { "Total",   util.ShortMoneyColored(st.income or 0) },',
+     '                { "Total",   util.ShortMoneyColored(st.spend or 0) },',
      "histstats"),
 
     # A block's Top Item is the biggest EARNER; the biggest single sale is a
@@ -6446,6 +6446,50 @@ end""",
      "    local items = (view ~= \"txns\")\n    return items, not items",
      "    local items = (view ~= \"txns\")\n    return items, true",
      "ledgeritems"),
+
+    # ---- the ledger overlay's layout ---------------------------------------
+    # A FauxScrollFrame's bar is drawn OUTSIDE its own rect, so a frame flush
+    # to the window edge puts the bar past it, half-drawn on the border.
+    ("ledger-scrollbar-outside-the-box", "ui/frame.lua",
+     "    ledger_scroll_r = 30,",
+     "    ledger_scroll_r = 0,",
+     "histgraph"),
+
+    # ui.RefreshHistory ends by painting the transaction list -- on every
+    # period click and every mailbox update -- so without the guard those rows
+    # come back on top of the item table.
+    ("ledger-views-overlap-on-repaint", "ui/frame.lua",
+     '    if (ui.ledgerView or "items") ~= "txns" then\n        local h = 1',
+     "    if false then\n        local h = 1",
+     "ledgeritems"),
+
+    # Returning early rather than hiding leaves whatever was on screen the last
+    # time that view was up -- whatever one fill writes, the other must clear.
+    ("ledger-view-returns-without-clearing", "ui/frame.lua",
+     "            ui.histRows[h]:Hide()",
+     "            local _ = h",
+     "ledgeritems"),
+
+    # ---- money by denomination ---------------------------------------------
+    ("shortmoneycolored-loses-the-text", "core/util.lua",
+     "    return colour .. txt .. \"|r\"",
+     "    return colour .. \"|r\"",
+     "util"),
+
+    ("shortmoneycolored-leaves-the-escape-open", "core/util.lua",
+     "    return colour .. txt .. \"|r\"",
+     "    return colour .. txt",
+     "util"),
+
+    ("shortmoneycolored-paints-everything-gold", "core/util.lua",
+     '    elseif last == "c" then\n        colour = "|cffeda55f"                        -- copper\n    end',
+     "    end",
+     "util"),
+
+    ("shortmoneycolored-thousands-not-gold", "core/util.lua",
+     '    if last == "s" and string.sub(txt, -2) ~= "ks" then',
+     '    if last == "s" or last == "g" then',
+     "util"),
 
 ]
 

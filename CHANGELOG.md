@@ -18,6 +18,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.9]
+
+### Fixed
+- **The Ledger's scrollbar sat outside the window**, half-drawn against the
+  border. A scroll frame's bar is drawn beyond its own edge, so both tables now
+  leave it a gutter.
+- **Items and Transactions drew on top of each other.** Anything that repainted
+  the History tab — a period button, a mailbox update — put the transaction
+  rows back over the item table, because that repaint didn't know which view
+  was showing.
+- **The empty strip across the top of the History tab is gone.** It was the
+  band the ledger table's headings used to need, left behind when the table
+  moved into its own window.
+
+### Changed
+- **Money reads in the game's own colours** — gold, silver and copper — across
+  the Ledger table, the figures under the chart and the blocks.
+
+  *Avg Profit still reads green or red, because on that column the sign is the
+  point.*
+
 ## [1.54.8]
 
 ### Added
@@ -6033,6 +6054,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

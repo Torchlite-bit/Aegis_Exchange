@@ -5535,7 +5535,11 @@ local LISTBOX = {
                   bot = AUCL.gap + AUCL.bid_head + AUCL.bid_hdr + AUCL.bot },
     -- Thirty pixels shallower than it was: the period buttons moved into the
     -- chart's own title bar, and the band they occupied went to the table.
-    hist      = { top = 70, bot = 10 },
+    -- THE CHART HAS THE WHOLE PANEL, so this band holds nothing. It was 70,
+    -- which is what the ledger table's totals line, its note and its column
+    -- headers needed -- and all three moved into the ledger window in
+    -- v1.54.0, leaving an empty strip across the top of the tab.
+    hist      = { top = 14, bot = 10 },
     -- Identical to sellList on purpose: both boxes start under the same
     -- header band and end on the same line, which is the whole point of
     -- giving the bag list a box at all. Two lists side by side that begin
@@ -12506,6 +12510,10 @@ local HISTL = {
     ledger_btn_w = 54,
     -- The Items / Transactions toggle at the ledger overlay's top left.
     ledger_view_w = 82,
+    -- The gutter a FauxScrollFrame's scrollbar needs on the right. It is drawn
+    -- OUTSIDE the scroll frame's own rect, so a frame flush to the window edge
+    -- puts its bar past it.
+    ledger_scroll_r = 30,
     per_w      = 32,
     per_h      = 18,
     per_gap    = 3,
@@ -13186,8 +13194,13 @@ function ui.BuildLedgerWindow()
     local iscroll = CreateFrame("ScrollFrame", "AegisExchangeLedgerItemScroll",
         f, "FauxScrollFrameTemplate")
     iscroll:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -HISTL.ledger_top)
+    -- THE SCROLLBAR LIVES TO THE RIGHT OF A FauxScrollFrame, outside its own
+    -- rect -- so a frame anchored flush to the window's edge puts its bar
+    -- past it, half-drawn against the border. ledger_scroll_r is the gutter it
+    -- needs, the same idea AUCL.scroll_r serves on the Auctions tab.
     iscroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT",
-                     -HISTL.edge, HISTL.ledger_bot + HISTL.fig_line)
+                     -HISTL.ledger_scroll_r,
+                     HISTL.ledger_bot + HISTL.fig_line)
     -- 1.12 signature: (itemHeight, updateFn). The frame and offset are the
     -- implicit globals `this` / `arg1`; the offset-first form is a later
     -- client's and crashes FrameXML here.
@@ -13564,7 +13577,7 @@ function ui.BuildHistoryTab()
     -- corners are available and the width follows the frame.
     scroll:SetPoint("TOPLEFT", host, "TOPLEFT", rowLeft, -HISTL.ledger_top)
     scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",
-                    -HISTL.edge, HISTL.ledger_bot)
+                    -HISTL.ledger_scroll_r, HISTL.ledger_bot)
 
     -- ANCHORED TO THE TABLE, not to the panel. Clear history used to sit at
     -- the panel's top-right, which is where the chart is now -- and the
@@ -14397,13 +14410,13 @@ end
 function ui.HistFigures(st, hi, lo)
     st = st or {}
     return {
-        { "HIGH",     util.ShortMoney(hi or 0) },
-        { "LOW",      util.ShortMoney(lo or 0) },
+        { "HIGH",     util.ShortMoneyColored(hi or 0) },
+        { "LOW",      util.ShortMoneyColored(lo or 0) },
         { "SOLD",     tostring(st.saleN or 0) },
         { "BOUGHT",   tostring(st.buyN or 0) },
-        { "TOP SALE", st.topSale and util.ShortMoney(st.topSale.amount)
+        { "TOP SALE", st.topSale and util.ShortMoneyColored(st.topSale.amount)
                       or "\226\128\148" },
-        { "TOP BUY",  st.topBuy and util.ShortMoney(st.topBuy.amount)
+        { "TOP BUY",  st.topBuy and util.ShortMoneyColored(st.topBuy.amount)
                       or "\226\128\148" },
     }
 end
@@ -14494,8 +14507,8 @@ function ui.HistBlocks(st)
         {
             title = "SALES",
             rows = {
-                { "Total",   util.ShortMoney(st.income or 0) },
-                { "Per day", util.ShortMoney(
+                { "Total",   util.ShortMoneyColored(st.income or 0) },
+                { "Per day", util.ShortMoneyColored(
                     ui.Trunc(A.db.PerDay(st.income or 0, days))) },
                 top(st.topSaleItem, "Top item"),
             },
@@ -14503,8 +14516,8 @@ function ui.HistBlocks(st)
         {
             title = "EXPENSES",
             rows = {
-                { "Total",   util.ShortMoney(st.spend or 0) },
-                { "Per day", util.ShortMoney(
+                { "Total",   util.ShortMoneyColored(st.spend or 0) },
+                { "Per day", util.ShortMoneyColored(
                     ui.Trunc(A.db.PerDay(st.spend or 0, days))) },
                 top(st.topBuyItem, "Top item"),
             },
@@ -14512,8 +14525,8 @@ function ui.HistBlocks(st)
         {
             title = "PROFIT",
             rows = {
-                { "Total",   util.ShortMoney(st.net or 0) },
-                { "Per day", util.ShortMoney(
+                { "Total",   util.ShortMoneyColored(st.net or 0) },
+                { "Per day", util.ShortMoneyColored(
                     ui.Trunc(A.db.PerDay(st.net or 0, days))) },
                 top(st.topSaleItem, "Top seller"),
             },
@@ -14563,7 +14576,7 @@ end
 -- table shows both in one row.
 function ui.MoneyOrDash(copper)
     if not copper then return NO_VALUE end
-    return util.ShortMoney(copper)
+    return util.ShortMoneyColored(copper)
 end
 
 -- A per-unit profit, signed and coloured. Returns text, r, g, b.
@@ -14585,7 +14598,7 @@ end
 -- exists to avoid -- see db.LedgerItemTotals.
 function ui.LedgerFooterText(resold, profit, skipped)
     local txt = (resold or 0) .. " items resold"
-    txt = txt .. "   \226\128\162   " .. util.ShortMoney(profit or 0)
+    txt = txt .. "   \226\128\162   " .. util.ShortMoneyColored(profit or 0)
         .. " total profit"
     if skipped and skipped > 0 then
         txt = txt .. "   \226\128\162   " .. skipped
@@ -14802,6 +14815,23 @@ end
 
 function ui.UpdateHistoryList()
     if not ui.histScroll then return end
+    -- THE LEDGER'S TWO VIEWS SHARE ONE FRAME, and this paints the transaction
+    -- half. ui.RefreshHistory ends by calling it -- unconditionally, and on
+    -- every period click and every mailbox update -- so without this guard the
+    -- transaction rows come back on top of the item table the moment anything
+    -- repaints. Which is exactly what they did.
+    --
+    -- HIDES RATHER THAN JUST RETURNING: whatever one fill writes, the other
+    -- must clear. Returning early would leave whatever was on screen from the
+    -- last time this view was up.
+    if (ui.ledgerView or "items") ~= "txns" then
+        local h = 1
+        while h <= table.getn(ui.histRows or {}) do
+            ui.histRows[h]:Hide()
+            h = h + 1
+        end
+        return
+    end
     local sortKey = ui.histSortKey or "when"
     local dir = ui.histSortDir or "desc"
     local rows = ui.SortHistory(ui.histView or {}, sortKey, dir)

@@ -376,8 +376,8 @@ do
     -- EACH LABEL CARRIES ITS OWN NUMBER, asserted by value. Checking only that
     -- a figure "looks like money" is what let a sabotage swap income and
     -- expenses under correct labels and pass every check.
-    H.eq("high carries the high", cells[1][2], util.ShortMoney(50000))
-    H.eq("low carries the low", cells[2][2], util.ShortMoney(1000))
+    H.eq("high carries the high", cells[1][2], util.ShortMoneyColored(50000))
+    H.eq("low carries the low", cells[2][2], util.ShortMoneyColored(1000))
 
     -- COUNTS ARE NOT MONEY. Through a money formatter, 2 sales render as "2c".
     H.eq("sold is a plain count", cells[3][2], "3")
@@ -385,9 +385,9 @@ do
 
     -- The top SINGLE transaction of each kind, not the totals beside them.
     H.eq("top sale is the biggest single sale",
-         cells[5][2], util.ShortMoney(30000))
+         cells[5][2], util.ShortMoneyColored(30000))
     H.eq("top buy is the biggest single buy",
-         cells[6][2], util.ShortMoney(10000))
+         cells[6][2], util.ShortMoneyColored(10000))
 end
 
 -- AN ABSENT FIGURE IS AN EM DASH, NOT A ZERO. "TOP SALE 0c" claims you sold
@@ -426,9 +426,9 @@ do
     H.eq("profit", blocks[3].title, "PROFIT")
     H.eq("three rows each", table.getn(blocks[1].rows), 3)
 
-    H.eq("the sales total", blocks[1].rows[1][2], util.ShortMoney(110000))
-    H.eq("the expenses total", blocks[2].rows[1][2], util.ShortMoney(30000))
-    H.eq("the profit total", blocks[3].rows[1][2], util.ShortMoney(80000))
+    H.eq("the sales total", blocks[1].rows[1][2], util.ShortMoneyColored(110000))
+    H.eq("the expenses total", blocks[2].rows[1][2], util.ShortMoneyColored(30000))
+    H.eq("the profit total", blocks[3].rows[1][2], util.ShortMoneyColored(80000))
     H.neq("and sales is not expenses",
           blocks[1].rows[1][2], blocks[2].rows[1][2])
 

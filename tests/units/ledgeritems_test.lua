@@ -279,7 +279,13 @@ H.check("the partial marker carries its question mark",
 -- A missing PRICE and a missing COUNT are different absences, and the table
 -- shows both in one row -- so they render identically on purpose.
 H.eq("no price is a dash", ui.MoneyOrDash(nil), NO_VALUE)
-H.eq("a price is money", ui.MoneyOrDash(10000), util.ShortMoney(10000))
+-- COLOURED BY DENOMINATION, the way the game colours money. The dash above is
+-- deliberately NOT coloured: an absence is not a gold figure.
+H.eq("a price is money", ui.MoneyOrDash(10000),
+     util.ShortMoneyColored(10000))
+H.check("...and carries a colour escape",
+        string.find(ui.MoneyOrDash(10000), "|c", 1, true) == 1)
+H.check("an absence does not", string.find(ui.MoneyOrDash(nil), "|c", 1, true) == nil)
 
 -- ---------------------------------------------------------------------------
 H.section("the profit column")
@@ -365,6 +371,26 @@ do
     H.check("no view set defaults to items", items)
     items = ui.LedgerViewParts("nonsense")
     H.check("...and so does anything unrecognised", items)
+end
+
+-- ...AND THE PAINTER HAS TO OBEY IT. ui.RefreshHistory ends by painting the
+-- transaction list -- unconditionally, on every period click and every mailbox
+-- update -- so without a guard in ui.UpdateHistoryList those rows come back on
+-- top of the item table the moment anything repaints. Which is what they did.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    local at = string.find(src, "function ui.UpdateHistoryList(", 1, true)
+    local body = string.sub(src, at, string.find(src, "\nend\n", at, true))
+    H.check("the transaction paint stands down in the Items view",
+            string.find(body, 'if (ui.ledgerView or "items") ~= "txns" then',
+                        1, true) ~= nil,
+            "ui.RefreshHistory calls this on every repaint")
+    -- HIDES RATHER THAN JUST RETURNING: whatever one fill writes, the other
+    -- must clear, or the rows from the last time that view was up stay on.
+    H.check("...and clears its rows rather than just returning",
+            string.find(body, "ui.histRows[h]:Hide()", 1, true) ~= nil)
 end
 
 os.exit(H.report("ledgeritems"))

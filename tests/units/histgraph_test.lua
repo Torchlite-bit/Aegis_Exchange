@@ -1487,6 +1487,16 @@ do
     -- chosen one reads filled over the chart's well and outlined over this
     -- overlay's opaque near-black. Same kind, same ui.MarkChosen, two
     -- different-looking rows -- unless both sit in a well.
+    -- A FauxScrollFrame's bar is drawn OUTSIDE its own rect, so a frame flush
+    -- to the window edge puts the bar past it, half-drawn on the border.
+    H.check("...and leaves a gutter for the scrollbar",
+            HISTL.ledger_scroll_r > HISTL.edge,
+            HISTL.ledger_scroll_r .. " vs edge " .. HISTL.edge)
+    H.check("...which both its tables use",
+            says(ledgerBody, "-HISTL.ledger_scroll_r,")
+            and says(bodyOf("function ui.BuildHistoryTab("),
+                     "-HISTL.ledger_scroll_r, HISTL.ledger_bot)"))
+
     H.check("...with its button rows in wells, so the plates match",
             says(ledgerBody, "local well = ui.MakeWell(f, box, 3)")
             and says(ledgerBody, "local perBar = bar(")
