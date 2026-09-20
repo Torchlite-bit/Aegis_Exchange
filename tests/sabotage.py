@@ -6358,6 +6358,95 @@ end""",
      "                local _ = job",
      "postbook"),
 
+    # ---- the per-item ledger table -----------------------------------------
+    # Money from every sale over units from only the countable ones divides a
+    # bigger number by a smaller one and reports an average that is too high --
+    # and plausible, which is worse.
+    ("ledgeritems-sums-money-outside-the-count", "core/db.lua",
+     "                    if qty and qty > 0 then\n                        rec.sold = rec.sold + qty\n                        rec.soldMoney = rec.soldMoney + amount\n                    else\n                        rec.soldUnknown = rec.soldUnknown + 1\n                    end",
+     "                    rec.soldMoney = rec.soldMoney + amount\n                    if qty and qty > 0 then\n                        rec.sold = rec.sold + qty\n                    else\n                        rec.soldUnknown = rec.soldUnknown + 1\n                    end",
+     "ledgeritems"),
+
+    # An unknown quantity counted as one is a Sold column that is wrong for
+    # everyone with history.
+    ("ledgeritems-counts-unknown-as-one", "core/db.lua",
+     "                    if qty and qty > 0 then\n                        rec.sold = rec.sold + qty",
+     "                    if true then\n                        rec.sold = rec.sold + (qty or 1)",
+     "ledgeritems"),
+
+    # You cannot resell more than you bought, nor more than you sold.
+    ("ledgeritems-resold-takes-the-larger", "core/db.lua",
+     "            if rec.bought < rec.resold then rec.resold = rec.bought end",
+     "            if rec.bought > rec.resold then rec.resold = rec.bought end",
+     "ledgeritems"),
+
+    # Profit needs BOTH sides: an item you only sold has no purchase price.
+    ("ledgeritems-profit-without-a-buy-side", "core/db.lua",
+     "        if rec.avgSell and rec.avgBuy then\n            rec.avgProfit = rec.avgSell - rec.avgBuy\n        end",
+     "        rec.avgProfit = (rec.avgSell or 0) - (rec.avgBuy or 0)",
+     "ledgeritems"),
+
+    ("ledgeritems-avg-divides-by-zero", "core/db.lua",
+     "    if not units or units <= 0 then return nil end",
+     "    units = units or 1",
+     "ledgeritems"),
+
+    # A total summed over what it could do and silent about the rest is a
+    # number nobody can reconcile against their own history.
+    ("ledgeritems-total-hides-what-it-skipped", "core/db.lua",
+     "            skipped = skipped + 1",
+     "            skipped = skipped",
+     "ledgeritems"),
+
+    # Keying by id-or-name splits an item whose history straddles the release
+    # where ids started being recorded.
+    ("ledgeritems-keyed-by-id", "core/db.lua",
+     '                local key = e.item or "?"\n                local rec = byName[key]',
+     '                local key = e.id or e.item or "?"\n                local rec = byName[key]',
+     "ledgeritems"),
+
+    # ---- rendering the unknowns --------------------------------------------
+    ("counttext-hides-the-uncounted", "ui/frame.lua",
+     '    if unknown > 0 then return known .. " +" .. unknown .. "?" end',
+     "    local _ = unknown",
+     "ledgeritems"),
+
+    ("counttext-shows-nothing-as-zero", "ui/frame.lua",
+     "    if known <= 0 then\n        if unknown > 0 then return \"?\" end\n        return NO_VALUE\n    end",
+     "    if known <= 0 then return \"0\" end",
+     "ledgeritems"),
+
+    ("moneyordash-shows-nothing-as-zero", "ui/frame.lua",
+     "    if not copper then return NO_VALUE end",
+     "    copper = copper or 0",
+     "ledgeritems"),
+
+    # A minus sign in the same colour as everything else is a number you have
+    # to read rather than see.
+    ("profittext-does-not-colour-a-loss", "ui/frame.lua",
+     "    local c = (copper < 0) and C.spend or C.income",
+     "    local c = C.income",
+     "ledgeritems"),
+
+    ("footer-silent-about-skipped-rows", "ui/frame.lua",
+     '    if skipped and skipped > 0 then',
+     "    if false then",
+     "ledgeritems"),
+
+    # A nil is not a small number: sorted as zero the unknowns sit at the top
+    # of a descending Avg Profit and read as the best rows in the table.
+    ("ledgersort-treats-unknown-as-zero", "ui/frame.lua",
+     '    if key == "avgSell" then return rec.avgSell end',
+     '    if key == "avgSell" then return rec.avgSell or 0 end',
+     "ledgeritems"),
+
+    # A widget left on from the other view draws through the table you are
+    # looking at.
+    ("ledgerview-shows-both-at-once", "ui/frame.lua",
+     "    local items = (view ~= \"txns\")\n    return items, not items",
+     "    local items = (view ~= \"txns\")\n    return items, true",
+     "ledgeritems"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -6406,6 +6495,7 @@ SUITES = {
     "purse": "tests/units/purse_test.lua",
     "sweep": "tests/units/sweep_test.lua",
     "postbook": "tests/units/postbook_test.lua",
+    "ledgeritems": "tests/units/ledgeritems_test.lua",
     "histstats": "tests/units/histstats_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"

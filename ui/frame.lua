@@ -5545,6 +5545,12 @@ local LISTBOX = {
 }
 ui.LISTBOX = LISTBOX     -- read by the geometry suite
 
+-- The em dash every table uses for "no answer". A CONSTANT because the three
+-- Ledger columns that can be empty are empty for three different reasons -- no
+-- price, no count, no counterpart -- and they have to look identical, or the
+-- reader starts hunting for a difference that is not there.
+local NO_VALUE = "\226\128\148"
+
 -- How many WHOLE rows a list shows at a given WINDOW height.
 --
 -- THIS REPLACES ui.RowsFor, WHICH MEASURED THE SCROLL FRAME. Every one of its
@@ -12349,6 +12355,21 @@ end
 -- spare, and ui.SetTextClipped already handles the few that do not fit.
 local HCX = { when = 2, kind = 92, item = 176, amount = 416 }
 local HCW = { when = 86, kind = 80, item = 236, amount = 96 }
+-- The per-ITEM table's columns. Wider than the transaction table's because the
+-- ledger overlay has the whole content area now -- see ui.BuildLedgerWindow.
+local LCX = { item = 2, sold = 232, avgSell = 330, bought = 448,
+              avgBuy = 546, profit = 664 }
+local LCW = { item = 226, sold = 92, avgSell = 112, bought = 92,
+              avgBuy = 112, profit = 112 }
+local LEDGER_HEADER_DEFS = {
+    { key = "item",    text = "Item" },
+    { key = "sold",    text = "Sold",       just = "RIGHT" },
+    { key = "avgSell", text = "Avg Sell",   just = "RIGHT" },
+    { key = "bought",  text = "Bought",     just = "RIGHT" },
+    { key = "avgBuy",  text = "Avg Buy",    just = "RIGHT" },
+    { key = "profit",  text = "Avg Profit", just = "RIGHT" },
+}
+
 local HIST_HEADER_DEFS = {
     { key = "when",   text = "When" },
     { key = "kind",   text = "Type" },
@@ -12483,6 +12504,8 @@ local HISTL = {
     -- The Ledger button beside the chart's heading -- the way into the other
     -- screen. Wider than a period button because it carries a word.
     ledger_btn_w = 54,
+    -- The Items / Transactions toggle at the ledger overlay's top left.
+    ledger_view_w = 82,
     per_w      = 32,
     per_h      = 18,
     per_gap    = 3,
@@ -13132,6 +13155,102 @@ function ui.BuildLedgerWindow()
     footBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
     ui.ledgerFootBar = footBar
 
+    -- ---- the two views -------------------------------------------------
+    -- ITEMS FIRST, because it is the question the tab is for: what do I
+    -- actually make on this. Transactions is the receipt behind it.
+    ui.ledgerViewBtns = {}
+    local vprev = nil
+    local views = { { "items", "Items" }, { "txns", "Transactions" } }
+    local vi = 1
+    while vi <= table.getn(views) do
+        local b = ui.MakeButton(f, "quiet")
+        b:SetWidth(HISTL.ledger_view_w); b:SetHeight(HISTL.per_h)
+        if vprev then
+            b:SetPoint("LEFT", vprev, "RIGHT", HISTL.per_gap, 0)
+        else
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", 74, -9)
+        end
+        b:SetText(views[vi][2])
+        b.view = views[vi][1]
+        b:SetScript("OnClick", function() ui.SetLedgerView(b.view) end)
+        ui.ledgerViewBtns[vi] = b
+        vprev = b
+        vi = vi + 1
+    end
+
+    -- ---- the per-item table ----------------------------------------------
+    ui.ledgerSortKey, ui.ledgerSortDir = "profit", "desc"
+    ui.ledgerHeaders = ui.MakeSortHeaders(f, 6, -70, LCX, LCW,
+        function(key) ui.SetLedgerSort(key) end, LEDGER_HEADER_DEFS)
+
+    local iscroll = CreateFrame("ScrollFrame", "AegisExchangeLedgerItemScroll",
+        f, "FauxScrollFrameTemplate")
+    iscroll:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -HISTL.ledger_top)
+    iscroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT",
+                     -HISTL.edge, HISTL.ledger_bot + HISTL.fig_line)
+    -- 1.12 signature: (itemHeight, updateFn). The frame and offset are the
+    -- implicit globals `this` / `arg1`; the offset-first form is a later
+    -- client's and crashes FrameXML here.
+    iscroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.RefreshLedgerItems)
+    end)
+    ui.ledgerItemScroll = iscroll
+
+    ui.ledgerItemRows = {}
+ui.GrowLedgerItemRows = function(n)
+        if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
+        n = ui.RowBudget(ui.ledgerItemRows, n)
+        local li = table.getn(ui.ledgerItemRows) + 1
+        while li <= n do
+            local row = CreateFrame("Button", nil, f)
+            row:SetHeight(HIST_ROW_H)
+            -- A LIST ROW, so pfUI must not plate it -- tests/lint/rowskin.py
+            -- enforces this for anything that gets ui.AddRowChrome.
+            row.aegisNoSkin = true
+            ui.PlaceRow(row, iscroll, li, HIST_ROW_H, ROWPAD.l, ROWPAD.r)
+            ui.AddRowChrome(row, li)
+            local mk = function(cx, w, just)
+                local fs = row:CreateFontString(nil, "OVERLAY",
+                                                "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+                fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+                return fs
+            end
+            row.item    = mk(LCX.item, LCW.item)
+            row.sold    = mk(LCX.sold, LCW.sold, "RIGHT")
+            row.avgSell = mk(LCX.avgSell, LCW.avgSell, "RIGHT")
+            row.bought  = mk(LCX.bought, LCW.bought, "RIGHT")
+            row.avgBuy  = mk(LCX.avgBuy, LCW.avgBuy, "RIGHT")
+            row.profit  = mk(LCX.profit, LCW.profit, "RIGHT")
+            -- The item's own tooltip, the way the History blocks' Top item
+            -- has one. Armed only where the row carries an id.
+            row:SetScript("OnEnter", function()
+                if not row.itemId then return end
+                GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                local shown = false
+                if GameTooltip.SetHyperlink then
+                    shown = pcall(function()
+                        GameTooltip:SetHyperlink("item:" .. row.itemId
+                                                 .. ":0:0:0")
+                    end)
+                end
+                if not shown then GameTooltip:SetText(row.item:GetText() or "") end
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row:Hide()
+            ui.ledgerItemRows[li] = row
+            li = li + 1
+        end
+    end
+    ui.GrowLedgerItemRows(HIST_ROWS)
+
+    ui.ledgerFooter = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.ledgerFooter:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12,
+                             HISTL.ledger_bot - 8)
+    ui.ledgerFooter:SetJustifyH("LEFT")
+    ui.ledgerFooter:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
     local closeBtn = ui.MakeButton(footBar, "quiet",
         "AegisExchangeLedgerCloseButton")
     closeBtn:SetWidth(80); closeBtn:SetHeight(22)
@@ -13147,6 +13266,7 @@ function ui.ShowLedgerWindow()
     ui.BuildLedgerWindow()
     ui.ledgerFrame:Show()
     ui.RefreshHistory()
+    ui.RefreshLedgerView()
 end
 
 function ui.HideLedgerWindow()
@@ -13179,6 +13299,148 @@ function ui.RefreshLedgerButton()
     local label, pressed = ui.LedgerButtonState(shown)
     ui.histLedgerBtn:SetText(label)
     ui.MarkChosen({ ui.histLedgerBtn }, function() return pressed end)
+end
+
+-- Sort key for the per-item table. A NIL SORTS LAST whichever direction the
+-- column runs, because "we do not know" is not a small number -- putting the
+-- unknowns at the top of a descending Avg Profit would read as the best rows
+-- in the table.
+function ui.LedgerSortValue(rec, key)
+    if key == "item" then return string.lower(rec.item or "") end
+    if key == "sold" then return rec.sold or 0 end
+    if key == "bought" then return rec.bought or 0 end
+    if key == "avgSell" then return rec.avgSell end
+    if key == "avgBuy" then return rec.avgBuy end
+    if key == "profit" then return rec.avgProfit end
+    return rec.item
+end
+
+function ui.SortLedgerItems(rows, key, dir)
+    local known, unknown = {}, {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local v = ui.LedgerSortValue(rows[i], key)
+        if v == nil then table.insert(unknown, rows[i])
+        else table.insert(known, rows[i]) end
+        i = i + 1
+    end
+    known = ui.SortByKey(known, function(r)
+        return ui.LedgerSortValue(r, key)
+    end, dir)
+    -- Appended, never interleaved, and in either direction.
+    local out = {}
+    i = 1
+    while i <= table.getn(known) do table.insert(out, known[i]); i = i + 1 end
+    i = 1
+    while i <= table.getn(unknown) do table.insert(out, unknown[i]); i = i + 1 end
+    return out
+end
+
+-- Which half of the ledger is showing. PURE: it returns what should be shown
+-- and hidden rather than doing it, so the pairing cannot drift -- a widget
+-- left on from the other view is the whole failure mode of a two-view frame.
+function ui.LedgerViewParts(view)
+    local items = (view ~= "txns")
+    return items, not items
+end
+
+function ui.SetLedgerView(view)
+    ui.ledgerView = (view == "txns") and "txns" or "items"
+    ui.RefreshLedgerView()
+end
+
+function ui.RefreshLedgerView()
+    local showItems, showTxns = ui.LedgerViewParts(ui.ledgerView)
+    ui.MarkChosen(ui.ledgerViewBtns, function(b)
+        return b.view == (ui.ledgerView or "items")
+    end)
+    -- WHATEVER ONE VIEW SHOWS, THE OTHER MUST HIDE. Listed rather than toggled
+    -- in two places: the headers, the scroll frame, every pooled row and the
+    -- footer all belong to one view or the other, and one left behind draws
+    -- through the other's table.
+    local function setShown(widget, on)
+        if not widget then return end
+        if on then widget:Show() else widget:Hide() end
+    end
+    setShown(ui.ledgerItemScroll, showItems)
+    setShown(ui.ledgerFooter, showItems)
+    setShown(ui.histScroll, showTxns)
+    setShown(ui.histTotals, showTxns)
+    setShown(ui.histNote, showTxns)
+    for _, h in pairs(ui.ledgerHeaders or {}) do setShown(h, showItems) end
+    for _, h in pairs(ui.histHeaders or {}) do setShown(h, showTxns) end
+    local i = 1
+    while i <= table.getn(ui.ledgerItemRows or {}) do
+        if not showItems then ui.ledgerItemRows[i]:Hide() end
+        i = i + 1
+    end
+    i = 1
+    while i <= table.getn(ui.histRows or {}) do
+        if not showTxns then ui.histRows[i]:Hide() end
+        i = i + 1
+    end
+    if showItems then ui.RefreshLedgerItems() else ui.UpdateHistoryList() end
+end
+
+function ui.SetLedgerSort(key)
+    if ui.ledgerSortKey == key then
+        ui.ledgerSortDir = (ui.ledgerSortDir == "asc") and "desc" or "asc"
+    else
+        ui.ledgerSortKey = key
+        -- A NEW COLUMN OPENS DESCENDING except the name, which reads forwards.
+        -- Every other column here is a quantity and the interesting end of a
+        -- quantity is the big one.
+        ui.ledgerSortDir = (key == "item") and "asc" or "desc"
+    end
+    ui.RefreshLedgerItems()
+end
+
+function ui.RefreshLedgerItems()
+    if not ui.ledgerItemRows then return end
+    local secs = HIST_PERIODS[ui.histPeriod or 2].secs
+    local since = (secs > 0) and (time() - secs) or nil
+    local all = A.db.LedgerItems(since)
+    local rows = ui.SortLedgerItems(all, ui.ledgerSortKey or "profit",
+                                    ui.ledgerSortDir or "desc")
+    ui.PaintSortHeaders(ui.ledgerHeaders, ui.ledgerSortKey or "profit",
+                        ui.ledgerSortDir or "desc")
+
+    local vis = ui.LedgerRowCount()
+    ui.GrowLedgerItemRows(vis)
+    ui.SkinNewRows(ui.ledgerItemRows)
+    FauxScrollFrame_Update(ui.ledgerItemScroll, table.getn(rows), vis,
+                           HIST_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.ledgerItemScroll)
+    local i = 1
+    while i <= table.getn(ui.ledgerItemRows) do
+        local row = ui.ledgerItemRows[i]
+        local rec = (i <= vis) and rows[i + offset] or nil
+        if rec then
+            row.item:SetText(rec.item or "?")
+            local q = rec.itemId and ui.CraftQualityOf(rec.itemId) or nil
+            local cr, cg, cb = ui.QualityColor(q)
+            row.item:SetTextColor(cr, cg, cb)
+            row.itemId = rec.itemId
+
+            row.sold:SetText(ui.CountText(rec.sold, rec.soldUnknown))
+            row.bought:SetText(ui.CountText(rec.bought, rec.boughtUnknown))
+            row.avgSell:SetText(ui.MoneyOrDash(rec.avgSell))
+            row.avgBuy:SetText(ui.MoneyOrDash(rec.avgBuy))
+            local txt, pr, pg, pb = ui.ProfitText(rec.avgProfit)
+            row.profit:SetText(txt)
+            row.profit:SetTextColor(pr, pg, pb)
+            row:Show()
+        else
+            row.itemId = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+
+    local resold, profit, skipped = A.db.LedgerItemTotals(all)
+    if ui.ledgerFooter then
+        ui.ledgerFooter:SetText(ui.LedgerFooterText(resold, profit, skipped))
+    end
 end
 
 -- approximate arrival time so the same mail isn't re-counted across sessions).
@@ -14270,6 +14532,68 @@ function ui.FigureSlot(i)
     return math.floor(i / 2) + 1, math.mod(i, 2) + 1
 end
 
+-- A unit count that may be partly unknown.
+--
+-- UNKNOWN STAYS UNKNOWN. Every sale logged before v1.54.7 has no quantity, and
+-- so does one this character could not match against a posting -- so a column
+-- of unit counts is, for anyone with history, partly a column of things we do
+-- not know. Rendering those as 1, or leaving them out of the number without
+-- saying, are both a total the player cannot reconcile against their own mail.
+--
+--   "120"      every transaction counted
+--   "120 +2?"  120 units counted, and two transactions whose size is unknown
+--   "?"        nothing countable at all
+--
+-- The "+2?" is deliberately not a unit count: two UNCOUNTED SALES might be two
+-- items or forty, and writing "+2" without the question mark would read as the
+-- former.
+function ui.CountText(known, unknown)
+    known = known or 0
+    unknown = unknown or 0
+    if known <= 0 then
+        if unknown > 0 then return "?" end
+        return NO_VALUE
+    end
+    if unknown > 0 then return known .. " +" .. unknown .. "?" end
+    return tostring(known)
+end
+
+-- Money, or an em dash when there is no answer. Separate from CountText
+-- because a missing PRICE and a missing COUNT are different absences and the
+-- table shows both in one row.
+function ui.MoneyOrDash(copper)
+    if not copper then return NO_VALUE end
+    return util.ShortMoney(copper)
+end
+
+-- A per-unit profit, signed and coloured. Returns text, r, g, b.
+--
+-- COLOURED BECAUSE THE SIGN IS THE POINT. This is the column the table exists
+-- for, and a minus sign in the same colour as everything else is a number you
+-- have to read rather than see.
+function ui.ProfitText(copper)
+    if not copper then return NO_VALUE, C.text[1], C.text[2], C.text[3] end
+    local c = (copper < 0) and C.spend or C.income
+    return util.ShortMoney(copper), c[1], c[2], c[3]
+end
+
+-- The footer: what was turned over, what it made, and what could not be
+-- counted.
+--
+-- THE SKIPPED ROWS ARE SAID OUT LOUD. A total over the rows it could do and
+-- silent about the rest is exactly the number this table's quantity work
+-- exists to avoid -- see db.LedgerItemTotals.
+function ui.LedgerFooterText(resold, profit, skipped)
+    local txt = (resold or 0) .. " items resold"
+    txt = txt .. "   \226\128\162   " .. util.ShortMoney(profit or 0)
+        .. " total profit"
+    if skipped and skipped > 0 then
+        txt = txt .. "   \226\128\162   " .. skipped
+            .. " item(s) not counted (no quantity recorded)"
+    end
+    return txt
+end
+
 -- Place and fill the figure band and the three blocks.
 --
 -- POSITIONS SET ON EVERY PAINT, because the columns are a fraction of a width
@@ -14414,6 +14738,12 @@ function ui.RefreshHistory()
     local chosen = function(b) return b.idx == ui.histPeriod end
     ui.MarkChosen(ui.histPerBtns, chosen)
     ui.MarkChosen(ui.ledgerPerBtns, chosen)
+    -- The per-item table reads the same period, so a period button has to
+    -- repaint it too -- it is not fed by ui.UpdateHistoryList.
+    if ui.ledgerFrame and ui.ledgerFrame:IsShown()
+        and (ui.ledgerView or "items") ~= "txns" then
+        ui.RefreshLedgerItems()
+    end
     -- ...and the Ledger button, which reads as pressed while its window is up.
     -- Done on every repaint rather than only on the toggle, because the window
     -- can also be closed by its own X.

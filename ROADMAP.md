@@ -4711,7 +4711,7 @@ the window's minimum height (`ui.PanelHeightAt(492)`) leaves the plot nothing.
 Same treatment, better use of the space available. **If the stacked look is
 wanted anyway, the plot has to give up its minimum first.**
 
-### 3.4 The Ledger window
+### 3.4 The Ledger window — ✅ **DONE** (v1.54.8)
 
 **The window itself shipped in v1.54.0, and became an OVERLAY in v1.54.1.**
 The two-screen question §3.3b was waiting on is answered, and this is the
@@ -4805,7 +4805,7 @@ there.
    small feather asset rather than a sprite strip. Skip if step 2 looked good
    enough.
 5. §5.6 — sale quantity into the ledger.
-6. §3.4 Ledger window.
+6. §3.4 Ledger window — ✅ **DONE** (v1.54.8). Per-item table, both views.
 
 **One MINOR for the push, PATCH per step.** The MINOR moved to **1.54.0** at
 the owner's call when the two-screen restructure landed, and stays there for
@@ -5123,11 +5123,18 @@ expiry, that sale cannot say how many it was. Both suites assert it both ways.
 **Bounded**: 33 days (72h auction + 30 days of mail) and a 500-row cap, oldest
 dropped first.
 
-**Still open for §3.4.** The book only helps from v1.54.7 onward. Sales already
-in the ledger have no quantity and never will, so the Sold column has to render
-a row with no count as **unknown** rather than dropping it — and the table's
-"N Items Resold" footer is a sum over rows that may be partly unknown. **Decide
-how that reads before building the table.**
+**Answered in v1.54.8.** The book only helps from v1.54.7 onward, so sales
+already in the ledger have no quantity and never will. `ui.CountText` renders
+that rather than hiding it: `120 +2?` for a partly-counted item, `?` for one
+with nothing countable, an em dash for nothing at all. The `+2?` is
+deliberately NOT a unit count — two uncounted sales might be two items or
+forty — and the question mark is what says so.
+
+**And an average covers money and units from the SAME transactions.** Summing
+all the money over only the countable units divides a bigger number by a
+smaller one and reports an average that is too high, and plausible, which is
+worse. An uncounted transaction is excluded from both sums and counted
+separately.
 
 **§3.4 is blocked on this section, and specifically on quantity.** The Ledger
 window's Sold column and both per-unit averages are unit counts; without the

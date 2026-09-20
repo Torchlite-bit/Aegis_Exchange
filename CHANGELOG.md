@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.8]
+
+### Added
+- **The Ledger now has a per-item table** — **Item · Sold · Avg Sell · Bought ·
+  Avg Buy · Avg Profit**, sortable on every column, with a footer reading
+  *"N items resold • Xg total profit"*. Hover a row for the item's tooltip.
+
+  **Items** and **Transactions** are two views of the same window; Items opens
+  first, because it's the question the tab is for. Both follow the period
+  buttons.
+
+- **Unknown counts stay unknown.** Sales logged before Aegis started recording
+  stack sizes have no quantity, and neither does one it couldn't match to a
+  posting. Those aren't counted as 1 and aren't quietly dropped:
+
+  - `120 +2?` — 120 units counted, plus two sales whose size isn't known
+  - `?` — nothing countable
+  - `—` — no answer at all
+
+  An average is only ever money and units from **the same** transactions, so a
+  partly-unknown item shows a correct average over the part it can see rather
+  than a plausible wrong one over all of it. The footer says how many items it
+  couldn't count.
+
 ## [1.54.7]
 
 ### Added
@@ -6009,6 +6033,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

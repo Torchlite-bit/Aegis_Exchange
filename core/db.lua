@@ -1923,6 +1923,132 @@ end
 -- TIES GO TO THE LOWER KEY, sorted as a string, so the answer does not change
 -- between two repaints of the same data. `pairs` has no order, and a figure
 -- that flickers between two items on a timer is a bug somebody will chase for
+-- ---------------------------------------------------------------------------
+-- The ledger, per ITEM rather than per transaction
+-- ---------------------------------------------------------------------------
+
+-- An average unit price, or nil when there is nothing to divide by.
+function db.AvgUnit(money, units)
+    if not units or units <= 0 then return nil end
+    return math.floor((money or 0) / units)
+end
+
+-- Roll the ledger up by item: what you sold, what you paid, and what the
+-- difference was per unit.
+--
+-- MONEY AND UNITS ARE SUMMED OVER THE SAME TRANSACTIONS, and that is the whole
+-- care in this function. A sale logged before v1.54.7 has no quantity, and so
+-- does one this character could not match to a posting -- so summing ALL the
+-- money over only the countable units would divide a bigger number by a
+-- smaller one and report an average that is simply too high. Every unknown
+-- transaction is excluded from BOTH sums and counted separately, so the
+-- average is right for the subset it covers and the caller can say how much it
+-- does not cover.
+--
+-- Returns an array of:
+--   item, itemId
+--   sold,   soldMoney,   soldTxns,   soldUnknown
+--   bought, boughtMoney, boughtTxns, boughtUnknown
+--
+-- KEYED BY NAME, for the reason db.LedgerStats is: keying by id-or-name splits
+-- an item whose history straddles the release where ids started being
+-- recorded, and neither half is then the whole item.
+function db.LedgerItems(sinceEpoch, now)
+    local byName, order = {}, {}
+    local led = db.Ledger()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        local t = e.t
+        if not sinceEpoch or (t and t >= sinceEpoch) then
+            local amount = e.amount or 0
+            if amount > 0 and (e.kind == "sale" or e.kind == "buy") then
+                local key = e.item or "?"
+                local rec = byName[key]
+                if not rec then
+                    rec = { item = e.item or "?", itemId = e.id,
+                            sold = 0, soldMoney = 0, soldTxns = 0,
+                            soldUnknown = 0,
+                            bought = 0, boughtMoney = 0, boughtTxns = 0,
+                            boughtUnknown = 0 }
+                    byName[key] = rec
+                    table.insert(order, rec)
+                end
+                if not rec.itemId and e.id then rec.itemId = e.id end
+                local qty = e.qty
+                if e.kind == "sale" then
+                    rec.soldTxns = rec.soldTxns + 1
+                    if qty and qty > 0 then
+                        rec.sold = rec.sold + qty
+                        rec.soldMoney = rec.soldMoney + amount
+                    else
+                        rec.soldUnknown = rec.soldUnknown + 1
+                    end
+                else
+                    rec.boughtTxns = rec.boughtTxns + 1
+                    if qty and qty > 0 then
+                        rec.bought = rec.bought + qty
+                        rec.boughtMoney = rec.boughtMoney + amount
+                    else
+                        rec.boughtUnknown = rec.boughtUnknown + 1
+                    end
+                end
+            end
+        end
+        i = i + 1
+    end
+
+    -- Failing an id off the transactions, the name map -- every scan, search
+    -- and browse feeds it, and it is what lets a row be quality-coloured and
+    -- hovered. Same lookup of last resort db.LedgerStats makes.
+    local r = 1
+    while r <= table.getn(order) do
+        local rec = order[r]
+        if not rec.itemId then rec.itemId = db.IdFromName(rec.item) end
+        rec.avgSell   = db.AvgUnit(rec.soldMoney, rec.sold)
+        rec.avgBuy    = db.AvgUnit(rec.boughtMoney, rec.bought)
+        -- PER UNIT, and only when BOTH sides are known. An item you have only
+        -- sold has no purchase price to subtract, and an item whose sales all
+        -- predate quantities has no per-unit sale price at all.
+        if rec.avgSell and rec.avgBuy then
+            rec.avgProfit = rec.avgSell - rec.avgBuy
+        end
+        -- HOW MANY YOU ACTUALLY TURNED OVER: you cannot resell more than you
+        -- bought, nor more than you sold.
+        if rec.sold > 0 and rec.bought > 0 then
+            rec.resold = rec.sold
+            if rec.bought < rec.resold then rec.resold = rec.bought end
+        end
+        r = r + 1
+    end
+    return order
+end
+
+-- The footer: how many units were turned over, what that made, and how many
+-- rows could not be counted.
+--
+-- THE SKIPPED COUNT IS RETURNED, NOT SWALLOWED. A total summed over the rows
+-- it could do and silent about the rest is a number nobody can reconcile
+-- against their own history -- which is the whole failure this table's
+-- quantity work exists to avoid.
+function db.LedgerItemTotals(rows)
+    local resold, profit, skipped = 0, 0, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local rec = rows[i]
+        if rec.resold and rec.avgProfit then
+            resold = resold + rec.resold
+            profit = profit + rec.avgProfit * rec.resold
+        elseif (rec.soldTxns or 0) > 0 and (rec.boughtTxns or 0) > 0 then
+            -- Traded both ways but not countable: exactly the row a total
+            -- would otherwise drop without saying.
+            skipped = skipped + 1
+        end
+        i = i + 1
+    end
+    return resold, math.floor(profit), skipped
+end
+
 -- an hour before realising it is the iteration.
 function db.TopOf(bucket)
     local best, bestKey = nil, nil
