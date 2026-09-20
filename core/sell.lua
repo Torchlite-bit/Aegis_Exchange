@@ -485,13 +485,13 @@ function sell.StartOwnerSweep()
         -- No auctions at all is a real answer, and it has to be RECORDED --
         -- otherwise cancelling your last auction leaves the old count on the
         -- tooltip until you post something again.
-        sell.FinishOwnerSweep({})
+        sell.FinishOwnerSweep({}, {})
         return nil
     end
     if pages > sell.OWNER_SWEEP_MAX_PAGES then
         pages = sell.OWNER_SWEEP_MAX_PAGES
     end
-    sell.ownerSweep = { page = 0, pages = pages, counts = {} }
+    sell.ownerSweep = { page = 0, pages = pages, counts = {}, stacks = {} }
     sell.RequestOwnerAuctions(0)
     return sell.ownerSweep
 end
@@ -512,6 +512,11 @@ function sell.OwnerSweepStep()
         if r.itemId then
             sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + (r.count or 1)
         end
+        -- One entry per AUCTION, not per item: the posting book is about stack
+        -- SIZES, and sw.counts has already thrown those away by summing. Kept
+        -- even for a row with no id, because a sale mail matches on the name.
+        table.insert(sw.stacks, { name = r.name, id = r.itemId,
+                                  qty = r.count or 1 })
         i = i + 1
     end
     sw.page = sw.page + 1
@@ -519,17 +524,25 @@ function sell.OwnerSweepStep()
         sell.RequestOwnerAuctions(sw.page)
         return true
     end
-    sell.FinishOwnerSweep(sw.counts)
+    sell.FinishOwnerSweep(sw.counts, sw.stacks)
     -- Put the client back on page 0, which is where the Auctions tab expects
     -- to find it and where the player left it.
     sell.RequestOwnerAuctions(0)
     return false
 end
 
-function sell.FinishOwnerSweep(counts)
+function sell.FinishOwnerSweep(counts, stacks)
     sell.ownerSweep = nil
     if A.db and A.db.SetInventoryBucket then
         A.db.SetInventoryBucket("ah", counts or {}, sell.PlayerClass())
+    end
+    -- The sweep is the only place the server tells us what is up and in what
+    -- stack sizes, which is the one thing a sale mail can never say. Folding it
+    -- into the posting book is what lets an auction posted before that book
+    -- existed -- or from anywhere else -- still report its quantity when it
+    -- sells. Additive only; see db.ReconcilePostings.
+    if A.db and A.db.ReconcilePostings then
+        A.db.ReconcilePostings(stacks or {})
     end
     return counts
 end

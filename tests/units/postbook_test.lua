@@ -32,6 +32,7 @@ W.Reset()
 local A = W.LoadCore()
 W.FireAddonLoaded(A)
 local db = A.db
+local sell = A.sell
 
 local DAY = 86400
 local NOW = 1700000000
@@ -186,6 +187,207 @@ do
 end
 
 H.isNil("matching nothing is nothing", db.MatchPosting(nil, NOW))
+
+-- ---------------------------------------------------------------------------
+H.section("posting for real, and matching what the mail would say")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS IS HERE. Everything above hands db.RecordPosting a name chosen by
+-- the test, so every one of those cases passes no matter WHAT the posting path
+-- actually stores. The one thing that cannot be assumed is that the key the
+-- poster writes is the key the mailbox will later look up: the mail subject
+-- yields a bare item name, and sell.GetItem reads a slot that also knows a
+-- LINK and an id. Store the wrong one of those and the whole feature reports
+-- unknown for every sale while every test above stays green -- which is very
+-- nearly what happened.
+--
+-- So this posts an item the way the addon does and then matches it the way the
+-- mailbox does, with nothing shared between the two but the item itself.
+do
+    reset()
+    W.AddItem(765, { name = "Silverleaf", quality = 1, stackCount = 20,
+                     sellPrice = 25, texture = "icon" })
+    W.sellSlot = { link = "|cffffffff|Hitem:765:0:0:0|h[Silverleaf]|h|r",
+                   count = 5 }
+
+    local it = sell.GetItem()
+    H.eq("the slot reports a bare name, not a link", it.name, "Silverleaf")
+
+    H.check("the post goes through", sell.Post(2000, 1000, 480))
+    H.eq("...and left exactly one posting", table.getn(db.Postings()), 1)
+
+    -- THE MAILBOX SIDE. "Auction successful: Silverleaf" gives this and only
+    -- this -- no link, no id, no count.
+    H.eq("the sale mail's bare name matches it",
+         db.MatchPosting("Silverleaf"), 5)
+end
+
+-- The id is worth carrying too: the ledger uses it for the tooltip on the
+-- Sales side, and it is the one field the mail can never supply.
+do
+    reset()
+    W.sellSlot = { link = "|cffffffff|Hitem:765:0:0:0|h[Silverleaf]|h|r",
+                   count = 3 }
+    sell.Post(2000, 1000, 480)
+    H.eq("the posting carries the item id", db.Postings()[1].id, 765)
+end
+
+W.sellSlot = nil
+
+-- ---------------------------------------------------------------------------
+H.section("the book is reconciled against what is actually up")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. db.RecordPosting only knows about stacks it WATCHED go up.
+-- Anything posted before this character had a book -- which is every auction
+-- any existing player had up when the feature shipped -- is invisible to it,
+-- and every one of those sales lands in the ledger with an unknown quantity.
+-- That is how it was reported: sold a Silverleaf, no data. The owner sweep
+-- already asks the server what is up; this is folding that answer in.
+
+local function stack(name, id, qty) return { name = name, id = id, qty = qty } end
+
+do
+    reset()
+    -- An empty book and two stacks up that it has never heard of.
+    H.eq("what the server knows is learned",
+         db.ReconcilePostings({ stack("Silverleaf", 765, 5),
+                                stack("Peacebloom", 2447, 20) }, NOW), 2)
+    H.eq("...and the sale can answer", db.MatchPosting("Silverleaf", NOW), 5)
+    H.eq("...for both", db.MatchPosting("Peacebloom", NOW), 20)
+end
+
+-- IDEMPOTENT, because this runs on EVERY auction house visit. A book that
+-- already agrees with the server has nothing to learn.
+do
+    reset()
+    local up = { stack("Silverleaf", 765, 5), stack("Silverleaf", 765, 5) }
+    H.eq("the first visit learns both", db.ReconcilePostings(up, NOW), 2)
+    H.eq("the second learns nothing", db.ReconcilePostings(up, NOW), 0)
+    H.eq("the third learns nothing", db.ReconcilePostings(up, NOW), 0)
+    H.eq("...and the book still holds two", table.getn(db.Postings()), 2)
+end
+
+-- The failure a naive append would cause, asserted directly: three visits with
+-- one stack up must not leave three postings, because all three are the same
+-- size and MatchPosting would then answer confidently for two sales that never
+-- happened.
+do
+    reset()
+    local up = { stack("Silverleaf", 765, 5) }
+    db.ReconcilePostings(up, NOW)
+    db.ReconcilePostings(up, NOW)
+    db.ReconcilePostings(up, NOW)
+    H.eq("one auction is one posting", db.MatchPosting("Silverleaf", NOW), 5)
+    H.isNil("...and there is not a second", db.MatchPosting("Silverleaf", NOW))
+end
+
+-- TOPPED UP PER SIZE, not per item. Two of five up and one of five known is
+-- one to add -- and a twenty that the book has never seen is another, even
+-- though the item is already in the book.
+do
+    reset()
+    db.RecordPosting("Silverleaf", 765, 5, NOW)
+    H.eq("only the difference is added",
+         db.ReconcilePostings({ stack("Silverleaf", 765, 5),
+                                stack("Silverleaf", 765, 5),
+                                stack("Silverleaf", 765, 20) }, NOW), 2)
+    H.eq("the book now holds all three", table.getn(db.Postings()), 3)
+end
+
+-- ADDITIVE, NEVER SUBTRACTIVE, and this is the case that makes it matter:
+-- the stack sold, the server has already forgotten it, and the sale mail is
+-- still sitting unread. Check the AH before the mailbox and a subtractive
+-- reconcile would eat the record the mail was about to use.
+do
+    reset()
+    db.RecordPosting("Silverleaf", 765, 5, NOW)
+    db.ReconcilePostings({}, NOW)        -- nothing up: it just sold
+    H.eq("a sold stack keeps its record", db.MatchPosting("Silverleaf", NOW), 5)
+end
+
+-- ...and the same for an item the server does report, but fewer of.
+do
+    reset()
+    db.RecordPosting("Silverleaf", 765, 5, NOW)
+    db.RecordPosting("Silverleaf", 765, 5, NOW)
+    db.ReconcilePostings({ stack("Silverleaf", 765, 5) }, NOW)
+    H.eq("the book is not trimmed to the server", table.getn(db.Postings()), 2)
+end
+
+-- A row the client could not identify still has a NAME, and the name is the
+-- whole of what a sale mail matches on -- so it is worth recording without an
+-- id rather than dropped.
+do
+    reset()
+    H.eq("an id-less row is still learned",
+         db.ReconcilePostings({ stack("Silverleaf", nil, 5) }, NOW), 1)
+    H.eq("...and answers", db.MatchPosting("Silverleaf", NOW), 5)
+end
+
+-- Junk rows are not postings.
+do
+    reset()
+    H.eq("nothing usable is nothing added",
+         db.ReconcilePostings({ stack(nil, 1, 5), stack("", 1, 5),
+                                stack("X", 1, 0), stack("Y", 1, nil) }, NOW), 0)
+    H.eq("...and the book is untouched", table.getn(db.Postings()), 0)
+end
+
+H.eq("no list at all is nothing added", db.ReconcilePostings(nil, NOW), 0)
+
+-- The tally both sides are counted with.
+do
+    local t = db.PostingTally({ stack("A", 1, 5), stack("A", 1, 5),
+                                stack("A", 1, 20), stack("B", 2, 1) })
+    H.eq("two of A at five", t.A[5], 2)
+    H.eq("one of A at twenty", t.A[20], 1)
+    H.eq("one of B at one", t.B[1], 1)
+    H.isNil("and nothing of C", t.C)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("...and the sweep actually feeds it")
+-- ---------------------------------------------------------------------------
+
+-- THE HALF A PURE FUNCTION CANNOT PROVE. ReconcilePostings can be perfect and
+-- change nothing on screen if no one calls it with real auctions. The owner
+-- sweep is the only place the server states stack sizes, so it is driven here
+-- end to end: set up auctions, run the sweep, and ask the book.
+do
+    reset()
+    db.char.posted = {}
+    W.SetOwned({
+        { name = "Silverleaf", count = 5, buyout = 10000,
+          link = "|cffffffff|Hitem:765:0:0:0|h[Silverleaf]|h|r" },
+        { name = "Peacebloom", count = 20, buyout = 40000,
+          link = "|cffffffff|Hitem:2447:0:0:0|h[Peacebloom]|h|r" },
+    })
+    sell.StartOwnerSweep()
+    local guard = 0
+    while sell.ownerSweep and guard < 10 do
+        sell.OwnerSweepStep()
+        guard = guard + 1
+    end
+    H.check("the sweep finished", sell.ownerSweep == nil)
+    H.eq("the sweep taught the book the stack size",
+         db.MatchPosting("Silverleaf"), 5)
+    H.eq("...for every auction up", db.MatchPosting("Peacebloom"), 20)
+end
+
+-- An empty auction book is not a reason to forget anything.
+do
+    reset()
+    db.RecordPosting("Silverleaf", 765, 5, NOW)
+    W.SetOwned({})
+    sell.StartOwnerSweep()
+    local guard = 0
+    while sell.ownerSweep and guard < 10 do
+        sell.OwnerSweepStep(); guard = guard + 1
+    end
+    H.eq("a sweep with nothing up keeps the book",
+         db.MatchPosting("Silverleaf", NOW), 5)
+end
 
 -- ---------------------------------------------------------------------------
 H.section("...and the real paths actually use it")

@@ -5123,6 +5123,35 @@ expiry, that sale cannot say how many it was. Both suites assert it both ways.
 **Bounded**: 33 days (72h auction + 30 days of mail) and a 500-row cap, oldest
 dropped first.
 
+**THE BOOK ALONE WAS NOT ENOUGH, and it was reported as "sold a Silverleaf and
+it doesn't populate any data" (v1.54.10).** `db.RecordPosting` only knows about
+stacks it *watched* go up. Everything an existing player already had at auction
+when v1.54.7 landed was invisible to it, and so is anything posted from
+anywhere else — so those sales all reported an unknown quantity, from a feature
+that looked broken rather than honest.
+
+The fix is that the server already knows. **`sell.StartOwnerSweep` walks every
+page of your own auctions on every AH visit**, and each row carries its stack
+size — the one thing the mailbox can never say. `db.ReconcilePostings` folds
+that list into the book.
+
+- **Additive, never subtractive.** A stack that sold ten minutes ago is already
+  off the server's list while its sale mail sits unread. Trimming the book to
+  match would eat the record that mail was about to use — so checking the AH
+  before the mailbox would break the feature. Entries leave the book exactly two
+  ways: consumed by a sale or an expiry, or dropped by age.
+- **Topped up to a count, not appended.** This runs on every visit. One stack up
+  and a naive append gives two postings, then three — all the same size, so
+  `MatchPosting` would answer confidently for sales that never happened.
+- **Per (name, size), not per item.** `sw.counts` sums units per item for the
+  inventory bucket, which throws the sizes away; the book needs one entry per
+  *auction*.
+- **A row with no id is still recorded.** The name is the whole of what a sale
+  mail matches on.
+
+*It does not recover a sale already logged as unknown — only the book can be
+repaired, not the ledger.*
+
 **Answered in v1.54.8.** The book only helps from v1.54.7 onward, so sales
 already in the ledger have no quantity and never will. `ui.CountText` renders
 that rather than hiding it: `120 +2?` for a partly-counted item, `?` for one

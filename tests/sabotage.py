@@ -4662,7 +4662,7 @@ end
     # An empty book not recorded, so cancelling your last auction leaves the
     # old count on the tooltip until you post again.
     ("inventory-ah-empty-book-not-recorded", "core/sell.lua",
-     "        sell.FinishOwnerSweep({})\n        return nil",
+     "        sell.FinishOwnerSweep({}, {})\n        return nil",
      "        return nil",
      "inventory"),
 
@@ -6356,6 +6356,70 @@ end""",
     ("sell-queue-does-not-remember", "core/sell.lua",
      "                A.db.RecordPosting(it.name, job.itemId, job.stackSize)",
      "                local _ = job",
+     "postbook"),
+
+    # ---- the posting book, reconciled against the server -------------------
+    # The whole reason the reconcile exists: a stack posted before this
+    # character had a book is invisible to RecordPosting, so its sale reports
+    # an unknown quantity. This is the "sold a Silverleaf and got no data" bug.
+    ("reconcile-learns-nothing", "core/db.lua",
+     "    local want = db.PostingTally(stacks)",
+     "    local want = db.PostingTally(nil)",
+     "postbook"),
+
+    # SUBTRACTIVE is the tempting version and it is wrong: a stack that just
+    # sold is already off the server's list while its mail sits unread, so
+    # trimming the book to match costs that sale the count it was about to
+    # claim. Check the AH before the mailbox and the feature breaks.
+    ("reconcile-trims-the-book-to-the-server", "core/db.lua",
+     "    local want = db.PostingTally(stacks)\n    local have = db.PostingTally(db.Postings())",
+     "    local want = db.PostingTally(stacks)\n    db.char.posted = {}\n    local have = {}",
+     "postbook"),
+
+    # ...and APPENDING instead of topping up is the other one. This runs on
+    # every AH visit, so one stack up becomes two postings, then three -- all
+    # the same size, so MatchPosting answers confidently for sales that never
+    # happened.
+    ("reconcile-appends-on-every-visit", "core/db.lua",
+     "            local short = n - (mine[qty] or 0)",
+     "            local short = n",
+     "postbook"),
+
+    # Topped up per ITEM rather than per SIZE loses the twenty when a five is
+    # already on the books -- and a book missing a size is a book that cannot
+    # answer for it.
+    ("reconcile-tops-up-per-item-not-per-size", "core/db.lua",
+     "            local short = n - (mine[qty] or 0)",
+     "            local short = n - (next(mine) and 1 or 0)",
+     "postbook"),
+
+    # A row the client could not identify still has a NAME, and the name is
+    # the whole of what a sale mail matches on.
+    ("reconcile-drops-rows-with-no-id", "core/db.lua",
+     "                if db.RecordPosting(name, ids[name], qty, now) then",
+     "                if ids[name] and db.RecordPosting(name, ids[name], qty, now) then",
+     "postbook"),
+
+    # The tally is what both sides are counted with; folding sizes together
+    # makes every size look like every other.
+    ("tally-ignores-the-stack-size", "core/db.lua",
+     "            t[n][q] = (t[n][q] or 0) + 1",
+     "            t[n][1] = (t[n][1] or 0) + 1",
+     "postbook"),
+
+    # ---- ...and the sweep is what feeds it ---------------------------------
+    # A perfect reconcile nobody calls with real auctions changes nothing on
+    # screen. The owner sweep is the only place the server states stack sizes.
+    ("sweep-does-not-feed-the-book", "core/sell.lua",
+     "    if A.db and A.db.ReconcilePostings then\n        A.db.ReconcilePostings(stacks or {})\n    end",
+     "    local _ = stacks",
+     "postbook"),
+
+    # sw.counts SUMS units per item, which throws the stack sizes away -- the
+    # one thing the book is about. One entry per AUCTION, not per item.
+    ("sweep-sends-summed-counts-not-stacks", "core/sell.lua",
+     "        table.insert(sw.stacks, { name = r.name, id = r.itemId,\n                                  qty = r.count or 1 })",
+     "        local _ = r",
      "postbook"),
 
     # ---- the per-item ledger table -----------------------------------------

@@ -368,6 +368,88 @@ function db.ExpirePosting(name, now)
     return db.MatchPosting(name, now)
 end
 
+-- ---------------------------------------------------------------------------
+-- The book, reconciled against what the SERVER says is up
+-- ---------------------------------------------------------------------------
+--
+-- WHY THE BOOK ALONE IS NOT ENOUGH. db.RecordPosting only knows about stacks
+-- it watched go up. A stack posted before this character's book existed, or
+-- from the stock UI, or through any path this addon did not drive, is invisible
+-- to it -- and every one of those sales lands in the ledger with an unknown
+-- quantity, which is exactly how it was reported: "sold a Silverleaf and it
+-- doesn't populate any data". The owner sweep already walks every page of your
+-- own auctions on every AH visit, so the server's own answer to "what is up,
+-- and in what stack sizes" is already in hand. This folds it in.
+--
+-- ADDITIVE, NEVER SUBTRACTIVE, and that is the whole design. A stack that sold
+-- ten minutes ago is already gone from the server's list while its sale mail
+-- sits unread in the mailbox; dropping the book entry the sweep can no longer
+-- see would cost that sale the quantity it was about to claim -- turning a
+-- feature that works into one that breaks whenever you check the AH before the
+-- mailbox. Entries leave the book exactly two ways: consumed by a sale or an
+-- expiry, or dropped by age.
+--
+-- TOPS UP TO A COUNT rather than appending, because this runs on every single
+-- AH visit. Three stacks of five up and three already in the book is nothing to
+-- do; a naive append would make it six, then nine, then a book whose entries
+-- outnumber the auctions they stand for -- and since every one of those is the
+-- same size, MatchPosting would happily keep answering "five" long after the
+-- last one sold.
+
+-- Fold a list of { name = , qty = } into counts[name][qty] = howMany.
+-- Shared by both sides of the reconcile so the two are counted the same way.
+function db.PostingTally(list)
+    local t = {}
+    local i = 1
+    while i <= table.getn(list or {}) do
+        local e = list[i]
+        local n = e and e.name
+        local q = tonumber(e and e.qty)
+        if n and n ~= "" and q and q >= 1 then
+            q = math.floor(q)
+            if not t[n] then t[n] = {} end
+            t[n][q] = (t[n][q] or 0) + 1
+        end
+        i = i + 1
+    end
+    return t
+end
+
+-- `stacks` is one entry per auction currently UP: { name = , id = , qty = }.
+-- Returns how many entries were added, which is 0 on the common visit where
+-- the book already agrees with the server.
+function db.ReconcilePostings(stacks, now)
+    if not db.char then return 0 end
+    now = now or time()
+    local want = db.PostingTally(stacks)
+    local have = db.PostingTally(db.Postings())
+    -- An id per name, so a topped-up entry carries what the sweep knew. The
+    -- name is what a sale mail matches on, so a row the client could not
+    -- identify is still worth recording -- it just records without an id.
+    local ids = {}
+    local i = 1
+    while i <= table.getn(stacks or {}) do
+        local e = stacks[i]
+        if e and e.name and e.id and not ids[e.name] then ids[e.name] = e.id end
+        i = i + 1
+    end
+    local added = 0
+    for name, sizes in pairs(want) do
+        local mine = have[name] or {}
+        for qty, n in pairs(sizes) do
+            local short = n - (mine[qty] or 0)
+            local k = 1
+            while k <= short do
+                if db.RecordPosting(name, ids[name], qty, now) then
+                    added = added + 1
+                end
+                k = k + 1
+            end
+        end
+    end
+    return added
+end
+
 -- Default shape of the per-character DB.
 local function DefaultCharDB()
     return {

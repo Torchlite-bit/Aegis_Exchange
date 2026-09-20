@@ -18,6 +18,28 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.10]
+
+### Fixed
+- **A sale could report no quantity at all** — an item sold, and the Ledger's
+  Sold column showed `?` with no average price beside it. The posting book that
+  answers "how many were in that stack" is written when Aegis watches a stack
+  go up, so it knew nothing about auctions that were already posted before it
+  existed. Every one of those, on selling, had to say it didn't know.
+
+  Aegis now reconciles the book against what the server says is actually up.
+  It already walks every page of your own auctions each time you open the
+  auction house, and that list states the stack sizes — so anything up is
+  learned from it, whether Aegis posted it or not.
+
+  *Added to, never trimmed. A stack that sold ten minutes ago is already off
+  the server's list while its mail sits unread; trimming the book to match
+  would cost that sale the count it was about to claim.*
+
+  *This does not recover a sale that has already been logged as unknown.*
+
+---
+
 ## [1.54.9]
 
 ### Fixed
@@ -6054,6 +6076,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
