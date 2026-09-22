@@ -1197,6 +1197,20 @@ function db.Ledger()
     return (db.account and db.account.ledger) or {}
 end
 
+-- Where ledger READS come from.
+--
+-- db.Ledger is the STORE and stays the write target; this is the seam demo
+-- mode substitutes at. Keeping the two apart is what makes it impossible for
+-- generated trading to reach a player's SavedVariables -- a transaction logged
+-- while the demo is on still lands in the real ledger, and nothing invented
+-- ever leaves this function. Same arrangement db.PurseRows has with
+-- db.DemoRows, and the reason is the same one: a substitute READER cannot
+-- write, and a seeded writer permanently could.
+function db.LedgerSource()
+    if db.demo then return db.DemoLedger() end
+    return db.Ledger()
+end
+
 -- Has this mail-sale dedup key been logged already?
 function db.WasSeen(key)
     return db.account and db.account.ledgerSeen and db.account.ledgerSeen[key]
@@ -1737,7 +1751,7 @@ end
 -- Income / spend / count over transactions at or after `sinceEpoch` (nil = all).
 function db.LedgerTotals(sinceEpoch)
     local income, spend, n = 0, 0, 0
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]
@@ -1760,7 +1774,7 @@ end
 -- this is not attributable" instead of quietly dropping it.
 function db.LedgerByChar(sinceEpoch)
     local seen, names, anon = {}, {}, false
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]
@@ -1840,89 +1854,258 @@ end
 -- and its total lands in two buckets, neither of which reaches the top spot.
 -- `item` is set on every entry (db.RecordTxn defaults it to "?"), `id` is not,
 -- so the name is the only key every row can offer. The id is carried alongside
--- Items the demo's figures name, by quality.
+-- ---------------------------------------------------------------------------
+-- The demo LEDGER
+-- ---------------------------------------------------------------------------
 --
--- REAL IDS, CHECKED, NOT REMEMBERED. The tooltip these arm is the client's own
--- and the colour comes from the client's own quality, so an id that is not
--- what it claims shows as a tooltip for the wrong item -- which is exactly the
--- failure demo mode exists to make visible. Verified against the Classic item
--- database rather than written from memory, which has been wrong here before.
+-- WHY THIS REPLACED A SECOND SET OF FIGURES. The History tab used to invent
+-- its stats directly -- an income, a spend, a top item -- while everything
+-- that reads the LEDGER (the item table, the transaction list, the IN/OUT/NET
+-- row) read the real store, which in demo mode holds nothing. So the Ledger
+-- window, the one screen with the most to show, opened empty, and the figures
+-- above it were answers to a question no visible data had asked.
 --
---   16984 Black Dragonscale Boots  epic   12784 Arcanite Reaper      rare
---   17193 Sulfuron Hammer          epic   12940 Dal'Rend's Sacred..  rare
+-- A generated ledger fixes both at once. Every reader computes from it through
+-- the SAME arithmetic it runs on real data, so the demo exercises the real
+-- paths rather than a parallel set, and every number on screen agrees with
+-- every other one.
+--
+-- REAL ITEMS, CHECKED, NOT REMEMBERED. Names, ids, qualities and stack sizes
+-- come from the CMaNGOS Classic-DB dump of the 1.12.1 `item_template`, not
+-- from memory -- which was wrong about four of them in this very table: Fiery
+-- Core and Lava Core are RARE on this patch, and Sulfuron Ingot and Nexus
+-- Crystal are EPIC. The tooltip these arm is the client's own, so an id that
+-- is not what it claims shows a tooltip for the wrong item, which is exactly
+-- the failure demo mode exists to make visible.
 --
 -- EACH CARRIES ITS QUALITY, and that is not redundancy. ui.CraftQualityOf asks
 -- the CLIENT, and the client only answers for items it has cached -- which for
--- a demo item the player has never seen or linked is none of them. So the
--- names drew in the default colour, which is the honest answer to "I do not
--- know" and the wrong one for data we made up ourselves and do know.
-db.DEMO_EPICS = {
-    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4 },
-    { item = "Sulfuron Hammer",         itemId = 17193, quality = 4 },
-}
-db.DEMO_RARES = {
-    { item = "Arcanite Reaper",          itemId = 12784, quality = 3 },
-    { item = "Dal'Rend's Sacred Charge", itemId = 12940, quality = 3 },
+-- an item the player has never seen or linked is none of them. So the names
+-- drew in the default colour, which is the honest answer to "I do not know"
+-- and the wrong one for data we made up ourselves and do know.
+--
+-- THE PRICES ARE OURS. No server dump can state what an auction house charges,
+-- so the unit prices are invented -- plausible, in copper, and the only part
+-- of this table that is not a checked fact.
+--
+-- WHAT THE SHAPE IS FOR. It is one trader's six months, and it is arranged so
+-- every path through the renderers has something to draw:
+--
+--   * All four quality tiers, so the colouring is visible without hovering.
+--   * TOP SALE and TOP ITEM are different items -- one Sulfuron Hammer is the
+--     biggest thing that ever happened, Black Dragonscale Boots is what
+--     actually earns. db.LedgerStats has always drawn that distinction and
+--     nothing ever demonstrated it.
+--   * Items traded BOTH ways (an average profit), SOLD only and BOUGHT only
+--     (an em dash where there is no other side).
+--   * Sales with no quantity, for the reason real ones have none. See below.
+db.DEMO_LEDGER_ITEMS = {
+    { item = "Sulfuron Hammer", itemId = 17193, quality = 4, qty = 1,
+      buy = nil, buys = 0, sell = 11000000, sales = 1 },
+    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,
+      buy = nil, buys = 0, sell = 4200000, sales = 6 },
+    { item = "Sulfuron Ingot", itemId = 17203, quality = 4, qty = 1,
+      buy = 900000, buys = 3, sell = nil, sales = 0 },
+    { item = "Nexus Crystal", itemId = 20725, quality = 4, qty = 1,
+      buy = 240000, buys = 5, sell = 310000, sales = 5 },
+    { item = "Arcanite Reaper", itemId = 12784, quality = 3, qty = 1,
+      buy = 2600000, buys = 9, sell = 3300000, sales = 4 },
+    { item = "Dal\'Rend\'s Sacred Charge", itemId = 12940, quality = 3, qty = 1,
+      buy = 2900000, buys = 2, sell = 3400000, sales = 1 },
+    { item = "Fiery Core", itemId = 17010, quality = 3, qty = 2,
+      buy = 210000, buys = 6, sell = 268000, sales = 6 },
+    { item = "Lava Core", itemId = 17011, quality = 3, qty = 2,
+      buy = 195000, buys = 6, sell = 245000, sales = 6 },
+    { item = "Large Brilliant Shard", itemId = 14344, quality = 3, qty = 3,
+      buy = 78000, buys = 8, sell = 99000, sales = 8 },
+    { item = "Arcanite Bar", itemId = 12360, quality = 2, qty = 5,
+      buy = 98000, buys = 10, sell = 126000, sales = 10 },
+    { item = "Arcane Crystal", itemId = 12363, quality = 2, qty = 2,
+      buy = 145000, buys = 7, sell = 181000, sales = 7 },
+    { item = "Blood of the Mountain", itemId = 11382, quality = 2, qty = 2,
+      buy = 160000, buys = 5, sell = 205000, sales = 5 },
+    { item = "Essence of Fire", itemId = 7078, quality = 2, qty = 5,
+      buy = 31000, buys = 8, sell = 39500, sales = 8 },
+    { item = "Greater Eternal Essence", itemId = 16203, quality = 2, qty = 5,
+      buy = 22000, buys = 9, sell = 29000, sales = 9 },
+    { item = "Dark Iron Bar", itemId = 11371, quality = 1, qty = 10,
+      buy = 14500, buys = 9, sell = 19000, sales = 9 },
+    { item = "Thorium Bar", itemId = 12359, quality = 1, qty = 20,
+      buy = 5200, buys = 12, sell = 7100, sales = 12 },
+    { item = "Black Dragonscale", itemId = 15416, quality = 1, qty = 4,
+      buy = 42000, buys = 7, sell = 56000, sales = 7 },
+    { item = "Enchanted Leather", itemId = 12810, quality = 1, qty = 5,
+      buy = 28000, buys = 6, sell = 36000, sales = 6 },
+    { item = "Illusion Dust", itemId = 16204, quality = 1, qty = 10,
+      buy = 9500, buys = 10, sell = 13000, sales = 10 },
+    { item = "Dense Grinding Stone", itemId = 12644, quality = 1, qty = 5,
+      buy = 12000, buys = 5, sell = 16500, sales = 5 },
+    { item = "Rune Thread", itemId = 14341, quality = 1, qty = 5,
+      buy = 4800, buys = 4, sell = nil, sales = 0 },
+    { item = "Runecloth", itemId = 14047, quality = 1, qty = 20,
+      buy = 1900, buys = 14, sell = 2650, sales = 14 },
+    { item = "Mageweave Cloth", itemId = 4338, quality = 1, qty = 20,
+      buy = 1400, buys = 10, sell = 1950, sales = 10 },
+    { item = "Silk Cloth", itemId = 4306, quality = 1, qty = 20,
+      buy = 900, buys = 9, sell = 1320, sales = 9 },
+    { item = "Linen Cloth", itemId = 2589, quality = 1, qty = 20,
+      buy = 180, buys = 8, sell = 310, sales = 8 },
+    { item = "Rugged Leather", itemId = 8170, quality = 1, qty = 20,
+      buy = 2100, buys = 9, sell = 2900, sales = 9 },
+    { item = "Thick Leather", itemId = 4304, quality = 1, qty = 20,
+      buy = 1250, buys = 7, sell = 1750, sales = 7 },
+    { item = "Dreamfoil", itemId = 13463, quality = 1, qty = 20,
+      buy = 2400, buys = 11, sell = 3350, sales = 11 },
+    { item = "Mountain Silversage", itemId = 13465, quality = 1, qty = 20,
+      buy = 2600, buys = 9, sell = 3600, sales = 9 },
+    { item = "Golden Sansam", itemId = 13464, quality = 1, qty = 20,
+      buy = 2200, buys = 8, sell = 3100, sales = 8 },
+    { item = "Peacebloom", itemId = 2447, quality = 1, qty = 20,
+      buy = 110, buys = 6, sell = 190, sales = 6 },
+    { item = "Silverleaf", itemId = 765, quality = 1, qty = 20,
+      buy = 120, buys = 6, sell = 205, sales = 6 },
+    { item = "Earthroot", itemId = 2449, quality = 1, qty = 20,
+      buy = 140, buys = 5, sell = 240, sales = 5 },
+    { item = "Briarthorn", itemId = 2450, quality = 1, qty = 20,
+      buy = 260, buys = 5, sell = 410, sales = 5 },
 }
 
--- Pick one, deterministically, from `seed`. Demo data that changed between two
--- repaints of the same window could not be looked at.
-function db.DemoPick(pool, seed)
-    local n = table.getn(pool or {})
-    if n == 0 then return nil end
-    return pool[math.mod(math.floor(seed or 0), n) + 1]
+-- How far back the demo trades. Matches db.OldestMoney's demo answer, so the
+-- chart and the ledger cover the same ground.
+db.DEMO_LEDGER_DAYS = 180
+
+-- How far back a SALE still knows its quantity. The posting book that answers
+-- "how many were in that stack" only exists from v1.54.7, so older sales have
+-- no count and never will -- db.RecordTxn treats absent as unknown and
+-- ui.CountText renders it as "?". That is a real, permanent property of
+-- anyone's history and the demo shows it rather than pretending otherwise.
+--
+-- WHERE THE LINE SITS IS A PRESENTATION CHOICE, not a claim about any real
+-- install: it puts roughly a quarter of the demo's sales on the unknown side.
+-- Enough that the "?" is plainly there to be seen and asked about, few enough
+-- that the column still reads as a column of counts rather than as a table
+-- that failed to load.
+db.DEMO_QTY_KNOWN_DAYS = 90
+
+-- ...and one recent sale in this many still cannot say, because this character
+-- had several stacks of that item up at different sizes. See db.MatchPosting:
+-- there is no auction id on 1.12 to ask which one sold.
+db.DEMO_QTY_MIXED = 9
+
+-- The quality of a demo item, by id, or nil for anything else.
+--
+-- Consulted by db.LedgerStats and db.LedgerItems so the rows they hand the
+-- renderers carry a colour the client cannot supply.
+function db.DemoQuality(itemId)
+    -- GATED ON DEMO MODE, and that is not belt-and-braces. Twenty-one of the
+    -- pool's items are ordinary trade goods a real player really trades, so
+    -- an ungated lookup would state a quality for a REAL Linen Cloth row and
+    -- override the client -- which is the one source that is actually
+    -- authoritative. A suite caught exactly that.
+    if not db.demo then return nil end
+    if not itemId then return nil end
+    local pool = db.DEMO_LEDGER_ITEMS
+    local i = 1
+    while i <= table.getn(pool) do
+        if pool[i].itemId == itemId then return pool[i].quality end
+        i = i + 1
+    end
+    return nil
 end
 
--- The History tab's figures, for demo mode.
+-- Build the demo's ledger: one array of transactions in exactly the shape
+-- db.RecordTxn writes, so every reader is none the wiser.
 --
--- SAME SHAPE AS db.LedgerStats, field for field, so ui.HistFigures and
--- ui.HistBlocks cannot tell the difference. A demo that returned a narrower
--- table would exercise the renderer's nil paths rather than its real ones,
--- which is the opposite of what a preview is for.
---
--- An EPIC on the sales side and a RARE on the buys side, so both quality
--- colours are on screen at once and the Top item hover can be checked against
--- two different tooltips. PROFIT's "Top seller" names the same item SALES does
--- -- it reads the same field, because until the ledger records quantities
--- (ROADMAP 5.6) the top earner IS the answer to both.
-function db.DemoStats(sinceEpoch, now)
+-- DETERMINISTIC. The same call always produces the same ledger -- a table
+-- whose figures changed between two repaints of the same window could not be
+-- read, and a seed taken from the clock looks perfectly stable to anything
+-- that checks twice in a row.
+function db.BuildDemoLedger(now)
     now = now or time()
-    local seed = db.DemoNext(db.DemoSeed("stats"))
-    local span = sinceEpoch and (now - sinceEpoch) or (86400 * 30)
-    local days = math.floor(span / 86400) + 1
-    if days < 1 then days = 1 end
+    local rows = {}
+    local seed = db.DemoSeed("ledger")
+    local span  = db.DEMO_LEDGER_DAYS * 86400
+    local known = db.DEMO_QTY_KNOWN_DAYS * 86400
+    local chars = db.DEMO_CHARS
+    local nChars = table.getn(chars)
+    local pool = db.DEMO_LEDGER_ITEMS
+    local p = 1
+    while p <= table.getn(pool) do
+        local it = pool[p]
+        local k = 1
+        while k <= 2 do
+            local kind, unit, count
+            if k == 1 then kind, unit, count = "buy", it.buy, it.buys
+            else            kind, unit, count = "sale", it.sell, it.sales end
+            local j = 1
+            while unit and unit > 0 and j <= (count or 0) do
+                seed = db.DemoNext(seed)
+                -- WEIGHTED TOWARD THE PRESENT (r squared). Six months of
+                -- trading spread evenly leaves the Day and Week periods --
+                -- the two a player actually checks -- with nothing in them.
+                local r = seed / db.DEMO_MOD
+                local age = math.floor(span * r * r)
+                seed = db.DemoNext(seed)
+                local qty = it.qty or 1
+                if qty > 1 then
+                    qty = qty + math.mod(math.floor(seed / 131), qty)
+                end
+                -- Plus or minus 15%, so a column of identical figures does
+                -- not read as a table that failed to load.
+                local amount =
+                    math.floor(unit * qty * (0.85 + (seed / db.DEMO_MOD) * 0.30))
+                if amount < 1 then amount = 1 end
+                seed = db.DemoNext(seed)
+                local who = chars[math.mod(math.floor(seed / 17), nChars) + 1]
+                local q = qty
+                if kind == "sale" then
+                    -- A BUY HAS ALWAYS KNOWN ITS COUNT; a sale has to learn it
+                    -- from the posting book. See db.DEMO_QTY_KNOWN_DAYS.
+                    if age > known then
+                        q = nil
+                    elseif math.mod(math.floor(seed / 7), db.DEMO_QTY_MIXED) == 0
+                    then
+                        q = nil
+                    end
+                end
+                table.insert(rows, { t = now - age, kind = kind,
+                                     item = it.item, amount = amount,
+                                     id = it.itemId, qty = q, who = who })
+                j = j + 1
+            end
+            k = k + 1
+        end
+        p = p + 1
+    end
+    -- CHRONOLOGICAL, because that is the order a real ledger is appended in
+    -- and the transaction list's default sort reverses it. The tiebreaks are
+    -- not decoration: `pairs` is unordered and table.sort is not stable, so
+    -- two entries sharing a second would otherwise swap between repaints.
+    table.sort(rows, function(a, b)
+        if a.t ~= b.t then return a.t < b.t end
+        if a.item ~= b.item then return a.item < b.item end
+        if a.kind ~= b.kind then return a.kind < b.kind end
+        return a.amount < b.amount
+    end)
+    return rows
+end
 
-    local epic = db.DemoPick(db.DEMO_EPICS, seed)
-    local rare = db.DemoPick(db.DEMO_RARES, math.floor(seed / 7))
+-- The built ledger, once per session.
+--
+-- CACHED because it is read several times per repaint -- the blocks, the
+-- strip, the item table and the transaction list all walk it -- and rebuilding
+-- five hundred rows behind every period button is work nobody asked for.
+-- Cleared when demo mode is toggled, so a second /aex demo re-anchors it to
+-- the current time rather than leaving a history that ends hours ago.
+db.demoLedger = nil
 
-    local income = 180000 + math.mod(seed, 900000)
-    local spend  =  60000 + math.mod(math.floor(seed / 13), 500000)
-    return {
-        income = income,
-        spend  = spend,
-        net    = income - spend,
-        saleN  = 12 + math.mod(math.floor(seed / 3), 200),
-        buyN   = 30 + math.mod(math.floor(seed / 11), 400),
-        days   = days,
-        oldest = now - span,
-        topSale = { item = epic.item, itemId = epic.itemId,
-                    quality = epic.quality,
-                    amount = math.floor(income * 0.31) },
-        topBuy  = { item = rare.item, itemId = rare.itemId,
-                    quality = rare.quality,
-                    amount = math.floor(spend * 0.42) },
-        topSaleItem = { item = epic.item, itemId = epic.itemId,
-                        quality = epic.quality,
-                        total = math.floor(income * 0.55) },
-        topBuyItem  = { item = rare.item, itemId = rare.itemId,
-                        quality = rare.quality,
-                        total = math.floor(spend * 0.61) },
-    }
+function db.DemoLedger()
+    if not db.demoLedger then db.demoLedger = db.BuildDemoLedger() end
+    return db.demoLedger
 end
 
 -- for quality colouring, where a missing one costs nothing.
 function db.LedgerStats(sinceEpoch, now)
-    if db.demo then return db.DemoStats(sinceEpoch, now) end
     now = now or time()
     local st = {
         income = 0, spend = 0, net = 0,
@@ -1931,7 +2114,7 @@ function db.LedgerStats(sinceEpoch, now)
     }
     local saleBy, buyBy = {}, {}
 
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]
@@ -1997,6 +2180,19 @@ function db.LedgerStats(sinceEpoch, now)
     st.days = db.WindowDays(sinceEpoch, st.oldest, now)
     st.topSaleItem = db.TopOf(saleBy)
     st.topBuyItem  = db.TopOf(buyBy)
+    -- A QUALITY THE CLIENT CANNOT ANSWER FOR. A real ledger row records none
+    -- and does not need to: ui.CraftQualityOf asks the client, which has the
+    -- item cached because the player traded it. A DEMO item the player has
+    -- never seen or linked is not cached, so without this the invented epics
+    -- drew in the ordinary text colour. Nil outside demo mode, which leaves
+    -- the renderers on their usual path.
+    local q = 1
+    local tops = { st.topSale, st.topBuy, st.topSaleItem, st.topBuyItem }
+    while q <= 4 do
+        local rec = tops[q]
+        if rec and not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end
+        q = q + 1
+    end
     return st
 end
 
@@ -2037,7 +2233,7 @@ end
 -- recorded, and neither half is then the whole item.
 function db.LedgerItems(sinceEpoch, now)
     local byName, order = {}, {}
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]
@@ -2087,6 +2283,9 @@ function db.LedgerItems(sinceEpoch, now)
     while r <= table.getn(order) do
         local rec = order[r]
         if not rec.itemId then rec.itemId = db.IdFromName(rec.item) end
+        -- Same reason db.LedgerStats states one: the client has never seen a
+        -- demo item, so it cannot colour the name. Nil on real data.
+        if not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end
         rec.avgSell   = db.AvgUnit(rec.soldMoney, rec.sold)
         rec.avgBuy    = db.AvgUnit(rec.boughtMoney, rec.bought)
         -- PER UNIT, and only when BOTH sides are known. An item you have only
@@ -2181,7 +2380,7 @@ end
 function db.SaleHistory(itemName)
     if not itemName then return nil, 0 end
     local amounts, last = {}, nil
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]

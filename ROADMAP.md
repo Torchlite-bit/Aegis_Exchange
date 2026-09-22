@@ -5153,7 +5153,11 @@ that list into the book.
 repaired, not the ledger.*
 
 **Answered in v1.54.8.** The book only helps from v1.54.7 onward, so sales
-already in the ledger have no quantity and never will. `ui.CountText` renders
+already in the ledger have no quantity and never will.
+
+*(And the demo shows that rather than hiding it — see the demo-ledger note
+below. A preview whose Sold column is complete would be a preview of a
+feature nobody has.)* `ui.CountText` renders
 that rather than hiding it: `120 +2?` for a partly-counted item, `?` for one
 with nothing countable, an em dash for nothing at all. The `+2?` is
 deliberately NOT a unit count — two uncounted sales might be two items or
@@ -5164,6 +5168,44 @@ all the money over only the countable units divides a bigger number by a
 smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
+
+### Demo mode covers the ledger — ✅ **DONE** (v1.54.11)
+
+Demo mode used to invent the History tab's **figures** through a `db.DemoStats`
+that ran beside `db.LedgerStats` and had to be kept in step with it by hand.
+Everything that reads the **ledger** read the real store, which in demo mode is
+empty — so the Ledger window, the screen with the most layout to judge, opened
+blank and the figures above it agreed with nothing on screen.
+
+It invents the **ledger** now. `db.LedgerSource` is the seam: `db.Ledger` stays
+the store and the write target, and demo mode substitutes a generated array in
+exactly the shape `db.RecordTxn` writes. Every reader — the blocks, the
+six-figure strip, the item table, the transaction list, the IN / OUT / NET row
+— computes from it through the same arithmetic it runs on real data, so the
+demo exercises the real paths and every number agrees with every other.
+
+- **The items are checked facts.** Names, ids, qualities and stack sizes come
+  from the CMaNGOS Classic-DB dump of the 1.12.1 `item_template`. Memory was
+  wrong about four of them: Fiery Core and Lava Core are RARE on this patch,
+  and Sulfuron Ingot and Nexus Crystal are EPIC. The tooltip they arm is the
+  client's own, so a wrong id shows the wrong item. **The prices are ours** and
+  are the only invented part of the table.
+- **The shape is the test surface.** All four quality tiers; items traded both
+  ways, only sold, and only bought; and a minority of sales with no quantity,
+  weighted by age because that is the real limit. `topSale` and `topSaleItem`
+  are deliberately different items, which is a distinction `db.LedgerStats` has
+  always drawn and nothing could previously demonstrate.
+- **Ages are weighted toward the present** (r squared). Six months spread
+  evenly leaves the Day and Week periods — the two anyone actually checks —
+  empty.
+- **`db.DemoQuality` is gated on demo mode.** Most of the pool is ordinary
+  trade goods, so an ungated lookup would state a colour for a *real* Linen
+  Cloth row and override the client, which is the authoritative source. A
+  suite caught exactly that.
+
+`db.DemoStats` and `db.DemoPick` are gone; the epic and rare pools they chose
+between are superseded by `db.DEMO_LEDGER_ITEMS`, and which item tops a column
+is now decided by what was traded rather than by a seed.
 
 **§3.4 is blocked on this section, and specifically on quantity.** The Ledger
 window's Sold column and both per-unit averages are unit counts; without the

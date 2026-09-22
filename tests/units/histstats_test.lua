@@ -565,13 +565,101 @@ do
 end
 
 -- ---------------------------------------------------------------------------
-H.section("demo figures")
+H.section("the demo ledger")
 -- ---------------------------------------------------------------------------
 
--- SAME SHAPE AS THE REAL ONES, field for field, or the renderer exercises its
--- nil paths instead of its real ones -- which is the opposite of a preview.
+-- WHAT CHANGED AND WHY IT IS TESTED THIS WAY. Demo mode used to invent the
+-- FIGURES -- an income, a spend, a top item -- through a db.DemoStats that ran
+-- beside db.LedgerStats and had to be kept in step with it by hand. It now
+-- invents the LEDGER, and db.LedgerStats computes the demo's figures the same
+-- way it computes everyone else's. So these checks are no longer "the parallel
+-- function returns a plausible table"; they are "the real arithmetic, run over
+-- invented transactions, produces what the tab needs".
+
 do
     db.demo = true
+    db.demoLedger = nil
+    local led = db.DemoLedger()
+
+    H.check("the demo has a ledger", table.getn(led) > 100, table.getn(led))
+
+    -- SHAPED LIKE A REAL ENTRY, field for field, or every reader exercises its
+    -- nil paths instead of its real ones -- which is the opposite of what a
+    -- preview is for.
+    local e = led[1]
+    H.check("entries are stamped", type(e.t) == "number")
+    H.check("...and have a kind", e.kind == "sale" or e.kind == "buy")
+    H.check("...and an item", type(e.item) == "string")
+    H.check("...and an amount", (e.amount or 0) > 0)
+    H.check("...and an id to hover", type(e.id) == "number")
+    H.check("...and a character", type(e.who) == "string")
+
+    -- CHRONOLOGICAL, the order a real ledger is appended in.
+    local backwards = false
+    local i = 2
+    while i <= table.getn(led) do
+        if led[i].t < led[i - 1].t then backwards = true end
+        i = i + 1
+    end
+    H.check("the ledger runs forwards", not backwards)
+end
+
+-- DETERMINISTIC, AND NOT MERELY WITHIN ONE SECOND. A table whose figures
+-- changed between two repaints of the same window could not be read -- and a
+-- seed taken from the clock looks perfectly stable to a check that calls twice
+-- in a row, which is how an earlier version of this passed a sabotage that
+-- replaced the seed with time().
+do
+    local realTime = time
+    time = function() return 1000000000 end
+    local a = db.BuildDemoLedger(1000000000)
+    time = function() return 1999999999 end
+    local b = db.BuildDemoLedger(1000000000)
+    time = realTime
+    H.eq("the same ledger at any hour", table.getn(a), table.getn(b))
+    local differs = nil
+    local i = 1
+    while i <= table.getn(a) do
+        if a[i].item ~= b[i].item or a[i].amount ~= b[i].amount
+           or a[i].qty ~= b[i].qty or a[i].who ~= b[i].who then
+            differs = a[i].item
+        end
+        i = i + 1
+    end
+    H.isNil("...down to every row", differs)
+end
+
+-- EVERY PERIOD HAS SOMETHING IN IT. Six months of trading spread evenly leaves
+-- Day and Week -- the two a player actually checks -- empty, which is why the
+-- ages are weighted toward the present. Asserted because "the demo looks fine"
+-- is only ever checked on the period that happens to be selected.
+do
+    db.demo = true
+    db.demoLedger = nil
+    local now = time()
+    local windows = { 1, 7, 30, 180 }
+    local thin = nil
+    local i = 1
+    while i <= table.getn(windows) do
+        local st = db.LedgerStats(now - windows[i] * 86400, now)
+        if st.saleN < 3 or st.buyN < 3 then thin = windows[i] end
+        i = i + 1
+    end
+    H.isNil("every period has trading in it", thin)
+
+    -- ...and a longer window is never smaller than a shorter one.
+    local day  = db.LedgerStats(now - 86400, now)
+    local all  = db.LedgerStats(nil, now)
+    H.check("the whole history is the biggest window", all.saleN > day.saleN)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("demo figures, computed the real way")
+-- ---------------------------------------------------------------------------
+
+do
+    db.demo = true
+    db.demoLedger = nil
     local st = db.LedgerStats(nil, NOW)
     H.check("income", st.income > 0, st.income)
     H.check("spend", st.spend > 0, st.spend)
@@ -586,120 +674,199 @@ do
 
     -- AN EPIC ON THE SALES SIDE, A RARE ON THE BUYS SIDE, so both quality
     -- colours are on screen at once and the hover can be checked against two
-    -- different tooltips.
-    local isEpic, isRare = false, false
-    local i = 1
-    while i <= table.getn(db.DEMO_EPICS) do
-        if db.DEMO_EPICS[i].itemId == st.topSaleItem.itemId then isEpic = true end
-        i = i + 1
-    end
-    i = 1
-    while i <= table.getn(db.DEMO_RARES) do
-        if db.DEMO_RARES[i].itemId == st.topBuyItem.itemId then isRare = true end
-        i = i + 1
-    end
-    H.check("the sales side names an epic", isEpic, st.topSaleItem.item)
-    H.check("the buys side names a rare", isRare, st.topBuyItem.item)
+    -- different tooltips. It used to be arranged by picking from two pools;
+    -- it is now a property of what the demo trader trades, which is why it is
+    -- asserted on the RESULT rather than on the pools.
+    H.eq("the sales side names an epic", st.topSaleItem.quality, 4)
+    H.eq("the buys side names a rare", st.topBuyItem.quality, 3)
     H.check("...which are not the same item",
             st.topSaleItem.itemId ~= st.topBuyItem.itemId)
+
+    -- TOP SALE AND TOP ITEM ARE DIFFERENT QUESTIONS -- "the best thing that
+    -- ever happened once" against "what actually earns here" -- and the demo
+    -- is the only place that distinction can be SEEN. A pool that answered
+    -- both with one item would make the two labels look like a duplication.
+    H.neq("the biggest single sale is not the biggest earner",
+          st.topSale.itemId, st.topSaleItem.itemId)
+    H.eq("...and it is an epic too", st.topSale.quality, 4)
+    H.eq("...and the biggest single buy is a rare", st.topBuy.quality, 3)
 
     -- EVERY DEMO ITEM CARRIES AN ID, or the hover this mode exists to let you
     -- check is armed on nothing.
     H.check("the top sold item can be hovered", st.topSaleItem.itemId ~= nil)
     H.check("the top bought item can be hovered", st.topBuyItem.itemId ~= nil)
 
-    -- AND EACH STATES ITS QUALITY. ui.CraftQualityOf asks the CLIENT, and the
-    -- client only answers for items it has cached -- which for an item the
-    -- player has never seen or linked is none of them. The colour therefore
-    -- appeared only AFTER hovering, because the tooltip is what fetches the
-    -- item. Stating it means the name is purple the moment the tab opens.
-    H.eq("the sales side states epic", st.topSaleItem.quality, 4)
-    H.eq("the buys side states rare", st.topBuyItem.quality, 3)
-    H.eq("...and so does the single biggest sale", st.topSale.quality, 4)
-    H.eq("...and the single biggest buy", st.topBuy.quality, 3)
+    -- IN PROFIT OVERALL, which is what makes the Profit block worth looking
+    -- at. Every item in the pool sells for more than it cost, so the only way
+    -- this goes negative is the generator reading the two prices the wrong
+    -- way round.
+    H.check("the demo trader made money", st.net > 0, st.net)
+end
 
-    -- DETERMINISTIC, AND NOT MERELY WITHIN ONE SECOND. Figures that changed
-    -- between two repaints of the same window could not be read -- and a seed
-    -- taken from the clock looks perfectly stable to a test that calls twice
-    -- in a row, which is how the first version of this check passed a sabotage
-    -- that replaced the seed with time().
-    local realTime = time
-    time = function() return 1000000000 end
-    local a = db.LedgerStats(nil, NOW)
-    time = function() return 1999999999 end
-    local b = db.LedgerStats(nil, NOW)
-    time = realTime
-    H.eq("the same window gives the same figures at any hour", a.income, b.income)
-    H.eq("...and the same items", a.topSaleItem.itemId, b.topSaleItem.itemId)
-    H.eq("...and the same counts", a.saleN, b.saleN)
-
-    -- It must not be reading the ledger at all.
+-- IT MUST NOT BE READING THE REAL LEDGER, and the real ledger must still be
+-- where a transaction LANDS. db.Ledger is the store and db.LedgerSource is the
+-- reader; keeping them apart is the whole reason nothing invented can reach a
+-- player's SavedVariables.
+do
+    db.demo = true
+    db.demoLedger = nil
     reset()
-    H.eq("an empty ledger changes nothing in demo mode",
-         db.LedgerStats(nil, NOW).income, st.income)
+    local st = db.LedgerStats(nil, NOW)
+    H.check("an empty real ledger changes nothing in demo mode", st.income > 0)
+
+    db.RecordTxn("sale", "Linen Cloth", 500, 2589, 20)
+    H.eq("a transaction logged in demo mode goes to the REAL ledger",
+         table.getn(db.Ledger()), 1)
+    H.check("...and not into the demo's",
+            table.getn(db.DemoLedger()) > 1)
+    reset()
     db.demo = nil
 end
 
--- Every id in the pools is distinct, so "random" cannot pick the same item for
--- both sides and hide the whole point of having two.
+-- THE DEMO'S FACTS MUST NOT LEAK INTO REAL DATA. Twenty-one of the pool's
+-- items are ordinary trade goods a real player really trades, so a quality
+-- lookup that answered outside demo mode would state a colour for a REAL
+-- Linen Cloth row and override the client -- the one source that is actually
+-- authoritative.
 do
-    local seen, clash = {}, false
-    local pools = { db.DEMO_EPICS, db.DEMO_RARES }
-    local p = 1
-    while p <= 2 do
-        local i = 1
-        while i <= table.getn(pools[p]) do
-            local id = pools[p][i].itemId
-            if seen[id] then clash = true end
-            seen[id] = true
-            i = i + 1
-        end
-        p = p + 1
-    end
-    H.check("no demo item id is used twice", not clash)
+    db.demo = nil
+    H.isNil("no quality is stated outside demo mode", db.DemoQuality(2589))
+    db.demo = true
+    H.eq("...and one is inside it", db.DemoQuality(2589), 1)
+    db.demo = nil
 end
 
 -- THE QUALITY REACHES THE RENDERER, not just the stats table. It travels as
 -- the FOURTH element of a Top item row, and a `top()` that drops it would
--- leave the demo exactly as it was.
+-- leave the demo looking exactly as it did before any of this -- every name in
+-- the default colour.
 do
     db.demo = true
+    db.demoLedger = nil
     local blocks = ui.HistBlocks(db.LedgerStats(nil, NOW))
     H.eq("the sales block carries epic through", blocks[1].rows[3][4], 4)
     H.eq("the expenses block carries rare through", blocks[2].rows[3][4], 3)
     H.check("...and still names the items",
             blocks[1].rows[3][2] ~= blocks[2].rows[3][2])
     db.demo = nil
+    db.demoLedger = nil
 end
 
--- EVERY ENTRY IN EACH POOL, not just whichever one the seed picked. A pool of
--- two where one has the wrong quality is a coin toss over whether any check
--- notices -- and that is exactly how a sabotage flipping Arcanite Reaper to
--- epic passed all 162 of them.
+-- ---------------------------------------------------------------------------
+H.section("the demo item pool")
+-- ---------------------------------------------------------------------------
+
+-- ITEM IDS ARE CHECKED FACTS, NOT REMEMBERED ONES. These were taken from the
+-- CMaNGOS Classic-DB dump of the 1.12.1 item_template, and memory was wrong
+-- about four of them -- Fiery Core and Lava Core are RARE on this patch, and
+-- Sulfuron Ingot and Nexus Crystal are EPIC. The tooltip they arm is the
+-- client's own, so an id that is not what it claims shows the wrong item.
 do
-    local bad = nil
+    local pool = db.DEMO_LEDGER_ITEMS
+    local n = table.getn(pool)
+    H.check("the pool is worth scrolling", n > 20, n)
+
+    local seen, clash, badQ, noPrice, noQty = {}, nil, nil, nil, nil
+    local tiers = {}
+    local sellOnly, buyOnly, bothWays = 0, 0, 0
     local i = 1
-    while i <= table.getn(db.DEMO_EPICS) do
-        if db.DEMO_EPICS[i].quality ~= 4 then bad = db.DEMO_EPICS[i].item end
+    while i <= n do
+        local it = pool[i]
+        if seen[it.itemId] then clash = it.item end
+        seen[it.itemId] = true
+        if not it.quality or it.quality < 1 or it.quality > 4 then
+            badQ = it.item
+        else
+            tiers[it.quality] = (tiers[it.quality] or 0) + 1
+        end
+        local buys  = (it.buy  or 0) > 0 and (it.buys  or 0) > 0
+        local sells = (it.sell or 0) > 0 and (it.sales or 0) > 0
+        if not buys and not sells then noPrice = it.item end
+        if buys and sells then bothWays = bothWays + 1
+        elseif sells then sellOnly = sellOnly + 1
+        elseif buys then buyOnly = buyOnly + 1 end
+        if not it.qty or it.qty < 1 then noQty = it.item end
         i = i + 1
     end
-    H.isNil("every demo epic is quality 4", bad)
 
-    bad = nil
-    i = 1
-    while i <= table.getn(db.DEMO_RARES) do
-        if db.DEMO_RARES[i].quality ~= 3 then bad = db.DEMO_RARES[i].item end
-        i = i + 1
+    H.isNil("no item id is used twice", clash)
+    H.isNil("every item states a quality the client understands", badQ)
+    H.isNil("every item is traded at least one way", noPrice)
+    H.isNil("every item has a stack size", noQty)
+
+    -- ALL FOUR TIERS, so the colouring is visible without hovering anything.
+    H.check("there are epics", (tiers[4] or 0) > 0)
+    H.check("...and rares", (tiers[3] or 0) > 0)
+    H.check("...and uncommons", (tiers[2] or 0) > 0)
+    H.check("...and plain items", (tiers[1] or 0) > 0)
+
+    -- ...AND ALL THREE TRADING SHAPES, because the item table renders an em
+    -- dash where there is no other side and that path needs a row.
+    -- TWO OF EACH ONE-WAY SHAPE, deliberately, so that losing one still
+    -- leaves a check to fail. A pool carrying a single sold-only item can
+    -- have it quietly given a buy price and nothing notices.
+    H.check("some items are traded both ways", bothWays > 5, bothWays)
+    H.check("...at least two are only sold", sellOnly >= 2, sellOnly)
+    H.check("...and at least two are only bought", buyOnly >= 2, buyOnly)
+
+    -- EVERY ITEM SELLS FOR MORE THAN IT COST. The demo is one trader's six
+    -- profitable months; a ledger in the red down its whole length is not a
+    -- preview of anything, and swapping the two prices in the generator is a
+    -- one-character slip that produces exactly that.
+    local upsideDown = nil
+    local j = 1
+    while j <= n do
+        local it = pool[j]
+        if it.buy and it.sell and it.sell <= it.buy then upsideDown = it.item end
+        j = j + 1
     end
-    H.isNil("every demo rare is quality 3", bad)
-
-    -- ...and each pool holds more than one, or "random" is a constant.
-    H.check("there is a choice of epics", table.getn(db.DEMO_EPICS) > 1)
-    H.check("...and of rares", table.getn(db.DEMO_RARES) > 1)
+    H.isNil("every item sells for more than it cost", upsideDown)
 end
 
-H.isNil("picking from an empty pool is nothing", db.DemoPick({}, 3))
-H.check("picking is in range", db.DemoPick(db.DEMO_EPICS, 99999) ~= nil)
+-- A SALE CAN HAVE NO QUANTITY AND A BUY NEVER DOES, which is the real
+-- asymmetry rather than a decoration: the purchase path has always known its
+-- count, while a sale learns it from a posting book that only exists from
+-- v1.54.7. Older sales have none and never will, and a character with several
+-- stacks of one item up at different sizes still cannot say. The demo shows
+-- that instead of pretending the column is complete.
+do
+    db.demo = true
+    db.demoLedger = nil
+    local led = db.DemoLedger()
+    local unknownSales, knownSales, unknownBuys = 0, 0, 0
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if e.kind == "buy" then
+            if not e.qty then unknownBuys = unknownBuys + 1 end
+        elseif e.qty then knownSales = knownSales + 1
+        else unknownSales = unknownSales + 1 end
+        i = i + 1
+    end
+    H.check("some sales cannot say how many", unknownSales > 0, unknownSales)
+    H.check("...and most still can", knownSales > unknownSales, knownSales)
+    H.eq("a buy always knows its count", unknownBuys, 0)
+
+    -- AND IT IS THE AGE THAT DECIDES. Asserted separately because the
+    -- one-in-nine ambiguous case would keep "some sales cannot say" true on
+    -- its own, leaving the cutoff free to be removed without a single check
+    -- going red -- and the cutoff is the half that models the real limit.
+    local cutoff = time() - db.DEMO_QTY_KNOWN_DAYS * 86400
+    local oldKnown, oldSales = nil, 0
+    i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if e.kind == "sale" and e.t < cutoff then
+            oldSales = oldSales + 1
+            if e.qty then oldKnown = e.item end
+        end
+        i = i + 1
+    end
+    H.check("there are sales older than the posting book", oldSales > 0)
+    H.isNil("...and not one of them states a quantity", oldKnown)
+    db.demo = nil
+    db.demoLedger = nil
+end
 
 -- ---------------------------------------------------------------------------
 H.section("where a band figure sits")

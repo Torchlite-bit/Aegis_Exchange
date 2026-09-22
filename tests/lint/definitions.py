@@ -43,6 +43,20 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.54.11. Demo mode used to invent the History tab's FIGURES directly
+    # while everything that reads the LEDGER read the real store, which in
+    # demo mode is empty -- so the Ledger window opened blank and the numbers
+    # above it answered a question no visible data had asked. A generated
+    # LEDGER replaced both: db.LedgerSource substitutes it and every reader
+    # computes through the same arithmetic it runs on real data, so there is
+    # no parallel statistics function left to keep in step. db.DemoPick chose
+    # between the two-item epic and rare pools that went with it; the pool it
+    # picked from is now db.DEMO_LEDGER_ITEMS, and which item tops a column is
+    # decided by what was traded rather than by a seed.
+    "db.DemoStats": "v1.54.11 -- db.LedgerStats computes the demo's figures "
+                    "from db.DemoLedger through the real path",
+    "db.DemoPick":  "v1.54.11 -- with no epic/rare pools to choose between, "
+                    "nothing picks; db.DEMO_LEDGER_ITEMS states every item",
     # v1.54.0. The History tab was split -- a table on the left, a chart on
     # the right -- and this divided the panel between them. Neither half had
     # room, so they became two screens: the tab is the dashboard and the chart

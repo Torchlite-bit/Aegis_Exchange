@@ -3068,8 +3068,9 @@ end
     # ...and the same collision from the other end: the ledger's refresh
     # reaching over and clearing the chart's selection.
     ('ledger-refresh-clears-the-chart', 'ui/frame.lua',
-     '    local led = A.db.Ledger()\n    ui.histView = {}',
-     '    local led = A.db.Ledger()\n    ui.histWho = {}\n    ui.histView = {}',
+     '    local led = A.db.LedgerSource()\n    ui.histView = {}',
+     '    local led = A.db.LedgerSource()\n    ui.histWho = {}\n'
+     '    ui.histView = {}',
      'histgraph'),
 
     # 'All Players' ticking alongside the names instead of clearing them,
@@ -6127,37 +6128,90 @@ end""",
      "                    rec.itemId = db.IdFromName(rec.item) or rec.itemId",
      "histstats"),
 
-    # ---- demo figures ------------------------------------------------------
-    ("demostats-not-used-in-demo-mode", "core/db.lua",
-     "    if db.demo then return db.DemoStats(sinceEpoch, now) end",
-     "    local _ = sinceEpoch",
+    # ---- the demo LEDGER ---------------------------------------------------
+    # Demo mode used to invent the FIGURES beside db.LedgerStats; it invents
+    # the LEDGER now and the real arithmetic runs over it. The five sabotages
+    # that used to sit here aimed at db.DemoStats and db.DemoPick, which is
+    # why they are gone rather than re-pointed.
+    ("demo-ledger-not-consulted", "core/db.lua",
+     "    if db.demo then return db.DemoLedger() end",
+     "    local _ = db.demo",
      "histstats"),
 
-    # An epic on the sales side and a rare on the buys side, so both quality
-    # colours are on screen and the hover can be checked against two tooltips.
-    ("demostats-uses-one-quality-for-both", "core/db.lua",
-     "    local rare = db.DemoPick(db.DEMO_RARES, math.floor(seed / 7))",
-     "    local rare = db.DemoPick(db.DEMO_EPICS, math.floor(seed / 7))",
-     "histstats"),
-
-    # Every demo item carries an id, or the hover the mode exists to let you
-    # check is armed on nothing.
-    ("demostats-drops-the-item-ids", "core/db.lua",
-     "        topSaleItem = { item = epic.item, itemId = epic.itemId,",
-     "        topSaleItem = { item = epic.item,",
+    # THE OTHER HALF OF THE SEAM. db.Ledger is the store and stays the write
+    # target; substituting there instead would put invented trading on a path
+    # that can reach a player's SavedVariables.
+    ("demo-ledger-replaces-the-store", "core/db.lua",
+     "function db.Ledger()\n    return (db.account and db.account.ledger) or {}",
+     "function db.Ledger()\n    if db.demo then return db.DemoLedger() end\n"
+     "    return (db.account and db.account.ledger) or {}",
      "histstats"),
 
     # Figures that changed between two repaints of the same window could not be
-    # read.
-    ("demostats-is-not-deterministic", "core/db.lua",
-     '    local seed = db.DemoNext(db.DemoSeed("stats"))',
+    # read -- and a seed taken from the clock looks perfectly stable to a check
+    # that calls twice in a row.
+    ("demo-ledger-is-not-deterministic", "core/db.lua",
+     '    local seed = db.DemoSeed("ledger")',
      "    local seed = db.DemoNext(time())",
      "histstats"),
 
-    ("demopick-runs-off-the-pool", "core/db.lua",
-     "    return pool[math.mod(math.floor(seed or 0), n) + 1]",
-     "    return pool[math.floor(seed or 0) + 1]",
+    # Six months spread EVENLY leaves Day and Week -- the two periods a player
+    # actually checks -- with nothing in them.
+    ("demo-ledger-spreads-evenly", "core/db.lua",
+     "                local age = math.floor(span * r * r)",
+     "                local age = math.floor(span * r)",
      "histstats"),
+
+    # ...and pushing everything to one end is the same failure the other way.
+    ("demo-ledger-is-all-ancient", "core/db.lua",
+     "                local age = math.floor(span * r * r)",
+     "                local age = span - math.floor(span * r * r)",
+     "histstats"),
+
+    # A BUY HAS ALWAYS KNOWN ITS COUNT. Dropping quantities on both sides
+    # makes the demo show a failure the buy path does not have.
+    ("demo-ledger-forgets-buy-counts", "core/db.lua",
+     '                if kind == "sale" then',
+     "                if true then",
+     "histstats"),
+
+    # ...and never dropping one hides the failure the SALE path really has,
+    # which is the whole reason ui.CountText renders a question mark.
+    ("demo-ledger-always-knows-the-count", "core/db.lua",
+     "                    if age > known then\n                        q = nil",
+     "                    if false then\n                        q = nil",
+     "histstats"),
+
+    # Every entry carries an id, or the hover the mode exists to let you check
+    # is armed on nothing.
+    ("demo-ledger-drops-the-item-ids", "core/db.lua",
+     "                                     id = it.itemId, qty = q, who = who })",
+     "                                     qty = q, who = who })",
+     "histstats"),
+
+    # A ledger out of order is one the transaction list's default sort cannot
+    # reverse into anything meaningful.
+    ("demo-ledger-is-unsorted", "core/db.lua",
+     "        if a.t ~= b.t then return a.t < b.t end",
+     "        if a.t ~= b.t then return a.t > b.t end",
+     "histstats"),
+
+    # ---- ...and the UI reads through the seam ------------------------------
+    # A perfect demo ledger nobody reads is an empty window. Both of the
+    # window's own reads go through db.LedgerSource.
+    ("history-list-reads-the-store-directly", "ui/frame.lua",
+     "    local led = A.db.LedgerSource()\n    ui.histView = {}",
+     "    local led = A.db.Ledger()\n    ui.histView = {}",
+     "ledgeritems"),
+
+    # A STATED quality wins over the client's on an item row too. Asking the
+    # client first gets nil for an uncached item and the default colour.
+    ("item-row-asks-the-client-first", "ui/frame.lua",
+     "            local q = rec.quality\n"
+     "                      or (rec.itemId and ui.CraftQualityOf(rec.itemId)) or nil",
+     "            local q = (rec.itemId and ui.CraftQualityOf(rec.itemId))\n"
+     "                      or rec.quality or nil",
+     "ledgeritems"),
 
     # ---- the hover target itself -------------------------------------------
     # ui.skin plates every Button it is given, and on an invisible hover target
@@ -6172,18 +6226,71 @@ end""",
     # cached. A demo item the player has never seen is not one, so the name
     # drew in the default colour until the tooltip fetched it.
     ("demostats-drops-the-quality", "core/db.lua",
-     "        topSaleItem = { item = epic.item, itemId = epic.itemId,\n                        quality = epic.quality,",
-     "        topSaleItem = { item = epic.item, itemId = epic.itemId,",
+     "        if rec and not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end",
+     "        if rec then local _ = rec.itemId end",
+     "histstats"),
+
+    # ...and the same on every row of the item table, which is 34 names drawn
+    # in one colour rather than four.
+    ("ledgeritems-drops-the-quality", "core/db.lua",
+     "        if not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end",
+     "        local _ = rec.quality",
+     "ledgeritems"),
+
+    # THE DEMO'S FACTS MUST NOT LEAK INTO REAL DATA. Most of the pool is
+    # ordinary trade goods a real player really trades, so an ungated lookup
+    # states a colour for a REAL Linen Cloth row and overrides the client --
+    # the one source that is authoritative.
+    ("demo-quality-answers-outside-demo-mode", "core/db.lua",
+     "    if not db.demo then return nil end\n    if not itemId then return nil end",
+     "    if not itemId then return nil end",
      "histstats"),
 
     ("demo-epics-are-not-epic", "core/db.lua",
-     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4 },',
-     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 3 },',
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,',
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 3, qty = 1,',
      "histstats"),
 
     ("demo-rares-are-not-rare", "core/db.lua",
-     '    { item = "Arcanite Reaper",          itemId = 12784, quality = 3 },',
-     '    { item = "Arcanite Reaper",          itemId = 12784, quality = 4 },',
+     '    { item = "Arcanite Reaper", itemId = 12784, quality = 3, qty = 1,',
+     '    { item = "Arcanite Reaper", itemId = 12784, quality = 4, qty = 1,',
+     "histstats"),
+
+    # THE TWO LABELS ARE TWO QUESTIONS -- "the best thing that ever happened
+    # once" against "what actually earns here". A pool where one item answers
+    # both makes them look like a duplication nobody would miss removing.
+    ("demo-top-sale-is-also-the-top-earner", "core/db.lua",
+     '    { item = "Sulfuron Hammer", itemId = 17193, quality = 4, qty = 1,\n'
+     '      buy = nil, buys = 0, sell = 11000000, sales = 1 },',
+     '    { item = "Sulfuron Hammer", itemId = 17193, quality = 4, qty = 1,\n'
+     '      buy = nil, buys = 0, sell = 11000000, sales = 6 },',
+     "histstats"),
+
+    # Every trading shape needs a row, or the em dash the item table draws
+    # where there is no other side is never on screen. The pool carries TWO of
+    # each shape so that losing one is still caught.
+    ("demo-pool-loses-a-sold-only-item", "core/db.lua",
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,\n'
+     '      buy = nil, buys = 0, sell = 4200000, sales = 6 },',
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,\n'
+     '      buy = 3000000, buys = 6, sell = 4200000, sales = 6 },',
+     "histstats"),
+
+    ("demo-pool-loses-a-bought-only-item", "core/db.lua",
+     '    { item = "Rune Thread", itemId = 14341, quality = 1, qty = 5,\n'
+     '      buy = 4800, buys = 4, sell = nil, sales = 0 },',
+     '    { item = "Rune Thread", itemId = 14341, quality = 1, qty = 5,\n'
+     '      buy = 4800, buys = 4, sell = 6200, sales = 4 },',
+     "histstats"),
+
+    # BUY PRICE AND SELL PRICE, not the other way round. Swapped, the demo
+    # trader loses money on everything -- a ledger nobody would believe and a
+    # Profit block that is red down its whole length.
+    ("demo-ledger-swaps-buy-and-sell-prices", "core/db.lua",
+     '            if k == 1 then kind, unit, count = "buy", it.buy, it.buys\n'
+     '            else            kind, unit, count = "sale", it.sell, it.sales end',
+     '            if k == 1 then kind, unit, count = "buy", it.sell, it.buys\n'
+     '            else            kind, unit, count = "sale", it.buy, it.sales end',
      "histstats"),
 
     # The quality has to reach the RENDERER, not just the stats table -- it

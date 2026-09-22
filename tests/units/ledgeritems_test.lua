@@ -393,4 +393,98 @@ do
             string.find(body, "ui.histRows[h]:Hide()", 1, true) ~= nil)
 end
 
+-- ---------------------------------------------------------------------------
+H.section("the Items view in demo mode")
+-- ---------------------------------------------------------------------------
+
+-- THE SCREEN THE DEMO USED TO LEAVE BLANK. Demo mode invented the History
+-- tab's figures and nothing else, so the Ledger window -- the one with the
+-- most to show and the most layout to judge -- opened empty on a real store
+-- that holds nothing. It reads a generated ledger now, through this same
+-- function and the same arithmetic.
+do
+    db.demo = true
+    db.demoLedger = nil
+    local rows = db.LedgerItems(nil, NOW)
+    local n = table.getn(rows)
+    H.check("the table has rows to scroll", n > 20, n)
+    H.eq("one per item the demo trades", n, table.getn(db.DEMO_LEDGER_ITEMS))
+
+    -- EVERY COLUMN THE TABLE DRAWS HAS A ROW THAT EXERCISES IT, which is the
+    -- whole job of a preview: an average that resolves, an average that is an
+    -- em dash because there is no other side, and a count that is unknown.
+    local withProfit, soldOnly, boughtOnly, withUnknown, coloured = 0, 0, 0, 0, 0
+    local tiers = {}
+    local i = 1
+    while i <= n do
+        local r = rows[i]
+        if r.avgProfit then withProfit = withProfit + 1 end
+        if r.soldTxns > 0 and r.boughtTxns == 0 then soldOnly = soldOnly + 1 end
+        if r.boughtTxns > 0 and r.soldTxns == 0 then boughtOnly = boughtOnly + 1 end
+        if r.soldUnknown > 0 then withUnknown = withUnknown + 1 end
+        if r.quality then
+            coloured = coloured + 1
+            tiers[r.quality] = (tiers[r.quality] or 0) + 1
+        end
+        if r.itemId == nil then H.check("every demo row can be hovered", false, r.item) end
+        i = i + 1
+    end
+    H.check("rows with an average profit", withProfit > 5, withProfit)
+    H.check("...a row that was only sold", soldOnly > 0, soldOnly)
+    H.check("...a row that was only bought", boughtOnly > 0, boughtOnly)
+    H.check("...and rows whose count is partly unknown",
+            withUnknown > 0, withUnknown)
+
+    -- A QUALITY ON EVERY ROW. The client has never seen these items, so it
+    -- cannot colour them -- without a stated quality the whole table draws in
+    -- one colour, which is exactly how three invented epics went unnoticed.
+    H.eq("every row states its quality", coloured, n)
+    H.check("epics among them", (tiers[4] or 0) > 0)
+    H.check("...and rares", (tiers[3] or 0) > 0)
+    H.check("...and uncommons", (tiers[2] or 0) > 0)
+    H.check("...and plain items", (tiers[1] or 0) > 0)
+
+    -- The footer totals the rows it can and says how many it could not.
+    local resold, profit, skipped = db.LedgerItemTotals(rows)
+    H.check("the footer has units to report", resold > 0, resold)
+    H.check("...and money", profit ~= 0)
+    H.check("...and a skipped count that is a number", skipped >= 0)
+
+    db.demo = nil
+    db.demoLedger = nil
+end
+
+-- ...AND THE WINDOW HAS TO READ THROUGH THE SEAM. Both halves of it are in
+-- ui/frame.lua, which no suite loads, so they are read as source -- a demo
+-- ledger nothing consults is an empty window and a passing test file.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local body = f:read("*a")
+    f:close()
+    local function says(needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+
+    H.check("the transaction list reads the substitutable source",
+            says("local led = A.db.LedgerSource()"))
+    H.check("...and so does the chart's window",
+            says("ui.HistWindow(A.db.LedgerSource()"))
+
+    -- A STATED quality WINS over the client's, the same way ui.HistBlocks
+    -- prefers row[4]. Asking the client first gets nil for an item it has
+    -- never cached -- which every demo item is -- and falls through to the
+    -- default colour, so the whole table draws in one colour.
+    H.check("a stated quality beats the client's on an item row",
+            says("local q = rec.quality\n"
+              .. "                      or (rec.itemId and ui.CraftQualityOf(rec.itemId))"))
+end
+
+-- ...AND IT IS STILL THE REAL STORE OUTSIDE DEMO MODE. A seam that forgot to
+-- switch back would show invented trading to a player who never asked for it.
+do
+    db.demo = nil
+    db.account.ledger = {}
+    H.eq("a real empty ledger is empty", table.getn(db.LedgerItems(nil, NOW)), 0)
+end
+
 os.exit(H.report("ledgeritems"))

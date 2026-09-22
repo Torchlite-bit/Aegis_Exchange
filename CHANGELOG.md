@@ -18,6 +18,42 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.11]
+
+### Changed
+- **`/aex demo` now invents a LEDGER, not just a gold line.** Six months of one
+  trader's buying and selling across 34 real items, so the Ledger window — both
+  the Items table and the Transactions list — has something to show, along with
+  the stat blocks and the IN / OUT / NET row above them.
+
+  Before this, demo mode invented the History tab's *figures* and nothing else,
+  while everything that reads the ledger read the real store — which in demo
+  mode holds nothing. So the one screen with the most layout to judge opened
+  blank, and the numbers above it answered a question no visible data had
+  asked.
+
+  Every reader now computes from the generated ledger through the **same
+  arithmetic it runs on real data**, so the demo exercises the real code paths
+  and every figure on screen agrees with every other one.
+
+  *The items are real: names, ids, qualities and stack sizes are from the
+  1.12.1 client's own item table, so hovering a demo row shows the item it
+  claims to be. Four of them were remembered wrong before being checked —
+  Fiery Core and Lava Core are rare on this patch, and Sulfuron Ingot and
+  Nexus Crystal are epic. The prices are ours; no dump can state what an
+  auction house charges.*
+
+  The shape is deliberate: all four quality colours, items traded both ways and
+  items traded only one, and a minority of sales with no quantity — because
+  that is the real limit, not a placeholder. The biggest single sale and the
+  biggest earner are different items, which is a distinction the History tab
+  has always drawn and nothing could previously demonstrate.
+
+  *Nothing is saved and nothing real is touched. A transaction logged while the
+  demo is on still lands in your real ledger.*
+
+---
+
 ## [1.54.10]
 
 ### Fixed
@@ -6076,6 +6112,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -13430,7 +13430,11 @@ function ui.RefreshLedgerItems()
         local rec = (i <= vis) and rows[i + offset] or nil
         if rec then
             row.item:SetText(rec.item or "?")
-            local q = rec.itemId and ui.CraftQualityOf(rec.itemId) or nil
+            -- A STATED QUALITY WINS, the same way ui.HistBlocks prefers
+            -- row[4]. The client can only answer for an item it has cached,
+            -- which a demo item never is -- see db.DemoQuality.
+            local q = rec.quality
+                      or (rec.itemId and ui.CraftQualityOf(rec.itemId)) or nil
             local cr, cg, cb = ui.QualityColor(q)
             row.item:SetTextColor(cr, cg, cb)
             row.itemId = rec.itemId
@@ -14243,7 +14247,8 @@ function ui.UpdateHistoryGraph()
     -- BUCKETS FROM THE PLOT WIDTH. See ui.HistBucketCount: a fixed count is
     -- what made the line a staircase at any column width.
     local n = ui.HistBucketCount(pw)
-    local from, step = ui.HistWindow(A.db.Ledger(), time(), period.secs, n)
+    local from, step =
+        ui.HistWindow(A.db.LedgerSource(), time(), period.secs, n)
 
     local values, title, note =
         ui.HistGoldSeries(ui.histWho, from, step, n)
@@ -14777,7 +14782,7 @@ function ui.RefreshHistory()
     -- that used to live here is now the sort's default (`when` descending), so
     -- clicking a header can actually change the order -- reversing here as
     -- well would have fought it.
-    local led = A.db.Ledger()
+    local led = A.db.LedgerSource()
     ui.histView = {}
     local i = 1
     while i <= table.getn(led) do
@@ -18291,7 +18296,7 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         else
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
-        ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
+        ChatMsg("  demo=" .. tostring(A.db.demo and true or false))
         -- WHICH dressing-room API this client has, if either. A check box
         -- that silently does nothing is the failure this line exists to make
         -- reportable in one word.
@@ -18518,10 +18523,13 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
     -- store, and why a /reload turns it off.
     if string.find(cmd, "demo", 1, true) then
         A.db.demo = not A.db.demo
+        -- Rebuilt on the next read, so toggling it back on re-anchors the
+        -- invented history to NOW instead of leaving one that ends hours ago.
+        A.db.demoLedger = nil
         if A.db.demo then
-            ChatMsg("Aegis: chart demo mode ON \226\128\148 the History chart"
-                .. " now draws INVENTED gold for four made-up characters, so"
-                .. " you can see what it looks like with a real history.")
+            ChatMsg("Aegis: demo mode ON \226\128\148 the History chart now"
+                .. " draws INVENTED gold for four made-up characters, so you"
+                .. " can see what it looks like with a real history.")
             ChatMsg("  Nothing is saved and nothing real is touched. /aex demo"
                 .. " again, or a /reload, turns it off.")
             ChatMsg("  The Crafting tab and the shopping list get four"
@@ -18529,10 +18537,12 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 .. " so the quality colours have something to show \226\128\148"
                 .. " with some reagents part-gathered and invented prices"
                 .. " on every line.")
-            ChatMsg("  The IN / OUT / NET row still reads your REAL ledger;"
-                .. " only the gold line and the recipes are invented.")
+            ChatMsg("  The LEDGER is invented too \226\128\148 six months of"
+                .. " one trader's buying and selling across 34 real items, so"
+                .. " both its views, the stat blocks and the IN / OUT / NET"
+                .. " row all have something to show, and all agree.")
         else
-            ChatMsg("Aegis: chart demo mode OFF.")
+            ChatMsg("Aegis: demo mode OFF.")
         end
         -- Both tabs have to be told. The picker lists the demo characters
         -- while it is on and the Crafting tab's whole tree changes, so neither

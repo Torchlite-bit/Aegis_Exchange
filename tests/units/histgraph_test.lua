@@ -1414,7 +1414,7 @@ do
     H.check("...reads the same period the table does",
             says(graph, "HIST_PERIODS[ui.histPeriod"))
     H.check("...and the same ledger for its window",
-            says(graph, "ui.HistWindow(A.db.Ledger()"))
+            says(graph, "ui.HistWindow(A.db.LedgerSource()"))
     H.check("...sized by arithmetic, not by measuring a frame",
             says(graph, "ui.HistPlotSizeAt(") and not says(graph, ":GetWidth()"),
             "a two-corner-anchored frame reports its creation size")
