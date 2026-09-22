@@ -81,7 +81,13 @@ for i = 1, table.getn(ALL_BANDS) do
 end
 
 H.eq("ilvl 1 lands in the first band", de.Band(1), 15)
-H.isNil("ilvl 66 is off the end", de.Band(66))
+-- THE CEILING MOVED FROM 65 TO 95, and the reason matters more than the
+-- number: 65 was where the OBSERVATIONS thinned out, not where the game
+-- stopped. The server's own loot table has one epic entry covering item level
+-- 61 to 92, so the ladder now goes as far as the source has items.
+H.eq("ilvl 66 is answerable now", de.Band(66), 70)
+H.eq("...and so is 92, where the source's last epic sits", de.Band(92), 95)
+H.isNil("ilvl 96 is off the end", de.Band(96))
 H.isNil("ilvl 99 is off the end -- Turtle goes this high", de.Band(99))
 H.isNil("ilvl 0 is not a level", de.Band(0))
 H.isNil("a nil level is not a level", de.Band(nil))
@@ -94,14 +100,15 @@ H.section("de.Class -- every equip slot the client can report")
 local WEAPON_SLOTS = {
     "INVTYPE_2HWEAPON", "INVTYPE_WEAPON", "INVTYPE_WEAPONMAINHAND",
     "INVTYPE_WEAPONOFFHAND", "INVTYPE_RANGED", "INVTYPE_RANGEDRIGHT",
-    "INVTYPE_THROWN",
+    -- Both of these were ARMOUR here until v1.54.13, and the pinned wrong
+    -- answer is the point of the note below.
+    "INVTYPE_SHIELD", "INVTYPE_HOLDABLE",
 }
 local ARMOUR_SLOTS = {
     "INVTYPE_HEAD", "INVTYPE_NECK", "INVTYPE_SHOULDER", "INVTYPE_BODY",
     "INVTYPE_CHEST", "INVTYPE_ROBE", "INVTYPE_WAIST", "INVTYPE_LEGS",
     "INVTYPE_FEET", "INVTYPE_WRIST", "INVTYPE_HAND", "INVTYPE_FINGER",
-    "INVTYPE_TRINKET", "INVTYPE_CLOAK", "INVTYPE_HOLDABLE", "INVTYPE_SHIELD",
-    "INVTYPE_RELIC", "INVTYPE_TABARD",
+    "INVTYPE_TRINKET", "INVTYPE_CLOAK", "INVTYPE_RELIC", "INVTYPE_TABARD",
 }
 for i = 1, table.getn(WEAPON_SLOTS) do
     H.eq(WEAPON_SLOTS[i] .. " is a weapon", de.Class(WEAPON_SLOTS[i]), "w")
@@ -109,10 +116,30 @@ end
 for i = 1, table.getn(ARMOUR_SLOTS) do
     H.eq(ARMOUR_SLOTS[i] .. " is armour", de.Class(ARMOUR_SLOTS[i]), "a")
 end
--- A shield is ARMOUR here. aux files it as a weapon; the observations do not
--- agree with aux, and this is the kind of one-line disagreement that is worth
--- pinning so it cannot drift back silently.
-H.eq("a shield is armour, not a weapon", de.Class("INVTYPE_SHIELD"), "a")
+-- A SHIELD IS A WEAPON, and this line is worth reading twice because it used
+-- to say the opposite -- word for word: "A shield is ARMOUR here. aux files it
+-- as a weapon; the observations do not agree with aux, and this is the kind of
+-- one-line disagreement that is worth pinning so it cannot drift back
+-- silently."
+--
+-- aux was right. The disagreement was pinned, for a year, in the wrong
+-- direction, because a test can only pin whatever it was handed -- and what it
+-- was handed came from clustering observations on dust share, which cannot see
+-- a slot at all. The 1.12.1 item table settles it outright: every one of the
+-- 173 shields and 103 held-in-off-hand items carries a DisenchantID from the
+-- WEAPON ladder, with no exceptions.
+--
+-- The lesson is not about shields. It is that "the observations do not agree
+-- with <a source that had it right>" is a sentence to be suspicious of.
+H.eq("a shield is a weapon, not armour", de.Class("INVTYPE_SHIELD"), "w")
+H.eq("...and so is a held-in-off-hand", de.Class("INVTYPE_HOLDABLE"), "w")
+
+-- THROWN WEAPONS CANNOT BE DISENCHANTED. Not one thrown weapon in the 1.12.1
+-- item table carries a DisenchantID, so the absence of an entry IS the answer
+-- and de.CanDisenchant says no.
+H.isNil("a thrown weapon is neither", de.Class("INVTYPE_THROWN"))
+H.check("...and cannot be disenchanted",
+        de.CanDisenchant(2, "INVTYPE_THROWN") == false)
 H.isNil("an empty equip slot is neither", de.Class(""))
 H.isNil("a bag is neither", de.Class("INVTYPE_BAG"))
 H.isNil("nil is neither", de.Class(nil))
@@ -158,13 +185,33 @@ H.isNil("...at Turtle's top end either", de.Yield(99, BLUE, ARMOUR))
 H.isNil("a grey yields nothing", de.Yield(40, 0, ARMOUR))
 H.isNil("a non-equippable green yields nothing", de.Yield(40, GREEN, "SOUP"))
 
--- Epics are absent ON PURPOSE: the source data holds nine items with yields
--- no real item produces. An unanswerable epic must stay unanswerable rather
--- than borrow the rare table, which would understate it by a shard tier.
-for i = 1, table.getn(ALL_BANDS) do
-    H.isNil("epic band " .. ALL_BANDS[i] .. " has no data",
-            de.Yield(ALL_BANDS[i], PURPLE, ARMOUR))
+-- EPICS ANSWER NOW. They were absent because the old source held nine of them
+-- with yields no real item produces; the server's loot table has all five
+-- entries as plain 100% rows.
+--
+-- Below the first epic in the game there is still nothing to say, and that
+-- boundary is asserted from both sides so "epics work" cannot come to mean
+-- "epics answer for any level at all".
+H.isNil("an epic below the first one in the game says nothing",
+        de.Yield(15, PURPLE, ARMOUR))
+for _, band in ipairs({ 45, 50, 55, 60, 65 }) do
+    local y = de.Yield(band, PURPLE, ARMOUR)
+    H.check("epic band " .. band .. " answers", y ~= nil)
+    H.check("...with exactly one material", y and table.getn(y) == 1)
 end
+
+-- AN EPIC IS WORTH MORE THAN A RARE OF THE SAME LEVEL, every time. That is
+-- the property the whole feature turns on -- it is why "epics say nothing"
+-- was worth reporting -- and it is checked as a shard TIER or a COUNT rather
+-- than a price, because prices are the caller's business.
+for _, band in ipairs({ 45, 50, 55 }) do
+    local epic = de.Yield(band, PURPLE, ARMOUR)
+    local rare = de.Yield(band, BLUE, ARMOUR)
+    H.check("epic band " .. band .. " out-yields the rare",
+            epic and rare and epic[1].mean > rare[1].mean)
+end
+H.eq("...and at 60 an epic gives a Nexus Crystal",
+     de.Yield(60, PURPLE, ARMOUR)[1].itemId, 20725)
 
 -- ---------------------------------------------------------------------------
 H.section("the shipped ladder -- material tiers climb in the right order")
@@ -221,11 +268,88 @@ for band, _ in pairs(GREEN_WEAPON_ESSENCE) do
             DUST[top(w)] == nil)
 end
 
--- Where the source had no usable weapon data the band ships armour only, and
--- must NOT quietly hand back the armour numbers instead.
-H.check("a band may answer for armour and not for weapons",
-        de.Yield(25, GREEN, ARMOUR) ~= nil
-        and de.Yield(25, GREEN, WEAPON) == nil)
+-- EVERY GREEN BAND NOW ANSWERS FOR BOTH. Bands 25, 30 and 65 shipped armour
+-- only, because no weapon OBSERVATIONS survived the gates -- not because the
+-- game had nothing to say. The loot table has all eleven weapon entries.
+do
+    local missing = nil
+    for i = 1, table.getn(ALL_BANDS) do
+        local b = ALL_BANDS[i]
+        if de.Yield(b, GREEN, ARMOUR) and not de.Yield(b, GREEN, WEAPON) then
+            missing = b
+        end
+    end
+    H.isNil("no green band answers for armour and not for weapons", missing)
+end
+
+-- ...and the one-sided case is still handled rather than assumed away: the
+-- source has no epic ARMOUR at item level 36-40, only an epic weapon, and the
+-- armour side must stay nil rather than borrow it.
+H.check("a band may still answer for one class only",
+        de.Yield(40, PURPLE, WEAPON) ~= nil
+        and de.Yield(40, PURPLE, ARMOUR) == nil)
+
+-- ---------------------------------------------------------------------------
+H.section("the 5% shard -- the one a player had to report")
+-- ---------------------------------------------------------------------------
+
+-- WHAT HAPPENED. A player disenchanted a green at item level 62 and got a
+-- Large Brilliant Shard. Aegis said that item could only give Illusion Dust
+-- and Greater Eternal Essence, because the shard is 5% and the 8.8 million
+-- observations behind the old table had not recorded enough of them in the
+-- top bands to clear the noise floor. The loot table writes it as a row with
+-- chance 0, meaning "take whatever the group has left" -- and the whole bug
+-- was reading that zero as "never".
+--
+-- So: EVERY green band from 20 up yields a shard, on BOTH ladders. Band 15 is
+-- the exception and is asserted as one -- it genuinely has no shard row.
+
+local GREEN_SHARD = {
+    [20] = 10978, [25] = 10978,                 -- Small Glimmering
+    [30] = 11084, [35] = 11138, [40] = 11139,
+    [45] = 11177, [50] = 11178, [55] = 14343,   -- Small Brilliant
+    [60] = 14344, [65] = 14344,                 -- Large Brilliant
+}
+
+for band, matId in pairs(GREEN_SHARD) do
+    for _, cls in ipairs({ ARMOUR, WEAPON }) do
+        local rows, found = de.Yield(band, GREEN, cls), nil
+        for i = 1, table.getn(rows or {}) do
+            if rows[i].itemId == matId then found = rows[i] end
+        end
+        H.check("green band " .. band .. " (" .. cls .. ") yields "
+                .. REAGENT[matId], found ~= nil)
+        -- A SHARD IS RARE AND NOT VANISHING. The real rates are 3%, 5% and
+        -- 10%; a band whose shard has drifted outside that is either a paste
+        -- error or a different game.
+        H.check("...at a believable rate", found
+                and found.chance >= 0.02 and found.chance <= 0.12,
+                found and found.chance)
+        H.check("...one at a time", found and found.mean == 1)
+    end
+end
+
+-- The bottom band has no shard, and saying so is what stops "every band has a
+-- shard" from being satisfied by handing one to every band.
+for _, cls in ipairs({ ARMOUR, WEAPON }) do
+    local rows = de.Yield(15, GREEN, cls)
+    local shard = nil
+    for i = 1, table.getn(rows or {}) do
+        if SHARD[rows[i].itemId] then shard = rows[i].itemId end
+    end
+    H.isNil("the bottom green band (" .. cls .. ") has no shard", shard)
+end
+
+-- AND THE REPORTED ITEM ITSELF. Nightshade Leggings, item level 62, green
+-- armour -- the exact item that was disenchanted.
+do
+    local rows, shard = de.Yield(62, GREEN, ARMOUR), nil
+    for i = 1, table.getn(rows or {}) do
+        if rows[i].itemId == 14344 then shard = rows[i] end
+    end
+    H.check("an item level 62 green can give a Large Brilliant Shard",
+            shard ~= nil)
+end
 
 -- ---------------------------------------------------------------------------
 H.section("the shipped table is internally sound")

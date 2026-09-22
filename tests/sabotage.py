@@ -1148,8 +1148,8 @@ end""",
      "        if ilvl < LADDER[i] then return LADDER[i] end",
      "disenchant"),
 
-    # Above ilvl 65 the observations thin out and stop being monotone, and
-    # Turtle item levels run to 99. Clamping to the top band instead of
+    # Above the ladder's top there is no rule to state -- Turtle content runs
+    # past where the source has items. Clamping to the top band instead of
     # returning nil is how a confident wrong answer gets shipped.
     ("de-band-no-ceiling", "core/disenchant.lua",
      """        i = i + 1
@@ -1246,6 +1246,69 @@ end
     ("de-marketprice-zero-not-nil", "core/disenchant.lua",
      "    return A.db.MarketValue(matId) or A.db.MinBuyout(matId)",
      "    return A.db.MarketValue(matId) or A.db.MinBuyout(matId) or 0",
+     "disenchant"),
+
+    # ---- disenchant, from the server's own loot table ---------------------
+    # THE BUG A PLAYER HAD TO REPORT. The shard row is written with chance 0,
+    # meaning "take whatever the group has left" -- 5%. Dropping it is what
+    # made an item level 62 green look like dust and essence only.
+    ("de-green-65-loses-its-shard", "core/disenchant.lua",
+     "                { 16203, 0.2000, 2.000 },   -- Greater Eternal Essence\n"
+     "                { 14344, 0.0500, 1.000 },   -- Large Brilliant Shard",
+     "                { 16203, 0.2500, 2.000 },   -- Greater Eternal Essence",
+     "disenchant"),
+
+    # ...and the same one band down, where it is a Small Brilliant Shard.
+    ("de-green-55-loses-its-shard", "core/disenchant.lua",
+     "                { 16202, 0.2000, 1.500 },   -- Lesser Eternal Essence\n"
+     "                { 14343, 0.0500, 1.000 },   -- Small Brilliant Shard",
+     "                { 16202, 0.2500, 1.500 },   -- Lesser Eternal Essence",
+     "disenchant"),
+
+    # A SHIELD IS A WEAPON. This file had it as armour for a year, with a test
+    # pinning the wrong answer and a comment explaining why aux was mistaken.
+    ("de-shield-is-armour-again", "core/disenchant.lua",
+     '    INVTYPE_SHIELD        = "w",',
+     '    INVTYPE_SHIELD        = "a",',
+     "disenchant"),
+
+    ("de-holdable-is-armour-again", "core/disenchant.lua",
+     '    INVTYPE_HOLDABLE      = "w",',
+     '    INVTYPE_HOLDABLE      = "a",',
+     "disenchant"),
+
+    # Thrown weapons cannot be disenchanted at all, and the absence of an
+    # entry is what says so.
+    ("de-thrown-can-be-disenchanted", "core/disenchant.lua",
+     '    INVTYPE_RELIC         = "a",',
+     '    INVTYPE_RELIC         = "a",\n    INVTYPE_THROWN        = "w",',
+     "disenchant"),
+
+    # The ladder stops where the SOURCE stops, not at the old 65 -- which was
+    # where the observations thinned out, not where the game did.
+    ("de-ladder-stops-at-65", "core/disenchant.lua",
+     "local LADDER = { 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65,\n"
+     "                 70, 75, 80, 85, 90, 95 }",
+     "local LADDER = { 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65 }",
+     "disenchant"),
+
+    # An epic must out-yield the rare of the same level. Handing epics the
+    # rare table understates them by a whole shard tier and still passes every
+    # structural check: it sums to 1, uses a real reagent, climbs in order.
+    ("de-epic-borrows-the-rare-yield", "core/disenchant.lua",
+     "            a = {   -- 15 items, DisenchantID 63\n"
+     "                { 14343, 1.0000, 3.000 },   -- Small Brilliant Shard",
+     "            a = {   -- 15 items, DisenchantID 63\n"
+     "                { 14343, 1.0000, 1.000 },   -- Small Brilliant Shard",
+     "disenchant"),
+
+    # The top epic band is a Nexus Crystal, which is the single most valuable
+    # thing this rule can report.
+    ("de-epic-60-is-not-a-nexus-crystal", "core/disenchant.lua",
+     "            a = {   -- 45 items, DisenchantID 64\n"
+     "                { 20725, 1.0000, 1.000 },   -- Nexus Crystal",
+     "            a = {   -- 45 items, DisenchantID 64\n"
+     "                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard",
      "disenchant"),
 
     # ---- tooltip ---------------------------------------------------------

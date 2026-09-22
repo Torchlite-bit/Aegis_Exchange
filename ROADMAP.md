@@ -5169,6 +5169,47 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Disenchant values from the server's loot table — ✅ **DONE** (v1.54.13)
+
+Reported as three things, which turned out to be one thing: greens at the top
+of the ladder missing their shard, weapons missing from some bands, and epics
+having no value at all. All three were the same limit — the table was inferred
+from **samples** (8.8M observed disenchants), and a 5% outcome in a thin band
+does not survive a noise floor.
+
+`tools/gen_disenchant.py` now reads **CMaNGOS Classic-DB**, a 1.12.1 content
+database: `disenchant_loot_template` states what each DisenchantID yields, at
+what chance and in what quantity, and `item_template` says which entry every
+item uses. That is the rule as the server runs it, not a sample of it.
+
+**The two agree everywhere they overlap** — same materials, same mean yields to
+two decimal places — which is what makes the places they differ worth acting
+on:
+
+| was | is |
+|---|---|
+| epics report unknown | all five epic entries, up to Nexus Crystal |
+| weapons absent in bands 25, 30, 65 | every band, both ladders |
+| no shard in green bands 55 and 65 | the 5% shard that was reported |
+| shields and holdables on the **armour** ladder | the **weapon** ladder — 173 shields, 103 holdables, no exceptions |
+| thrown weapons disenchantable | they are not, and never were |
+| nothing above item level 65 | the ladder runs to 95 |
+
+**The one judgement call** is mangos loot-group semantics: within a group, an
+explicit chance is taken as written and a row written `0` takes whatever the
+group has left. Every green entry is dust 75 / essence 20 / shard **0**, and
+reading that zero as "never" *is* the reported bug. `resolve()` makes the
+remainder explicit and refuses any entry whose chances do not come to 100% —
+which drops exactly one (rares above item level 70, whose entry holds a single
+row at 0.5%).
+
+**A note worth keeping.** The old test pinned `INVTYPE_SHIELD` as armour with
+the comment *"aux files it as a weapon; the observations do not agree with aux,
+and this is the kind of one-line disagreement that is worth pinning so it
+cannot drift back silently."* aux was right. A test can only pin what it was
+handed, and what it was handed came from clustering on dust share — which
+cannot see an equip slot at all.
+
 ### Window ordering — ✅ **DONE** (v1.54.12)
 
 Reported as "my bag is always behind the AH window". The client opens the

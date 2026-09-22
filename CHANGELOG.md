@@ -18,6 +18,32 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.13]
+
+### Fixed
+- **Disenchant values now come from the server's own loot table**, not from
+  8.8 million observed disenchants. Reported by a player who broke an item
+  level 62 green, got a Large Brilliant Shard, and found Aegis saying that item
+  could only give dust and essence.
+
+  The shard is a 5% chance the observations were too thin to see. Everything
+  else that was missing turned out to be missing for the same reason:
+
+  - **Epics have a value at all.** They reported *unknown*.
+  - **Weapons in three bands** (item level 21–25, 26–30 and 61–65) reported
+    *unknown* — the game has always had an answer.
+  - **Shields and held-in-off-hand items** were valued off the **armour**
+    ladder. They take the weapon one, so their value was wrong, not missing.
+  - **Thrown weapons** were offered a disenchant value. They cannot be
+    disenchanted at all.
+  - **Item level 66 and above** reported *unknown*; the ladder now runs to 95.
+
+  *The two sources agree everywhere they overlap — same materials, same
+  average quantities to two decimal places — which is what makes the parts
+  they disagree about worth trusting.*
+
+---
+
 ## [1.54.12]
 
 ### Fixed
@@ -6133,6 +6159,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

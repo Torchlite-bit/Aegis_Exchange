@@ -7,9 +7,16 @@
 --
 -- Given item level, quality and weapon-or-armour, vanilla's disenchant result
 -- is fully determined -- which materials, how often, and how many. That is not
--- read from documentation; it is measured. tools/gen_disenchant.py derives the
--- BANDS table below from 8.8 million observed disenchants, and the band
--- boundaries land exactly on the 5-wide ladder with no fuzz.
+-- read from documentation and it is no longer inferred from samples either:
+-- tools/gen_disenchant.py reads the BANDS table below out of the SERVER'S OWN
+-- LOOT TABLE, the 1.12.1 `disenchant_loot_template`, joined to the item table
+-- that says which entry each item uses.
+--
+-- It used to be derived from 8.8 million observed disenchants. The two agree
+-- -- same materials, same mean yields to two decimal places -- which is the
+-- best evidence either is right. What the samples could not reach is what
+-- changed here: epics, weapons in three bands, the 5% shard in the top two
+-- green bands, shields, and anything above item level 65.
 --
 -- The consequence worth understanding before editing anything here: every
 -- source of disenchant knowledge -- a shipped item-level table, a disenchant
@@ -24,21 +31,29 @@
 -- WHAT THIS FILE DELIBERATELY CANNOT ANSWER, and why -- do not "fix" these by
 -- filling in plausible numbers:
 --
---   * Item level above 65. The observations thin to a few dozen there and
---     stop being monotone, and Turtle item levels run to 99. `de.Band`
---     returns nil, once, so no caller can extrapolate by accident.
---   * Epics (quality 4). Vanilla players rarely disenchanted epics, so the
---     source data holds 9 items total, with yields (4.1 Large Brilliant
---     Shards per proc) that no real item produces. The generator drops them
---     and BANDS has no [4]. An epic reports unknown.
---   * Weapons in a few bands. Where the source has no usable weapon data the
---     band ships armour only. Armour numbers are NOT borrowed for weapons:
---     armour is dust-led (~82%) and weapons essence-led (~80%), so borrowing
---     would be confidently wrong rather than roughly right.
+--   * Item level above 95. The ladder runs as far as the source has items --
+--     one epic entry covers 61 to 92 -- and stops. Turtle content above that
+--     is a rule nobody has stated. `de.Band` returns nil, once, so no caller
+--     can extrapolate by accident.
+--   * Rares above item level 70. Their entry exists and its chances come to
+--     half a percent, which is not a distribution. The generator refuses it
+--     rather than normalising half a percent up to certainty.
 --   * Whether an item can be disenchanted AT ALL. Quality and equip slot get
 --     most of the way; the rest is a hardcoded exception list that no rule
 --     predicts. Turtle will have its own entries and only a failed disenchant
 --     reveals them.
+--
+-- THREE THINGS THIS FILE USED TO GET WRONG, kept here because each was
+-- reported by a player rather than caught by a test, and because each looked
+-- like a deliberate limitation right up until the better source arrived:
+--
+--   * A green at item level 62 gave a Large Brilliant Shard and Aegis said it
+--     could only give dust and essence. The shard is the row the loot table
+--     writes as chance 0 -- meaning "take what the group has left", which is
+--     5% -- and the samples had simply never recorded enough of them.
+--   * Epics answered unknown. All five epic entries are plain 100% rows.
+--   * Shields and held-in-off-hand items were priced off the ARMOUR ladder.
+--     They take the weapon one. See INVTYPE below.
 --
 -- THE RULE is a pure function of its arguments -- no globals read, no DB, no
 -- client API. `de.Value` takes the pricer as a parameter for that reason: it
@@ -58,7 +73,15 @@ local util = A.util
 -- The ladder is fixed and 5 wide. Nothing above the last entry is answerable;
 -- see the header. Kept as ONE table rather than a family of file-scope locals
 -- -- the 32-upvalue ceiling is real and a table of constants costs one.
-local LADDER = { 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65 }
+--
+-- IT RUNS TO 95 NOW, and that is the source speaking rather than a decision.
+-- The old top of 65 was where the OBSERVATIONS thinned out; the server's own
+-- loot table has no such edge -- one epic entry covers item level 61 to 92 --
+-- so the ladder goes as far as the generator found items. Turtle content
+-- above that still reports unknown, which is the honest answer for a rule
+-- nobody has stated.
+local LADDER = { 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65,
+                 70, 75, 80, 85, 90, 95 }
 
 -- equipLoc -> the BANDS key for that class. Returning the table key directly
 -- rather than a prettier "armor"/"weapon" removes a translation step, and a
@@ -70,7 +93,14 @@ local INVTYPE = {
     INVTYPE_WEAPONOFFHAND = "w",
     INVTYPE_RANGED        = "w",
     INVTYPE_RANGEDRIGHT   = "w",
-    INVTYPE_THROWN        = "w",
+    -- SHIELDS AND HELD-IN-OFF-HAND ARE WEAPONS HERE, and this file had both
+    -- as armour for its whole life. It is not a judgement call: the 1.12.1
+    -- item table gives every shield and every holdable a green DisenchantID
+    -- from the WEAPON ladder (21..31), never the armour one. 173 shields and
+    -- 103 holdables, no exceptions. Nothing about a shield's dust share could
+    -- have revealed that, which is why the samples never did.
+    INVTYPE_SHIELD        = "w",
+    INVTYPE_HOLDABLE      = "w",
     INVTYPE_HEAD          = "a",
     INVTYPE_NECK          = "a",
     INVTYPE_SHOULDER      = "a",
@@ -85,10 +115,18 @@ local INVTYPE = {
     INVTYPE_FINGER        = "a",
     INVTYPE_TRINKET       = "a",
     INVTYPE_CLOAK         = "a",
-    INVTYPE_HOLDABLE      = "a",
-    INVTYPE_SHIELD        = "a",
+    -- RELICS -- idols, librams, totems -- exist only as rare and epic, and at
+    -- those qualities both ladders share one entry, so this answer cannot be
+    -- wrong in a way anything can see. Left as armour because that is what it
+    -- was; the source states no preference because there is no green relic to
+    -- state one with.
     INVTYPE_RELIC         = "a",
     INVTYPE_TABARD        = "a",
+    -- THROWN IS ABSENT ON PURPOSE, and absence is the answer: with no entry
+    -- here de.Class returns nil and de.CanDisenchant says no. Not one thrown
+    -- weapon in the 1.12.1 item table carries a DisenchantID -- they cannot
+    -- be disenchanted, and this file used to say they could.
+    --
     -- Stand-ins from util.ItemInfo for a client that omits equipLoc entirely
     -- (Turtle + ClassicAPI does). Never sent by the client; see the TYPE_SLOT
     -- note in core/util.lua. Armour-or-weapon is all this table decides, and
@@ -112,207 +150,329 @@ local NEVER = {
 
 -- BANDS[quality][band] = { a = armour, w = weapon }, each a list of
 -- { materialId, chance, meanYield }. `chance` sums to 1 across the list;
--- `meanYield` is the average count when that material is the one that drops.
--- The comment on each class carries the item count and observation count
--- behind it -- that is the evidence, and it is why this table is generated
--- rather than typed. Re-run tools/gen_disenchant.py; do not patch a number.
+-- `meanYield` is the midpoint of the count the server rolls for that
+-- material. The comment on each class carries the item count and the
+-- DisenchantID behind it -- that is the evidence, and it is why this table is
+-- generated rather than typed. Re-run tools/gen_disenchant.py; do not patch a
+-- number.
 local BANDS = {
     [2] = {   -- green
         [15] = {
-            a = {   -- 118 items, n=418902
-                { 10940, 0.8102, 1.517 },   -- Strange Dust
-                { 10938, 0.1898, 1.516 },   -- Lesser Magic Essence
+            a = {   -- 133 items, DisenchantID 1
+                { 10940, 0.8000, 1.500 },   -- Strange Dust
+                { 10938, 0.2000, 1.500 },   -- Lesser Magic Essence
             },
-            w = {   -- 41 items, n=154152
-                { 10938, 0.8091, 1.518 },   -- Lesser Magic Essence
-                { 10940, 0.1909, 1.492 },   -- Strange Dust
+            w = {   -- 112 items, DisenchantID 21
+                { 10938, 0.8000, 1.500 },   -- Lesser Magic Essence
+                { 10940, 0.2000, 1.500 },   -- Strange Dust
             },
         },
         [20] = {
-            a = {   -- 202 items, n=652964
-                { 10940, 0.7642, 2.509 },   -- Strange Dust
-                { 10939, 0.1889, 1.506 },   -- Greater Magic Essence
-                { 10978, 0.0469, 1.006 },   -- Small Glimmering Shard
+            a = {   -- 229 items, DisenchantID 2
+                { 10940, 0.7500, 2.500 },   -- Strange Dust
+                { 10939, 0.2000, 1.500 },   -- Greater Magic Essence
+                { 10978, 0.0500, 1.000 },   -- Small Glimmering Shard
             },
-            w = {   -- 52 items, n=191048
-                { 10939, 0.7593, 1.515 },   -- Greater Magic Essence
-                { 10940, 0.1889, 2.523 },   -- Strange Dust
-                { 10978, 0.0519, 1.001 },   -- Small Glimmering Shard
+            w = {   -- 119 items, DisenchantID 22
+                { 10939, 0.7500, 1.500 },   -- Greater Magic Essence
+                { 10940, 0.2000, 2.500 },   -- Strange Dust
+                { 10978, 0.0500, 1.000 },   -- Small Glimmering Shard
             },
         },
         [25] = {
-            a = {   -- 202 items, n=449927
-                { 10940, 0.7778, 5.022 },   -- Strange Dust
-                { 10998, 0.1344, 1.525 },   -- Lesser Astral Essence
-                { 10978, 0.0877, 1.005 },   -- Small Glimmering Shard
+            a = {   -- 233 items, DisenchantID 3
+                { 10940, 0.7500, 5.000 },   -- Strange Dust
+                { 10998, 0.1500, 1.500 },   -- Lesser Astral Essence
+                { 10978, 0.1000, 1.000 },   -- Small Glimmering Shard
             },
-            -- w: no usable data (0 items, n=0)
+            w = {   -- 96 items, DisenchantID 23
+                { 10998, 0.7500, 1.500 },   -- Lesser Astral Essence
+                { 10940, 0.1500, 5.000 },   -- Strange Dust
+                { 10978, 0.1000, 1.000 },   -- Small Glimmering Shard
+            },
         },
         [30] = {
-            a = {   -- 258 items, n=574926
-                { 11083, 0.7742, 1.525 },   -- Soul Dust
-                { 11082, 0.1809, 1.502 },   -- Greater Astral Essence
-                { 11084, 0.0449, 1.000 },   -- Large Glimmering Shard
+            a = {   -- 288 items, DisenchantID 4
+                { 11083, 0.7500, 1.500 },   -- Soul Dust
+                { 11082, 0.2000, 1.500 },   -- Greater Astral Essence
+                { 11084, 0.0500, 1.000 },   -- Large Glimmering Shard
             },
-            -- w: no usable data (0 items, n=0)
+            w = {   -- 86 items, DisenchantID 24
+                { 11082, 0.7500, 1.500 },   -- Greater Astral Essence
+                { 11083, 0.2000, 1.500 },   -- Soul Dust
+                { 11084, 0.0500, 1.000 },   -- Large Glimmering Shard
+            },
         },
         [35] = {
-            a = {   -- 255 items, n=430610
-                { 11083, 0.7891, 3.515 },   -- Soul Dust
-                { 11134, 0.1689, 1.497 },   -- Lesser Mystic Essence
-                { 11138, 0.0420, 1.001 },   -- Small Glowing Shard
+            a = {   -- 310 items, DisenchantID 5
+                { 11083, 0.7500, 3.500 },   -- Soul Dust
+                { 11134, 0.2000, 1.500 },   -- Lesser Mystic Essence
+                { 11138, 0.0500, 1.000 },   -- Small Glowing Shard
             },
-            w = {   -- 25 items, n=64685
-                { 11134, 0.7689, 1.509 },   -- Lesser Mystic Essence
-                { 11083, 0.1877, 3.512 },   -- Soul Dust
-                { 11138, 0.0434, 1.020 },   -- Small Glowing Shard
+            w = {   -- 68 items, DisenchantID 25
+                { 11134, 0.7500, 1.500 },   -- Lesser Mystic Essence
+                { 11083, 0.2000, 3.500 },   -- Soul Dust
+                { 11138, 0.0500, 1.000 },   -- Small Glowing Shard
             },
         },
         [40] = {
-            a = {   -- 249 items, n=584008
-                { 11137, 0.7775, 1.527 },   -- Vision Dust
-                { 11135, 0.1764, 1.497 },   -- Greater Mystic Essence
-                { 11139, 0.0461, 1.000 },   -- Large Glowing Shard
+            a = {   -- 310 items, DisenchantID 6
+                { 11137, 0.7500, 1.500 },   -- Vision Dust
+                { 11135, 0.2000, 1.500 },   -- Greater Mystic Essence
+                { 11139, 0.0500, 1.000 },   -- Large Glowing Shard
             },
-            w = {   -- 29 items, n=76126
-                { 11135, 0.7480, 1.522 },   -- Greater Mystic Essence
-                { 11137, 0.2024, 1.514 },   -- Vision Dust
-                { 11139, 0.0496, 1.033 },   -- Large Glowing Shard
+            w = {   -- 79 items, DisenchantID 26
+                { 11135, 0.7500, 1.500 },   -- Greater Mystic Essence
+                { 11137, 0.2000, 1.500 },   -- Vision Dust
+                { 11139, 0.0500, 1.000 },   -- Large Glowing Shard
             },
         },
         [45] = {
-            a = {   -- 335 items, n=592103
-                { 11137, 0.7867, 3.524 },   -- Vision Dust
-                { 11174, 0.1682, 1.504 },   -- Lesser Nether Essence
-                { 11177, 0.0452, 1.000 },   -- Small Radiant Shard
+            a = {   -- 367 items, DisenchantID 7
+                { 11137, 0.7500, 3.500 },   -- Vision Dust
+                { 11174, 0.2000, 1.500 },   -- Lesser Nether Essence
+                { 11177, 0.0500, 1.000 },   -- Small Radiant Shard
             },
-            w = {   -- 27 items, n=55612
-                { 11174, 0.8042, 1.498 },   -- Lesser Nether Essence
-                { 11137, 0.1532, 3.839 },   -- Vision Dust
-                { 11177, 0.0427, 1.000 },   -- Small Radiant Shard
+            w = {   -- 77 items, DisenchantID 27
+                { 11174, 0.7500, 1.500 },   -- Lesser Nether Essence
+                { 11137, 0.2000, 3.500 },   -- Vision Dust
+                { 11177, 0.0500, 1.000 },   -- Small Radiant Shard
             },
         },
         [50] = {
-            a = {   -- 321 items, n=742147
-                { 11176, 0.7811, 1.530 },   -- Dream Dust
-                { 11175, 0.1759, 1.511 },   -- Greater Nether Essence
-                { 11178, 0.0430, 1.018 },   -- Large Radiant Shard
+            a = {   -- 353 items, DisenchantID 8
+                { 11176, 0.7500, 1.500 },   -- Dream Dust
+                { 11175, 0.2000, 1.500 },   -- Greater Nether Essence
+                { 11178, 0.0500, 1.000 },   -- Large Radiant Shard
             },
-            w = {   -- 28 items, n=57873
-                { 11175, 0.7727, 1.507 },   -- Greater Nether Essence
-                { 11176, 0.1783, 1.486 },   -- Dream Dust
-                { 11178, 0.0490, 1.055 },   -- Large Radiant Shard
+            w = {   -- 51 items, DisenchantID 28
+                { 11175, 0.7500, 1.500 },   -- Greater Nether Essence
+                { 11176, 0.2000, 1.500 },   -- Dream Dust
+                { 11178, 0.0500, 1.000 },   -- Large Radiant Shard
             },
         },
         [55] = {
-            a = {   -- 152 items, n=247579
-                { 11176, 0.8148, 3.521 },   -- Dream Dust
-                { 16202, 0.1852, 1.513 },   -- Lesser Eternal Essence
+            a = {   -- 317 items, DisenchantID 9
+                { 11176, 0.7500, 3.500 },   -- Dream Dust
+                { 16202, 0.2000, 1.500 },   -- Lesser Eternal Essence
+                { 14343, 0.0500, 1.000 },   -- Small Brilliant Shard
             },
-            w = {   -- 13 items, n=30860
-                { 16202, 0.8359, 1.469 },   -- Lesser Eternal Essence
-                { 11176, 0.1641, 3.475 },   -- Dream Dust
+            w = {   -- 67 items, DisenchantID 29
+                { 16202, 0.7500, 1.500 },   -- Lesser Eternal Essence
+                { 11176, 0.2200, 3.500 },   -- Dream Dust
+                { 14343, 0.0300, 1.000 },   -- Small Brilliant Shard
             },
         },
         [60] = {
-            a = {   -- 298 items, n=751452
-                { 16204, 0.7751, 1.525 },   -- Illusion Dust
-                { 16203, 0.1976, 1.512 },   -- Greater Eternal Essence
-                { 14344, 0.0273, 1.000 },   -- Large Brilliant Shard
+            a = {   -- 358 items, DisenchantID 10
+                { 16204, 0.7500, 1.500 },   -- Illusion Dust
+                { 16203, 0.2000, 1.500 },   -- Greater Eternal Essence
+                { 14344, 0.0500, 1.000 },   -- Large Brilliant Shard
             },
-            w = {   -- 25 items, n=65838
-                { 16203, 0.7611, 1.526 },   -- Greater Eternal Essence
-                { 16204, 0.2084, 1.525 },   -- Illusion Dust
-                { 14344, 0.0305, 1.000 },   -- Large Brilliant Shard
+            w = {   -- 69 items, DisenchantID 30
+                { 16203, 0.7500, 1.500 },   -- Greater Eternal Essence
+                { 16204, 0.2200, 1.500 },   -- Illusion Dust
+                { 14344, 0.0300, 1.000 },   -- Large Brilliant Shard
             },
         },
         [65] = {
-            a = {   -- 64 items, n=65819
-                { 16204, 0.8507, 3.540 },   -- Illusion Dust
-                { 16203, 0.1493, 2.482 },   -- Greater Eternal Essence
+            a = {   -- 188 items, DisenchantID 11
+                { 16204, 0.7500, 3.500 },   -- Illusion Dust
+                { 16203, 0.2000, 2.000 },   -- Greater Eternal Essence
+                { 14344, 0.0500, 1.000 },   -- Large Brilliant Shard
             },
-            -- w: no usable data (4 items, n=3740)
+            w = {   -- 45 items, DisenchantID 31
+                { 16203, 0.7500, 2.000 },   -- Greater Eternal Essence
+                { 16204, 0.2200, 3.500 },   -- Illusion Dust
+                { 14344, 0.0300, 1.000 },   -- Large Brilliant Shard
+            },
         },
     },
     [3] = {   -- rare
         [20] = {
-            a = {   -- 7 items, n=5376
+            a = {   -- 2 items, DisenchantID 41
                 { 10978, 1.0000, 1.000 },   -- Small Glimmering Shard
             },
-            w = {   -- 7 items, n=5376
+            w = {   -- 10 items, DisenchantID 41
                 { 10978, 1.0000, 1.000 },   -- Small Glimmering Shard
             },
         },
         [25] = {
-            a = {   -- 46 items, n=129937
-                { 10978, 1.0000, 1.009 },   -- Small Glimmering Shard
+            a = {   -- 32 items, DisenchantID 41
+                { 10978, 1.0000, 1.000 },   -- Small Glimmering Shard
             },
-            w = {   -- 46 items, n=129937
-                { 10978, 1.0000, 1.009 },   -- Small Glimmering Shard
+            w = {   -- 40 items, DisenchantID 41
+                { 10978, 1.0000, 1.000 },   -- Small Glimmering Shard
             },
         },
         [30] = {
-            a = {   -- 44 items, n=120505
-                { 11084, 1.0000, 1.001 },   -- Large Glimmering Shard
+            a = {   -- 38 items, DisenchantID 42
+                { 11084, 1.0000, 1.000 },   -- Large Glimmering Shard
             },
-            w = {   -- 44 items, n=120505
-                { 11084, 1.0000, 1.001 },   -- Large Glimmering Shard
+            w = {   -- 40 items, DisenchantID 42
+                { 11084, 1.0000, 1.000 },   -- Large Glimmering Shard
             },
         },
         [35] = {
-            a = {   -- 45 items, n=57954
-                { 11138, 1.0000, 1.001 },   -- Small Glowing Shard
+            a = {   -- 44 items, DisenchantID 43
+                { 11138, 1.0000, 1.000 },   -- Small Glowing Shard
             },
-            w = {   -- 45 items, n=57954
-                { 11138, 1.0000, 1.001 },   -- Small Glowing Shard
+            w = {   -- 38 items, DisenchantID 43
+                { 11138, 1.0000, 1.000 },   -- Small Glowing Shard
             },
         },
         [40] = {
-            a = {   -- 56 items, n=125839
-                { 11139, 1.0000, 1.012 },   -- Large Glowing Shard
+            a = {   -- 45 items, DisenchantID 44
+                { 11139, 1.0000, 1.000 },   -- Large Glowing Shard
             },
-            w = {   -- 56 items, n=125839
-                { 11139, 1.0000, 1.012 },   -- Large Glowing Shard
+            w = {   -- 58 items, DisenchantID 44
+                { 11139, 1.0000, 1.000 },   -- Large Glowing Shard
             },
         },
         [45] = {
-            a = {   -- 53 items, n=194288
-                { 11177, 1.0000, 1.007 },   -- Small Radiant Shard
+            a = {   -- 46 items, DisenchantID 45
+                { 11177, 1.0000, 1.000 },   -- Small Radiant Shard
             },
-            w = {   -- 53 items, n=194288
-                { 11177, 1.0000, 1.007 },   -- Small Radiant Shard
+            w = {   -- 37 items, DisenchantID 45
+                { 11177, 1.0000, 1.000 },   -- Small Radiant Shard
             },
         },
         [50] = {
-            a = {   -- 56 items, n=163395
-                { 11178, 1.0000, 1.006 },   -- Large Radiant Shard
+            a = {   -- 48 items, DisenchantID 46
+                { 11178, 1.0000, 1.000 },   -- Large Radiant Shard
             },
-            w = {   -- 56 items, n=163395
-                { 11178, 1.0000, 1.006 },   -- Large Radiant Shard
+            w = {   -- 45 items, DisenchantID 46
+                { 11178, 1.0000, 1.000 },   -- Large Radiant Shard
             },
         },
         [55] = {
-            a = {   -- 96 items, n=221288
-                { 14343, 1.0000, 1.010 },   -- Small Brilliant Shard
+            a = {   -- 130 items, DisenchantID 47
+                { 14343, 1.0000, 1.000 },   -- Small Brilliant Shard
             },
-            w = {   -- 96 items, n=221288
-                { 14343, 1.0000, 1.010 },   -- Small Brilliant Shard
+            w = {   -- 60 items, DisenchantID 47
+                { 14343, 1.0000, 1.000 },   -- Small Brilliant Shard
             },
         },
         [60] = {
-            a = {   -- 182 items, n=338076
-                { 14344, 1.0000, 1.019 },   -- Large Brilliant Shard
+            a = {   -- 258 items, DisenchantID 48
+                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard
             },
-            w = {   -- 182 items, n=338076
-                { 14344, 1.0000, 1.019 },   -- Large Brilliant Shard
+            w = {   -- 90 items, DisenchantID 48
+                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard
             },
         },
         [65] = {
-            a = {   -- 194 items, n=359504
-                { 14344, 1.0000, 1.011 },   -- Large Brilliant Shard
+            a = {   -- 384 items, DisenchantID 48
+                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard
             },
-            w = {   -- 194 items, n=359504
-                { 14344, 1.0000, 1.011 },   -- Large Brilliant Shard
+            w = {   -- 128 items, DisenchantID 48
+                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard
+            },
+        },
+        [70] = {
+            a = {   -- 70 items, DisenchantID 49
+                { 14344, 0.9950, 1.000 },   -- Large Brilliant Shard
+                { 20725, 0.0050, 1.000 },   -- Nexus Crystal
+            },
+            w = {   -- 18 items, DisenchantID 49
+                { 14344, 0.9950, 1.000 },   -- Large Brilliant Shard
+                { 20725, 0.0050, 1.000 },   -- Nexus Crystal
+            },
+        },
+    },
+    [4] = {   -- epic
+        [40] = {
+            -- a: the source has no item of this quality, class and level
+            w = {   -- 2 items, DisenchantID 61
+                { 11177, 1.0000, 3.000 },   -- Small Radiant Shard
+            },
+        },
+        [45] = {
+            a = {   -- 4 items, DisenchantID 61
+                { 11177, 1.0000, 3.000 },   -- Small Radiant Shard
+            },
+            w = {   -- 6 items, DisenchantID 61
+                { 11177, 1.0000, 3.000 },   -- Small Radiant Shard
+            },
+        },
+        [50] = {
+            a = {   -- 3 items, DisenchantID 62
+                { 11178, 1.0000, 3.000 },   -- Large Radiant Shard
+            },
+            w = {   -- 7 items, DisenchantID 62
+                { 11178, 1.0000, 3.000 },   -- Large Radiant Shard
+            },
+        },
+        [55] = {
+            a = {   -- 15 items, DisenchantID 63
+                { 14343, 1.0000, 3.000 },   -- Small Brilliant Shard
+            },
+            w = {   -- 7 items, DisenchantID 63
+                { 14343, 1.0000, 3.000 },   -- Small Brilliant Shard
+            },
+        },
+        [60] = {
+            a = {   -- 45 items, DisenchantID 64
+                { 20725, 1.0000, 1.000 },   -- Nexus Crystal
+            },
+            w = {   -- 9 items, DisenchantID 64
+                { 20725, 1.0000, 1.000 },   -- Nexus Crystal
+            },
+        },
+        [65] = {
+            a = {   -- 51 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 29 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+        },
+        [70] = {
+            a = {   -- 136 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 52 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+        },
+        [75] = {
+            a = {   -- 112 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 32 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+        },
+        [80] = {
+            a = {   -- 174 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 26 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+        },
+        [85] = {
+            a = {   -- 94 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 39 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+        },
+        [90] = {
+            a = {   -- 92 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 12 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+        },
+        [95] = {
+            a = {   -- 20 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
+            },
+            w = {   -- 2 items, DisenchantID 65
+                { 20725, 1.0000, 1.500 },   -- Nexus Crystal
             },
         },
     },
