@@ -18,6 +18,38 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.14]
+
+### Fixed
+- **The Sell tab could show no listings for an item the auction house is full
+  of.** "0 price(s), scanned just now" over 158 Truesilver Bars, while
+  searching the same item on the Buy tab found them all.
+
+  A scanned row is matched to the slotted item by item id, and on 1.12 the
+  client gives no id for an item it has never cached — so every row was
+  discarded and the scan reported success with nothing in it. It matches on an
+  exact name now when, and only when, there is no id to use.
+
+  *This is why searching the item on the Buy tab first made the Sell tab work:
+  the search is what caches the links.*
+
+- **Spamming Undercut or Price match moved the deposit figure.** The Sell tab
+  measures the deposit correction while it repaints, and a repaint happens on
+  every click. That measurement is averaged over the last twenty samples, so
+  twenty clicks made the correction entirely that one item's — and the figure
+  walked while you clicked.
+
+  It now takes one measurement per item, stack size and duration, and a
+  **slotted item's deposit comes from the client's own figure** rather than
+  from the formula that exists to estimate it for items still in your bags.
+
+### Changed
+- **A targeted scan says what it is scanning.** "Requesting first page…" looked
+  identical whether the scanner was walking the whole house or fetching one
+  item for the Sell tab, so a scan that was working read as a stuck one.
+
+---
+
 ## [1.54.13]
 
 ### Fixed
@@ -6159,6 +6191,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

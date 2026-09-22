@@ -358,4 +358,46 @@ do
             "last scan's sold-out listings would still be on it")
 end
 
+-- ---------------------------------------------------------------------------
+H.section("what the strip says it is scanning")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. A targeted scan from the Sell tab and a stalled full scan
+-- showed the strip the same "Requesting first page..." -- so a player whose
+-- Sell tab was scanning one item read the Aegis tab, saw a request pending,
+-- and reasonably took it for a stuck scan and stopped it. Naming the item is
+-- the whole fix.
+
+do
+    scan.Start({ name = "Truesilver Bar" })
+    H.eq("a one-item scan names its item", scan.Subject(), "Truesilver Bar")
+    H.eq("...and the strip is handed it",
+         scan.GetProgress().subject, "Truesilver Bar")
+    scan.Stop()
+end
+
+-- A FULL SCAN NAMES NOTHING, or the strip would claim to be scanning an item
+-- while it walks the whole house.
+do
+    scan.Start({})
+    H.isNil("a full scan has no subject", scan.Subject())
+    scan.Stop()
+end
+
+-- NOR DOES A MULTI-QUERY RUN, even when its first query carries a name: a
+-- sweep over several categories is not "scanning Truesilver Bar", and a strip
+-- that said so would be worse than one that said nothing.
+do
+    scan.Start({ { name = "Truesilver Bar" }, { class = 2 } })
+    H.isNil("a category sweep has no subject", scan.Subject())
+    scan.Stop()
+end
+
+-- An empty name is not a name.
+do
+    scan.Start({ name = "" })
+    H.isNil("an empty name is not a subject", scan.Subject())
+    scan.Stop()
+end
+
 os.exit(H.report("scan.leak"))

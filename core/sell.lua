@@ -1054,15 +1054,45 @@ end
 -- looking at, so this costs one division whenever the Sell tab redraws.
 --
 -- Returns the ratio it recorded, or nil when it could not.
+-- ONE MEASUREMENT PER OPPORTUNITY, and the key is what defines one.
+--
+-- WHY IT IS NEEDED. The Sell tab learns this ratio while repainting, which is
+-- the right place -- an item is slotted, so the client will answer, and both
+-- numbers are being computed anyway. But a repaint happens on every keystroke
+-- and every button click, and the measurement does not change between them:
+-- it is the same item, the same stack, the same duration.
+--
+-- Recording it again on each repaint is not harmless. db.RecordDepositRatio
+-- keeps a running mean over the last 20 samples, so clicking Undercut twenty
+-- times makes the account-wide correction ENTIRELY that one item's ratio. The
+-- deposit figure then walks toward that item's number while you click, which
+-- is how it was reported: "spam the undercut or price match button and it
+-- increases the deposit cost".
+--
+-- The stack size is in the key because the client's figure is per stack.
+function sell.DepositSampleKey(itemId, count, minutes)
+    if not itemId or not minutes then return nil end
+    return tostring(itemId) .. ":" .. tostring(count or 1)
+        .. ":" .. tostring(minutes)
+end
+
+-- Which measurement has already been taken. A SESSION value: the ratio is a
+-- property of the server's arithmetic, so re-measuring the same item next
+-- login adds nothing, but forgetting across a reload costs only one sample.
+sell.ratioSampledFor = nil
+
 function sell.LearnDepositRatio(minutes)
     if not CalculateAuctionDeposit then return nil end
     if not minutes or minutes <= 0 then return nil end
     local it = sell.GetItem()
     if not it or not it.price or it.price <= 0 then return nil end
+    local key = sell.DepositSampleKey(it.itemId, it.count, minutes)
+    if key and sell.ratioSampledFor == key then return nil end
     local ours = sell.DepositAmount(it.price / (it.count or 1),
         it.count or 1, 1, minutes)
     local ratio = sell.DepositRatio(CalculateAuctionDeposit(minutes), ours)
     if not ratio then return nil end
+    sell.ratioSampledFor = key
     if A.db and A.db.RecordDepositRatio then A.db.RecordDepositRatio(ratio) end
     return ratio
 end
@@ -1313,6 +1343,33 @@ end
 -- {count, buyout, unit, minBid, owner, isMine}, sorts cheapest-first, and calls
 -- onDone(rows). onProgress(page, total) fires per page. Returns false if the
 -- scanner is busy with another scan.
+-- Is this auction row the item we asked for?
+--
+-- WHY IT IS NOT JUST `id == itemId`, which is what it was. The row's id comes
+-- from GetAuctionItemLink, and on 1.12 THAT RETURNS NIL FOR AN ITEM THE CLIENT
+-- HAS NOT CACHED. A player who has never linked or looted Truesilver Bar gets
+-- nil for all 50 rows on the page, every row is discarded, and the scan
+-- reports success with nothing in it -- "0 price(s), scanned just now" over an
+-- auction house holding 158 of them. It was reported exactly that way, along
+-- with the detail that explains it: searching for the item on the Buy tab
+-- first makes the Sell tab work, because the search is what caches the links.
+--
+-- THE NAME IS A SAFE FALLBACK HERE AND ONLY HERE, because the query WAS the
+-- name. The server matches names as a SUBSTRING -- a query for "Silk Cloth"
+-- returns "Bolt of Silk Cloth" too -- so the comparison has to be exact, and
+-- a row whose id we CAN read is still judged on the id. The fallback only
+-- covers the one case the id cannot: no link at all.
+--
+-- A row carrying a DIFFERENT id is never accepted on a name match. Two items
+-- can share a name across a rename or a server's custom content, and pricing
+-- against the wrong one is worse than pricing against nothing.
+function sell.SameItem(rowId, rowName, wantId, wantName)
+    if rowId and wantId then return rowId == wantId end
+    if rowId then return false end
+    if not rowName or not wantName then return false end
+    return rowName == wantName
+end
+
 function sell.ScanItem(itemName, itemId, onProgress, onDone)
     -- Cache hit: return stored results without a new scan.
     local entry = sell.cache[itemId]
@@ -1335,7 +1392,7 @@ function sell.ScanItem(itemName, itemId, onProgress, onDone)
     local me = UnitName("player")
     A.scan.Start({ name = itemName }, {
         onListing = function(id, name, count, buyout, minBid, owner)
-            if id == itemId then
+            if sell.SameItem(id, name, itemId, itemName) then
                 table.insert(sell.listings, {
                     count  = count,
                     buyout = buyout,   -- stack buyout (copper); 0 = bid only

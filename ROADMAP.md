@@ -5169,6 +5169,45 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Two Sell-tab bugs — ✅ **DONE** (v1.54.14)
+
+**The listings that were not there.** `sell.ScanItem` kept a scanned row only
+when `id == itemId`, and that id comes from `GetAuctionItemLink` — which on
+1.12 returns **nil for an item the client has not cached**. Every row on the
+page was discarded and the scan reported success with nothing in it.
+`sell.SameItem` falls back to an exact name match when, and only when, there is
+no id; a row carrying a *different* id is never accepted on a name match, and
+the name comparison is exact because the server matches a query as a substring.
+
+*The reporter supplied the decisive detail themselves: searching the item on
+the Buy tab first makes the Sell tab work. The search is what caches the
+links.*
+
+**The deposit that walked.** The Sell tab measures the formula-to-client
+deposit ratio while repainting — the right place, since an item is slotted and
+both numbers are being computed anyway — but a repaint happens on every click.
+`db.RecordDepositRatio` keeps a running mean over 20 samples, so twenty clicks
+on Undercut made the account-wide correction *entirely* the slotted item's
+ratio, and every deposit figure moved with it.
+
+- `sell.DepositSampleKey` defines one measurement opportunity as (item, stack
+  size, duration). The stack size is in the key because the client's figure is
+  per stack.
+- **A slotted item's deposit now comes from the client**, not from
+  `sell.DepositFor` — which reconstructs the client's number from a vendor
+  price and a learned correction, and exists for the **bag preview**, which has
+  no slotted item and so cannot ask. Only for the stack the client is actually
+  holding; any other size still uses the formula.
+
+**Still open:** the reported scan halt. The repro is fully explained by the
+listings bug above — including "the second attempt worked", which is the Buy
+tab search having cached the links — and what looked like a stalled scan on the
+Aegis tab was the shared scanner legitimately fetching that one item. The strip
+now names what it is scanning (`scan.Subject`) so the two cannot be confused.
+If a scan genuinely hangs again, `/aex debug` distinguishes the two stall legs:
+the query gate never opening, versus queries going out and never being
+answered.
+
 ### Disenchant values from the server's loot table — ✅ **DONE** (v1.54.13)
 
 Reported as three things, which turned out to be one thing: greens at the top

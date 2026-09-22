@@ -1311,6 +1311,103 @@ end
      "                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard",
      "disenchant"),
 
+    # ---- the Sell tab's listings ------------------------------------------
+    # GetAuctionItemLink returns NIL for an item the client has not cached, so
+    # comparing ids alone discards every row on the page and reports a
+    # successful scan with nothing in it -- over an auction house holding 158
+    # of them. This is the shape the bug had.
+    ("sell-listings-match-on-id-alone", "core/sell.lua",
+     "    if rowId and wantId then return rowId == wantId end\n"
+     "    if rowId then return false end",
+     "    if rowId or wantId then return rowId == wantId end",
+     "sellslot"),
+
+    # ...and the scan has to go THROUGH the helper. The arithmetic is right
+    # either way if the callback still compares ids inline.
+    ("sell-listings-filter-bypasses-the-helper", "core/sell.lua",
+     "            if sell.SameItem(id, name, itemId, itemName) then",
+     "            if id == itemId then",
+     "sellslot"),
+
+    # The name fallback must be EXACT. The server matches a query as a
+    # SUBSTRING, so "Silk Cloth" is answered with "Bolt of Silk Cloth" -- and
+    # pricing one against the other is how an undercut lands at a tenth of
+    # the market.
+    ("sell-listings-name-match-is-loose", "core/sell.lua",
+     "    return rowName == wantName",
+     "    return string.find(rowName, wantName, 1, true) ~= nil",
+     "sellslot"),
+
+    # A row carrying a DIFFERENT id is never accepted on a matching name.
+    ("sell-listings-name-overrules-the-id", "core/sell.lua",
+     "    if rowId and wantId then return rowId == wantId end\n"
+     "    if rowId then return false end",
+     "    if rowId and wantId and rowId == wantId then return true end",
+     "sellslot"),
+
+    # A targeted scan and a stalled full scan read identically on the strip,
+    # which is what made a player stop a scan that was working.
+    ("scan-subject-never-reported", "core/scan.lua",
+     "        subject     = scan.Subject(),",
+     "        subject     = nil,",
+     "scan.leak"),
+
+    # A multi-query sweep is not "scanning Truesilver Bar".
+    ("scan-subject-names-a-category-sweep", "core/scan.lua",
+     "    if not queries or table.getn(queries) ~= 1 then return nil end",
+     "    if not queries then return nil end",
+     "scan.leak"),
+
+    # ---- the deposit figure -----------------------------------------------
+    # The Sell tab learns this ratio while repainting, and a repaint happens on
+    # every keystroke and click. db.RecordDepositRatio keeps a running mean
+    # over 20 samples, so twenty clicks make the account-wide correction
+    # entirely the slotted item's ratio -- and the deposit walks while you
+    # click. Reported as "spam undercut and the deposit goes up".
+    ("deposit-measured-on-every-repaint", "core/sell.lua",
+     "    if key and sell.ratioSampledFor == key then return nil end",
+     "    local _ = key",
+     "sellslot"),
+
+    # ...and the other half: never re-measuring is not a fix either. A new
+    # item, stack or duration is a genuinely different measurement.
+    ("deposit-measured-once-and-never-again", "core/sell.lua",
+     "    local key = sell.DepositSampleKey(it.itemId, it.count, minutes)",
+     '    local key = "once"',
+     "sellslot"),
+
+    # The client's figure is per STACK, so the stack size has to be part of
+    # what counts as the same measurement.
+    ("deposit-key-ignores-the-stack-size", "core/sell.lua",
+     '    return tostring(itemId) .. ":" .. tostring(count or 1)\n'
+     '        .. ":" .. tostring(minutes)',
+     '    return tostring(itemId) .. ":" .. tostring(minutes)',
+     "sellslot"),
+
+    ("deposit-key-ignores-the-duration", "core/sell.lua",
+     '    return tostring(itemId) .. ":" .. tostring(count or 1)\n'
+     '        .. ":" .. tostring(minutes)',
+     '    return tostring(itemId) .. ":" .. tostring(count or 1)',
+     "sellslot"),
+
+    # A slotted item's deposit is the CLIENT's own figure. sell.DepositFor
+    # reconstructs it from a vendor price and a learned correction, and exists
+    # for the bag preview -- which cannot ask. Preferring the reconstruction
+    # puts a figure on screen that moves as the correction is learned.
+    ("deposit-prefers-the-formula-over-the-client", "ui/frame.lua",
+     "    if size == (it.count or 1) then\n"
+     "        perStack = A.sell.EstimateDeposit(ui.sellDuration)",
+     "    if false then\n"
+     "        perStack = A.sell.EstimateDeposit(ui.sellDuration)",
+     "sellslot"),
+
+    # ...but only for the stack the client is actually holding. Its answer is
+    # about what is IN the slot, so any other size has to use the formula.
+    ("deposit-uses-the-client-for-any-stack-size", "ui/frame.lua",
+     "    if size == (it.count or 1) then",
+     "    if true then",
+     "sellslot"),
+
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
     # stack of twenty is twenty draws, not twenty times this. The price lines

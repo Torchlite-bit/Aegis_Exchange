@@ -2809,15 +2809,18 @@ function ui.Refresh()
             -- Still before the first page. Say WHICH leg we're on so a stall
             -- is diagnosable from the strip alone (see /aex debug for the
             -- full trace).
+            -- NAME THE ITEM when there is one. A targeted scan from the
+            -- Sell tab and a stalled full scan used to read identically here.
+            local what = p.subject and (" \226\128\148 " .. p.subject) or ""
             if p.sent == 0 then
                 ui.statusText:SetText(
-                    "Starting scan \226\128\148 waiting for client...")
+                    "Starting scan \226\128\148 waiting for client..." .. what)
             elseif p.retries > 0 then
                 ui.statusText:SetText(string.format(
-                    "Requesting first page... (no reply \226\128\148 retry %d)",
-                    p.retries))
+                    "Requesting first page%s... (no reply \226\128\148 retry %d)",
+                    what, p.retries))
             else
-                ui.statusText:SetText("Requesting first page...")
+                ui.statusText:SetText("Requesting first page" .. what .. "...")
             end
         end
         ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
@@ -16400,8 +16403,26 @@ function ui.RefreshSell()
     -- place the formula can be checked against the client is the same place
     -- the formula gets used. O(1): one client call and one division.
     A.sell.LearnDepositRatio(ui.sellDuration)
-    local perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
-        it.maxStack)
+    -- THE CLIENT'S OWN FIGURE FIRST, whenever it will answer -- which here it
+    -- will, because an item is in the slot. sell.DepositFor reconstructs that
+    -- number from the vendor price and a learned correction, and it exists for
+    -- the BAG PREVIEW, which has no slotted item and so cannot ask. Preferring
+    -- the reconstruction over the real thing while the real thing is sitting
+    -- there is how the two paths came to disagree, and it puts a figure on
+    -- screen that moves as the correction is learned.
+    --
+    -- The stack size is the one wrinkle: the client answers for what is IN the
+    -- slot, so it is only the right answer when that is the stack being
+    -- posted. For any other size the formula is all there is.
+    local perStack, fromClient = nil, false
+    if size == (it.count or 1) then
+        perStack = A.sell.EstimateDeposit(ui.sellDuration)
+        fromClient = (perStack or 0) > 0
+    end
+    if not fromClient then
+        perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
+            it.maxStack)
+    end
     local approx = true
     if not perStack then
         perStack = A.sell.EstimateDeposit(ui.sellDuration)
