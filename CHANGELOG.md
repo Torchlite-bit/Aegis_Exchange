@@ -18,6 +18,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.12]
+
+### Fixed
+- **Whatever you clicked last is now in front.** Opening the auction house
+  opens your backpack — the client does that itself — and the bag landed
+  behind the Aegis window with no way to bring it forward. Clicking the bag did
+  nothing; clicking the window put the window back on top.
+
+  Bags, the trade skill and craft windows, the merchant, the bank, the mailbox
+  and the rest of what you have open while trading now come to the front when
+  you click them, and the Aegis window takes its turn the same way.
+
+  *It was not a z-order to fix by picking a better number — any fixed order is
+  wrong half the time. The client already does exactly the right thing when a
+  frame asks it to; ours was the only frame in the argument that was asking.*
+
+  *Raised, never lowered: a window that deliberately sits above everything — a
+  confirmation box asking whether you meant to spend that gold — stays there.*
+
+---
+
 ## [1.54.11]
 
 ### Changed
@@ -6112,6 +6133,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

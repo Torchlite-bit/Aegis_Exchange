@@ -1518,6 +1518,131 @@ end
 -- Window construction (once)
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- Window ordering: whatever you clicked last is in front
+-- ---------------------------------------------------------------------------
+--
+-- WHAT WAS WRONG. Opening the auction house opens your BACKPACK -- the client
+-- does that itself -- and the bag landed behind the Aegis window with no way
+-- to bring it forward. Clicking it did nothing. Clicking ours put ours on top
+-- again, which is the half that always worked and made the other half look
+-- deliberate.
+--
+-- It was not a z-order to fix by picking a better number. ANY fixed order is
+-- wrong half the time -- the right answer is "the one you just clicked", and
+-- the client already implements exactly that: SetToplevel(true) means "put me
+-- on top of my strata when I am clicked". Our window is created with it. The
+-- bags are not, and neither is the trade skill window.
+--
+-- So one frame in the argument could raise itself and the others could not.
+--
+-- THE FIX IS THAT SAME SWITCH, GIVEN TO EVERYTHING IN THE ARGUMENT, plus the
+-- one thing that makes it work at all: TOPLEVEL ONLY REORDERS WITHIN A
+-- STRATA. A frame a whole strata below ours can be clicked all day and will
+-- never come forward, so anything sitting lower is lifted into ours first.
+--
+-- RAISED, NEVER LOWERED. A frame that sits ABOVE us does so for a reason that
+-- has nothing to do with this -- a confirmation dialog, a popup -- and pulling
+-- it down into our strata to win an argument it was not having is how an addon
+-- ends up hiding the box asking whether you really meant to spend that gold.
+--
+-- WE DO NOT HOOK ANYTHING. There is no OnMouseDown to save and replace here
+-- and no per-frame script to fight with another addon over: every one of
+-- these is a single widget setting the client then acts on by itself.
+
+-- Where a strata sits in the client's fixed order. 0 for anything unknown,
+-- which reads as "below everything" and so gets lifted.
+--
+-- THE ORDER IS THE CLIENT'S AND NOT OURS TO REARRANGE. FULLSCREEN is ABOVE
+-- DIALOG, which looks wrong written down and is what the client does.
+function ui.StrataRank(name)
+    local order = {
+        "WORLD", "BACKGROUND", "LOW", "MEDIUM", "HIGH",
+        "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP",
+    }
+    local i = 1
+    while i <= table.getn(order) do
+        if order[i] == name then return i end
+        i = i + 1
+    end
+    return 0
+end
+
+-- Every frame that should trade places with ours, by global name.
+--
+-- `bags` is NUM_CONTAINER_FRAMES, passed in rather than read here: the bag
+-- frames are NUMBERED and how many there are is the client's business, so a
+-- hardcoded 1..5 misses the bank bags and a hardcoded 1..11 names frames that
+-- may not exist on this client.
+--
+-- THE REST IS A LIST BECAUSE IT HAS TO BE. There is no way to ask the client
+-- for "the windows a player has open while trading" -- UIPanelWindows is a
+-- table of panel behaviour, not of frames worth raising, and it does not
+-- contain the bags at all. A named list is honest about being a list: a frame
+-- that is not in it simply keeps the behaviour it has today, which is what it
+-- had before any of this.
+function ui.RaiseFrameNames(bags)
+    local names = {}
+    local n = bags or 5
+    local i = 1
+    while i <= n do
+        table.insert(names, "ContainerFrame" .. i)
+        i = i + 1
+    end
+    -- Professions are LOAD-ON-DEMAND. Neither frame exists until the player
+    -- has opened that window once, which is why ui.ApplyRaiseGroup runs again
+    -- on ADDON_LOADED rather than only at startup.
+    table.insert(names, "TradeSkillFrame")
+    table.insert(names, "CraftFrame")
+    -- ...and the rest of what is plausibly open while you are at the auction
+    -- house.
+    table.insert(names, "MerchantFrame")
+    table.insert(names, "BankFrame")
+    table.insert(names, "MailFrame")
+    table.insert(names, "TradeFrame")
+    table.insert(names, "CharacterFrame")
+    table.insert(names, "SpellBookFrame")
+    table.insert(names, "QuestLogFrame")
+    table.insert(names, "InspectFrame")
+    table.insert(names, "LootFrame")
+    return names
+end
+
+-- Put one frame into the group. Returns whether there was a frame to put.
+function ui.JoinRaiseGroup(frame, strata)
+    if not frame or not frame.SetToplevel then return false end
+    if strata and frame.GetFrameStrata and frame.SetFrameStrata then
+        if ui.StrataRank(frame:GetFrameStrata()) < ui.StrataRank(strata) then
+            frame:SetFrameStrata(strata)
+        end
+    end
+    frame:SetToplevel(true)
+    return true
+end
+
+-- Apply it to everything that exists right now. Returns how many were there.
+--
+-- IDEMPOTENT, because it runs again every time a load-on-demand window turns
+-- up and every time the auction house opens. Setting a flag that is already
+-- set costs nothing and a frame that does not exist yet is skipped rather
+-- than remembered, so the next run picks it up.
+function ui.ApplyRaiseGroup()
+    local strata = "HIGH"
+    if ui.frame and ui.frame.GetFrameStrata then
+        strata = ui.frame:GetFrameStrata() or strata
+    end
+    local names = ui.RaiseFrameNames(NUM_CONTAINER_FRAMES)
+    local found = 0
+    local i = 1
+    while i <= table.getn(names) do
+        if ui.JoinRaiseGroup(getglobal(names[i]), strata) then
+            found = found + 1
+        end
+        i = i + 1
+    end
+    return found
+end
+
 function ui.BuildWindow()
     if ui.frame then return end
 
@@ -1557,6 +1682,9 @@ function ui.BuildWindow()
     f:SetBackdropBorderColor(1, 1, 1)
     f:Hide()
     ui.frame = f
+    -- Everything else that can be on screen while trading learns the same
+    -- trick, so clicking a bag brings the bag forward. See ui.ApplyRaiseGroup.
+    ui.ApplyRaiseGroup()
 
     -- ESC closes our window (and, via OnHide below, the AH session). Without
     -- this the client swallows ESC while our top-level frame is up instead of
@@ -17734,12 +17862,23 @@ A.RegisterEvent("ADDON_LOADED", function(evt, loadedName)
     if loadedName and string.lower(loadedName) == "blizzard_auctionui" then
         ui.HookAuctionFrame()
     end
+    -- A load-on-demand UI brings its frame with it -- the trade skill and
+    -- craft windows do not exist until the player has opened one -- so the
+    -- raise group is applied again rather than only at startup. Bounded: a
+    -- dozen getglobals, and ADDON_LOADED does not storm.
+    if loadedName and string.find(string.lower(loadedName), "blizzard_", 1, true)
+       == 1 then
+        ui.ApplyRaiseGroup()
+    end
 end)
 
 -- By AUCTION_HOUSE_SHOW, Blizzard_AuctionUI is loaded and AuctionFrame exists,
 -- and the auction API is usable — so this is the moment to take over.
 A.RegisterEvent("AUCTION_HOUSE_SHOW", function()
     ui.OpenWindow()
+    -- The client opens your BACKPACK here, which is the bag that used to land
+    -- behind the window and stay there.
+    ui.ApplyRaiseGroup()
 end)
 
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()

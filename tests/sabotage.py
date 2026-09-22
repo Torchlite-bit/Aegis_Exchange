@@ -6213,6 +6213,79 @@ end""",
      "                      or rec.quality or nil",
      "ledgeritems"),
 
+    # ---- window ordering: whatever you clicked last is in front ------------
+    # TOPLEVEL ALONE IS NOT THE FIX. It only reorders WITHIN a strata, so a bag
+    # a whole strata below the window can be clicked all day and never come
+    # forward -- the flag gets set, nothing changes, and it looks done.
+    ("raise-sets-the-flag-but-never-lifts", "ui/frame.lua",
+     "        if ui.StrataRank(frame:GetFrameStrata()) < ui.StrataRank(strata) then\n"
+     "            frame:SetFrameStrata(strata)\n        end",
+     "        local _ = strata",
+     "raise"),
+
+    # ...and the flag is the other half. Lifting a frame into our strata and
+    # not telling it to raise itself leaves it in a fair fight it cannot win.
+    ("raise-lifts-but-never-sets-the-flag", "ui/frame.lua",
+     "    frame:SetToplevel(true)\n    return true",
+     "    return true",
+     "raise"),
+
+    # RAISED, NEVER LOWERED. A frame above us is there for reasons of its own
+    # -- a confirmation dialog, a popup -- and dragging it down into our
+    # strata hides it behind an auction window.
+    ("raise-lowers-frames-that-sit-above-us", "ui/frame.lua",
+     "        if ui.StrataRank(frame:GetFrameStrata()) < ui.StrataRank(strata) then",
+     "        if ui.StrataRank(frame:GetFrameStrata()) ~= ui.StrataRank(strata) then",
+     "raise"),
+
+    # An unknown strata has to read as BELOW everything, or the frame most
+    # likely to be stuck underneath is the one left there.
+    ("raise-treats-an-unknown-strata-as-topmost", "ui/frame.lua",
+     "    return 0\nend\n\n-- Every frame that should trade places with ours",
+     "    return 99\nend\n\n-- Every frame that should trade places with ours",
+     "raise"),
+
+    # FULLSCREEN is ABOVE DIALOG. It looks wrong written down, and a list that
+    # "corrects" it starts lowering dialogs into our strata.
+    ("raise-reorders-the-clients-strata", "ui/frame.lua",
+     '        "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP",',
+     '        "FULLSCREEN", "DIALOG", "FULLSCREEN_DIALOG", "TOOLTIP",',
+     "raise"),
+
+    # The bag count is the CLIENT's. A hardcoded five drops the bank bags.
+    ("raise-hardcodes-five-bags", "ui/frame.lua",
+     "    local n = bags or 5",
+     "    local n = 5",
+     "raise"),
+
+    # A perfect group nobody applies is an unchanged screen. These are the two
+    # moments that are easiest to leave out.
+    ("raise-not-applied-when-the-house-opens", "ui/frame.lua",
+     "    ui.OpenWindow()\n    -- The client opens your BACKPACK here, which is"
+     " the bag that used to land\n    -- behind the window and stay there.\n"
+     "    ui.ApplyRaiseGroup()",
+     "    ui.OpenWindow()",
+     "raise"),
+
+    ("raise-not-applied-to-load-on-demand-windows", "ui/frame.lua",
+     '    if loadedName and string.find(string.lower(loadedName), "blizzard_", 1, true)\n'
+     "       == 1 then\n        ui.ApplyRaiseGroup()\n    end",
+     "    local _ = loadedName",
+     "raise"),
+
+    # The target strata is READ from our own window, not written down a second
+    # time -- a copy is one more place to change and forget.
+    ("raise-hardcodes-the-target-strata", "ui/frame.lua",
+     "        strata = ui.frame:GetFrameStrata() or strata",
+     "        strata = strata",
+     "raise"),
+
+    # The professions windows are what the report named after the bags.
+    ("raise-forgets-the-professions", "ui/frame.lua",
+     '    table.insert(names, "TradeSkillFrame")',
+     '    local _ = names',
+     "raise"),
+
     # ---- the hover target itself -------------------------------------------
     # ui.skin plates every Button it is given, and on an invisible hover target
     # over a FontString that drew a bar straight through the item's name.
@@ -6710,6 +6783,7 @@ SUITES = {
     "purse": "tests/units/purse_test.lua",
     "sweep": "tests/units/sweep_test.lua",
     "postbook": "tests/units/postbook_test.lua",
+    "raise": "tests/units/raise_test.lua",
     "ledgeritems": "tests/units/ledgeritems_test.lua",
     "histstats": "tests/units/histstats_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and

@@ -5169,6 +5169,36 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Window ordering — ✅ **DONE** (v1.54.12)
+
+Reported as "my bag is always behind the AH window". The client opens the
+backpack for you at `AUCTION_HOUSE_SHOW`, and the bag landed under the Aegis
+window with no way to bring it forward.
+
+Not a z-order to fix by picking a better number — any fixed order is wrong half
+the time. The right answer is "the one you just clicked", and the client
+already implements it: `SetToplevel(true)`. Our window was created with it and
+nothing else in the argument was, so one frame could raise itself and the
+others could not.
+
+- **`ui.ApplyRaiseGroup`** gives the same flag to the bags (built from
+  `NUM_CONTAINER_FRAMES`, not a hardcoded count), the trade skill and craft
+  windows, the merchant, bank, mailbox, trade, character, spellbook, quest log,
+  inspect and loot frames.
+- **Toplevel only reorders WITHIN a strata**, so anything sitting lower is
+  lifted into ours first — the flag alone looks like a fix and changes nothing.
+- **Raised, never lowered.** A frame above us is there for reasons of its own;
+  pulling it down is how an addon hides a confirmation dialog.
+- **Nothing is hooked.** These are widget settings the client acts on by
+  itself, so there is no `OnMouseDown` to save and replace and nothing for
+  another addon to fight over.
+- Applied again on `ADDON_LOADED` for `Blizzard_*`, because the professions
+  windows are load-on-demand and do not exist until first opened.
+
+**Not covered:** a UI replacement's own bag frames (pfUI's, for instance) are
+not in the list, because guessing global names that may not exist is dead code.
+Adding one is a line in `ui.RaiseFrameNames`.
+
 ### Demo mode covers the ledger — ✅ **DONE** (v1.54.11)
 
 Demo mode used to invent the History tab's **figures** through a `db.DemoStats`
