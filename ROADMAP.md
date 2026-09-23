@@ -5588,9 +5588,29 @@ Bronn     Salt Shaker              ready tomorrow 09:40
 file for the stated purpose, because it is in the client where you act on it.
 Build this first and ship it on its own; 6.3 is optional on top.
 
-**Open:** where it lives. A Crafting-tab panel is the obvious home; a one-line
-reminder at login ("2 profession cooldowns are ready") may be the thing people
-actually use. Needs a call before building.
+**Settled by the owner: a `/aex cd` window plus a login reminder.** Not a
+Crafting-tab panel: the main window only opens at an auction house, and a
+cooldown list you can only read while standing at an auctioneer is not one you
+can check from wherever you logged in. So:
+
+- **`/aex cd`** opens a small movable window anywhere, on the model of
+  `/aex shop` (`ui.BuildShopWindow`) — which exists for the same reason.
+- **One chat line at login** when anything is ready, naming who and what:
+  *"2 profession cooldowns are ready: Bronn (Transmute: Arcanite), Merrily
+  (Mooncloth)"*. Nothing ready, nothing printed.
+- **`/aex demo` fills it**, the way it fills the chart, Ledger and Receipt —
+  consulted instead of the store, never written to it, with a mix of *ready
+  now*, *hours* and *days* so every state the list can draw is on screen.
+
+**Scope limit, stated to the owner before building:** "across all accounts"
+means every character on **one WoW account**. `AegisExchangeDB` lives in that
+account's own `WTF/Account/<NAME>/SavedVariables` folder, and no 1.12 addon can
+read another account's. Alts on a second login see only their own account's
+cooldowns. A client limit, not a design choice — say so in the window rather
+than letting an empty row imply there is nothing to craft.
+
+**Deferred by the owner (asked 1.54.18):** not started yet; the project stays on
+1.54.x. It is a new capability, so it opens the next MINOR when it does start.
 
 ### 6.3 The machine-readable log
 
