@@ -4532,18 +4532,295 @@ flag already repaints once a frame behind rule 16's flush.
 
 ---
 
-## Phase 3 — History & Price Intelligence polish
+## Phase 3 — History tab: TSM-grade chart and a Ledger window
 
-- **Line graph** of profit/loss over time on the History tab. No charting
-  primitive exists in 1.12 FrameXML — needs a short design spike (grid of
-  `Texture` pixels vs. a `StatusBar`-based sparkline) before committing to
-  an approach. **Phase 0.3 is settled (v1.4.0)**, so this is unblocked; read
-  its note about plotting a median before designing the axes.
+**NEXT UP.** Set as the current focus alongside whatever small fixes are cheap
+enough to carry with it. Reference: TSM 4.x's Dashboard (a smooth filled line
+chart of gold over time, a figure row, and three stat blocks) and its Ledger (a
+per-item table of Sold / Avg Sell Price / Bought / Avg Buy Price / Avg Profit).
+
+**The old bullet here said the line graph "needs a short design spike".** It was
+stale by roughly forty releases. The chart exists: `ui.PlotColumns`,
+`ui.AxisMarks`, `ui.XAxisMarks`, `ui.BuildHistoryGraph`,
+`ui.UpdateHistoryGraph`, `ui.GrowPlotSpans`, the `HISTL` constants, a real
+gradient area fill from `art/gradient-fill.tga`, and 275 checks in
+`tests/units/histgraph_test.lua`. **Nothing below starts from nothing.**
+
+### 3.1 The chart's subject — ✅ **SETTLED, and it was already built**
+
+**Decided: gold balance.** And it already is one. `ui.UpdateHistoryGraph` sets
+the heading to `"Player Gold"`, pulls a single series from `ui.HistGoldSeries`
+→ `db.MoneySeries`, fills it, and clears series 2. The character picker chooses
+*whose* gold. There is a design note above `HIST_ALL_PLAYERS` saying so in as
+many words: *"THE CHART SHOWS ONE THING: GOLD HELD, over time"*, and that
+income and spending are what the table beside it is for.
+
+**This section originally said the chart plots income and spending and asked
+which it should be.** That came from `histgraph_test.lua`'s header — *"a line
+graph of income and spending"* — and not from `ui.UpdateHistoryGraph`. **Third
+time**: the same file's rotation claim (§3.2) and this phase's own "needs a
+design spike" bullet both rotted the same way. The rule this earns: **a comment
+in this repo is a lead, not a source.** Open the function.
+
+### 3.2 The smooth line
+
+`ui.PlotColumns` emits one rectangle per column spanning y1→y2. That is a
+staircase; the reference is a 1px anti-aliased stroke.
+
+**1.12 HAS affine `SetTexCoord`, and the repo said otherwise.** The 1.12 API
+definitions declare the eight-argument overload explicitly —
+
+```lua
+---@overload fun(ULx, ULy, LLx, LLy, URx, URy, LRx, LRy)
+function Texture:SetTexCoord(minX, maxX, minY, maxY) end
+```
+
+— and document `Texture:GetTexCoord()` as *"gets the **8** texture coordinates
+that map to the Texture's corners — New in 1.11"*. An in-client `pcall` of the
+eight-argument form returns true.
+
+**Where the wrong claim came from.** `histgraph_test.lua`'s header asserts
+"1.12 has no line primitive and no texture rotation". It appears exactly once,
+in a comment, introduced by `7e4eca8` — **the same commit that built the
+vertical-span rasteriser**. There is no in-client note behind it and no
+diagnostic. It reads as an assumption that was written down and then became the
+reason the line is blocky. **Correct that comment once the readback below
+confirms**, and not before: replacing one unsourced claim with another is how
+this happened the first time.
+
+**CONFIRMED on a real client.** The readback returns eight values, exactly
+those set:
+
+```
+/run local t=UIParent:CreateTexture() t:SetTexCoord(0,1,1,1,0,0,1,0) local r={t:GetTexCoord()} DEFAULT_CHAT_FRAME:AddMessage("n="..table.getn(r).." "..table.concat(r,","))
+
+n=8 0,1,1,1,0,0,1,0
+```
+
+(`select()` does not exist on 5.0, hence `{f()}` + `table.getn`.) The
+`histgraph_test.lua` comment has been corrected to say so and to cite this
+output, so the question does not get re-opened from the same bad premise.
+
+**The design this unlocks, which is better than the sprite sheet on every
+axis.** One texture per **line segment**, sheared into a parallelogram along the
+slope:
+
+- **Arbitrary angles**, not quantised to 16 or 32 cells. No banding to tune.
+- **One texture per segment, not per pixel column.** The budget worry is gone:
+  a 600px plot is one texture per data point, not 600 per series, so
+  `ui.GrowPlotSpans`' never-shrinking pool stops mattering.
+- **One tiny asset, not a sprite strip**: a symmetric alpha-feathered bar
+  (a few pixels tall, opaque centre, transparent edges) sheared along each
+  segment gives the anti-aliased stroke. Power-of-two, white, tinted at runtime —
+  see §3.5. `gradient-fill.tga` cannot serve; it is a one-way ramp and this
+  needs a symmetric one.
+- **`SetTexCoordModifiesRect(enableFlag)` is new in 1.11 and is relevant here** —
+  it decides whether a texcoord change modifies the display rectangle or
+  stretches within it. Read it before fighting a sheared segment that will not
+  sit where it is put.
+
+**MEASURED (v1.54.5), and the free thing does not help.** `HISTL.col_w` was
+already **2**, not the 4 its own comment claimed. The span cost:
+
+| window | plot width | spans @2px | spans @1px | data points |
+|---|---|---|---|---|
+| 1000 | 874 | 437 | 874 | 291 |
+| 1200 | 1074 | 537 | 1074 | 358 |
+| 1400 | 1274 | 637 | 1274 | 400 (capped) |
+| 1920 | 1794 | 897 | 1794 | 400 (capped) |
+
+**Columns are already finer than the data.** `bucket_px = 3` puts one data
+point every three pixels, so 2px columns frequently interpolate between the
+same two points; halving to 1px doubles the texture count and adds no
+information at all. **Do not do it.** What is left is aliasing on the diagonal
+EDGES — vertical bars have square ends — and no amount of horizontal
+subdivision touches that.
+
+**A cheaper lever turned up while measuring: `bucket_max = 400` is BITING.** At
+1400px the plot asks for 424 buckets and gets 400; at 1920px it asks for 598.
+So above roughly 1200px the chart is drawing fewer real points than it has room
+for, and raising that cap adds genuine detail for one walk of `db.MoneySeries`
+— far less work than a rasteriser, and it should be tried before one.
+
+**So the order is: raise `bucket_max` and look; then sheared segments if it
+still reads jagged.**
+
+**Arithmetic that gets a test and a sabotage:** segment endpoints → the eight
+texcoords, including a **vertical segment** (no angle — must not divide by zero)
+and a **zero-length segment** (two identical points, which must draw nothing or
+a dot, never NaN). Both have wrong answers that still draw something plausible,
+which is this suite's whole reason for existing.
+
+**The fill follows the line.** It already works; if the stroke smooths and the
+fill keeps the old span tops, the two disagree by a pixel along every slope.
+
+### 3.3 Stat blocks
+
+**3.3a shipped in v1.53.30.** The engine is done and the figure rows are live.
+
+`db.LedgerStats(sinceEpoch, now)` walks the ledger **once** and returns income,
+spend, net, the two transaction counts, the day span, the biggest single
+transaction of each kind, and the item with the biggest summed total of each
+kind. Supporting it: `db.WindowDays`, `db.PerDay`, `db.TopOf`. On the UI side
+`ui.HistFigures(st, hi, lo)` returns **rows of `{label, value}` pairs** and
+`ui.FigureText` renders one. 92 checks in `tests/units/histstats_test.lua`,
+17 sabotages.
+
+Three decisions worth not re-litigating:
+
+- **The per-day denominator is the later of the window's start and the first
+  entry that exists**, never the raw period. A one-year window over three days
+  of history divided by 365 is a rounding error wearing a label. It is also
+  never zero, because everything divides by it.
+- **Items are keyed by NAME, not by id-or-name.** The obvious choice splits an
+  item whose history straddles the release where ids started being recorded,
+  and neither half reaches the top spot. The id is carried alongside for
+  colouring and backfills from whichever entry has one.
+- **Top Sale and Top Item are different questions** and the code may not
+  collapse them. One 500g rare against four hundred sales of Linen Cloth is the
+  same money and only one of them is a business.
+
+**3.3b shipped in v1.54.0, with the restructure it was waiting on.** The tab is
+the dashboard now: `ui.HistFigures` returns the **six-cell strip** (HIGH, LOW,
+SOLD, BOUGHT, TOP SALE, TOP BUY) and `ui.HistBlocks` the **three blocks**
+(SALES / EXPENSES / PROFIT, each Total / Per day / Top item, quality-coloured).
+`ui.PaintHistFigures` places both from `ui.BlockColumns` — arithmetic, not a
+chain of anchors, because three blocks each anchored to the one before drift by
+a rounding error per gap and the third clips. `plot_bot` 78 → 104.
+
+Two things recorded so they are not re-litigated:
+
+- **Profit's third row is "Top seller", not "Top item".** Per-item profit needs
+  what you PAID for what you sold, and the ledger has no quantity yet (§5.6).
+  The label has to stop it claiming to be the other thing.
+- **An absent figure is an em dash, not a zero.** "TOP SALE 0c" claims you sold
+  something for nothing.
+
+**v1.54.2 took the reference's visual treatment.** The band is three columns of
+two in a well (`ui.FigureSlot` pairs DOWN the columns -- the chart's extremes
+together, then the counts, then the extremes -- because reading across pairs
+HIGH with SOLD, which are not two answers to one question), the blocks sit in a
+well of their own, and values are right-aligned to their column so a column can
+be compared down. A block's Top item hovers for its tooltip.
+
+**The blocks stayed SIDE BY SIDE rather than stacked, and that is a deliberate
+divergence from the reference.** TSM stacks them because its stats pane is
+585px wide. Aegis's panel is well over twice that, so stacking would waste two
+thirds of the width -- and it costs 12 lines of height instead of 4, which at
+the window's minimum height (`ui.PanelHeightAt(492)`) leaves the plot nothing.
+Same treatment, better use of the space available. **If the stacked look is
+wanted anyway, the plot has to give up its minimum first.**
+
+### 3.4 The Ledger window — ✅ **DONE** (v1.54.8)
+
+**The window itself shipped in v1.54.0, and became an OVERLAY in v1.54.1.**
+The two-screen question §3.3b was waiting on is answered, and this is the
+answer. `ui.BuildHistoryTab` parents the table's widgets to it with one word,
+`host`; the rows, headers, totals line and Clear button are otherwise
+unchanged, because what moved is where they live and not what they do.
+`ui.HistWidthsAt` and `ui.StatLine` went with the split.
+
+**It shipped as a floating frame on UIParent and that was wrong.** Draggable,
+position-remembering, able to sit beside the auction house — and at the size a
+ledger wants it covered the chart it was launched from, where a backdrop over a
+bright filled area chart is a backdrop you can see straight through. A ledger
+you cannot read is not worth being able to move. `ui.SaveLedgerPoint`,
+`ui.RestoreLedgerPoint` and `ui.LedgerWindowHeight` went with it.
+
+**It is now built the way `ui.BuildCategoryPicker` is**: two-corner anchored
+over `ui.content`, click-swallowing, with Clear history and Close on a bottom
+button row. Two details are load-bearing and both have sabotages:
+
+- **Frame level `+50`, not the picker's `+5`.** A panel's widgets are children
+  of children and each nesting level is another `+1`, so a small bump leaves
+  the deepest of them drawing THROUGH the overlay — which is exactly why the
+  shipped category picker can still be read through. **That picker has the same
+  bug and this fix has not been applied to it.**
+- **A solid fill under the backdrop.** A tiling background texture at alpha 1
+  is only as opaque as the texture is.
+
+**What shipped is the OLD transaction table in a new window.** The PER-ITEM
+table below is still ahead, and still blocked on §5.6:
+
+A **Ledger** button opening a per-item table: Item · Sold · Avg Sell Price ·
+Bought · Avg Buy Price · Avg Profit, with a keyword filter, a time range, and a
+footer reading *"N Items Resold · Xg Total Profit"*.
+
+**Today's ledger cannot produce this table.** `db.RecordTxn` stores
+`{t, kind, item, amount, id, who}` and **there is no quantity**. Every column but
+Item needs one: Sold and Bought are *unit* counts, the averages are per-unit, and
+"Items Resold" is `min(bought, sold)` per item. Built on transaction counts it
+produces a table that is wrong everywhere and looks right everywhere.
+
+**The two sides are not equally blocked, and that is the staging:**
+
+- **Buys have quantity today.** The purchase path already knows `count` —
+  `buy.session` records units. Add the field to `db.RecordTxn` and populate it
+  from the buy path now.
+- **Sales do not.** Quantity is in the mail body, needing `GetInboxText`, which
+  **HARD RULE 16 forbids inline in the inbox scan**. That is **§5.6**, and §3.4
+  cannot finish before it.
+
+Shipping §3.4 early is allowed with Bought live and Sold marked as awaiting
+data. **Never with guessed units.**
+
+Schema rules, all with precedent: quantity is additive and optional, missing
+means unknown and never 1 (`who` already set this rule — no backfill);
+**`A.RecordExternalTxn` silently drops fields it does not name**, so widen it in
+the same release or Courier-sourced sales can never carry quantity; and
+**`LEDGER_MAX` pruning makes "All Time" a lie past the cap** — say so in the UI
+or raise the cap deliberately.
+
+Window mechanics: `FauxScrollFrame_OnVerticalScroll` takes **2 args** on 1.12;
+pooled rows mean whatever one fill writes the other must clear; every colour
+through the palette. **"Filter by groups" depends on Phase 4** — leave the
+affordance out rather than stub a dropdown that filters nothing.
+
+### 3.5 Asset format
+
+`art/gradient-fill.tga` is the known-good recipe and any new art matches it:
+**uncompressed 32-bit BGRA, TGA type 2, top-origin (descriptor `0x28`),
+power-of-two dimensions**, referenced by path **without the extension**
+(`Interface\\AddOns\\Aegis_Exchange\\art\\<name>`), **white and tinted at
+runtime** so one asset serves every series colour.
+
+**Always ship a fallback for a file that will not load, and make it
+detectable.** `ui.histFillArt` plus its `/aex diag` line is the pattern — a
+chart that silently degraded and a chart that is meant to look that way are
+indistinguishable without it.
+
+**Adding art is NOT a restart release.** CLAUDE.md's restart rule is about
+adding a `.lua` file to the `.toc`; textures load by path and are not listed
+there.
+
+### 3.6 Order of work
+
+1. §3.1 answered — ✅ gold balance, and already built.
+2. §3.2 cheap pass — ✅ **MEASURED** (v1.54.5): `col_w` is already finer than
+   the data, so reducing it buys nothing. `bucket_max` is the live lever.
+3. §3.3a figures — ✅ **DONE** (v1.53.30).
+3b. §3.3b blocks — ✅ **DONE** (v1.54.0), with the two-screen restructure.
+3c. §3.4's window — ✅ **DONE** (v1.54.0). Its per-item TABLE is not.
+4. §3.2 sheared segments — affine `SetTexCoord` is available, so this is one
+   small feather asset rather than a sprite strip. Skip if step 2 looked good
+   enough.
+5. §5.6 — sale quantity into the ledger.
+6. §3.4 Ledger window — ✅ **DONE** (v1.54.8). Per-item table, both views.
+
+**One MINOR for the push, PATCH per step.** The MINOR moved to **1.54.0** at
+the owner's call when the two-screen restructure landed, and stays there for
+the rest of this phase.
+
+### Also in this phase
+
 - **Disenchant value** in the tooltip — ✅ **DONE**. See 3k, which shipped all
   six of its phases between v1.29.0 and v1.49.2. This line said "building, §2 of
   3k, learning item levels from play is next" for twenty releases after that
   became untrue; the housekeeping pass caught 3k's own heading and missed the
-  forward reference to it here.
+  forward reference to it here. **The line-graph bullet above had rotted the
+  same way** — "needs a design spike" survived the spike, the implementation and
+  275 tests. When a phase says a thing is unbuilt, check the source before
+  believing it.
 
 ---
 
@@ -4661,7 +4938,15 @@ of it already shipped; what follows is only what did not. Each entry names the
 function that already does most of the work, because in almost every case this
 is a small addition to something that exists rather than a new subsystem.
 
-### 5.1 Total quantity on a grouped result row
+### 5.1 Total quantity on a grouped result row — ✅ **DONE** (v1.54.5)
+
+`ui.GroupCountText(listings, units)`. It says both counts only when they
+differ: a group where every listing is a single would otherwise print the same
+number twice, and a column that repeats itself teaches the eye to stop reading
+it. A `units` figure below the listing count cannot happen, so it is treated as
+absent rather than printed.
+
+#### Original entry
 
 `ui.FillGroupRow` prints `"8 auctions"`. `ui.BuyTreeRows` already carries
 `g.units` — the summed `r.count` across the group — and throws it away.
@@ -4669,7 +4954,20 @@ is a small addition to something that exists rather than a new subsystem.
 Wanted: `Runecloth — 8 auctions, 129 items`. **The number is computed; only the
 label is missing.** Check the column width before assuming the text fits.
 
-### 5.2 Aegis tooltip lines on a chat link
+### 5.2 Aegis tooltip lines on a chat link — ✅ **DONE** (v1.54.5)
+
+`HookMethod` became `HookOn(frame, name, source, store)`, with `HookMethod` and
+`HookRef` as the two callers. **Two frames need two stores**: one table keyed by
+method name cannot hold two originals under `SetHyperlink`, and the second
+would overwrite the first — leaving GameTooltip calling ItemRefTooltip's
+method. `tooltip.orig` is unchanged, so every existing caller and test is
+untouched; `tooltip.origRef` is the new one.
+
+Still per-object, never the metatable. The harness gained an `ItemRefTooltip`,
+without which the hook installs on nothing and the suite passes for the wrong
+reason.
+
+#### Original entry
 
 `tooltip.Install` hooks **`GameTooltip` only** — `GameTooltip[name] = ...`,
 per-object, deliberately never the shared metatable (HARD RULE 16's corollary).
@@ -4687,23 +4985,30 @@ client shows the frame afterwards, which is why `GameTooltip` needs no
 should behave — but that is reasoning, not observation, and a tooltip clipped at
 the bottom is exactly the class of bug no suite here can see.
 
-### 5.3 Below-vendor warning should compare NET, not gross
+### 5.3 Below-vendor warning should compare NET, not gross — ✅ **DONE** (v1.54.5)
 
-`sell.VendorCompare(itemId, unitPrice)` compares the **list price** to the
-vendor price. What matters is what you actually keep:
+`sell.VendorCompare` was handed the **gross** buyout, so an item listed at
+exactly the vendor price reported "at vendor" while netting 95% of it — and
+everything inside that 5% band lost money without a word. It now gets
+`netPerItem`, which the disenchant comparison two lines above was already
+reading correctly.
+
+**THIS ENTRY ASKED FOR THE WRONG FORMULA.** It said:
 
 ```
 net = unitPrice * (1 - cut) - depositPerUnit
 ```
 
-With the 5% consignment cut and a deposit, an auction listed slightly above
-vendor still loses money, and the current warning says nothing. The cut and
-`sell.DepositFor` are both already in hand at the call site
-(`ui/frame.lua`, the Sell tab's vendor line).
+**The deposit does not belong there.** A deposit is refunded in full when an
+auction SELLS, and forfeited only when it expires or is cancelled — so it is a
+risk carried while the auction is up, not a cost of selling. Subtracting it
+would have understated every price on the tab, which is wrong in the opposite
+direction from the bug being fixed. `sell.NetUnit` takes a price and a cut and
+nothing else, and a sabotage plants the deposit back in so the wrong formula
+cannot return.
 
-**This is a correctness fix, not a feature** — the existing warning is
-answering a question nobody asked. Keep the gross comparison available; add the
-net one and warn on it.
+The lesson is the same one this file keeps recording: **the entry was written
+from a plausible reading and not checked.** One search settled it.
 
 ### 5.4 Post All: a policy, not just a walk
 
@@ -4731,22 +5036,385 @@ list, easy remove and clear.
 means two item-set implementations that will disagree. Ship it as a
 built-in group the posting queue skips, or wait for 4.1.
 
-### 5.6 Sale details printed to chat
+### 5.6 Richer sale records — in the ledger, not in chat
 
-`ui.ScanMailSales` records sales to the ledger, deduped via `A.MailTxnKey` +
-`db.WasSeen` (already correct, and already shared with Courier). It prints
-nothing.
+**Revised.** This started as "print sale details to chat when the mail is
+opened". The decision is now that chat is the wrong destination: the numbers
+belong in the **sales ledger**, landing with Phase 3's History graph work so the
+tab gains the detail and the chart in one pass rather than growing a second
+notification channel nobody asked to subscribe to.
 
-Wanted, optionally, on collection: item, quantity, sale price, deposit
-returned, net.
+---
 
-**Buyer name is the hard one and may not be available.** `GetInboxHeaderInfo`
-gives the *sender*, which for auction mail is the auction house, not the buyer.
-The buyer appears in the mail **body**, which needs `GetInboxText` — a per-mail
-call in a `MAIL_INBOX_UPDATE` path, which is precisely what **HARD RULE 16**
-forbids inline. If it is done at all it must be on collection of one specific
-mail, never during a scan of the inbox. **Treat "buyer name, when available" as
-optional and be prepared to drop it.**
+### 5.6a — the schema and the buy side — ✅ **DONE** (v1.54.6)
+
+`db.RecordTxn(kind, item, amount, itemId, qty)`. **Absent means UNKNOWN, never
+one** — a reader that substitutes 1 turns "I do not know" into a number it can
+average, which is precisely how §3.4's table would come out wrong everywhere
+and look right everywhere. Zero, negative, and non-numeric are all stored as
+absent; a fraction is floored. `A.RecordExternalTxn` passes `txn.qty` through,
+additively, so an older Courier is unaffected.
+
+Both buy paths now record it. `buy.RecordPurchase` had always taken
+`row.count`; the ledger threw it away. `buy.BatchStep`'s `onStep` callback was
+not handed `info.stack` or `info.itemId` at all, so a batch purchase wrote a
+thinner row than a single buyout did for the same kind of purchase.
+
+### 5.6b — the sale side. TWO FINDINGS, one of them a trap.
+
+**USE `GetInboxInvoiceInfo`, NOT THE MAIL BODY.** It exists on 1.12 — it is in
+the 1.12 API definitions alongside `GetInboxText` — and it returns structured
+data rather than prose:
+
+```
+invoiceType, itemName, playerName, bid, buyout, deposit, consignment
+```
+
+For a sale that is `"seller"`, the **buyer's name**, what it went for, the
+**deposit** and the **consignment cut** — four of the five fields this section
+wants, with no string parsing and no locale problem. It retires the plan to
+read the body with `GetInboxText`, and it retires the "buyer name may not be
+available, be prepared to drop it" caveat.
+
+**⚠ AND IT MARKS THE MAIL AS READ.** The vanilla wiki warns that calling it
+*"also reads the inbox item, thus reducing its timeout to 3 days or less."*
+
+**So it must never be called while walking the inbox.** That was already the
+rule for performance (HARD RULE 16); it is now a rule for a much worse reason —
+a scan that touched every mail would silently shorten the life of the player's
+entire mailbox, including mail Aegis has nothing to do with. **Data loss, not
+lag.** One mail, on open or on take, and never a loop.
+
+*(Confidence: the side effect is documented on the vanilla wiki and I have not
+verified the exact retention rule in a client. Treat it as true — the downside
+of being wrong in the cautious direction is nothing.)*
+
+**QUANTITY IS STILL NOT THERE.** The invoice carries no stack size, the subject
+line ("Auction successful: <item>") carries none, and a sold auction's mail has
+no attachment to count — the buyer got the items. **There is no way to read the
+quantity of a sale out of the mailbox.**
+
+The only honest source is **what Aegis posted** — and that is what it does now
+(v1.54.7). `db.RecordPosting` remembers every stack at the moment
+`StartAuction` fires, from **both** posting paths; `db.MatchPosting` answers the
+sale mail. Per character, because that is who posted and who the mail comes to.
+
+**THE MATCH IS A MULTISET, NOT AN IDENTITY.** There is no auction id on 1.12,
+so "which of my three stacks sold" is unanswerable — and it is also the wrong
+question:
+
+- **All the same size → that size is the answer**, whichever one sold. Consume
+  one.
+- **Different sizes → nil, and consume NOTHING.** Picking one is a number the
+  player reconciles against their own mail and finds wrong, and consuming would
+  throw away the evidence that we had guessed. `db.RecordTxn` already treats
+  absent as unknown rather than as one.
+
+Same reasoning as the batch buyout's fingerprints, written down here because it
+is the second time identity has been unobtainable on this client and a multiset
+has been sufficient.
+
+**Expiry mail is read for exactly one reason.** An auction that came back
+unsold is not waiting on a sale mail, and leaving it in the book turns a book
+of one stack size into a mixed one — which costs the *next* sale of that item
+its quantity. Post 20, it expires, post 5, it sells: without consuming the
+expiry, that sale cannot say how many it was. Both suites assert it both ways.
+
+**Bounded**: 33 days (72h auction + 30 days of mail) and a 500-row cap, oldest
+dropped first.
+
+**THE BOOK ALONE WAS NOT ENOUGH, and it was reported as "sold a Silverleaf and
+it doesn't populate any data" (v1.54.10).** `db.RecordPosting` only knows about
+stacks it *watched* go up. Everything an existing player already had at auction
+when v1.54.7 landed was invisible to it, and so is anything posted from
+anywhere else — so those sales all reported an unknown quantity, from a feature
+that looked broken rather than honest.
+
+The fix is that the server already knows. **`sell.StartOwnerSweep` walks every
+page of your own auctions on every AH visit**, and each row carries its stack
+size — the one thing the mailbox can never say. `db.ReconcilePostings` folds
+that list into the book.
+
+- **Additive, never subtractive.** A stack that sold ten minutes ago is already
+  off the server's list while its sale mail sits unread. Trimming the book to
+  match would eat the record that mail was about to use — so checking the AH
+  before the mailbox would break the feature. Entries leave the book exactly two
+  ways: consumed by a sale or an expiry, or dropped by age.
+- **Topped up to a count, not appended.** This runs on every visit. One stack up
+  and a naive append gives two postings, then three — all the same size, so
+  `MatchPosting` would answer confidently for sales that never happened.
+- **Per (name, size), not per item.** `sw.counts` sums units per item for the
+  inventory bucket, which throws the sizes away; the book needs one entry per
+  *auction*.
+- **A row with no id is still recorded.** The name is the whole of what a sale
+  mail matches on.
+
+*It does not recover a sale already logged as unknown — only the book can be
+repaired, not the ledger.*
+
+**Answered in v1.54.8.** The book only helps from v1.54.7 onward, so sales
+already in the ledger have no quantity and never will.
+
+*(And the demo shows that rather than hiding it — see the demo-ledger note
+below. A preview whose Sold column is complete would be a preview of a
+feature nobody has.)* `ui.CountText` renders
+that rather than hiding it: `120 +2?` for a partly-counted item, `?` for one
+with nothing countable, an em dash for nothing at all. The `+2?` is
+deliberately NOT a unit count — two uncounted sales might be two items or
+forty — and the question mark is what says so.
+
+**And an average covers money and units from the SAME transactions.** Summing
+all the money over only the countable units divides a bigger number by a
+smaller one and reports an average that is too high, and plausible, which is
+worse. An uncounted transaction is excluded from both sums and counted
+separately.
+
+### The chart that was only drawn when you picked someone — ✅ **FIXED** (v1.54.18)
+
+Reported as "the History tab defaults to none; you have to select All Players
+or a character yourself". The default was always everyone — `ui.histWho = {}`
+and `ui.HistWhoTicks` ticks *All Players* for an empty set. **The chart was not
+being drawn.**
+
+`ui.UpdateHistoryGraph()` was called from exactly two places: the picker's own
+click, and the last line of `ui.UpdateHistoryList`. v1.54.9 gave that list
+painter an early return for the Ledger's Items view, to stop the two views
+drawing over each other — and Items is the default. From then on an ordinary
+refresh never reached the chart, and the picker's click was the only way in.
+
+The call now lives in `ui.RefreshHistory`, the tab's own repaint, which has no
+early exit after its built-check. The old test asserted the call was *written*
+inside the list painter; it was, and never ran. The new one pins where it is
+reached, that it is **not** back in a function that can stand down, and that
+the tab's repaint has exactly one early return.
+
+### Separating bands by quantity — ✅ **DONE** (v1.54.16)
+
+Follow-up to v1.54.13, prompted by the reporter's screenshot of the old bands
+55 and 65. Green bands 60 and 65 yield the **same three materials** — Illusion
+Dust, Greater Eternal Essence, Large Brilliant Shard — so `de.BandCandidates`,
+which only asked *which* materials came out, could never separate them.
+
+Before v1.54.13 that was worse than undecided: the table had no shard in band
+65, so a Large Brilliant Shard **pinned band 60**, and observation outranks
+ClassicAPI in `de.ItemLevel`. Replayed against the old code, an item level 62
+green that had ever dropped one was valued on band 60's half-sized dust yield
+even for a player whose client knew the real level. Observations are stored
+raw, so that corrected itself with the table.
+
+- **The generator emits each material's count range** — rows are now
+  `{ id, chance, mean, min, max }`. The mean values an item; the range
+  identifies a band.
+- **The test is exact.** n rolls, each a whole number in [min, max], can sum to
+  `total` iff `n·min ≤ total ≤ n·max`, both ends inclusive. Three breaks
+  giving six dust is 2+2+2, which both bands roll, so it pins neither.
+- **Quantity narrows, never erases.** If the counts contradict every band the
+  materials allow, the likelier story is that this server rolls different
+  amounts (Turtle changes things), so the material answer stands. Quantity is
+  the weaker evidence and does not get to delete the stronger.
+
+**Left ambiguous, deliberately:** every other shared material set has
+*identical* rows — rare 20/25 and 60/65, epic 40/45 and 65–95 — so the band is
+uncertain but the value is not. `de.ItemLevel` still declines to pin those and
+falls through to ClassicAPI or required level, which gives the same answer.
+Accepting value-identical candidates would let observation answer for those
+too; not needed for correctness, noted in case it is ever wanted.
+
+### Two Sell-tab bugs — ✅ **DONE** (v1.54.14)
+
+**The listings that were not there.** `sell.ScanItem` kept a scanned row only
+when `id == itemId`, and that id comes from `GetAuctionItemLink` — which on
+1.12 returns **nil for an item the client has not cached**. Every row on the
+page was discarded and the scan reported success with nothing in it.
+`sell.SameItem` falls back to an exact name match when, and only when, there is
+no id; a row carrying a *different* id is never accepted on a name match, and
+the name comparison is exact because the server matches a query as a substring.
+
+*The reporter supplied the decisive detail themselves: searching the item on
+the Buy tab first makes the Sell tab work. The search is what caches the
+links.*
+
+**The deposit that walked.** The Sell tab measures the formula-to-client
+deposit ratio while repainting — the right place, since an item is slotted and
+both numbers are being computed anyway — but a repaint happens on every click.
+`db.RecordDepositRatio` keeps a running mean over 20 samples, so twenty clicks
+on Undercut made the account-wide correction *entirely* the slotted item's
+ratio, and every deposit figure moved with it.
+
+- `sell.DepositSampleKey` defines one measurement opportunity as (item, stack
+  size, duration). The stack size is in the key because the client's figure is
+  per stack.
+- **A slotted item's deposit now comes from the client**, not from
+  `sell.DepositFor` — which reconstructs the client's number from a vendor
+  price and a learned correction, and exists for the **bag preview**, which has
+  no slotted item and so cannot ask. Only for the stack the client is actually
+  holding; any other size still uses the formula.
+
+**Still open:** the reported scan halt. The repro is fully explained by the
+listings bug above — including "the second attempt worked", which is the Buy
+tab search having cached the links — and what looked like a stalled scan on the
+Aegis tab was the shared scanner legitimately fetching that one item. The strip
+now names what it is scanning (`scan.Subject`) so the two cannot be confused.
+If a scan genuinely hangs again, `/aex debug` distinguishes the two stall legs:
+the query gate never opening, versus queries going out and never being
+answered.
+
+### Disenchant values from the server's loot table — ✅ **DONE** (v1.54.13)
+
+Reported as three things, which turned out to be one thing: greens at the top
+of the ladder missing their shard, weapons missing from some bands, and epics
+having no value at all. All three were the same limit — the table was inferred
+from **samples** (8.8M observed disenchants), and a 5% outcome in a thin band
+does not survive a noise floor.
+
+`tools/gen_disenchant.py` now reads **CMaNGOS Classic-DB**, a 1.12.1 content
+database: `disenchant_loot_template` states what each DisenchantID yields, at
+what chance and in what quantity, and `item_template` says which entry every
+item uses. That is the rule as the server runs it, not a sample of it.
+
+**The two agree everywhere they overlap** — same materials, same mean yields to
+two decimal places — which is what makes the places they differ worth acting
+on:
+
+| was | is |
+|---|---|
+| epics report unknown | all five epic entries, up to Nexus Crystal |
+| weapons absent in bands 25, 30, 65 | every band, both ladders |
+| no shard in green bands 55 and 65 | the 5% shard that was reported |
+| shields and holdables on the **armour** ladder | the **weapon** ladder — 173 shields, 103 holdables, no exceptions |
+| thrown weapons disenchantable | they are not, and never were |
+| nothing above item level 65 | the ladder runs to 95 |
+
+**The one judgement call** is mangos loot-group semantics: within a group, an
+explicit chance is taken as written and a row written `0` takes whatever the
+group has left. Every green entry is dust 75 / essence 20 / shard **0**, and
+reading that zero as "never" *is* the reported bug. `resolve()` makes the
+remainder explicit and refuses any entry whose chances do not come to 100% —
+which drops exactly one (rares above item level 70, whose entry holds a single
+row at 0.5%).
+
+**A note worth keeping.** The old test pinned `INVTYPE_SHIELD` as armour with
+the comment *"aux files it as a weapon; the observations do not agree with aux,
+and this is the kind of one-line disagreement that is worth pinning so it
+cannot drift back silently."* aux was right. A test can only pin what it was
+handed, and what it was handed came from clustering on dust share — which
+cannot see an equip slot at all.
+
+### Window ordering — ✅ **DONE** (v1.54.12)
+
+Reported as "my bag is always behind the AH window". The client opens the
+backpack for you at `AUCTION_HOUSE_SHOW`, and the bag landed under the Aegis
+window with no way to bring it forward.
+
+Not a z-order to fix by picking a better number — any fixed order is wrong half
+the time. The right answer is "the one you just clicked", and the client
+already implements it: `SetToplevel(true)`. Our window was created with it and
+nothing else in the argument was, so one frame could raise itself and the
+others could not.
+
+- **`ui.ApplyRaiseGroup`** gives the same flag to the bags (built from
+  `NUM_CONTAINER_FRAMES`, not a hardcoded count), the trade skill and craft
+  windows, the merchant, bank, mailbox, trade, character, spellbook, quest log,
+  inspect and loot frames.
+- **Toplevel only reorders WITHIN a strata**, so anything sitting lower is
+  lifted into ours first — the flag alone looks like a fix and changes nothing.
+- **Raised, never lowered.** A frame above us is there for reasons of its own;
+  pulling it down is how an addon hides a confirmation dialog.
+- **Nothing is hooked.** These are widget settings the client acts on by
+  itself, so there is no `OnMouseDown` to save and replace and nothing for
+  another addon to fight over.
+- Applied again on `ADDON_LOADED` for `Blizzard_*`, because the professions
+  windows are load-on-demand and do not exist until first opened.
+
+**Not covered:** a UI replacement's own bag frames (pfUI's, for instance) are
+not in the list, because guessing global names that may not exist is dead code.
+Adding one is a line in `ui.RaiseFrameNames`.
+
+### Demo mode covers the ledger — ✅ **DONE** (v1.54.11)
+
+Demo mode used to invent the History tab's **figures** through a `db.DemoStats`
+that ran beside `db.LedgerStats` and had to be kept in step with it by hand.
+Everything that reads the **ledger** read the real store, which in demo mode is
+empty — so the Ledger window, the screen with the most layout to judge, opened
+blank and the figures above it agreed with nothing on screen.
+
+It invents the **ledger** now. `db.LedgerSource` is the seam: `db.Ledger` stays
+the store and the write target, and demo mode substitutes a generated array in
+exactly the shape `db.RecordTxn` writes. Every reader — the blocks, the
+six-figure strip, the item table, the transaction list, the IN / OUT / NET row
+— computes from it through the same arithmetic it runs on real data, so the
+demo exercises the real paths and every number agrees with every other.
+
+- **The items are checked facts.** Names, ids, qualities and stack sizes come
+  from the CMaNGOS Classic-DB dump of the 1.12.1 `item_template`. Memory was
+  wrong about four of them: Fiery Core and Lava Core are RARE on this patch,
+  and Sulfuron Ingot and Nexus Crystal are EPIC. The tooltip they arm is the
+  client's own, so a wrong id shows the wrong item. **The prices are ours** and
+  are the only invented part of the table.
+- **The shape is the test surface.** All four quality tiers; items traded both
+  ways, only sold, and only bought; and a minority of sales with no quantity,
+  weighted by age because that is the real limit. `topSale` and `topSaleItem`
+  are deliberately different items, which is a distinction `db.LedgerStats` has
+  always drawn and nothing could previously demonstrate.
+- **Ages are weighted toward the present** (r squared). Six months spread
+  evenly leaves the Day and Week periods — the two anyone actually checks —
+  empty.
+- **`db.DemoQuality` is gated on demo mode.** Most of the pool is ordinary
+  trade goods, so an ungated lookup would state a colour for a *real* Linen
+  Cloth row and override the client, which is the authoritative source. A
+  suite caught exactly that.
+
+`db.DemoStats` and `db.DemoPick` are gone; the epic and rare pools they chose
+between are superseded by `db.DEMO_LEDGER_ITEMS`, and which item tops a column
+is now decided by what was traded rather than by a seed.
+
+**§3.4 is blocked on this section, and specifically on quantity.** The Ledger
+window's Sold column and both per-unit averages are unit counts; without the
+quantity added here, that table can only be built from transaction counts, which
+are wrong everywhere and look right everywhere. Buys can be populated ahead of
+it — the purchase path already knows `count` — so this section gates the SALES
+half alone.
+
+Wanted per sale: item, **quantity**, sale price, **deposit returned**, **net
+collected**, and buyer where it can be had.
+
+**What exists.** `ui.ScanMailSales` reads `GetInboxHeaderInfo` only — subject
+and money — dedupes via `A.MailTxnKey` + `db.WasSeen`, and calls
+`db.RecordTxn("sale", item, money)`. The ledger row is
+`{t, kind, item, amount, id, who}`. So today a sale is *one item name and one
+number*, and every field above except the name is either missing or conflated.
+
+Four things have to be settled before any of it is built, and three are traps:
+
+- **Establish what `money` in that mail actually IS.** Net of the 5% cut? Does
+  it include the returned deposit? Until that is known, splitting one number
+  into three is guesswork. **I could not confirm the 1.12 mail body format from
+  public sources** — this needs a real client and a real sale. If the mail does
+  not break it down, note that Aegis can *reconstruct* the deposit from its own
+  record of what it paid, which is a better answer than parsing prose.
+- **Quantity and buyer live in the mail BODY**, which needs `GetInboxText` —
+  a per-mail call. **HARD RULE 16 forbids that inline in the inbox scan**, which
+  is a `MAIL_INBOX_UPDATE` path and the exact shape that froze Courier. It must
+  happen on opening **one** mail, never while walking the inbox. Keep buyer name
+  optional and be ready to drop it.
+- **`A.RecordExternalTxn` silently discards anything it does not name.** It
+  validates `{kind, amount, item, itemId, key}` and calls `db.RecordTxn` with
+  four of them. **Courier is the thorough mail reader** — it is precisely the
+  caller that would *have* quantity and buyer — so widening the ledger without
+  widening this function means the richer fields can only ever arrive from
+  Aegis's own header-only path, the one path that cannot see them. **Widen the
+  contract in the same release.** It is additive, so an older Courier keeps
+  working unchanged.
+- **Old ledger rows will not have the new fields**, and there is precedent for
+  handling that correctly: `who` already has this problem, and `db.RecordTxn`'s
+  own comment says every reader must treat a missing one as unknown rather than
+  as any particular value. Same rule, no migration pass, no backfill.
+
+**While `AuctionSoldItem` is open, fix its localisation.** It hardcodes
+`"Auction successful: "` and so returns nil on any non-English client — every
+sale silently unlogged. `craft.CreatePrefix` is the pattern: read the client's
+own global, fall back to the English literal, derive the prefix from the format
+string.
 
 ### 5.7 Equipment comparison tooltips
 
@@ -4761,6 +5429,57 @@ the vanilla implementation differs most from every later client, and writing it
 from memory of retail is how it ends up subtly wrong.
 
 ---
+
+### 5.8 Purchase receipt window — ✅ **DONE** (v1.54.15)
+
+A small button on the Buy tab that pops out a receipt of what this run has
+bought, replacing the one-line status-bar tally. Per row: item name, quantity,
+**number of auctions**, total spent. A total at the foot, and a Clear.
+
+**Most of the data is already there.** `buy.session` holds
+`itemId -> {n = units, spent = copper, name}`, fed by the purchase path rather
+than inferred from bags, and `buy.SessionBought` reads it. Two gaps:
+
+- **Auction count is not tracked** — `n` is units. Add a third counter
+  incremented once per purchase; it is the one genuinely new number.
+- **The status line only shows the tally when the results are about ONE item**
+  (`buy.SoleItemId`). A window has no such constraint, which is most of why it
+  is better: a crafting run buys six things, and the current surface can only
+  talk about a search that narrowed to one.
+
+**Settled by the owner: keep the session semantics.** The window is labelled
+"this session — Clear resets it", and Clear repaints the Buy tab's status line
+as well, because that line carries the same tally and a Clear that empties one
+surface and not the other has cleared nothing the player can see.
+
+`buy.SessionRows()` builds the rows in the engine rather than the window: the
+session table is keyed by item id, so `pairs` returns it in no order at all,
+and a list whose rows swap between two repaints of the same data cannot be
+read. Biggest spend first — a receipt is read to find out where the gold went
+— with ties broken on the name so the order is total.
+
+**Demo mode (v1.54.17).** `buy.SessionSource()` is the seam, the same shape as
+`db.LedgerSource()`: `buy.session` stays the store and the write target, and
+demo mode substitutes `buy.DemoSession()` — the demo ledger's buys over the
+last day, folded into the session shape. Derived rather than invented a second
+time, so the receipt's total **is** the Ledger's Day-period spend, which the
+suite asserts to the copper. Clear is disabled in demo mode, because it clears
+the real session and not the rows on screen.
+
+#### The original open question
+
+**It contradicted a settled decision, so it needed a call.** The
+request says *"for the current auction-house visit"*. `buy.session` deliberately
+does **not** clear on `AUCTION_HOUSE_CLOSED`; `craft.made` carries the reasoning
+verbatim — *"a crafting run spans several trips to the auctioneer, so a counter
+that cleared on the way out would clear in the middle of the thing it counts."*
+
+Per-visit and per-run are different features and the existing choice was
+deliberate. **Recommendation: keep the session semantics**, label the window
+honestly ("This session"), and let Clear be the reset — a button the player
+presses is a boundary they chose, which is what "visit" was reaching for anyway.
+Changing it to per-visit means changing `craft.made` to match or leaving two
+counters on the same screen that reset on different rules.
 
 ### Already shipped — checked, not assumed
 
@@ -4777,8 +5496,130 @@ Recorded so the same list does not get re-raised:
 | Sale history without double-counting | `A.MailTxnKey` + `db.WasSeen` / `db.MarkSeen` |
 
 One gap inside a shipped feature: the purchase tracker counts **units and
-copper**, not **number of auctions bought**. Add it to `buy.session` when 5.x is
-touched, not on its own.
+copper**, not **number of auctions bought**, and only surfaces at all when a
+search narrowed to one item. Both are addressed by §5.8 rather than on their
+own.
+
+---
+
+## Phase 6 — Profession cooldowns across alts, and a machine-readable log
+
+**Asked for as:** *"For crafts with cooldown I'd like a craft log to know when to
+log on to that character. I have multiple alts doing this. A text log file
+written live, consumable by other tools — maybe expanded to everything
+bought/sold and at what price."*
+
+Two requests wearing one coat, and they separate cleanly. The **goal** — knowing
+which alt to log onto — needs no file at all. The **file** is a different
+feature with a hard constraint in front of it.
+
+### 6.0 The constraint, because it shapes everything below
+
+**A 1.12 addon cannot write a file.** No `io`, no `os`, no `require` — and no
+DLL closes that gap: ClassicAPI's manifest backports 550+ functions across 45
+`C_*` namespaces and contains none of them. SavedVariables is the only way data
+reaches disk, and the client writes it **on logout or `/reload`**, never
+continuously. 1.12 has no flush API.
+
+**The chat-log route does not work, and the version that does must not be
+built.** `LoggingChat(1)` makes the client write `Logs\WoWChatLog.txt` live, so
+it looks like the answer — but `DEFAULT_CHAT_FRAME:AddMessage()` **is not
+captured by it**. Only real chat events are. Landing a line in that file means
+calling `SendChatMessage` — whispering yourself or posting to a channel on every
+craft and every sale. That is rate-limited, visible to other players, visible to
+the server's own logs, and on a private server it looks exactly like botting.
+**Decided: no.** Not as an option, not behind a setting.
+
+**So "live" is not available, and the honest question is whether it was ever
+needed.** For the stated purpose it is not: you want to know an alt's cooldown
+*while you are on a different character*, which means the interesting data was
+written when you logged that alt out. The flush happens at precisely the moment
+the data becomes worth reading.
+
+### 6.1 Capturing a cooldown
+
+Two independent signals, and we want both because each covers the other's blind
+spot.
+
+- **`GetTradeSkillCooldown(index)`** exists in 1.12 — confirmed against the 1.12
+  API definitions, alongside `GetSpellCooldown` and the rest of the `*Cooldown`
+  family. It returns **seconds remaining** for the selected trade skill recipe.
+  - **There is NO `GetCraftCooldown`.** The Craft window (Enchanting, Beast
+    Training) has no cooldown function in 1.12 at all. Enchanting has no
+    cooldowns in vanilla so this costs nothing — but do not write the Craft path
+    assuming symmetry with TradeSkill, because there is none.
+  - **Only readable while the profession window is open**, and the index is into
+    the currently open list. So this is a capture-on-open, not a poll.
+  - **Store `time() + remaining`, never `remaining`.** A remaining-seconds value
+    is meaningless the moment you log out, which is the only moment this feature
+    exists to serve.
+- **`craft.ParseCreate`** already detects every craft — the client prints
+  `"You create: <link>"` to `CHAT_MSG_LOOT`, and we already parse it for the
+  craft counter. It is O(1), the event does not storm, and it fires **whether or
+  not the profession window is open**. Paired with a table of known cooldown
+  lengths it answers for a recipe the player crafted and walked away from.
+
+**HARD RULE 16 applies to the capture.** `TRADE_SKILL_UPDATE` fires repeatedly
+while a profession window settles. A handler that walks the whole recipe list
+calling `GetTradeSkillCooldown` per index is an unbounded rescan inline in a
+stormable handler — the exact shape that froze Courier. **Dirty flag, flushed
+once per frame from an existing `OnUpdate`**, and nothing per-recipe inline.
+
+### 6.2 The alt view (the actual feature)
+
+`AegisExchangeDB` is already account-wide and `db.CharKey()` already exists —
+the ledger has used it since it shipped. So cross-character cooldowns need no
+new plumbing, just a table:
+
+```
+cooldowns[charKey][itemId] = readyAtEpoch
+```
+
+The view is a list sorted by ready time, across every character the account has
+ever opened a profession window on:
+
+```
+Bronn     Transmute: Arcanite      ready now
+Merrily   Mooncloth                ready in 2h 14m
+Bronn     Salt Shaker              ready tomorrow 09:40
+```
+
+**This is the thing that was actually asked for**, and it is better than a text
+file for the stated purpose, because it is in the client where you act on it.
+Build this first and ship it on its own; 6.3 is optional on top.
+
+**Open:** where it lives. A Crafting-tab panel is the obvious home; a one-line
+reminder at login ("2 profession cooldowns are ready") may be the thing people
+actually use. Needs a call before building.
+
+### 6.3 The machine-readable log
+
+For the "consumed by other tools" half. **A separate SavedVariables file**,
+declared in the `.toc` (restart release), never the main DB:
+
+- **`AegisExchangeLog`**, flat and append-only, with a **schema version** as its
+  first field and a documented shape that is treated as an interface — the whole
+  point is that something outside the game parses it, and a silent shape change
+  breaks a tool we cannot see.
+- Separate from `AegisExchangeDB` for two reasons. It keeps the parser away from
+  a structure that exists to serve the History tab and will change when that tab
+  does; and the main DB carries gold, inventory and character names, so a file a
+  player hands to a tool should not be the file that holds all of it.
+- **Most of the content already exists.** `db.RecordTxn` records
+  `{t, kind, item, amount, id, who}` for every buy and sale, deduped against
+  mail via `A.MailTxnKey`. This phase mirrors it into the log file and adds
+  craft events alongside; it is not new capture.
+- **Say the latency out loud, in the file's own header comment.** Written on
+  logout or `/reload`. A tool reading it is reading the last flush, not the live
+  session — and someone building against it should learn that from the file
+  rather than from a bug report.
+- **`LEDGER_MAX` pruning must not silently truncate the log.** The in-game
+  ledger caps and drops the oldest, which is right for a UI and wrong for an
+  export. Decide the retention deliberately and write it down; an append-only
+  log that quietly forgets is worse than one that stops.
+
+**Depends on 6.2 only for the craft events.** The buy/sell half could ship
+first, and probably should — it is a serialization of data we already hold.
 
 ---
 

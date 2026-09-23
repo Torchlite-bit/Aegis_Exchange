@@ -18,6 +18,448 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.18]
+
+### Fixed
+- **The History chart shows your whole account again as soon as you open the
+  tab.** Since 1.54.9 it opened blank, with no one ticked in the player picker,
+  until you chose *All Players* or a character yourself.
+
+  *All Players was always the default — the chart just wasn't being drawn.
+  1.54.9 stopped the Ledger's two views drawing over each other, and in doing
+  so cut off the only everyday path that drew the chart. Picking someone from
+  the menu was the one other way in, which is why that fixed it.*
+
+---
+
+## [1.54.17]
+
+### Changed
+- **`/aex demo` fills the Receipt window too** — the demo Ledger's last day of
+  buying, so it agrees with the Ledger's Day figures to the copper rather than
+  being a second set of made-up numbers. The title says **(DEMO)** in red.
+
+  **Clear is greyed out while the demo is on.** It clears your *real* session,
+  which isn't what's on screen — pressing it would have wiped your actual
+  purchases and left the invented ones sitting there as if nothing happened.
+  Anything you buy while the demo is on is still recorded for real, and shows
+  once you turn it off.
+
+---
+
+## [1.54.16]
+
+### Fixed
+- **Your own disenchants can now tell item level 56–60 and 61–65 greens
+  apart.** Both give Illusion Dust, Greater Eternal Essence and the odd Large
+  Brilliant Shard — only the *amounts* differ. Aegis used to look only at
+  which materials came out, so for those two bands it could never decide, and
+  fell back to an estimate. It now reads the counts too: **a single Illusion
+  Dust only happens at 56–60, three or more only at 61–65**, and a single
+  Greater Eternal Essence only at 56–60. For higher-level greens that roughly
+  doubles the dust Aegis expects, so it matters which band it picks.
+
+  *Nothing to reset — it reads the disenchants you've already done. And if
+  your server's amounts ever turn out different from the ones Aegis knows, it
+  goes by the materials alone rather than throwing the evidence away.*
+
+---
+
+## [1.54.15]
+
+### Added
+- **A Receipt button on the Buy tab**, opening a window of what you have
+  bought: item, units, **number of auctions**, average each, and total spent —
+  biggest spend first, with a total at the foot and a Clear.
+
+  The status line under the results already carried a tally, but it could only
+  show one when your search had narrowed to a single item — naming one item's
+  total beside three items' results would be a true number attached to the
+  wrong thing. So a crafting run buying six things had no surface at all, which
+  is exactly the run worth tracking. A window has no such constraint.
+
+  *It counts **this session** — login to logout — and says so under the title.
+  It deliberately does not reset when you leave the auction house: buying out a
+  crafting run takes several trips, and a counter that cleared on the way out
+  would clear in the middle of the thing it counts. Clear is the reset.*
+
+  *Auctions are a genuinely new number. The tally has always counted units,
+  because "how many have I bought" is a question about items — but twenty
+  Runecloth out of one stack and twenty out of twenty singles are different
+  afternoons, and now both are on screen.*
+
+---
+
+## [1.54.14]
+
+### Fixed
+- **The Sell tab could show no listings for an item the auction house is full
+  of.** "0 price(s), scanned just now" over 158 Truesilver Bars, while
+  searching the same item on the Buy tab found them all.
+
+  A scanned row is matched to the slotted item by item id, and on 1.12 the
+  client gives no id for an item it has never cached — so every row was
+  discarded and the scan reported success with nothing in it. It matches on an
+  exact name now when, and only when, there is no id to use.
+
+  *This is why searching the item on the Buy tab first made the Sell tab work:
+  the search is what caches the links.*
+
+- **Spamming Undercut or Price match moved the deposit figure.** The Sell tab
+  measures the deposit correction while it repaints, and a repaint happens on
+  every click. That measurement is averaged over the last twenty samples, so
+  twenty clicks made the correction entirely that one item's — and the figure
+  walked while you clicked.
+
+  It now takes one measurement per item, stack size and duration, and a
+  **slotted item's deposit comes from the client's own figure** rather than
+  from the formula that exists to estimate it for items still in your bags.
+
+### Changed
+- **A targeted scan says what it is scanning.** "Requesting first page…" looked
+  identical whether the scanner was walking the whole house or fetching one
+  item for the Sell tab, so a scan that was working read as a stuck one.
+
+---
+
+## [1.54.13]
+
+### Fixed
+- **Disenchant values now come from the server's own loot table**, not from
+  8.8 million observed disenchants. Reported by a player who broke an item
+  level 62 green, got a Large Brilliant Shard, and found Aegis saying that item
+  could only give dust and essence.
+
+  The shard is a 5% chance the observations were too thin to see. Everything
+  else that was missing turned out to be missing for the same reason:
+
+  - **Epics have a value at all.** They reported *unknown*.
+  - **Weapons in three bands** (item level 21–25, 26–30 and 61–65) reported
+    *unknown* — the game has always had an answer.
+  - **Shields and held-in-off-hand items** were valued off the **armour**
+    ladder. They take the weapon one, so their value was wrong, not missing.
+  - **Thrown weapons** were offered a disenchant value. They cannot be
+    disenchanted at all.
+  - **Item level 66 and above** reported *unknown*; the ladder now runs to 95.
+
+  *The two sources agree everywhere they overlap — same materials, same
+  average quantities to two decimal places — which is what makes the parts
+  they disagree about worth trusting.*
+
+---
+
+## [1.54.12]
+
+### Fixed
+- **Whatever you clicked last is now in front.** Opening the auction house
+  opens your backpack — the client does that itself — and the bag landed
+  behind the Aegis window with no way to bring it forward. Clicking the bag did
+  nothing; clicking the window put the window back on top.
+
+  Bags, the trade skill and craft windows, the merchant, the bank, the mailbox
+  and the rest of what you have open while trading now come to the front when
+  you click them, and the Aegis window takes its turn the same way.
+
+  *It was not a z-order to fix by picking a better number — any fixed order is
+  wrong half the time. The client already does exactly the right thing when a
+  frame asks it to; ours was the only frame in the argument that was asking.*
+
+  *Raised, never lowered: a window that deliberately sits above everything — a
+  confirmation box asking whether you meant to spend that gold — stays there.*
+
+---
+
+## [1.54.11]
+
+### Changed
+- **`/aex demo` now invents a LEDGER, not just a gold line.** Six months of one
+  trader's buying and selling across 34 real items, so the Ledger window — both
+  the Items table and the Transactions list — has something to show, along with
+  the stat blocks and the IN / OUT / NET row above them.
+
+  Before this, demo mode invented the History tab's *figures* and nothing else,
+  while everything that reads the ledger read the real store — which in demo
+  mode holds nothing. So the one screen with the most layout to judge opened
+  blank, and the numbers above it answered a question no visible data had
+  asked.
+
+  Every reader now computes from the generated ledger through the **same
+  arithmetic it runs on real data**, so the demo exercises the real code paths
+  and every figure on screen agrees with every other one.
+
+  *The items are real: names, ids, qualities and stack sizes are from the
+  1.12.1 client's own item table, so hovering a demo row shows the item it
+  claims to be. Four of them were remembered wrong before being checked —
+  Fiery Core and Lava Core are rare on this patch, and Sulfuron Ingot and
+  Nexus Crystal are epic. The prices are ours; no dump can state what an
+  auction house charges.*
+
+  The shape is deliberate: all four quality colours, items traded both ways and
+  items traded only one, and a minority of sales with no quantity — because
+  that is the real limit, not a placeholder. The biggest single sale and the
+  biggest earner are different items, which is a distinction the History tab
+  has always drawn and nothing could previously demonstrate.
+
+  *Nothing is saved and nothing real is touched. A transaction logged while the
+  demo is on still lands in your real ledger.*
+
+---
+
+## [1.54.10]
+
+### Fixed
+- **A sale could report no quantity at all** — an item sold, and the Ledger's
+  Sold column showed `?` with no average price beside it. The posting book that
+  answers "how many were in that stack" is written when Aegis watches a stack
+  go up, so it knew nothing about auctions that were already posted before it
+  existed. Every one of those, on selling, had to say it didn't know.
+
+  Aegis now reconciles the book against what the server says is actually up.
+  It already walks every page of your own auctions each time you open the
+  auction house, and that list states the stack sizes — so anything up is
+  learned from it, whether Aegis posted it or not.
+
+  *Added to, never trimmed. A stack that sold ten minutes ago is already off
+  the server's list while its mail sits unread; trimming the book to match
+  would cost that sale the count it was about to claim.*
+
+  *This does not recover a sale that has already been logged as unknown.*
+
+---
+
+## [1.54.9]
+
+### Fixed
+- **The Ledger's scrollbar sat outside the window**, half-drawn against the
+  border. A scroll frame's bar is drawn beyond its own edge, so both tables now
+  leave it a gutter.
+- **Items and Transactions drew on top of each other.** Anything that repainted
+  the History tab — a period button, a mailbox update — put the transaction
+  rows back over the item table, because that repaint didn't know which view
+  was showing.
+- **The empty strip across the top of the History tab is gone.** It was the
+  band the ledger table's headings used to need, left behind when the table
+  moved into its own window.
+
+### Changed
+- **Money reads in the game's own colours** — gold, silver and copper — across
+  the Ledger table, the figures under the chart and the blocks.
+
+  *Avg Profit still reads green or red, because on that column the sign is the
+  point.*
+
+## [1.54.8]
+
+### Added
+- **The Ledger now has a per-item table** — **Item · Sold · Avg Sell · Bought ·
+  Avg Buy · Avg Profit**, sortable on every column, with a footer reading
+  *"N items resold • Xg total profit"*. Hover a row for the item's tooltip.
+
+  **Items** and **Transactions** are two views of the same window; Items opens
+  first, because it's the question the tab is for. Both follow the period
+  buttons.
+
+- **Unknown counts stay unknown.** Sales logged before Aegis started recording
+  stack sizes have no quantity, and neither does one it couldn't match to a
+  posting. Those aren't counted as 1 and aren't quietly dropped:
+
+  - `120 +2?` — 120 units counted, plus two sales whose size isn't known
+  - `?` — nothing countable
+  - `—` — no answer at all
+
+  An average is only ever money and units from **the same** transactions, so a
+  partly-unknown item shows a correct average over the part it can see rather
+  than a plausible wrong one over all of it. The footer says how many items it
+  couldn't count.
+
+## [1.54.7]
+
+### Added
+- **Sales now record how many were in the stack.** The mailbox can't tell you —
+  it isn't in the subject line or the invoice, and a sold auction has no
+  attachment left to count. So Aegis remembers what it posted and matches the
+  sale back to it.
+
+  When several stacks of one item are up **at the same size**, the answer is
+  that size whichever one sold. When they're **different sizes**, there's no
+  way to know which sold, so it records nothing rather than guessing — an
+  entry with no count says *unknown*.
+
+  Expired auctions coming back are read too, so an item that expired at one
+  size and then sold at another still gets counted correctly.
+
+### Fixed
+- **Sale mail is recognised on non-English clients.** The subject line was
+  matched against hardcoded English, so everywhere else every sale went
+  unlogged — and silently, because "no sales" and "didn't recognise the
+  subject" look identical from the outside.
+
+## [1.54.6]
+
+### Changed
+- **The gold chart draws more of the detail it has room for.** Above roughly a
+  1200px window it was capped at 400 points and interpolating across the rest —
+  a 1920px window was asking for 598. Raised to 900, which covers an ultrawide.
+
+### Added
+- **Purchases now record how many items were in the stack**, not just what they
+  cost. Both ways of buying record it; batch buyouts were writing a thinner
+  entry than single ones for the same purchase. Groundwork for the per-item
+  Ledger table.
+
+  Sales don't record it yet, and an entry without one says *unknown* rather
+  than guessing 1.
+
+## [1.54.5]
+
+### Fixed
+- **The below-vendor warning was comparing the wrong number.** It checked your
+  buyout against the vendor price *before* the auction house takes its 5% — so
+  an item listed at exactly vendor price read as "at vendor" while actually
+  netting 95% of it, and anything in that band lost you money without a word.
+  It now compares what you'd keep, and says so: **"Nets below vendor price"**.
+
+  *(Your deposit is not counted against a sale, because it comes back when the
+  item sells — it's only lost if the auction expires or you cancel.)*
+
+- **The category scanner no longer shows the tab behind it.** Same frame-level
+  fix the Ledger got in 1.54.1.
+
+### Added
+- **Grouped results say how many items, not just how many auctions.**
+  `Runecloth — 8 auctions, 129 items`. Eight auctions might be eight singles or
+  eight stacks of twenty, and the row only ever told you the first. It stays
+  quiet when the two are the same.
+- **Aegis price lines now appear on item links clicked in chat.** Those open a
+  different tooltip frame from the one hovering a bag item uses, which had
+  never been hooked.
+
+## [1.54.4]
+
+### Fixed
+- **Demo items are quality-coloured the moment the tab opens**, instead of only
+  after you hover each one. The colour comes from the client, and the client
+  only answers for items it has cached — which for an item you've never seen or
+  linked is none of them. Hovering fetched it, which is why the purple turned
+  up a moment later. The demo now states the quality it already knows.
+
+  Real items are unaffected: they keep asking the client, which knows about
+  anything you've actually traded.
+
+## [1.54.3]
+
+### Fixed
+- **Top item now hovers on the Sales and Profit blocks, not just Expenses.**
+  The 1.12 mailbox gives a subject line and no item link, so every sale logged
+  from mail stored a name and nothing else — while buys, which come through the
+  Buy tab, always knew the item. That's why one block out of three had a
+  tooltip. Aegis now resolves the name against everything it has seen, so
+  existing history works too, and new mail sales record the id directly.
+- **The hovered name no longer has a bar drawn through it.** The invisible
+  hover target was a Button, and the pfUI skinner plates every Button it's
+  given.
+
+### Changed
+- **The Ledger's buttons match the chart's.** A button's plate is translucent,
+  so the chosen period read *filled* on the chart and *outlined* on the
+  ledger's opaque backdrop — same button, different ground. Both rows sit in
+  wells now, and **Clear history** and **Close** share one at the bottom.
+- **`/aex demo` fills in the figures too**, with an epic on the sales side and
+  a rare on the buys side, so both quality colours are on screen at once and
+  the Top item hover can be checked against two real tooltips.
+
+## [1.54.2]
+
+### Added
+- **The Ledger has its own period buttons.** It covers the whole window, so the
+  chart's row was behind it — a ledger you couldn't change the period on showed
+  one week forever. Both rows drive the same period and the same repaint.
+- **Hover a block's Top item for its tooltip.** Only when the row actually
+  names an item; an em dash isn't hoverable.
+
+### Changed
+- **The figures under the chart are boxed now**, like the reference: the six
+  figures in a bordered band as **three columns of two** — the chart's extremes
+  together, then the two counts, then the two biggest transactions — and the
+  three blocks in a box below it. **Values are right-aligned to their column**,
+  so a column of figures can be compared straight down.
+- **Leaving the History tab closes the Ledger.** It covers the content area, so
+  left open it sat over whichever tab you switched to.
+- **`/aex demo` draws a far more varied chart.** It moved in *regimes* now —
+  long climbs, cliffs, plateaus — instead of an independent draw per bucket,
+  which averaged into a collapse to zero followed by five flat days. A purse
+  that hits the floor also earns its way back, because every phase is
+  multiplicative and a percentage of nothing is nothing.
+
+## [1.54.1]
+
+### Changed
+- **The Ledger now covers the whole Aegis window**, the way the category
+  scanner does, instead of floating as a small frame over the chart. It is
+  **opaque** — two layers of near-black and a frame level well above the panel
+  — so nothing behind it shows through.
+
+  The floating version could be dragged beside the auction house, which sounded
+  better than it read: at the size a ledger wants, it covered the chart it was
+  launched from, and a backdrop over a bright filled area chart is a backdrop
+  you can see straight through. A ledger you can't read isn't worth being able
+  to move.
+
+  **Clear history** and **Close** sit on a button row at the bottom, where the
+  category scanner puts its own, and the table's rows follow the window's
+  height like every other list in here.
+
+## [1.54.0]
+
+### Changed
+- **The History tab is now a dashboard, and the ledger table has its own
+  window.** They were sharing one tab and neither had room: the chart had to
+  fit an axis, a legend, a line and its figures into 46% of the panel, and the
+  table's Amount column ran under its own scrollbar below a fixed width.
+
+  **The chart now has the whole tab**, and the **Ledger** button beside its
+  heading opens the table in a window you can drag anywhere — including
+  alongside the auction house, since it isn't a child of the Aegis window and
+  survives closing it. It remembers where you put it.
+
+### Added
+- **A six-figure strip under the chart** — HIGH, LOW, SOLD, BOUGHT, TOP SALE,
+  TOP BUY — and **three blocks** beneath it: **SALES**, **EXPENSES** and
+  **PROFIT**, each with a Total, a Per day, and the item that earned or cost
+  the most. Item names are quality-coloured.
+
+  All of it follows the period buttons.
+
+  **Top Sale and Top Item answer different questions** and the tab says both:
+  one 500g rare and four hundred sales of Linen Cloth are the same money, and
+  only one of them is a business. The strip's TOP SALE is your biggest single
+  transaction; a block's Top item is what actually earns.
+
+  *(Profit's third row is labelled "Top seller", not "Top item" — per-item
+  profit needs what you paid for the thing you sold, and the ledger doesn't
+  record quantities yet.)*
+
+- **An absent figure reads as an em dash, not a zero.** "TOP SALE 0c" would
+  claim you sold something for nothing.
+
+## [1.53.30]
+
+### Added
+- **The History tab's chart now carries real figures under it.** Three rows
+  instead of two, and they answer the questions the chart is too coarse to:
+
+  - **HIGH / LOW** — the most and least gold held over the period.
+  - **SALES / EXPENSES / PROFIT** — the totals, replacing the old IN/OUT/NET.
+  - **PER DAY / SOLD / BOUGHT** — profit per day, and how many transactions of
+    each kind.
+
+  All of it follows the period buttons, so 1W and All Time give different
+  answers to the same three rows.
+
+  **"Per day" divides by the days you actually have, not by the period.**
+  Picking 1Y three days after installing divides by the three — the other 362
+  are days the addon wasn't running, not days you earned nothing.
+
 ## [1.53.29]
 
 ### Fixed
@@ -5821,6 +6263,26 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.11]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.10]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.9]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.8]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.7]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.6]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.5]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.53.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.53.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

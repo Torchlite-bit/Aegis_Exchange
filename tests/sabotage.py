@@ -1148,8 +1148,8 @@ end""",
      "        if ilvl < LADDER[i] then return LADDER[i] end",
      "disenchant"),
 
-    # Above ilvl 65 the observations thin out and stop being monotone, and
-    # Turtle item levels run to 99. Clamping to the top band instead of
+    # Above the ladder's top there is no rule to state -- Turtle content runs
+    # past where the source has items. Clamping to the top band instead of
     # returning nil is how a confident wrong answer gets shipped.
     ("de-band-no-ceiling", "core/disenchant.lua",
      """        i = i + 1
@@ -1200,7 +1200,8 @@ end
      """    local out, i, n = {}, 1, table.getn(rows)
     while i <= n do
         local r = rows[i]
-        table.insert(out, { itemId = r[1], chance = r[2], mean = r[3] })
+        table.insert(out, { itemId = r[1], chance = r[2], mean = r[3],
+                            min = r[4], max = r[5] })
         i = i + 1
     end
     return out""",
@@ -1208,6 +1209,7 @@ end
     while i <= n do
         local r = rows[i]
         r.itemId, r.chance, r.mean = r[1], r[2], r[3]
+        r.min, r.max = r[4], r[5]
         i = i + 1
     end
     return out""",
@@ -1247,6 +1249,386 @@ end
      "    return A.db.MarketValue(matId) or A.db.MinBuyout(matId)",
      "    return A.db.MarketValue(matId) or A.db.MinBuyout(matId) or 0",
      "disenchant"),
+
+    # ---- disenchant, from the server's own loot table ---------------------
+    # THE BUG A PLAYER HAD TO REPORT. The shard row is written with chance 0,
+    # meaning "take whatever the group has left" -- 5%. Dropping it is what
+    # made an item level 62 green look like dust and essence only.
+    ("de-green-65-loses-its-shard", "core/disenchant.lua",
+     "                { 16203, 0.2000, 2.000, 2, 2 },   -- Greater Eternal Essence\n"
+     "                { 14344, 0.0500, 1.000, 1, 1 },   -- Large Brilliant Shard",
+     "                { 16203, 0.2500, 2.000, 2, 2 },   -- Greater Eternal Essence",
+     "disenchant"),
+
+    # ...and the same one band down, where it is a Small Brilliant Shard.
+    ("de-green-55-loses-its-shard", "core/disenchant.lua",
+     "                { 16202, 0.2000, 1.500, 1, 2 },   -- Lesser Eternal Essence\n"
+     "                { 14343, 0.0500, 1.000, 1, 1 },   -- Small Brilliant Shard",
+     "                { 16202, 0.2500, 1.500, 1, 2 },   -- Lesser Eternal Essence",
+     "disenchant"),
+
+    # A SHIELD IS A WEAPON. This file had it as armour for a year, with a test
+    # pinning the wrong answer and a comment explaining why aux was mistaken.
+    ("de-shield-is-armour-again", "core/disenchant.lua",
+     '    INVTYPE_SHIELD        = "w",',
+     '    INVTYPE_SHIELD        = "a",',
+     "disenchant"),
+
+    ("de-holdable-is-armour-again", "core/disenchant.lua",
+     '    INVTYPE_HOLDABLE      = "w",',
+     '    INVTYPE_HOLDABLE      = "a",',
+     "disenchant"),
+
+    # Thrown weapons cannot be disenchanted at all, and the absence of an
+    # entry is what says so.
+    ("de-thrown-can-be-disenchanted", "core/disenchant.lua",
+     '    INVTYPE_RELIC         = "a",',
+     '    INVTYPE_RELIC         = "a",\n    INVTYPE_THROWN        = "w",',
+     "disenchant"),
+
+    # The ladder stops where the SOURCE stops, not at the old 65 -- which was
+    # where the observations thinned out, not where the game did.
+    ("de-ladder-stops-at-65", "core/disenchant.lua",
+     "local LADDER = { 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65,\n"
+     "                 70, 75, 80, 85, 90, 95 }",
+     "local LADDER = { 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65 }",
+     "disenchant"),
+
+    # An epic must out-yield the rare of the same level. Handing epics the
+    # rare table understates them by a whole shard tier and still passes every
+    # structural check: it sums to 1, uses a real reagent, climbs in order.
+    ("de-epic-borrows-the-rare-yield", "core/disenchant.lua",
+     "            a = {   -- 15 items, DisenchantID 63\n"
+     "                { 14343, 1.0000, 3.000, 2, 4 },   -- Small Brilliant Shard",
+     "            a = {   -- 15 items, DisenchantID 63\n"
+     "                { 14343, 1.0000, 1.000, 1, 1 },   -- Small Brilliant Shard",
+     "disenchant"),
+
+    # The top epic band is a Nexus Crystal, which is the single most valuable
+    # thing this rule can report.
+    ("de-epic-60-is-not-a-nexus-crystal", "core/disenchant.lua",
+     "            a = {   -- 45 items, DisenchantID 64\n"
+     "                { 20725, 1.0000, 1.000, 1, 1 },   -- Nexus Crystal",
+     "            a = {   -- 45 items, DisenchantID 64\n"
+     "                { 14344, 1.0000, 1.000, 1, 1 },   -- Large Brilliant Shard",
+     "disenchant"),
+
+    # ---- the Sell tab's listings ------------------------------------------
+    # GetAuctionItemLink returns NIL for an item the client has not cached, so
+    # comparing ids alone discards every row on the page and reports a
+    # successful scan with nothing in it -- over an auction house holding 158
+    # of them. This is the shape the bug had.
+    ("sell-listings-match-on-id-alone", "core/sell.lua",
+     "    if rowId and wantId then return rowId == wantId end\n"
+     "    if rowId then return false end",
+     "    if rowId or wantId then return rowId == wantId end",
+     "sellslot"),
+
+    # ...and the scan has to go THROUGH the helper. The arithmetic is right
+    # either way if the callback still compares ids inline.
+    ("sell-listings-filter-bypasses-the-helper", "core/sell.lua",
+     "            if sell.SameItem(id, name, itemId, itemName) then",
+     "            if id == itemId then",
+     "sellslot"),
+
+    # The name fallback must be EXACT. The server matches a query as a
+    # SUBSTRING, so "Silk Cloth" is answered with "Bolt of Silk Cloth" -- and
+    # pricing one against the other is how an undercut lands at a tenth of
+    # the market.
+    ("sell-listings-name-match-is-loose", "core/sell.lua",
+     "    return rowName == wantName",
+     "    return string.find(rowName, wantName, 1, true) ~= nil",
+     "sellslot"),
+
+    # A row carrying a DIFFERENT id is never accepted on a matching name.
+    ("sell-listings-name-overrules-the-id", "core/sell.lua",
+     "    if rowId and wantId then return rowId == wantId end\n"
+     "    if rowId then return false end",
+     "    if rowId and wantId and rowId == wantId then return true end",
+     "sellslot"),
+
+    # A targeted scan and a stalled full scan read identically on the strip,
+    # which is what made a player stop a scan that was working.
+    ("scan-subject-never-reported", "core/scan.lua",
+     "        subject     = scan.Subject(),",
+     "        subject     = nil,",
+     "scan.leak"),
+
+    # A multi-query sweep is not "scanning Truesilver Bar".
+    ("scan-subject-names-a-category-sweep", "core/scan.lua",
+     "    if not queries or table.getn(queries) ~= 1 then return nil end",
+     "    if not queries then return nil end",
+     "scan.leak"),
+
+    # ---- the deposit figure -----------------------------------------------
+    # The Sell tab learns this ratio while repainting, and a repaint happens on
+    # every keystroke and click. db.RecordDepositRatio keeps a running mean
+    # over 20 samples, so twenty clicks make the account-wide correction
+    # entirely the slotted item's ratio -- and the deposit walks while you
+    # click. Reported as "spam undercut and the deposit goes up".
+    ("deposit-measured-on-every-repaint", "core/sell.lua",
+     "    if key and sell.ratioSampledFor == key then return nil end",
+     "    local _ = key",
+     "sellslot"),
+
+    # ...and the other half: never re-measuring is not a fix either. A new
+    # item, stack or duration is a genuinely different measurement.
+    ("deposit-measured-once-and-never-again", "core/sell.lua",
+     "    local key = sell.DepositSampleKey(it.itemId, it.count, minutes)",
+     '    local key = "once"',
+     "sellslot"),
+
+    # The client's figure is per STACK, so the stack size has to be part of
+    # what counts as the same measurement.
+    ("deposit-key-ignores-the-stack-size", "core/sell.lua",
+     '    return tostring(itemId) .. ":" .. tostring(count or 1)\n'
+     '        .. ":" .. tostring(minutes)',
+     '    return tostring(itemId) .. ":" .. tostring(minutes)',
+     "sellslot"),
+
+    ("deposit-key-ignores-the-duration", "core/sell.lua",
+     '    return tostring(itemId) .. ":" .. tostring(count or 1)\n'
+     '        .. ":" .. tostring(minutes)',
+     '    return tostring(itemId) .. ":" .. tostring(count or 1)',
+     "sellslot"),
+
+    # A slotted item's deposit is the CLIENT's own figure. sell.DepositFor
+    # reconstructs it from a vendor price and a learned correction, and exists
+    # for the bag preview -- which cannot ask. Preferring the reconstruction
+    # puts a figure on screen that moves as the correction is learned.
+    ("deposit-prefers-the-formula-over-the-client", "ui/frame.lua",
+     "    if size == (it.count or 1) then\n"
+     "        perStack = A.sell.EstimateDeposit(ui.sellDuration)",
+     "    if false then\n"
+     "        perStack = A.sell.EstimateDeposit(ui.sellDuration)",
+     "sellslot"),
+
+    # ...but only for the stack the client is actually holding. Its answer is
+    # about what is IN the slot, so any other size has to use the formula.
+    ("deposit-uses-the-client-for-any-stack-size", "ui/frame.lua",
+     "    if size == (it.count or 1) then",
+     "    if true then",
+     "sellslot"),
+
+    # ---- the purchase receipt ---------------------------------------------
+    # One per CALL, because RecordPurchase is called once per auction bought.
+    # Adding the stack size makes `buys` a second copy of `n` -- a column that
+    # looks plausible and is wrong by the stack size on every row.
+    ("receipt-counts-units-as-auctions", "core/buy.lua",
+     "    rec.buys  = (rec.buys or 0) + 1",
+     "    rec.buys  = (rec.buys or 0) + stack",
+     "session.buys"),
+
+    # buy.session is keyed by item id, so `pairs` returns it in no order at
+    # all. A list whose rows swap between two repaints cannot be read.
+    ("receipt-rows-are-unordered", "core/buy.lua",
+     "        if a.spent ~= b.spent then return a.spent > b.spent end\n"
+     "        return a.name < b.name",
+     "        return a.spent > b.spent",
+     "session.buys"),
+
+    # BIGGEST SPEND FIRST: a receipt is read to find out where the gold went.
+    ("receipt-rows-sort-cheapest-first", "core/buy.lua",
+     "        if a.spent ~= b.spent then return a.spent > b.spent end",
+     "        if a.spent ~= b.spent then return a.spent < b.spent end",
+     "session.buys"),
+
+    # A zero-unit row would divide by zero, and `inf` in a money column is a
+    # worse answer than an em dash.
+    ("receipt-divides-by-zero-units", "core/buy.lua",
+     "            unit   = (rec.n and rec.n > 0)\n"
+     "                     and math.floor((rec.spent or 0) / rec.n) or nil,",
+     "            unit   = math.floor((rec.spent or 0) / (rec.n or 0)),",
+     "session.buys"),
+
+    # The totals are summed over the same rows the table draws.
+    ("receipt-total-counts-auctions-as-units", "core/buy.lua",
+     "        units = units + (rec.n or 0)",
+     "        units = units + (rec.buys or 0)",
+     "session.buys"),
+
+    # "1 items" is the detail that makes a window look unfinished.
+    ("receipt-footer-has-no-singular", "ui/frame.lua",
+     'local items = n == 1 and "1 item" or (n .. " items")',
+     'local items = n .. " items"',
+     "session.buys"),
+
+    # Three zeroes in a row reads as broken rather than as empty.
+    ("receipt-footer-silent-when-empty", "ui/frame.lua",
+     '        return "Nothing bought yet this session."',
+     '        return ""',
+     "session.buys"),
+
+    # The units column reads `n`. A key pointed at a field the rows do not
+    # carry sorts every row as equal, which looks like a sort that ran.
+    ("receipt-sorts-units-on-a-missing-field", "ui/frame.lua",
+     'if key == "units" then return rec.units or rec.n or 0 end',
+     'if key == "units" then return rec.units or 0 end',
+     "session.buys"),
+
+    # A Clear that empties the window and leaves the status line below it
+    # saying "12 bought" has cleared nothing the player can see.
+    ("receipt-clear-leaves-the-status-line", "ui/frame.lua",
+     "        if ui.RefreshBuyStatus then ui.RefreshBuyStatus() end",
+     "        local _ = ui.RefreshBuyStatus",
+     "session.buys"),
+
+    # It covers the whole content area, so left open it sits over whichever
+    # tab you switched to -- which reads as the window being stuck.
+    ("receipt-survives-a-tab-change", "ui/frame.lua",
+     '    if name ~= "Buy" then\n        ui.HideReceiptWindow()\n    end',
+     "    local _ = name",
+     "session.buys"),
+
+    # The button reading unpressed while its window is open is the same class
+    # of bug as a Clear that repaints one surface and not the other.
+    ("receipt-button-never-reads-pressed", "ui/frame.lua",
+     '    return "Receipt", shown and true or false',
+     '    return "Receipt", false',
+     "session.buys"),
+
+    # ---- disenchant: telling bands apart by quantity -----------------------
+    # Green bands 60 and 65 yield the same three materials. Ignoring the counts
+    # leaves them inseparable forever -- the state this change exists to end.
+    ("de-learn-ignores-quantities", "core/disenchant.lua",
+     '    if type(obs) ~= "table" then return true end      -- presence only',
+     "    do return true end",
+     "disenchant.learn"),
+
+    # BOTH ENDS INCLUSIVE. Three breaks giving six dust is 2+2+2, which both
+    # bands roll; an exclusive bound calls it for one of them.
+    ("de-learn-lower-bound-exclusive", "core/disenchant.lua",
+     "    return total >= n * range[1] and total <= n * range[2]",
+     "    return total > n * range[1] and total <= n * range[2]",
+     "disenchant.learn"),
+
+    ("de-learn-upper-bound-exclusive", "core/disenchant.lua",
+     "    return total >= n * range[1] and total <= n * range[2]",
+     "    return total >= n * range[1] and total < n * range[2]",
+     "disenchant.learn"),
+
+    # An AVERAGE test: "1.67 per break is nearer band 60's mean". The question
+    # is which band COULD have rolled it, not which mean it sits nearest.
+    ("de-learn-tests-the-average-not-the-range", "core/disenchant.lua",
+     "    return total >= n * range[1] and total <= n * range[2]",
+     "    return math.abs(total / n - (range[1] + range[2]) / 2) <= 0.5",
+     "disenchant.learn"),
+
+    # QUANTITY MAY NARROW, NEVER ERASE. A server rolling different counts from
+    # the 1.12.1 table must not turn material evidence into no evidence.
+    ("de-learn-quantity-erases-the-materials", "core/disenchant.lua",
+     "    if table.getn(use) == 0 then use = byMaterial end",
+     "    local _ = byMaterial",
+     "disenchant.learn"),
+
+    # The real path has to pass the counts it stores. Flattened back to
+    # `true`, every test of the arithmetic passes and none of it is used.
+    ("de-learn-observation-drops-the-counts", "core/disenchant.lua",
+     "            seen[matId] = { n = m.n, total = m.total }",
+     "            seen[matId] = true",
+     "disenchant.learn"),
+
+    # A generator that swapped min and max, or a paste that did, would still
+    # value every item correctly -- the mean does not care -- and quietly rule
+    # out every band.
+    ("de-table-range-backwards", "core/disenchant.lua",
+     "                { 16204, 0.7500, 3.500, 2, 5 },   -- Illusion Dust",
+     "                { 16204, 0.7500, 3.500, 5, 2 },   -- Illusion Dust",
+     "disenchant"),
+
+    ("de-table-mean-is-not-the-midpoint", "core/disenchant.lua",
+     "                { 16204, 0.7500, 1.500, 1, 2 },   -- Illusion Dust",
+     "                { 16204, 0.7500, 1.500, 1, 3 },   -- Illusion Dust",
+     "disenchant"),
+
+    # ---- the receipt in demo mode -----------------------------------------
+    # The demo must be CONSULTED instead of the store, or the window opens on
+    # your real (often empty) session while the rest of the demo is invented.
+    ("receipt-demo-reads-the-store", "core/buy.lua",
+     "    if A.db and A.db.demo then return buy.DemoSession() end\n"
+     "    return buy.session",
+     "    return buy.session",
+     "session.buys"),
+
+    # ...and the WRITES must still go to the store. A purchase made while the
+    # demo is on is a real purchase; routed into the throwaway demo table it
+    # would simply vanish.
+    ("receipt-demo-swallows-real-purchases", "core/buy.lua",
+     "    local rec = buy.session[itemId]\n    if not rec then\n"
+     "        rec = { n = 0, buys = 0, spent = 0, name = name }\n"
+     "        buy.session[itemId] = rec",
+     "    local src = buy.SessionSource()\n    local rec = src[itemId]\n"
+     "    if not rec then\n"
+     "        rec = { n = 0, buys = 0, spent = 0, name = name }\n"
+     "        src[itemId] = rec",
+     "session.buys"),
+
+    # Derived from the demo LEDGER's buys -- counting its sales too would make
+    # the receipt disagree with the Ledger's own Day figures.
+    ("receipt-demo-counts-sales", "core/buy.lua",
+     '        if e.kind == "buy" and e.id and e.t and e.t >= since',
+     "        if e.id and e.t and e.t >= since",
+     "session.buys"),
+
+    # One per ledger ENTRY: a stack of twenty is one auction.
+    ("receipt-demo-counts-units-as-auctions", "core/buy.lua",
+     "            rec.buys  = rec.buys + 1\n            rec.spent = rec.spent + e.amount",
+     "            rec.buys  = rec.buys + (e.qty or 1)\n            rec.spent = rec.spent + e.amount",
+     "session.buys"),
+
+    # The status line has to read the same source, or a search that narrows to
+    # one demo item reports your real tally beside invented results.
+    ("status-line-ignores-the-demo", "core/buy.lua",
+     "    local rec = itemId and buy.SessionSource()[itemId]",
+     "    local rec = itemId and buy.session[itemId]",
+     "session.buys"),
+
+    # CLEAR CLEARS THE REAL SESSION, which is not what a demo receipt shows.
+    # Enabled, it wipes your actual purchases and leaves the invented rows
+    # sitting there looking as if nothing happened.
+    ("receipt-demo-clear-enabled", "ui/frame.lua",
+     "        if demo then ui.receiptClearBtn:Disable()",
+     "        if false then ui.receiptClearBtn:Disable()",
+     "session.buys"),
+
+    ("receipt-demo-clear-unguarded", "ui/frame.lua",
+     "        if A.db.demo then return end\n        A.buy.ClearSession()",
+     "        A.buy.ClearSession()",
+     "session.buys"),
+
+    # A demo receipt that looks like a real one is a list of invented
+    # purchases someone might act on.
+    ("receipt-demo-title-unmarked", "ui/frame.lua",
+     '    if demo then return "Receipt  |cffe64c4c(DEMO)|r" end',
+     "    local _ = demo",
+     "session.buys"),
+
+    # ---- the History chart is painted by the tab, not the list -------------
+    # THE REGRESSION. Called only from the end of ui.UpdateHistoryList, the
+    # chart was never reached once that function learned to stand down in the
+    # Ledger's default Items view: no line, and a picker with no one ticked,
+    # until a player chose someone from it.
+    ("history-chart-not-painted-by-the-tab", "ui/frame.lua",
+     "    -- down.\n    ui.UpdateHistoryGraph()\nend",
+     "    -- down.\nend",
+     "histgraph"),
+
+    # ...and putting it BACK in the list painter is the shape it broke in.
+    ("history-chart-back-in-the-list-painter", "ui/frame.lua",
+     '        ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")\n'
+     "    end\nend",
+     '        ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")\n'
+     "    end\n    ui.UpdateHistoryGraph()\nend",
+     "histgraph"),
+
+    # An early return in the tab's own repaint reopens the same hole one
+    # function up.
+    ("history-repaint-gains-an-early-return", "ui/frame.lua",
+     "    ui.UpdateHistoryList()\n\n    -- THE CHART, FROM THE TAB'S OWN REPAINT",
+     "    ui.UpdateHistoryList()\n"
+     "    if ui.ledgerFrame and ui.ledgerFrame:IsShown() then return end\n\n"
+     "    -- THE CHART, FROM THE TAB'S OWN REPAINT",
+     "histgraph"),
 
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
@@ -1424,8 +1806,8 @@ end
     # The candidate test is a SUBSET test: every material seen must be one
     # the band can produce. Inverted, every band matches everything.
     ("de-band-subset-inverted", "core/disenchant.lua",
-     "                if not set[matId] then ok = false end",
-     "                if set[matId] then ok = ok end",
+     "                if not range then\n                    ok = false",
+     "                if false then\n                    ok = false",
      "disenchant.learn"),
     # ---- disenchant, phase 4 (the filters) -------------------------------
     # AN UNKNOWN VALUE IS NOT ZERO. As zero, disenchant-profit/1g silently
@@ -2886,9 +3268,30 @@ end
     # The period row anchored by its LEFT edge. The chart's width moves with
     # the window and the buttons have to stay against its far side; anchored
     # left they run straight through the heading.
+    # Re-pointed at ui.MakePeriodRow, which both the chart and the ledger
+    # overlay now build their rows from. The bug is unchanged: a row anchored
+    # by its LEFT edge does not stay against a container whose width moves.
     ('periods-left-on-the-tab', 'ui/frame.lua',
-     '            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)',
-     '            b:SetPoint("TOPLEFT", box, "TOPLEFT", HISTL.plot_side, -5)',
+     '            b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", x, y)',
+     '            b:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)',
+     'histgraph'),
+
+    # Two rows, one period. A ledger whose buttons drive their own state
+    # disagrees with the chart about what week it is.
+    ('ledger-periods-are-not-marked', 'ui/frame.lua',
+     '    ui.MarkChosen(ui.ledgerPerBtns, chosen)',
+     '    local _ = chosen',
+     'histgraph'),
+
+    # The ledger covers the whole content area, so left open on a tab change it
+    # sits over whichever tab you switched to.
+    ('ledger-survives-a-tab-change', 'ui/frame.lua',
+     '''    if name ~= "History" then
+        ui.HideLedgerWindow()
+    end''',
+     '''    if false then
+        ui.HideLedgerWindow()
+    end''',
      'histgraph'),
 
     # The chart's floor dropped below what its own title bar needs, so the
@@ -3047,8 +3450,9 @@ end
     # ...and the same collision from the other end: the ledger's refresh
     # reaching over and clearing the chart's selection.
     ('ledger-refresh-clears-the-chart', 'ui/frame.lua',
-     '    local led = A.db.Ledger()\n    ui.histView = {}',
-     '    local led = A.db.Ledger()\n    ui.histWho = {}\n    ui.histView = {}',
+     '    local led = A.db.LedgerSource()\n    ui.histView = {}',
+     '    local led = A.db.LedgerSource()\n    ui.histWho = {}\n'
+     '    ui.histView = {}',
      'histgraph'),
 
     # 'All Players' ticking alongside the names instead of clearing them,
@@ -3091,19 +3495,13 @@ end
 
     # The two stat strings back on one line, anchored to opposite ends. Both
     # can grow, so on a narrow window they overlapped into 'LOWN0g 14s 6c'.
-    ('stat-rows-share-a-line', 'ui/frame.lua',
-     '    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)\n    ui.histStatR:SetJustifyH("LEFT")',
-     '    ui.histStatR:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, 18)\n    ui.histStatR:SetJustifyH("RIGHT")',
-     'histgraph'),
-
-    # The ledger table squeezed below its own columns, so the Amount column
+    # Re-pointed when the figure work added a THIRD stat row and moved the
+    # other two up. The bug it plants is unchanged: two strings that can both
+    # grow put back on one line, which is how "LOW 9g 14s 6c" and "IN 37s 92c"
+    # became "LOWN0g 14s 6c".
+        # The ledger table squeezed below its own columns, so the Amount column
     # -- the rightmost thing in the window -- runs under the scrollbar.
-    ('table-columns-run-under-the-scrollbar', 'ui/frame.lua',
-     '    left_min   = 566,',
-     '    left_min   = 420,',
-     'histgraph'),
-
-    # ---- gold-only chart, longer history (v1.53.8) -----------------------
+        # ---- gold-only chart, longer history (v1.53.8) -----------------------
 
     # Compaction keeping the FIRST sample of each day rather than the last.
     # The series reader carries the last known figure forward, so a day has
@@ -3185,6 +3583,13 @@ end
      '    if n > HISTL.bucket_max then n = HISTL.bucket_max end',
      '    local _ = n',
      'histgraph'),
+
+    # A ceiling a normal window reaches is a resolution limit wearing a safety
+    # rail's name: 400 capped a 1400px window (424) and a 1920px one (598).
+    ("bucket-cap-bites-a-real-window", "ui/frame.lua",
+     "    bucket_max = 900,",
+     "    bucket_max = 400,",
+     "histgraph"),
 
     # Columns wider than the gap between data points, so the interpolation is
     # wasted -- two points inside one column is one of them thrown away.
@@ -3299,8 +3704,8 @@ end
     # Ledger entries written with no character, so the per-character
     # breakdown has nothing to break down.
     ('ledger-txn-unattributed', 'core/db.lua',
-     '        amount = amount, id = itemId, who = db.CharKey() })',
-     '        amount = amount, id = itemId })',
+     '        amount = amount, id = itemId, qty = n, who = db.CharKey() })',
+     '        amount = amount, id = itemId, qty = n })',
      'purse'),
 
     # The unattributed entries not reported. History from before this feature
@@ -3431,8 +3836,8 @@ end
     # route into buy.Buyout spends the gold and never reaches History --
     # which the graph on that tab now reads.
     ('buyout-ledger-write-left-to-the-caller', 'core/buy.lua',
-     '    if A.db and A.db.RecordTxn then\n        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)\n    end',
-     '    local _ = row',
+     '    if A.db and A.db.RecordTxn then\n        -- WITH THE STACK COUNT. row.count is the number of items in the',
+     '    if false then\n        -- WITH THE STACK COUNT. row.count is the number of items in the',
      'bidpath'),
 
     # ...or booked for a purchase that was REFUSED, which is a number the
@@ -3517,20 +3922,10 @@ end
 
     # The chart given the table's minimum width whatever the window, so it
     # never grows -- and the panel's two halves stop adding up.
-    ("hist-split-does-not-follow-the-window", "ui/frame.lua",
-     "    local graph = math.floor(inner * HISTL.graph_frac)",
-     "    local graph = HISTL.graph_min",
-     "histgraph"),
-
-    # The CHART winning the squeeze instead of the table. The table's columns
+        # The CHART winning the squeeze instead of the table. The table's columns
     # are fixed and its Amount column is the rightmost thing that can be
     # clipped.
-    ("hist-table-loses-the-squeeze", "ui/frame.lua",
-     "    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end",
-     "    local _ = inner",
-     "histgraph"),
-
-    # The plot measured off a two-corner-anchored frame, which reports the size
+        # The plot measured off a two-corner-anchored frame, which reports the size
     # it was created at -- so the chart keeps its first width however far the
     # window is dragged. This trap has taken five other things in this file.
     ("hist-plot-measures-a-stale-frame", "ui/frame.lua",
@@ -3541,12 +3936,7 @@ end
     # The table anchored corner to corner again -- the way every other list in
     # this window is built, and so the easy thing to "fix" it back to. It runs
     # the table under the chart.
-    ("hist-table-anchored-under-the-chart", "ui/frame.lua",
-     '    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,\n                    LISTBOX.hist.bot)',
-     '    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, LISTBOX.hist.bot)',
-     "histgraph"),
-
-    # The chart never repainted with the table, so it keeps whichever period
+        # The chart never repainted with the table, so it keeps whichever period
     # was selected when the tab was built.
     ("hist-chart-not-repainted", "ui/frame.lua",
      "    ui.UpdateHistoryGraph()\nend",
@@ -4517,13 +4907,13 @@ end
     # The guard removed, which is the bug as reported: the client refuses a
     # link and the error carries OUR file name for a link we never touched.
     ("tooltip-hook-rethrows-client-refusal", "ui/tooltip.lua",
-     """        local ok, r1, r2 = pcall(tooltip.orig[name], self, a1, a2)
+     """        local ok, r1, r2 = pcall(store[name], self, a1, a2)
         if not ok then
             tooltip.failures = (tooltip.failures or 0) + 1
             tooltip.lastFailure = { method = name, err = r1 }
             return
         end""",
-     "        local r1, r2 = tooltip.orig[name](self, a1, a2)",
+     "        local r1, r2 = store[name](self, a1, a2)",
      "tooltip.hook"),
 
     # Guarded but silent: the refusal never reaches /aex diag, so a link storm
@@ -4655,7 +5045,7 @@ end
     # An empty book not recorded, so cancelling your last auction leaves the
     # old count on the tooltip until you post again.
     ("inventory-ah-empty-book-not-recorded", "core/sell.lua",
-     "        sell.FinishOwnerSweep({})\n        return nil",
+     "        sell.FinishOwnerSweep({}, {})\n        return nil",
      "        return nil",
      "inventory"),
 
@@ -5856,6 +6246,877 @@ end""",
      '    local word = " pages skipped"',
      "sweep"),
 
+    # ---- History tab figures ----------------------------------------------
+    # The denominator can never be zero -- everything divides by it.
+    ("windowdays-drops-the-touched-day", "core/db.lua",
+     "    local days = math.floor((now - start) / 86400) + 1",
+     "    local days = math.floor((now - start) / 86400)",
+     "histstats"),
+
+    # A year-long window over three days of history must divide by the three.
+    ("windowdays-ignores-short-history", "core/db.lua",
+     "    if not start or (oldest and oldest > start) then start = oldest end",
+     "    if not start then start = oldest end",
+     "histstats"),
+
+    # ...and the other way: a short window over long history uses the window.
+    ("windowdays-ignores-the-window", "core/db.lua",
+     "    if not start or (oldest and oldest > start) then start = oldest end",
+     "    if oldest then start = oldest end",
+     "histstats"),
+
+    ("perday-divides-by-zero", "core/db.lua",
+     "    if not days or days < 1 then days = 1 end",
+     "    days = days or 1",
+     "histstats"),
+
+    # THE CENTRAL ONE. Top sale and top item are different questions; code
+    # that answers both with the biggest single transaction is wrong in a way
+    # no screenshot shows.
+    ("topitem-collapses-into-topsale", "core/db.lua",
+     "    st.topSaleItem = db.TopOf(saleBy)",
+     "    st.topSaleItem = st.topSale",
+     "histstats"),
+
+    # Keying by id-or-name splits an item whose history straddles the release
+    # where ids started being recorded, and the split loses the top spot.
+    ("topitem-keyed-by-id-splits-history", "core/db.lua",
+     '                local key = e.item or "?"',
+     '                local key = e.id or e.item or "?"',
+     "histstats"),
+
+    # pairs has no order, so a tie must break the same way every repaint.
+    ("topof-tie-breaks-backwards", "core/db.lua",
+     "            or (rec.total == best.total and k < bestKey) then",
+     "            or (rec.total == best.total and k > bestKey) then",
+     "histstats"),
+
+    ("stats-counts-zero-amounts", "core/db.lua",
+     "            if amount > 0 then",
+     "            if amount >= 0 then",
+     "histstats"),
+
+    ("stats-net-backwards", "core/db.lua",
+     "    st.net  = st.income - st.spend",
+     "    st.net  = st.spend - st.income",
+     "histstats"),
+
+    # An undated entry cannot be placed in a window, so a bounded one must not
+    # quietly include it.
+    ("stats-window-swallows-undated", "core/db.lua",
+     "        if not sinceEpoch or (t and t >= sinceEpoch) then",
+     "        if not sinceEpoch or not t or t >= sinceEpoch then",
+     "histstats"),
+
+    ("stats-buys-bucket-as-sales", "core/db.lua",
+     """                    st.spend = st.spend + amount
+                    st.buyN  = st.buyN + 1
+                    bucket = buyBy""",
+     """                    st.spend = st.spend + amount
+                    st.buyN  = st.buyN + 1
+                    bucket = saleBy""",
+     "histstats"),
+
+    ("stats-oldest-is-newest", "core/db.lua",
+     "                if t and (not st.oldest or t < st.oldest) then st.oldest = t end",
+     "                if t and (not st.oldest or t > st.oldest) then st.oldest = t end",
+     "histstats"),
+
+    # Counts are not money: through a money formatter, 14 sales render as
+    # "14c" -- a wrong answer that looks like a right one.
+        # math.floor on a negative average reports a loss as bigger than it is.
+    ("trunc-floors-a-loss", "ui/frame.lua",
+     """    if v < 0 then return -math.floor(-v) end
+    return math.floor(v)""",
+     """    return math.floor(v)""",
+     "histstats"),
+
+    # The rows are an interface: 3.3b's grid reads them by position.
+            # Pairs that run together read as a sentence rather than as figures.
+    ("figuretext-loses-the-gap", "ui/frame.lua",
+     '        if out ~= "" then out = out .. "   " end',
+     '        if out ~= "" then out = out .. "" end',
+     "histstats"),
+
+    # ---- the two-screen History tab ---------------------------------------
+    # The table moved into its own window. Parenting it back to the panel puts
+    # it behind the chart, which now covers the whole tab.
+    ("hist-table-back-in-the-tab", "ui/frame.lua",
+     "    local host = ui.BuildLedgerWindow()",
+     "    local host = panel",
+     "histgraph"),
+
+    # A two-corner-anchored frame that ALSO has its width set ignores one of
+    # them -- the bug the old split had to avoid in the opposite direction.
+    ("hist-table-sets-its-own-width", "ui/frame.lua",
+     '    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",\n                    -HISTL.ledger_scroll_r, HISTL.ledger_bot)',
+     '    scroll:SetWidth(HISTL.ledger_w)',
+     "histgraph"),
+
+    # SetPoint ADDS a point on 1.12. Without the clear, every repaint pulls the
+    # figure further right.
+    ("paintfigs-forgets-clearallpoints", "ui/frame.lua",
+     "        w.label:ClearAllPoints()\n        w.value:ClearAllPoints()",
+     "        local _ = w",
+     "histgraph"),
+
+    # Columns by arithmetic, not by chaining anchors.
+    ("paintfigs-chains-anchors", "ui/frame.lua",
+     "    local cols = ui.BlockColumns(bandW - HISTL.fig_pad * 2,",
+     "    local cols = ui.NoSuchThing(",
+     "histgraph"),
+
+    # Values that start wherever their label ended do not line up, and a column
+    # you cannot compare down is most of what a column of figures is for.
+    ("paintfigs-left-aligns-the-values", "ui/frame.lua",
+     '            w.value:SetPoint("TOPRIGHT", ui.histBand, "TOPLEFT",',
+     '            w.value:SetPoint("TOPLEFT", ui.histBand, "TOPLEFT",',
+     "histgraph"),
+
+    # An em dash must not be hoverable for a tooltip about nothing.
+    ("paintfigs-arms-the-tooltip-on-nothing", "ui/frame.lua",
+     "        if last and last[3] then",
+     "        if last then",
+     "histgraph"),
+
+    # Contents parented to the chart box instead of INTO the well draw behind
+    # it -- the same rule that makes pfUI's backdrop cover an edit box's text.
+    ("figures-parented-outside-their-well", "ui/frame.lua",
+     "        ui.histStrip[si] = { label = cell(ui.histBand),\n                             value = cell(ui.histBand) }",
+     "        ui.histStrip[si] = { label = cell(box), value = cell(box) }",
+     "histgraph"),
+
+    # Reading across pairs HIGH with SOLD, which are not two answers to one
+    # question.
+    ("figureslot-fills-rows-not-columns", "ui/frame.lua",
+     "    return math.floor(i / 2) + 1, math.mod(i, 2) + 1",
+     "    return math.mod(i, 3) + 1, math.floor(i / 3) + 1",
+     "histstats"),
+
+    # The overlay's rows follow the window, the way every other list's do. A
+    # fixed count is what it had while the ledger was a floating frame of its
+    # own size, and under a full-height panel it leaves rows' worth of empty
+    # space below the table.
+    ("ledger-rows-stop-following-the-window", "ui/frame.lua",
+     "    return ui.ListRowsAt(ui.WindowH(), LEDGERBOX, HIST_ROW_H, HIST_ROWS_MAX)",
+     "    return 14",
+     "histgraph"),
+
+    # The bottom inset has to clear the divider and the button row, or the last
+    # row draws through Close.
+    ("ledger-bottom-inset-clips-the-buttons", "ui/frame.lua",
+     "    ledger_bot = 52,",
+     "    ledger_bot = 14,",
+     "histgraph"),
+
+    # An overlay five levels above the content is what the category picker
+    # does, and it is why you can still read the settings behind that one.
+    ("ledger-overlay-sits-too-low", "ui/frame.lua",
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)",
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)",
+     "histgraph"),
+
+    # Clicks that fall through an overlay land on whatever it is covering.
+    ("ledger-overlay-lets-clicks-through", "ui/frame.lua",
+     "    f:EnableMouse(true)   -- swallow clicks so they don't fall through",
+     "    f:EnableMouse(false)",
+     "histgraph"),
+
+    # ---- the figure strip and the blocks ----------------------------------
+    ("figures-format-counts-as-money", "ui/frame.lua",
+     '        { "SOLD",     tostring(st.saleN or 0) },',
+     '        { "SOLD",     util.ShortMoney(st.saleN or 0) },',
+     "histstats"),
+
+    ("figures-swap-high-and-low", "ui/frame.lua",
+     '        { "HIGH",     util.ShortMoneyColored(hi or 0) },\n        { "LOW",      util.ShortMoneyColored(lo or 0) },',
+     '        { "HIGH",     util.ShortMoneyColored(lo or 0) },\n        { "LOW",      util.ShortMoneyColored(hi or 0) },',
+     "histstats"),
+
+    # An absent figure shown as a zero claims you sold something for nothing.
+    ("figures-show-absent-as-zero", "ui/frame.lua",
+     '        { "TOP SALE", st.topSale and util.ShortMoneyColored(st.topSale.amount)\n                      or "\\226\\128\\148" },',
+     '        { "TOP SALE", util.ShortMoneyColored(st.topSale and st.topSale.amount or 0) },',
+     "histstats"),
+
+    # Top Sale is the biggest single transaction; the strip must not show the
+    # summed total there -- that is the block's Top Item.
+    ("figures-topsale-shows-the-total", "ui/frame.lua",
+     '        { "TOP SALE", st.topSale and util.ShortMoneyColored(st.topSale.amount)',
+     '        { "TOP SALE", st.topSaleItem and util.ShortMoneyColored(st.topSaleItem.total)',
+     "histstats"),
+
+    ("blocks-swap-sales-and-expenses", "ui/frame.lua",
+     '                { "Total",   util.ShortMoneyColored(st.income or 0) },',
+     '                { "Total",   util.ShortMoneyColored(st.spend or 0) },',
+     "histstats"),
+
+    # A block's Top Item is the biggest EARNER; the biggest single sale is a
+    # different question and lives in the strip.
+    ("blocks-topitem-is-the-top-sale", "ui/frame.lua",
+     '                top(st.topSaleItem, "Top item"),',
+     '                top(st.topSale, "Top item"),',
+     "histstats"),
+
+    # Profit's item row cannot claim to be profit per item: the ledger has no
+    # quantity yet, so what you paid for what you sold is unknown.
+    ("blocks-profit-claims-per-item", "ui/frame.lua",
+     '                top(st.topSaleItem, "Top seller"),',
+     '                top(st.topSaleItem, "Top item"),',
+     "histstats"),
+
+    # The id is what lets a Top Item name be quality-coloured.
+    ("blocks-drop-the-item-id", "ui/frame.lua",
+     '        return { label, rec.item or "?", rec.itemId, rec.quality }',
+     '        return { label, rec.item or "?" }',
+     "histstats"),
+
+    ("blockcolumns-ignores-the-gap", "ui/frame.lua",
+     "    local avail = (width or 0) - gap * (n - 1)",
+     "    local avail = (width or 0)",
+     "histstats"),
+
+    ("blockcolumns-overlaps-columns", "ui/frame.lua",
+     "        table.insert(out, { x = (i - 1) * (w + gap), w = w })",
+     "        table.insert(out, { x = (i - 1) * w, w = w })",
+     "histstats"),
+
+    # Anchored on the line ABOVE it too: `if w < 1 then w = 1 end` appears in
+    # three functions and a bare match sabotages whichever comes first.
+    ("blockcolumns-can-return-zero-width", "ui/frame.lua",
+     "    local w = math.floor(avail / n)\n    -- NEVER ZERO",
+     "    local w = 0\n    -- NEVER ZERO",
+     "histstats"),
+
+    # ---- the Top item hover ------------------------------------------------
+    # The 1.12 inbox gives a subject and no link, so a mail-logged sale stores
+    # a name and nothing else. Without the name->id map the Sales and Profit
+    # blocks can never colour or hover their Top item while Expenses -- fed by
+    # the Buy tab, which knows the id -- always can.
+    ("stats-drops-the-name-lookup", "core/db.lua",
+     "                    if not rec.itemId then\n                        rec.itemId = db.IdFromName(rec.item)\n                    end",
+     "                    local _ = rec",
+     "histstats"),
+
+    ("stats-topsale-drops-the-name-lookup", "core/db.lua",
+     "    if st.topSale and not st.topSale.itemId then\n        st.topSale.itemId = db.IdFromName(st.topSale.item)\n    end",
+     "    local _ = st",
+     "histstats"),
+
+    # A recorded id came off the actual transaction; the name map is a lookup
+    # of last resort and must not overwrite it.
+    ("stats-name-lookup-beats-the-real-id", "core/db.lua",
+     "                    if not rec.itemId then\n                        rec.itemId = db.IdFromName(rec.item)\n                    end",
+     "                    rec.itemId = db.IdFromName(rec.item) or rec.itemId",
+     "histstats"),
+
+    # ---- the demo LEDGER ---------------------------------------------------
+    # Demo mode used to invent the FIGURES beside db.LedgerStats; it invents
+    # the LEDGER now and the real arithmetic runs over it. The five sabotages
+    # that used to sit here aimed at db.DemoStats and db.DemoPick, which is
+    # why they are gone rather than re-pointed.
+    ("demo-ledger-not-consulted", "core/db.lua",
+     "    if db.demo then return db.DemoLedger() end",
+     "    local _ = db.demo",
+     "histstats"),
+
+    # THE OTHER HALF OF THE SEAM. db.Ledger is the store and stays the write
+    # target; substituting there instead would put invented trading on a path
+    # that can reach a player's SavedVariables.
+    ("demo-ledger-replaces-the-store", "core/db.lua",
+     "function db.Ledger()\n    return (db.account and db.account.ledger) or {}",
+     "function db.Ledger()\n    if db.demo then return db.DemoLedger() end\n"
+     "    return (db.account and db.account.ledger) or {}",
+     "histstats"),
+
+    # Figures that changed between two repaints of the same window could not be
+    # read -- and a seed taken from the clock looks perfectly stable to a check
+    # that calls twice in a row.
+    ("demo-ledger-is-not-deterministic", "core/db.lua",
+     '    local seed = db.DemoSeed("ledger")',
+     "    local seed = db.DemoNext(time())",
+     "histstats"),
+
+    # Six months spread EVENLY leaves Day and Week -- the two periods a player
+    # actually checks -- with nothing in them.
+    ("demo-ledger-spreads-evenly", "core/db.lua",
+     "                local age = math.floor(span * r * r)",
+     "                local age = math.floor(span * r)",
+     "histstats"),
+
+    # ...and pushing everything to one end is the same failure the other way.
+    ("demo-ledger-is-all-ancient", "core/db.lua",
+     "                local age = math.floor(span * r * r)",
+     "                local age = span - math.floor(span * r * r)",
+     "histstats"),
+
+    # A BUY HAS ALWAYS KNOWN ITS COUNT. Dropping quantities on both sides
+    # makes the demo show a failure the buy path does not have.
+    ("demo-ledger-forgets-buy-counts", "core/db.lua",
+     '                if kind == "sale" then',
+     "                if true then",
+     "histstats"),
+
+    # ...and never dropping one hides the failure the SALE path really has,
+    # which is the whole reason ui.CountText renders a question mark.
+    ("demo-ledger-always-knows-the-count", "core/db.lua",
+     "                    if age > known then\n                        q = nil",
+     "                    if false then\n                        q = nil",
+     "histstats"),
+
+    # Every entry carries an id, or the hover the mode exists to let you check
+    # is armed on nothing.
+    ("demo-ledger-drops-the-item-ids", "core/db.lua",
+     "                                     id = it.itemId, qty = q, who = who })",
+     "                                     qty = q, who = who })",
+     "histstats"),
+
+    # A ledger out of order is one the transaction list's default sort cannot
+    # reverse into anything meaningful.
+    ("demo-ledger-is-unsorted", "core/db.lua",
+     "        if a.t ~= b.t then return a.t < b.t end",
+     "        if a.t ~= b.t then return a.t > b.t end",
+     "histstats"),
+
+    # ---- ...and the UI reads through the seam ------------------------------
+    # A perfect demo ledger nobody reads is an empty window. Both of the
+    # window's own reads go through db.LedgerSource.
+    ("history-list-reads-the-store-directly", "ui/frame.lua",
+     "    local led = A.db.LedgerSource()\n    ui.histView = {}",
+     "    local led = A.db.Ledger()\n    ui.histView = {}",
+     "ledgeritems"),
+
+    # A STATED quality wins over the client's on an item row too. Asking the
+    # client first gets nil for an uncached item and the default colour.
+    ("item-row-asks-the-client-first", "ui/frame.lua",
+     "            local q = rec.quality\n"
+     "                      or (rec.itemId and ui.CraftQualityOf(rec.itemId)) or nil",
+     "            local q = (rec.itemId and ui.CraftQualityOf(rec.itemId))\n"
+     "                      or rec.quality or nil",
+     "ledgeritems"),
+
+    # ---- window ordering: whatever you clicked last is in front ------------
+    # TOPLEVEL ALONE IS NOT THE FIX. It only reorders WITHIN a strata, so a bag
+    # a whole strata below the window can be clicked all day and never come
+    # forward -- the flag gets set, nothing changes, and it looks done.
+    ("raise-sets-the-flag-but-never-lifts", "ui/frame.lua",
+     "        if ui.StrataRank(frame:GetFrameStrata()) < ui.StrataRank(strata) then\n"
+     "            frame:SetFrameStrata(strata)\n        end",
+     "        local _ = strata",
+     "raise"),
+
+    # ...and the flag is the other half. Lifting a frame into our strata and
+    # not telling it to raise itself leaves it in a fair fight it cannot win.
+    ("raise-lifts-but-never-sets-the-flag", "ui/frame.lua",
+     "    frame:SetToplevel(true)\n    return true",
+     "    return true",
+     "raise"),
+
+    # RAISED, NEVER LOWERED. A frame above us is there for reasons of its own
+    # -- a confirmation dialog, a popup -- and dragging it down into our
+    # strata hides it behind an auction window.
+    ("raise-lowers-frames-that-sit-above-us", "ui/frame.lua",
+     "        if ui.StrataRank(frame:GetFrameStrata()) < ui.StrataRank(strata) then",
+     "        if ui.StrataRank(frame:GetFrameStrata()) ~= ui.StrataRank(strata) then",
+     "raise"),
+
+    # An unknown strata has to read as BELOW everything, or the frame most
+    # likely to be stuck underneath is the one left there.
+    ("raise-treats-an-unknown-strata-as-topmost", "ui/frame.lua",
+     "    return 0\nend\n\n-- Every frame that should trade places with ours",
+     "    return 99\nend\n\n-- Every frame that should trade places with ours",
+     "raise"),
+
+    # FULLSCREEN is ABOVE DIALOG. It looks wrong written down, and a list that
+    # "corrects" it starts lowering dialogs into our strata.
+    ("raise-reorders-the-clients-strata", "ui/frame.lua",
+     '        "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP",',
+     '        "FULLSCREEN", "DIALOG", "FULLSCREEN_DIALOG", "TOOLTIP",',
+     "raise"),
+
+    # The bag count is the CLIENT's. A hardcoded five drops the bank bags.
+    ("raise-hardcodes-five-bags", "ui/frame.lua",
+     "    local n = bags or 5",
+     "    local n = 5",
+     "raise"),
+
+    # A perfect group nobody applies is an unchanged screen. These are the two
+    # moments that are easiest to leave out.
+    ("raise-not-applied-when-the-house-opens", "ui/frame.lua",
+     "    ui.OpenWindow()\n    -- The client opens your BACKPACK here, which is"
+     " the bag that used to land\n    -- behind the window and stay there.\n"
+     "    ui.ApplyRaiseGroup()",
+     "    ui.OpenWindow()",
+     "raise"),
+
+    ("raise-not-applied-to-load-on-demand-windows", "ui/frame.lua",
+     '    if loadedName and string.find(string.lower(loadedName), "blizzard_", 1, true)\n'
+     "       == 1 then\n        ui.ApplyRaiseGroup()\n    end",
+     "    local _ = loadedName",
+     "raise"),
+
+    # The target strata is READ from our own window, not written down a second
+    # time -- a copy is one more place to change and forget.
+    ("raise-hardcodes-the-target-strata", "ui/frame.lua",
+     "        strata = ui.frame:GetFrameStrata() or strata",
+     "        strata = strata",
+     "raise"),
+
+    # The professions windows are what the report named after the bags.
+    ("raise-forgets-the-professions", "ui/frame.lua",
+     '    table.insert(names, "TradeSkillFrame")',
+     '    local _ = names',
+     "raise"),
+
+    # ---- the hover target itself -------------------------------------------
+    # ui.skin plates every Button it is given, and on an invisible hover target
+    # over a FontString that drew a bar straight through the item's name.
+    ("hover-target-gets-plated", "ui/frame.lua",
+     "        hot.aegisNoSkin = true",
+     "        hot.aegisNoSkin = nil",
+     "histgraph"),
+
+    # ---- stated quality ----------------------------------------------------
+    # ui.CraftQualityOf asks the CLIENT, which only answers for items it has
+    # cached. A demo item the player has never seen is not one, so the name
+    # drew in the default colour until the tooltip fetched it.
+    ("demostats-drops-the-quality", "core/db.lua",
+     "        if rec and not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end",
+     "        if rec then local _ = rec.itemId end",
+     "histstats"),
+
+    # ...and the same on every row of the item table, which is 34 names drawn
+    # in one colour rather than four.
+    ("ledgeritems-drops-the-quality", "core/db.lua",
+     "        if not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end",
+     "        local _ = rec.quality",
+     "ledgeritems"),
+
+    # THE DEMO'S FACTS MUST NOT LEAK INTO REAL DATA. Most of the pool is
+    # ordinary trade goods a real player really trades, so an ungated lookup
+    # states a colour for a REAL Linen Cloth row and overrides the client --
+    # the one source that is authoritative.
+    ("demo-quality-answers-outside-demo-mode", "core/db.lua",
+     "    if not db.demo then return nil end\n    if not itemId then return nil end",
+     "    if not itemId then return nil end",
+     "histstats"),
+
+    ("demo-epics-are-not-epic", "core/db.lua",
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,',
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 3, qty = 1,',
+     "histstats"),
+
+    ("demo-rares-are-not-rare", "core/db.lua",
+     '    { item = "Arcanite Reaper", itemId = 12784, quality = 3, qty = 1,',
+     '    { item = "Arcanite Reaper", itemId = 12784, quality = 4, qty = 1,',
+     "histstats"),
+
+    # THE TWO LABELS ARE TWO QUESTIONS -- "the best thing that ever happened
+    # once" against "what actually earns here". A pool where one item answers
+    # both makes them look like a duplication nobody would miss removing.
+    ("demo-top-sale-is-also-the-top-earner", "core/db.lua",
+     '    { item = "Sulfuron Hammer", itemId = 17193, quality = 4, qty = 1,\n'
+     '      buy = nil, buys = 0, sell = 11000000, sales = 1 },',
+     '    { item = "Sulfuron Hammer", itemId = 17193, quality = 4, qty = 1,\n'
+     '      buy = nil, buys = 0, sell = 11000000, sales = 6 },',
+     "histstats"),
+
+    # Every trading shape needs a row, or the em dash the item table draws
+    # where there is no other side is never on screen. The pool carries TWO of
+    # each shape so that losing one is still caught.
+    ("demo-pool-loses-a-sold-only-item", "core/db.lua",
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,\n'
+     '      buy = nil, buys = 0, sell = 4200000, sales = 6 },',
+     '    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,\n'
+     '      buy = 3000000, buys = 6, sell = 4200000, sales = 6 },',
+     "histstats"),
+
+    ("demo-pool-loses-a-bought-only-item", "core/db.lua",
+     '    { item = "Rune Thread", itemId = 14341, quality = 1, qty = 5,\n'
+     '      buy = 4800, buys = 4, sell = nil, sales = 0 },',
+     '    { item = "Rune Thread", itemId = 14341, quality = 1, qty = 5,\n'
+     '      buy = 4800, buys = 4, sell = 6200, sales = 4 },',
+     "histstats"),
+
+    # BUY PRICE AND SELL PRICE, not the other way round. Swapped, the demo
+    # trader loses money on everything -- a ledger nobody would believe and a
+    # Profit block that is red down its whole length.
+    ("demo-ledger-swaps-buy-and-sell-prices", "core/db.lua",
+     '            if k == 1 then kind, unit, count = "buy", it.buy, it.buys\n'
+     '            else            kind, unit, count = "sale", it.sell, it.sales end',
+     '            if k == 1 then kind, unit, count = "buy", it.sell, it.buys\n'
+     '            else            kind, unit, count = "sale", it.buy, it.sales end',
+     "histstats"),
+
+    # The quality has to reach the RENDERER, not just the stats table -- it
+    # travels as the fourth element of a Top item row.
+    ("histblocks-drops-the-quality", "ui/frame.lua",
+     '        return { label, rec.item or "?", rec.itemId, rec.quality }',
+     '        return { label, rec.item or "?", rec.itemId }',
+     "histstats"),
+
+    # A STATED quality wins over the client's. Asking the client first gets nil
+    # for an uncached item and falls back to the default colour.
+    ("painter-asks-the-client-first", "ui/frame.lua",
+     "                    local q = row[4] or ui.CraftQualityOf(row[3])",
+     "                    local q = ui.CraftQualityOf(row[3]) or row[4]",
+     "histgraph"),
+
+    # ---- what a sale nets, and the vendor warning --------------------------
+    # The cut comes off. Compared gross, an item listed at exactly vendor price
+    # reads "at vendor" while netting 95% of it.
+    ("netunit-forgets-the-cut", "core/sell.lua",
+     "    return math.floor(unitPrice * (1 - cut))",
+     "    return math.floor(unitPrice)",
+     "sellslot"),
+
+    # ...and the deposit must NOT come off: it is refunded when the auction
+    # sells. ROADMAP 5.3 asked for this formula and was wrong.
+    ("netunit-subtracts-a-deposit", "core/sell.lua",
+     "function sell.NetUnit(unitPrice, cut)\n    if not unitPrice or unitPrice <= 0 then return nil end\n    cut = cut or sell.CUT\n    return math.floor(unitPrice * (1 - cut))",
+     "function sell.NetUnit(unitPrice, cut)\n    if not unitPrice or unitPrice <= 0 then return nil end\n    cut = cut or sell.CUT\n    return math.floor(unitPrice * (1 - cut)) - 500",
+     "sellslot"),
+
+    ("vendorcompare-reads-it-backwards", "core/sell.lua",
+     "        above  = unitPrice >= vendor,",
+     "        above  = unitPrice <= vendor,",
+     "sellslot"),
+
+    # The warning has to be handed the NET. Handing it the gross is the bug.
+    ("sell-warning-compares-the-gross", "ui/frame.lua",
+     "    local vc = A.sell.VendorCompare(it.itemId, netPerItem)",
+     "    local vc = A.sell.VendorCompare(it.itemId, unitBuy)",
+     "sellslot"),
+
+    # ---- a group row's two counts ------------------------------------------
+    # Eight auctions of Runecloth might be eight singles or eight stacks of
+    # twenty, and the row said only the first.
+    ("grouprow-drops-the-item-count", "ui/frame.lua",
+     '    if units and units > listings then\n        txt = txt .. ", " .. units .. " items"\n    end',
+     "    local _ = units",
+     "buygroup"),
+
+    # ...and must not say the same number twice on a group of singles.
+    ("grouprow-repeats-the-same-number", "ui/frame.lua",
+     "    if units and units > listings then",
+     "    if units then",
+     "buygroup"),
+
+    ("grouprow-stops-using-the-helper", "ui/frame.lua",
+     "        row.left:SetText(ui.GroupCountText(e.listings, e.units))",
+     '        row.left:SetText((e.listings or 0) .. " auctions")',
+     "buygroup"),
+
+    # ---- the chat-link tooltip ---------------------------------------------
+    # ItemRefTooltip is a different frame; without its own hook none of our
+    # price lines reach a link clicked in chat.
+    ("chatlink-tooltip-not-hooked", "ui/tooltip.lua",
+     '    HookRef("SetHyperlink", "link")',
+     "    local _ = HookRef",
+     "tooltip.hook"),
+
+    # Two frames need two stores: one table keyed by method name cannot hold
+    # two originals under "SetHyperlink", and the second overwrites the first.
+    ("chatlink-shares-one-store", "ui/tooltip.lua",
+     "    HookOn(ItemRefTooltip, name, source, tooltip.origRef)",
+     "    HookOn(ItemRefTooltip, name, source, tooltip.orig)",
+     "tooltip.hook"),
+
+    # ---- quantity on a ledger row ------------------------------------------
+    # Absent means UNKNOWN, never one. Substituting 1 turns "I do not know"
+    # into a number a reader can average, which is how the Ledger table would
+    # come out wrong everywhere and look right everywhere.
+    ("recordtxn-defaults-quantity-to-one", "core/db.lua",
+     "    if n and n > 0 then n = math.floor(n) else n = nil end",
+     "    if n and n > 0 then n = math.floor(n) else n = 1 end",
+     "histstats"),
+
+    ("recordtxn-stores-a-zero-quantity", "core/db.lua",
+     "    local n = tonumber(qty)\n    if n and n > 0 then n = math.floor(n) else n = nil end",
+     "    local n = tonumber(qty)",
+     "histstats"),
+
+    ("recordtxn-drops-the-quantity", "core/db.lua",
+     "        amount = amount, id = itemId, qty = n, who = db.CharKey() })",
+     "        amount = amount, id = itemId, who = db.CharKey() })",
+     "histstats"),
+
+    # A.RecordExternalTxn dropped every field it did not name, and Courier is
+    # the thorough mail reader -- the one caller that would HAVE a quantity.
+    ("external-txn-drops-the-quantity", "core/db.lua",
+     "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId, txn.qty)",
+     "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId)",
+     "histstats"),
+
+    # buy.RecordPurchase has always taken row.count; the ledger threw it away.
+    ("buy-ledger-drops-the-stack", "core/buy.lua",
+     '        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId, row.count)',
+     '        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)',
+     "bidpath"),
+
+    # ---- the posting book --------------------------------------------------
+    # Several stacks of one item at DIFFERENT sizes cannot say which sold --
+    # there is no auction id on 1.12 to ask with -- so nil is the answer.
+    # Picking one is a number the player reconciles against their mail and
+    # finds wrong.
+    ("postbook-guesses-a-mixed-book", "core/db.lua",
+     "    if not firstAt or mixed then return nil end",
+     "    if not firstAt then return nil end",
+     "postbook"),
+
+    # ...and consuming on a guess throws away the evidence that we guessed.
+    ("postbook-consumes-on-a-guess", "core/db.lua",
+     "            if qty == nil then qty = p.qty\n            elseif p.qty ~= qty then mixed = true end",
+     "            if qty == nil then qty = p.qty end",
+     "postbook"),
+
+    # A match has to CONSUME, or one stack answers for every later sale of the
+    # same item.
+    ("postbook-never-consumes", "core/db.lua",
+     "    table.remove(book, firstAt)\n    return qty",
+     "    return qty",
+     "postbook"),
+
+    # An expired auction is not waiting on a sale mail. Left in the book it
+    # turns one stack size into a mixed one and costs the NEXT sale its count.
+    ("postbook-ignores-expiries", "core/db.lua",
+     "function db.ExpirePosting(name, now)\n    return db.MatchPosting(name, now)",
+     "function db.ExpirePosting(name, now)\n    return nil",
+     "postbook"),
+
+    # A posting older than the longest auction plus the longest mail life is a
+    # leak, not a record.
+    ("postbook-keeps-stale-postings", "core/db.lua",
+     "        if not p.t or (now - p.t) > db.POSTED_KEEP then",
+     "        if false then",
+     "postbook"),
+
+    # ...and one with no timestamp can never age out at all.
+    ("postbook-keeps-undated-postings", "core/db.lua",
+     "        if not p.t or (now - p.t) > db.POSTED_KEEP then",
+     "        if p.t and (now - p.t) > db.POSTED_KEEP then",
+     "postbook"),
+
+    # The cap has to drop the OLDEST: the newest are the ones a sale is most
+    # likely to be about.
+    ("postbook-cap-drops-the-newest", "core/db.lua",
+     "    while table.getn(book) > db.POSTED_MAX do\n        table.remove(book, 1)\n    end",
+     "    while table.getn(book) > db.POSTED_MAX do\n        table.remove(book)\n    end",
+     "postbook"),
+
+    ("postbook-records-a-zero-stack", "core/db.lua",
+     "    if not n or n < 1 then return false end",
+     "    if not n then return false end",
+     "postbook"),
+
+    # ---- posting and matching are wired to the real paths ------------------
+    ("sell-post-does-not-remember", "core/sell.lua",
+     "        A.db.RecordPosting(it.name, it.itemId, count)",
+     "        local _ = count",
+     "postbook"),
+
+    ("sell-queue-does-not-remember", "core/sell.lua",
+     "                A.db.RecordPosting(it.name, job.itemId, job.stackSize)",
+     "                local _ = job",
+     "postbook"),
+
+    # ---- the posting book, reconciled against the server -------------------
+    # The whole reason the reconcile exists: a stack posted before this
+    # character had a book is invisible to RecordPosting, so its sale reports
+    # an unknown quantity. This is the "sold a Silverleaf and got no data" bug.
+    ("reconcile-learns-nothing", "core/db.lua",
+     "    local want = db.PostingTally(stacks)",
+     "    local want = db.PostingTally(nil)",
+     "postbook"),
+
+    # SUBTRACTIVE is the tempting version and it is wrong: a stack that just
+    # sold is already off the server's list while its mail sits unread, so
+    # trimming the book to match costs that sale the count it was about to
+    # claim. Check the AH before the mailbox and the feature breaks.
+    ("reconcile-trims-the-book-to-the-server", "core/db.lua",
+     "    local want = db.PostingTally(stacks)\n    local have = db.PostingTally(db.Postings())",
+     "    local want = db.PostingTally(stacks)\n    db.char.posted = {}\n    local have = {}",
+     "postbook"),
+
+    # ...and APPENDING instead of topping up is the other one. This runs on
+    # every AH visit, so one stack up becomes two postings, then three -- all
+    # the same size, so MatchPosting answers confidently for sales that never
+    # happened.
+    ("reconcile-appends-on-every-visit", "core/db.lua",
+     "            local short = n - (mine[qty] or 0)",
+     "            local short = n",
+     "postbook"),
+
+    # Topped up per ITEM rather than per SIZE loses the twenty when a five is
+    # already on the books -- and a book missing a size is a book that cannot
+    # answer for it.
+    ("reconcile-tops-up-per-item-not-per-size", "core/db.lua",
+     "            local short = n - (mine[qty] or 0)",
+     "            local short = n - (next(mine) and 1 or 0)",
+     "postbook"),
+
+    # A row the client could not identify still has a NAME, and the name is
+    # the whole of what a sale mail matches on.
+    ("reconcile-drops-rows-with-no-id", "core/db.lua",
+     "                if db.RecordPosting(name, ids[name], qty, now) then",
+     "                if ids[name] and db.RecordPosting(name, ids[name], qty, now) then",
+     "postbook"),
+
+    # The tally is what both sides are counted with; folding sizes together
+    # makes every size look like every other.
+    ("tally-ignores-the-stack-size", "core/db.lua",
+     "            t[n][q] = (t[n][q] or 0) + 1",
+     "            t[n][1] = (t[n][1] or 0) + 1",
+     "postbook"),
+
+    # ---- ...and the sweep is what feeds it ---------------------------------
+    # A perfect reconcile nobody calls with real auctions changes nothing on
+    # screen. The owner sweep is the only place the server states stack sizes.
+    ("sweep-does-not-feed-the-book", "core/sell.lua",
+     "    if A.db and A.db.ReconcilePostings then\n        A.db.ReconcilePostings(stacks or {})\n    end",
+     "    local _ = stacks",
+     "postbook"),
+
+    # sw.counts SUMS units per item, which throws the stack sizes away -- the
+    # one thing the book is about. One entry per AUCTION, not per item.
+    ("sweep-sends-summed-counts-not-stacks", "core/sell.lua",
+     "        table.insert(sw.stacks, { name = r.name, id = r.itemId,\n                                  qty = r.count or 1 })",
+     "        local _ = r",
+     "postbook"),
+
+    # ---- the per-item ledger table -----------------------------------------
+    # Money from every sale over units from only the countable ones divides a
+    # bigger number by a smaller one and reports an average that is too high --
+    # and plausible, which is worse.
+    ("ledgeritems-sums-money-outside-the-count", "core/db.lua",
+     "                    if qty and qty > 0 then\n                        rec.sold = rec.sold + qty\n                        rec.soldMoney = rec.soldMoney + amount\n                    else\n                        rec.soldUnknown = rec.soldUnknown + 1\n                    end",
+     "                    rec.soldMoney = rec.soldMoney + amount\n                    if qty and qty > 0 then\n                        rec.sold = rec.sold + qty\n                    else\n                        rec.soldUnknown = rec.soldUnknown + 1\n                    end",
+     "ledgeritems"),
+
+    # An unknown quantity counted as one is a Sold column that is wrong for
+    # everyone with history.
+    ("ledgeritems-counts-unknown-as-one", "core/db.lua",
+     "                    if qty and qty > 0 then\n                        rec.sold = rec.sold + qty",
+     "                    if true then\n                        rec.sold = rec.sold + (qty or 1)",
+     "ledgeritems"),
+
+    # You cannot resell more than you bought, nor more than you sold.
+    ("ledgeritems-resold-takes-the-larger", "core/db.lua",
+     "            if rec.bought < rec.resold then rec.resold = rec.bought end",
+     "            if rec.bought > rec.resold then rec.resold = rec.bought end",
+     "ledgeritems"),
+
+    # Profit needs BOTH sides: an item you only sold has no purchase price.
+    ("ledgeritems-profit-without-a-buy-side", "core/db.lua",
+     "        if rec.avgSell and rec.avgBuy then\n            rec.avgProfit = rec.avgSell - rec.avgBuy\n        end",
+     "        rec.avgProfit = (rec.avgSell or 0) - (rec.avgBuy or 0)",
+     "ledgeritems"),
+
+    ("ledgeritems-avg-divides-by-zero", "core/db.lua",
+     "    if not units or units <= 0 then return nil end",
+     "    units = units or 1",
+     "ledgeritems"),
+
+    # A total summed over what it could do and silent about the rest is a
+    # number nobody can reconcile against their own history.
+    ("ledgeritems-total-hides-what-it-skipped", "core/db.lua",
+     "            skipped = skipped + 1",
+     "            skipped = skipped",
+     "ledgeritems"),
+
+    # Keying by id-or-name splits an item whose history straddles the release
+    # where ids started being recorded.
+    ("ledgeritems-keyed-by-id", "core/db.lua",
+     '                local key = e.item or "?"\n                local rec = byName[key]',
+     '                local key = e.id or e.item or "?"\n                local rec = byName[key]',
+     "ledgeritems"),
+
+    # ---- rendering the unknowns --------------------------------------------
+    ("counttext-hides-the-uncounted", "ui/frame.lua",
+     '    if unknown > 0 then return known .. " +" .. unknown .. "?" end',
+     "    local _ = unknown",
+     "ledgeritems"),
+
+    ("counttext-shows-nothing-as-zero", "ui/frame.lua",
+     "    if known <= 0 then\n        if unknown > 0 then return \"?\" end\n        return NO_VALUE\n    end",
+     "    if known <= 0 then return \"0\" end",
+     "ledgeritems"),
+
+    ("moneyordash-shows-nothing-as-zero", "ui/frame.lua",
+     "    if not copper then return NO_VALUE end",
+     "    copper = copper or 0",
+     "ledgeritems"),
+
+    # A minus sign in the same colour as everything else is a number you have
+    # to read rather than see.
+    ("profittext-does-not-colour-a-loss", "ui/frame.lua",
+     "    local c = (copper < 0) and C.spend or C.income",
+     "    local c = C.income",
+     "ledgeritems"),
+
+    ("footer-silent-about-skipped-rows", "ui/frame.lua",
+     '    if skipped and skipped > 0 then',
+     "    if false then",
+     "ledgeritems"),
+
+    # A nil is not a small number: sorted as zero the unknowns sit at the top
+    # of a descending Avg Profit and read as the best rows in the table.
+    ("ledgersort-treats-unknown-as-zero", "ui/frame.lua",
+     '    if key == "avgSell" then return rec.avgSell end',
+     '    if key == "avgSell" then return rec.avgSell or 0 end',
+     "ledgeritems"),
+
+    # A widget left on from the other view draws through the table you are
+    # looking at.
+    ("ledgerview-shows-both-at-once", "ui/frame.lua",
+     "    local items = (view ~= \"txns\")\n    return items, not items",
+     "    local items = (view ~= \"txns\")\n    return items, true",
+     "ledgeritems"),
+
+    # ---- the ledger overlay's layout ---------------------------------------
+    # A FauxScrollFrame's bar is drawn OUTSIDE its own rect, so a frame flush
+    # to the window edge puts the bar past it, half-drawn on the border.
+    ("ledger-scrollbar-outside-the-box", "ui/frame.lua",
+     "    ledger_scroll_r = 30,",
+     "    ledger_scroll_r = 0,",
+     "histgraph"),
+
+    # ui.RefreshHistory ends by painting the transaction list -- on every
+    # period click and every mailbox update -- so without the guard those rows
+    # come back on top of the item table.
+    ("ledger-views-overlap-on-repaint", "ui/frame.lua",
+     '    if (ui.ledgerView or "items") ~= "txns" then\n        local h = 1',
+     "    if false then\n        local h = 1",
+     "ledgeritems"),
+
+    # Returning early rather than hiding leaves whatever was on screen the last
+    # time that view was up -- whatever one fill writes, the other must clear.
+    ("ledger-view-returns-without-clearing", "ui/frame.lua",
+     "            ui.histRows[h]:Hide()",
+     "            local _ = h",
+     "ledgeritems"),
+
+    # ---- money by denomination ---------------------------------------------
+    ("shortmoneycolored-loses-the-text", "core/util.lua",
+     "    return colour .. txt .. \"|r\"",
+     "    return colour .. \"|r\"",
+     "util"),
+
+    ("shortmoneycolored-leaves-the-escape-open", "core/util.lua",
+     "    return colour .. txt .. \"|r\"",
+     "    return colour .. txt",
+     "util"),
+
+    ("shortmoneycolored-paints-everything-gold", "core/util.lua",
+     '    elseif last == "c" then\n        colour = "|cffeda55f"                        -- copper\n    end',
+     "    end",
+     "util"),
+
+    ("shortmoneycolored-thousands-not-gold", "core/util.lua",
+     '    if last == "s" and string.sub(txt, -2) ~= "ks" then',
+     '    if last == "s" or last == "g" then',
+     "util"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -5903,6 +7164,10 @@ SUITES = {
     "bidpath": "tests/units/bidpath_test.lua",
     "purse": "tests/units/purse_test.lua",
     "sweep": "tests/units/sweep_test.lua",
+    "postbook": "tests/units/postbook_test.lua",
+    "raise": "tests/units/raise_test.lua",
+    "ledgeritems": "tests/units/ledgeritems_test.lua",
+    "histstats": "tests/units/histstats_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

@@ -566,6 +566,30 @@ end
 function GameTooltip:AddDoubleLine(l, r) table.insert(self.lines, { left = l, right = r }) end
 function GameTooltip:NumLines() return table.getn(self.lines) end
 
+-- THE CHAT-LINK TOOLTIP, which is a separate frame from GameTooltip and is
+-- what the client opens when you click an item link in chat. ui/tooltip.lua
+-- hooks its SetHyperlink as a SECOND, explicit, per-object hook -- so the
+-- harness has to offer a second object, or the hook silently installs on
+-- nothing and the suite passes for the wrong reason.
+ItemRefTooltip = {
+    lines = {},
+    shown = 0,
+}
+function ItemRefTooltip:SetOwner(owner, anchor) self.owner = owner end
+function ItemRefTooltip:Show() self.shown = self.shown + 1 end
+function ItemRefTooltip:Hide() end
+function ItemRefTooltip:SetText(t) self.text = t end
+function ItemRefTooltip:AddLine(text, r, g, b)
+    table.insert(self.lines, { left = text, r = r, g = g, b = b })
+end
+function ItemRefTooltip:AddDoubleLine(l, r)
+    table.insert(self.lines, { left = l, right = r })
+end
+function ItemRefTooltip:NumLines() return table.getn(self.lines) end
+function ItemRefTooltip:SetHyperlink(link)
+    table.insert(W.tooltipCalls, { method = "RefSetHyperlink", a1 = link })
+end
+
 -- The methods ui/tooltip.lua hooks. SetBagItem returns two values on 1.12
 -- (hasCooldown, repairCost) and the wrapper has to pass both up, so it does
 -- here too.

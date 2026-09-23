@@ -522,6 +522,51 @@ do
     H.check("the line actually moves", not flat)
 end
 
+-- ...AND IT MOVES BOTH WAYS, IN RUNS. The version before this one was an
+-- independent draw per bucket with a net-negative drift: it collapsed from its
+-- starting purse to zero and sat there for five of the seven days on screen.
+-- That is a line, and it is not variety.
+do
+    local vals = db.DemoSeries(0, HOUR, 300)
+    local ups, downs, lo, hi = 0, 0, vals[1], vals[1]
+    local i = 2
+    while i <= 300 do
+        if vals[i] > vals[i - 1] then ups = ups + 1 end
+        if vals[i] < vals[i - 1] then downs = downs + 1 end
+        if vals[i] < lo then lo = vals[i] end
+        if vals[i] > hi then hi = vals[i] end
+        i = i + 1
+    end
+    H.check("it rises somewhere", ups > 20, ups)
+    H.check("...and falls somewhere", downs > 20, downs)
+    -- A range worth drawing an axis against. A line that never doubles gives
+    -- the axis one magnitude to label and the fill one height to fade over.
+    H.check("it covers a real range", hi > lo * 2, lo .. " -> " .. hi)
+end
+
+-- A PURSE THAT HITS THE FLOOR EARNS ITS WAY BACK. Every phase is
+-- multiplicative, so a percentage of nothing is nothing -- without a wage a
+-- broke character is broke for the rest of the chart, which is what made the
+-- old line flat for most of its width.
+do
+    local one = db.DemoSeries(0, HOUR, 400, "Ashvane")
+    local floored, recovered = false, false
+    local i = 1
+    while i <= 400 do
+        if one[i] <= db.DEMO_POOR then floored = true
+        elseif floored then recovered = true end
+        i = i + 1
+    end
+    -- Only assert the recovery when the run actually went broke; whether it
+    -- does is the seed's business and pinning that would be testing the PRNG.
+    if floored then
+        H.check("a broke purse climbs off the floor", recovered)
+    else
+        H.check("this seed never went broke, so there is nothing to recover",
+                true)
+    end
+end
+
 -- The account view is the sum of the characters, the same as the real one.
 do
     local total = db.DemoSeries(0, HOUR, 10)

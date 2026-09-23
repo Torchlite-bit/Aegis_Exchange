@@ -25,83 +25,75 @@ needed again.
 ## `gen_disenchant.py` — the BANDS table in `core/disenchant.lua`
 
 ```sh
-python3 tools/gen_disenchant.py --de <DisenchantList.lua> \
-                                --ilvl <ShaguScore/Database.lua> --report
-python3 tools/gen_disenchant.py --de ... --ilvl ... > /tmp/bands.lua
+python3 tools/gen_disenchant.py --db ClassicDB_1_12_1_z2815.sql.gz --report
+python3 tools/gen_disenchant.py --db ClassicDB_1_12_1_z2815.sql.gz > /tmp/bands.lua
 ```
 
-`--report` prints the diagnostics (what was skipped and why, the armour/weapon
-centroids, every band with its observation count). Without it, the script emits
+`--report` prints the diagnostics: how many items and loot entries were read,
+the inventory-type → ladder split it derived, anything it refused and why, and
+every band with its DisenchantID and item count. Without it, the script emits
 the Lua table for pasting into `core/disenchant.lua`.
 
-### Inputs are NOT vendored, on purpose
+### It reads the rule; it used to infer it
 
-Neither source file is in this repository and neither should be added.
+Until v1.54.13 this script derived the table from **8.8 million observed
+disenchants** (Enchantrix's `DisenchantList.lua`) grouped by a borrowed
+item-level table (ShaguScore). Neither file carried item quality or equip slot,
+so both were inferred — quality from the shape of the yields, armour-or-weapon
+by clustering on dust share.
 
-- **`DisenchantList.lua`** — from **Enchantrix 3.6.1** (`## Interface: 11200`,
-  our exact client). 5,214 items, **8,843,728 observed disenchants**,
-  community-harvested and credited in the file's own tail. It is **GPL v2**.
-  Aegis is MIT, so the file itself must never be copied in here.
+It now reads **CMaNGOS Classic-DB**, a 1.12.1 content database.
+`disenchant_loot_template` states what each DisenchantID yields, at what chance
+and in what quantity; `item_template` states every item's quality, item level,
+inventory type and which DisenchantID it uses. That is not a sample of the
+rule — it is the rule, as the server runs it.
 
-  What *is* copied in is a few dozen derived probabilities — aggregate
-  statistics describing how a game behaves. Those are facts about vanilla, not
-  Enchantrix's expression of them, and they are re-derivable by anyone with the
-  same observations.
+**The two agree**, which is the best evidence either was right: where the old
+method produced a band, the materials match and the mean yields match to two
+decimal places. Strange Dust in band 20 measured 2.509 per proc; the loot table
+rolls 2–3.
 
-- **`Database.lua`** — from **ShaguScore**. 12,871 `[itemId] = itemLevel`
-  entries, which is what groups the observations into bands. It ships with **no
-  licence at all**: no LICENSE file, no header, nothing in its README or `.toc`.
-  It is no longer shipped or read — see the note above — so that concern is
-  now historical.
+What the samples could not reach, and this does:
 
-### What the script does, and the two judgement calls in it
-
-The disenchant result is a function of (item level, quality, weapon-or-armour).
-Neither input file carries quality or equip slot, so both are inferred:
-
-- **Quality.** Greens yield dust; rares yield exactly one shard per proc; epics
-  yield the same shards several at a time.
-- **Class.** Within a band, dust share is sharply bimodal — armour ~82%,
-  weapons ~17%, with an empty valley between. Cluster at 0.5 and read both
-  centroids off the data. aux hand-types this split as 75/20; the observations
-  disagree, which is the whole reason for generating rather than copying.
-
-**Judgement call one — off-signature items are dropped, not blended.**
-Enchantrix's file pools logs across vanilla's entire life, and Blizzard changed
-the disenchant tables during it. A minority of items therefore carry an essence
-tier from a different patch — ilvl 26–30 pieces yielding Greater Magic Essence
-where that band's essence is Greater Astral. Those are real observations of a
-rule nobody plays under any more. Each band's material set is taken to be the
-one **most items** agree on, and items that disagree are dropped and counted
-(the `--report` output names the number per band). Averaging them in would
-drag the numbers toward a table that no longer exists.
-
-**Judgement call two — a band ships only with depth AND breadth.** Both gates
-are enforced, and neither implies the other:
-
-| gate | why |
+| gap | what was wrong |
 |---|---|
-| `MIN_OBS_PER_BAND` | the probabilities must be stable |
-| `MIN_ITEMS_PER_BAND` | they must describe a *rule*, not a few broken logs |
+| epics | nine source items with impossible yields, dropped — so an epic reported *unknown* |
+| weapons in bands 25, 30, 65 | no weapon observations survived the depth/breadth gates |
+| the 5% shard in bands 55 and 65 | too rare to clear the noise floor — **this is the one a player reported** |
+| shields, held-in-off-hand | take the **weapon** ladder; no dust-share clustering could see a slot |
+| thrown weapons | cannot be disenchanted at all; the old table said they could |
+| item level above 65 | the observations thinned out there; the game does not |
 
-That second gate is what removes epics entirely. The source holds nine epic
-items, three of which carry tens of thousands of procs — plenty of depth — with
-yields like **4.14 Large Brilliant Shards per disenchant**, which is not a
-result any vanilla item produces. Depth alone would have shipped them.
+### The input is NOT vendored, on purpose
 
-### What comes out, and what deliberately does not
+**CMaNGOS Classic-DB** is **GPL v3** and Aegis is MIT, so the dump must never
+be copied in here. Get it from `cmangos/classic-db`, `Full_DB/`.
 
-Emitted: greens and rares, bands 15–65, split by armour/weapon where the data
-supports it. Absent on purpose, each documented in `core/disenchant.lua`'s
-header:
+What *is* copied in is a few dozen derived probabilities — aggregate facts
+about how a 1.12 server behaves. Those are facts about the game, not
+Classic-DB's expression of them, and they are re-derivable by anyone with the
+same dump. Same reasoning that applied to Enchantrix (GPL v2) before it.
 
-- **anything above item level 65** — the observations thin to a few dozen and
-  stop being monotone, while Turtle item levels run to 99;
-- **epics** — see above;
-- **weapons in a few bands** — where no usable weapon data survives, the band
-  ships armour only. The armour numbers are never borrowed for weapons: armour
-  is dust-led and weapons essence-led, so borrowing is confidently wrong rather
-  than roughly right.
+### Each row carries its count range
+
+Rows are `{ materialId, chance, meanYield, min, max }`. The **mean** values an
+item; the **range** is what lets a player's own disenchants identify a band.
+Green bands 60 and 65 yield the same three materials and differ only in count
+(Illusion Dust 1–2 against 2–5), so without the range they can never be told
+apart. `resolve()` refuses an entry whose range is not a range.
+
+### The one judgement call left
+
+**Mangos loot-group semantics.** Within a group, a row with an explicit chance
+takes that chance and a row written as `0` takes whatever the group has left.
+Every green entry is three rows — dust 75, essence 20, shard **0** — and that
+last zero is the 5%. Reading it as "never drops" is precisely the bug this
+rewrite fixes, so `resolve()` makes the remainder explicit and **refuses any
+entry whose chances do not come to 100%**.
+
+One entry is refused: DisenchantID 50 (rares above item level 70) holds a
+single row at 0.5%, which is not a distribution. Those rares report unknown
+rather than have half a percent normalised up to certainty.
 
 ### After regenerating
 
@@ -109,6 +101,7 @@ header:
 restating generated numbers only proves the paste worked. It asserts what must
 hold whatever the generator emits: probabilities summing to one, materials
 drawn from the 24 real reagents, the dust ladder climbing in the right order,
-and armour leading with dust where weapons lead with essence. Run
-`./tests/run.sh --sabotage` after any regeneration; if the ladder assertions
-trip, the generator changed meaning and not just precision.
+armour leading with dust where weapons lead with essence, a shard in every
+green band above the first, and an epic out-yielding the rare of the same
+level. Run `./tests/run.sh --sabotage` after any regeneration; if the ladder
+assertions trip, the generator changed meaning and not just precision.

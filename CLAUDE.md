@@ -287,6 +287,9 @@ Aegis_Exchange/
   CLAUDE.md              -- this file
   ROADMAP.md             -- phased, dependency-ordered plan; check before
                          -- starting a large feature
+  DISCORD.md             -- the release post for Discord: player-facing
+                         -- additions and fixes only, and UNDER 2,000
+                         -- characters (Discord's message limit). Not loaded
 ```
 
 Load order is fixed by the `.toc`: `init` → `util` → `db` → `disenchant` →

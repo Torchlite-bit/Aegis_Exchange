@@ -66,6 +66,27 @@ function util.ShortMoney(copper)
     return sign .. string.format("%.1f", gold / 1000) .. "kg"
 end
 
+-- util.ShortMoney with the denomination COLOURED the way the game colours it:
+-- gold yellow, silver grey, copper bronze.
+--
+-- A SEPARATE FUNCTION rather than a flag on ShortMoney, because ShortMoney's
+-- other caller is the chart's y axis -- five labels in a narrow gutter, where
+-- a colour escape per label is bytes spent on something nobody reads as money.
+--
+-- THE THOUSANDS FORM IS GOLD. "4.2kg" is a gold figure said short, so it takes
+-- the gold colour and not the colour of whatever letter happens to be last.
+function util.ShortMoneyColored(copper)
+    local txt = util.ShortMoney(copper)
+    local last = string.sub(txt, -1)
+    local colour = "|cffffd700"                      -- gold
+    if last == "s" and string.sub(txt, -2) ~= "ks" then
+        colour = "|cffc7c7cf"                        -- silver
+    elseif last == "c" then
+        colour = "|cffeda55f"                        -- copper
+    end
+    return colour .. txt .. "|r"
+end
+
 -- Format a copper amount as a compact string like "12g 34s 56c". Leading zero
 -- denominations are dropped, but copper is always shown when the total is
 -- under one silver. Pass `colored` = true for WoW color escape codes.

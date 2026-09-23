@@ -458,4 +458,49 @@ H.check("it is shorter than the full figure",
             < string.len(util.FormatMoney(1234 * 10000 + 5678)),
         util.ShortMoney(1234 * 10000 + 5678))
 
+-- ---------------------------------------------------------------------------
+H.section("money, coloured by denomination")
+-- ---------------------------------------------------------------------------
+
+-- The same text ShortMoney gives, wrapped in the game's own colour for the
+-- denomination it ends in.
+do
+    local function strip(t) return string.gsub(string.gsub(t, "|c%x%x%x%x%x%x%x%x", ""), "|r", "") end
+    H.eq("the text is unchanged", strip(util.ShortMoneyColored(1234567)),
+         util.ShortMoney(1234567))
+    H.eq("...for silver too", strip(util.ShortMoneyColored(8400)),
+         util.ShortMoney(8400))
+    H.eq("...and copper", strip(util.ShortMoneyColored(84)),
+         util.ShortMoney(84))
+end
+
+do
+    local GOLD, SILVER, COPPER = "|cffffd700", "|cffc7c7cf", "|cffeda55f"
+    H.check("gold is gold",
+            string.find(util.ShortMoneyColored(120000), GOLD, 1, true) == 1,
+            util.ShortMoneyColored(120000))
+    H.check("silver is silver",
+            string.find(util.ShortMoneyColored(8400), SILVER, 1, true) == 1,
+            util.ShortMoneyColored(8400))
+    H.check("copper is copper",
+            string.find(util.ShortMoneyColored(84), COPPER, 1, true) == 1,
+            util.ShortMoneyColored(84))
+
+    -- THE THOUSANDS FORM IS A GOLD FIGURE SAID SHORT. "4.2kg" ends in "g" and
+    -- is gold; reading the last letter alone is right here and would not be if
+    -- the suffix ever changed, which is why it is asserted.
+    H.check("thousands of gold are still gold",
+            string.find(util.ShortMoneyColored(42000000), GOLD, 1, true) == 1,
+            util.ShortMoneyColored(42000000))
+
+    -- A loss keeps its sign inside the colour.
+    H.check("a negative keeps its sign",
+            string.find(util.ShortMoneyColored(-84), "-", 1, true) ~= nil,
+            util.ShortMoneyColored(-84))
+end
+
+H.check("every colour is closed",
+        string.find(util.ShortMoneyColored(84), "|r", 1, true) ~= nil,
+        "an unclosed escape colours the rest of the line")
+
 os.exit(H.report("util"))

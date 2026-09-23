@@ -268,12 +268,197 @@ function db.SetSetting(key, value)
     db.account.settings[key] = value
 end
 
+-- ---------------------------------------------------------------------------
+-- The posting book: what this character put up, so a sale can say how many
+--
+-- WHY THIS EXISTS. A sale's quantity cannot be read from the mailbox. It is
+-- not in the invoice (GetInboxInvoiceInfo returns a name and prices, no stack
+-- size), not in the subject line, and a sold auction's mail has no attachment
+-- to count -- the buyer got the items. The only place the number ever exists
+-- is the moment we posted it.
+--
+-- PER CHARACTER, because that is who posted and who the mail comes to. The
+-- ledger is account-wide; this is not.
+--
+-- THE MATCH IS BY NAME, NOT BY IDENTITY. There is no auction id on 1.12, so
+-- "which of my three stacks sold" is unanswerable -- and it is also the wrong
+-- question. If every outstanding posting of an item is the same size, that
+-- size is the answer whichever one sold. If they are NOT all the same size,
+-- the honest answer is that we do not know, and db.RecordTxn already treats
+-- absent as unknown rather than as one. Same reasoning as the batch buyout's
+-- fingerprints: identity is unobtainable and a multiset is sufficient.
+-- ---------------------------------------------------------------------------
+
+-- 72h is the longest auction Turtle allows, and mail then sits for up to 30
+-- days. A posting older than the two together cannot still be waiting on a
+-- sale mail, so it is a leak rather than a record.
+db.POSTED_KEEP = 33 * 86400
+-- ...and a cap, because "one per posted stack" is unbounded for a player who
+-- posts all day and never opens their mail.
+db.POSTED_MAX  = 500
+
+function db.Postings()
+    if not db.char then return {} end
+    if not db.char.posted then db.char.posted = {} end
+    return db.char.posted
+end
+
+-- Drop postings too old to be waiting on anything, and trim to the cap.
+-- OLDEST FIRST on the trim: the newest are the ones a sale is most likely to
+-- be about.
+function db.PrunePostings(now)
+    now = now or time()
+    local book = db.Postings()
+    local i = 1
+    while i <= table.getn(book) do
+        local p = book[i]
+        if not p.t or (now - p.t) > db.POSTED_KEEP then
+            table.remove(book, i)
+        else
+            i = i + 1
+        end
+    end
+    while table.getn(book) > db.POSTED_MAX do
+        table.remove(book, 1)
+    end
+end
+
+-- Remember that `qty` of `name` went up for auction.
+function db.RecordPosting(name, itemId, qty, now)
+    if not db.char or not name or name == "" then return false end
+    local n = tonumber(qty)
+    if not n or n < 1 then return false end
+    local book = db.Postings()
+    table.insert(book, { name = name, id = itemId, qty = math.floor(n),
+                         t = now or time() })
+    db.PrunePostings(now)
+    return true
+end
+
+-- How many were in the stack that just sold, or nil when we cannot say.
+--
+-- CONSUMES ONE POSTING on a confident answer and NONE otherwise. Consuming on
+-- an ambiguous match would be picking a stack size at random and then throwing
+-- away the evidence that we had guessed.
+function db.MatchPosting(name, now)
+    if not db.char or not name then return nil end
+    db.PrunePostings(now)
+    local book = db.Postings()
+    local firstAt, qty, mixed = nil, nil, false
+    local i = 1
+    while i <= table.getn(book) do
+        local p = book[i]
+        if p.name == name then
+            if not firstAt then firstAt = i end
+            if qty == nil then qty = p.qty
+            elseif p.qty ~= qty then mixed = true end
+        end
+        i = i + 1
+    end
+    if not firstAt or mixed then return nil end
+    table.remove(book, firstAt)
+    return qty
+end
+
+-- An auction that came BACK unsold is not waiting on a sale mail either, and
+-- leaving it in the book is what turns a book of one stack size into a mixed
+-- one -- which costs the NEXT sale its quantity. Same consume rule: only on an
+-- unambiguous match.
+function db.ExpirePosting(name, now)
+    return db.MatchPosting(name, now)
+end
+
+-- ---------------------------------------------------------------------------
+-- The book, reconciled against what the SERVER says is up
+-- ---------------------------------------------------------------------------
+--
+-- WHY THE BOOK ALONE IS NOT ENOUGH. db.RecordPosting only knows about stacks
+-- it watched go up. A stack posted before this character's book existed, or
+-- from the stock UI, or through any path this addon did not drive, is invisible
+-- to it -- and every one of those sales lands in the ledger with an unknown
+-- quantity, which is exactly how it was reported: "sold a Silverleaf and it
+-- doesn't populate any data". The owner sweep already walks every page of your
+-- own auctions on every AH visit, so the server's own answer to "what is up,
+-- and in what stack sizes" is already in hand. This folds it in.
+--
+-- ADDITIVE, NEVER SUBTRACTIVE, and that is the whole design. A stack that sold
+-- ten minutes ago is already gone from the server's list while its sale mail
+-- sits unread in the mailbox; dropping the book entry the sweep can no longer
+-- see would cost that sale the quantity it was about to claim -- turning a
+-- feature that works into one that breaks whenever you check the AH before the
+-- mailbox. Entries leave the book exactly two ways: consumed by a sale or an
+-- expiry, or dropped by age.
+--
+-- TOPS UP TO A COUNT rather than appending, because this runs on every single
+-- AH visit. Three stacks of five up and three already in the book is nothing to
+-- do; a naive append would make it six, then nine, then a book whose entries
+-- outnumber the auctions they stand for -- and since every one of those is the
+-- same size, MatchPosting would happily keep answering "five" long after the
+-- last one sold.
+
+-- Fold a list of { name = , qty = } into counts[name][qty] = howMany.
+-- Shared by both sides of the reconcile so the two are counted the same way.
+function db.PostingTally(list)
+    local t = {}
+    local i = 1
+    while i <= table.getn(list or {}) do
+        local e = list[i]
+        local n = e and e.name
+        local q = tonumber(e and e.qty)
+        if n and n ~= "" and q and q >= 1 then
+            q = math.floor(q)
+            if not t[n] then t[n] = {} end
+            t[n][q] = (t[n][q] or 0) + 1
+        end
+        i = i + 1
+    end
+    return t
+end
+
+-- `stacks` is one entry per auction currently UP: { name = , id = , qty = }.
+-- Returns how many entries were added, which is 0 on the common visit where
+-- the book already agrees with the server.
+function db.ReconcilePostings(stacks, now)
+    if not db.char then return 0 end
+    now = now or time()
+    local want = db.PostingTally(stacks)
+    local have = db.PostingTally(db.Postings())
+    -- An id per name, so a topped-up entry carries what the sweep knew. The
+    -- name is what a sale mail matches on, so a row the client could not
+    -- identify is still worth recording -- it just records without an id.
+    local ids = {}
+    local i = 1
+    while i <= table.getn(stacks or {}) do
+        local e = stacks[i]
+        if e and e.name and e.id and not ids[e.name] then ids[e.name] = e.id end
+        i = i + 1
+    end
+    local added = 0
+    for name, sizes in pairs(want) do
+        local mine = have[name] or {}
+        for qty, n in pairs(sizes) do
+            local short = n - (mine[qty] or 0)
+            local k = 1
+            while k <= short do
+                if db.RecordPosting(name, ids[name], qty, now) then
+                    added = added + 1
+                end
+                k = k + 1
+            end
+        end
+    end
+    return added
+end
+
 -- Default shape of the per-character DB.
 local function DefaultCharDB()
     return {
         version  = DB_VERSION,
         ui       = {},    -- window position, open tab, column widths, ...
         lastScan = nil,   -- { when = epoch, pages = n, auctions = n }
+        -- What this character has up for auction, so a sale mail can say how
+        -- many were in the stack -- the mailbox cannot. See db.RecordPosting.
+        posted   = {},
     }
 end
 
@@ -984,13 +1169,24 @@ end
 -- ENTRIES WRITTEN BEFORE v1.53.7 HAVE NO `who` AT ALL, and there is no way to
 -- recover it. Every reader has to treat a missing one as unknown rather than
 -- as any particular character; see db.LedgerByChar.
-function db.RecordTxn(kind, item, amount, itemId)
+function db.RecordTxn(kind, item, amount, itemId, qty)
     if not db.account then return end
     if not amount or amount <= 0 then return end
     local led = db.account.ledger
     if not led then led = {}; db.account.ledger = led end
+    -- QUANTITY IS OPTIONAL AND ABSENT MEANS UNKNOWN, NEVER ONE. Every entry
+    -- written before v1.54.6 has none, and so does every sale logged from
+    -- mail -- the 1.12 inbox does not say how many were in the stack. A reader
+    -- that substitutes 1 turns "I do not know" into a number it can average,
+    -- which is the Ledger table's whole failure mode (ROADMAP 3.4). Same rule
+    -- `who` already carries; see db.LedgerByChar.
+    --
+    -- Stored only when it is a sane positive count, so a nil, a zero or a
+    -- string cannot become a divisor later.
+    local n = tonumber(qty)
+    if n and n > 0 then n = math.floor(n) else n = nil end
     table.insert(led, { t = time(), kind = kind, item = item or "?",
-        amount = amount, id = itemId, who = db.CharKey() })
+        amount = amount, id = itemId, qty = n, who = db.CharKey() })
     -- Prune oldest beyond the cap.
     while table.getn(led) > LEDGER_MAX do
         table.remove(led, 1)
@@ -999,6 +1195,20 @@ end
 
 function db.Ledger()
     return (db.account and db.account.ledger) or {}
+end
+
+-- Where ledger READS come from.
+--
+-- db.Ledger is the STORE and stays the write target; this is the seam demo
+-- mode substitutes at. Keeping the two apart is what makes it impossible for
+-- generated trading to reach a player's SavedVariables -- a transaction logged
+-- while the demo is on still lands in the real ledger, and nothing invented
+-- ever leaves this function. Same arrangement db.PurseRows has with
+-- db.DemoRows, and the reason is the same one: a substitute READER cannot
+-- write, and a seeded writer permanently could.
+function db.LedgerSource()
+    if db.demo then return db.DemoLedger() end
+    return db.Ledger()
 end
 
 -- Has this mail-sale dedup key been logged already?
@@ -1204,13 +1414,46 @@ function db.DemoSeed(name)
     return seed
 end
 
+-- The phases a demo purse moves through, and how long one lasts.
+--
+-- REGIMES, NOT NOISE, and that is the whole difference between this chart and
+-- the one it replaced. An independent draw per bucket averages out into a
+-- straight line with fuzz on it; a walk that stays in one regime for twenty
+-- buckets gives the shape a real purse has -- a long climb, a cliff, a
+-- plateau. It is what makes the reference chart worth copying.
+db.DEMO_PHASES = {
+    { drift =  0.020, noise = 0.010 },   -- grow: the ordinary week
+    { drift =  0.070, noise = 0.020 },   -- boom: a good run
+    { drift = -0.090, noise = 0.030 },   -- bust: the cliff
+    { drift =  0.000, noise = 0.008 },   -- flat: the plateau
+}
+db.DEMO_PHASE_MIN  = 8     -- shortest a regime lasts, in buckets
+db.DEMO_PHASE_SPAN = 26    -- ...and how much longer it can run
+-- A purse below this is broke, and earns a wage until it is not.
+db.DEMO_POOR = 40000
+db.DEMO_WAGE = 9000
+-- The one flat cost -- a mount, an epic, a stack of bars.
+db.DEMO_BIG_BUY = 400000
+
 -- One character's gold across `n` buckets.
 --
--- A RANDOM WALK THAT LOOKS LIKE TRADING: a gentle upward drift, noise on every
--- bucket, and an occasional large drop for a purchase. A pure upward line
--- would exercise none of the things worth looking at -- the fill's gradient
--- over a varying height, the axis labels at different magnitudes, the hover
--- readout on a slope.
+-- A RANDOM WALK THAT LOOKS LIKE TRADING: phases of growth, of loss and of
+-- nothing much, with noise inside each and an occasional large purchase. A
+-- pure upward line would exercise none of the things worth looking at -- the
+-- fill's gradient over a varying height, the axis labels at different
+-- magnitudes, the hover readout on a slope.
+--
+-- THE BIG PURCHASE IS A FLAT COST, not a fraction of the purse, and that is
+-- deliberate: a fraction can never take you below zero, so the floor
+-- underneath would be a guard nothing could reach -- worse than no guard at
+-- all. It is the only thing in here that can drive a purse to the floor, which
+-- is what makes `if held < 0` a branch the suite actually exercises.
+--
+-- AND A BROKE PURSE EARNS ITS WAY BACK. Without that, a purse that reaches the
+-- floor stays on it: every phase is multiplicative and a percentage of nothing
+-- is nothing. That is not a hypothetical -- the version before this one spent
+-- five of seven days flat on zero, which is exactly the variety a demo exists
+-- to have.
 --
 -- Never negative: gold held cannot be, and a chart drawn from data its own
 -- reader could not produce is testing the wrong thing.
@@ -1219,30 +1462,35 @@ function db.DemoSeries(from, step, n, who)
     n = n or 0
     local names = db.DEMO_CHARS
     if who then names = { who } end
+    local phases = table.getn(db.DEMO_PHASES)
     local ci = 1
     while ci <= table.getn(names) do
         local seed = db.DemoSeed(names[ci])
         -- A different starting purse per character, so the account total is
         -- not four copies of one line.
         local held = 20000 + math.mod(seed, 900000)
+        local phase, left = 1, 0
         local b = 1
         while b <= n do
             seed = db.DemoNext(seed)
             local r = seed / db.DEMO_MOD
-            if r < 0.02 then
-                -- A BIG FIXED PURCHASE -- a mount, an epic, a stack of bars.
-                -- A flat cost rather than a fraction of the purse, because
-                -- that is what a real one is, and because a fraction can never
-                -- take you below zero: the floor underneath would be a guard
-                -- nothing could reach, which is worse than no guard at all.
-                held = held - 400000
-            elseif r < 0.06 then
-                held = held - held * (0.15 + r * 4)
-            else
-                held = held + held * (r - 0.42) * 0.06
+            if left <= 0 then
+                seed = db.DemoNext(seed)
+                phase = math.mod(seed, phases) + 1
+                left = db.DEMO_PHASE_MIN
+                       + math.mod(math.floor(seed / 97), db.DEMO_PHASE_SPAN)
+                -- A broke purse does not enter a bust. It has nothing left to
+                -- lose and the line would sit on the floor for the length of
+                -- the regime.
+                if held < db.DEMO_POOR then phase = 1 end
             end
-            -- ...and it CAN, which is why this is here.
+            local ph = db.DEMO_PHASES[phase]
+            held = held + held * (ph.drift + (r - 0.5) * ph.noise)
+            if r < 0.01 then held = held - db.DEMO_BIG_BUY end
+            -- ...and it CAN go below zero, which is why this is here.
             if held < 0 then held = 0 end
+            if held < db.DEMO_POOR then held = held + db.DEMO_WAGE end
+            left = left - 1
             out[b] = (out[b] or 0) + math.floor(held)
             b = b + 1
         end
@@ -1456,7 +1704,12 @@ function A.RecordExternalTxn(txn)
         if db.WasSeen(txn.key) then return false, "duplicate" end
         db.MarkSeen(txn.key)
     end
-    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId)
+    -- QUANTITY PASSED THROUGH. A.RecordExternalTxn used to drop every field it
+    -- did not name, and Courier is the thorough mail reader -- so widening the
+    -- ledger without widening this would have left the new field reachable
+    -- only from Aegis's own header-only path, which is the one path that
+    -- cannot see it. Additive, so an older Courier keeps working unchanged.
+    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId, txn.qty)
     return true
 end
 
@@ -1498,7 +1751,7 @@ end
 -- Income / spend / count over transactions at or after `sinceEpoch` (nil = all).
 function db.LedgerTotals(sinceEpoch)
     local income, spend, n = 0, 0, 0
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]
@@ -1521,7 +1774,7 @@ end
 -- this is not attributable" instead of quietly dropping it.
 function db.LedgerByChar(sinceEpoch)
     local seen, names, anon = {}, {}, false
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]
@@ -1539,6 +1792,555 @@ function db.LedgerByChar(sinceEpoch)
     end
     table.sort(names)
     return names, anon
+end
+
+-- ---------------------------------------------------------------------------
+-- The History tab's figures
+-- ---------------------------------------------------------------------------
+
+-- The denominator for a per-day average.
+--
+-- `from` is the window's start (nil for "all time"), `oldest` the earliest
+-- entry that actually exists, `now` the present.
+--
+-- THE SPAN STARTS AT WHICHEVER IS LATER, and that is the whole judgement in
+-- this function. A one-year window over three days of history divided by 365
+-- is not an average, it is a rounding error wearing a label: the other 362
+-- days are not days you earned nothing, they are days the addon was not
+-- installed. And an "all time" window has no start of its own, so the data's
+-- own beginning is the only honest one available.
+--
+-- NEVER ZERO. Everything recorded in the last hour is a span of ONE day, not
+-- of none -- the caller divides by this, and a chart that errors is worse than
+-- one that rounds.
+function db.WindowDays(from, oldest, now)
+    now = now or time()
+    local start = from
+    if not start or (oldest and oldest > start) then start = oldest end
+    if not start or start > now then return 1 end
+    local days = math.floor((now - start) / 86400) + 1
+    if days < 1 then return 1 end
+    return days
+end
+
+-- A per-day average. Separate from the division only because `days` is the
+-- interesting half and deserves to be wrong in one place rather than four.
+function db.PerDay(total, days)
+    if not days or days < 1 then days = 1 end
+    return (total or 0) / days
+end
+
+-- Everything the History tab's figure row and stat blocks need, in ONE pass.
+--
+-- Returns a table:
+--   income, spend, net          copper over the window
+--   saleN, buyN                 how many transactions of each kind
+--   days                        the denominator above
+--   oldest                      epoch of the earliest entry in the window
+--   topSale, topBuy             the biggest SINGLE transaction of each kind,
+--                               as { item, itemId, amount }
+--   topSaleItem, topBuyItem     the item with the biggest SUMMED amount,
+--                               as { item, itemId, total }
+--
+-- TOP SALE AND TOP ITEM ARE DIFFERENT QUESTIONS and the names have to keep
+-- saying so. One is "the best thing that ever happened once"; the other is
+-- "what actually earns here". A single 500g sale of a rare and 400 sales of
+-- Linen Cloth are the same money and only one of them is a business.
+--
+-- ITEMS ARE KEYED BY NAME, NOT BY ID, and that is deliberate. The obvious
+-- choice -- id where there is one, name otherwise -- SPLITS an item whose
+-- history straddles the point where ids started being recorded: the same Linen
+-- Cloth arrives as key 2589 from one entry and as "Linen Cloth" from another,
+-- and its total lands in two buckets, neither of which reaches the top spot.
+-- `item` is set on every entry (db.RecordTxn defaults it to "?"), `id` is not,
+-- so the name is the only key every row can offer. The id is carried alongside
+-- ---------------------------------------------------------------------------
+-- The demo LEDGER
+-- ---------------------------------------------------------------------------
+--
+-- WHY THIS REPLACED A SECOND SET OF FIGURES. The History tab used to invent
+-- its stats directly -- an income, a spend, a top item -- while everything
+-- that reads the LEDGER (the item table, the transaction list, the IN/OUT/NET
+-- row) read the real store, which in demo mode holds nothing. So the Ledger
+-- window, the one screen with the most to show, opened empty, and the figures
+-- above it were answers to a question no visible data had asked.
+--
+-- A generated ledger fixes both at once. Every reader computes from it through
+-- the SAME arithmetic it runs on real data, so the demo exercises the real
+-- paths rather than a parallel set, and every number on screen agrees with
+-- every other one.
+--
+-- REAL ITEMS, CHECKED, NOT REMEMBERED. Names, ids, qualities and stack sizes
+-- come from the CMaNGOS Classic-DB dump of the 1.12.1 `item_template`, not
+-- from memory -- which was wrong about four of them in this very table: Fiery
+-- Core and Lava Core are RARE on this patch, and Sulfuron Ingot and Nexus
+-- Crystal are EPIC. The tooltip these arm is the client's own, so an id that
+-- is not what it claims shows a tooltip for the wrong item, which is exactly
+-- the failure demo mode exists to make visible.
+--
+-- EACH CARRIES ITS QUALITY, and that is not redundancy. ui.CraftQualityOf asks
+-- the CLIENT, and the client only answers for items it has cached -- which for
+-- an item the player has never seen or linked is none of them. So the names
+-- drew in the default colour, which is the honest answer to "I do not know"
+-- and the wrong one for data we made up ourselves and do know.
+--
+-- THE PRICES ARE OURS. No server dump can state what an auction house charges,
+-- so the unit prices are invented -- plausible, in copper, and the only part
+-- of this table that is not a checked fact.
+--
+-- WHAT THE SHAPE IS FOR. It is one trader's six months, and it is arranged so
+-- every path through the renderers has something to draw:
+--
+--   * All four quality tiers, so the colouring is visible without hovering.
+--   * TOP SALE and TOP ITEM are different items -- one Sulfuron Hammer is the
+--     biggest thing that ever happened, Black Dragonscale Boots is what
+--     actually earns. db.LedgerStats has always drawn that distinction and
+--     nothing ever demonstrated it.
+--   * Items traded BOTH ways (an average profit), SOLD only and BOUGHT only
+--     (an em dash where there is no other side).
+--   * Sales with no quantity, for the reason real ones have none. See below.
+db.DEMO_LEDGER_ITEMS = {
+    { item = "Sulfuron Hammer", itemId = 17193, quality = 4, qty = 1,
+      buy = nil, buys = 0, sell = 11000000, sales = 1 },
+    { item = "Black Dragonscale Boots", itemId = 16984, quality = 4, qty = 1,
+      buy = nil, buys = 0, sell = 4200000, sales = 6 },
+    { item = "Sulfuron Ingot", itemId = 17203, quality = 4, qty = 1,
+      buy = 900000, buys = 3, sell = nil, sales = 0 },
+    { item = "Nexus Crystal", itemId = 20725, quality = 4, qty = 1,
+      buy = 240000, buys = 5, sell = 310000, sales = 5 },
+    { item = "Arcanite Reaper", itemId = 12784, quality = 3, qty = 1,
+      buy = 2600000, buys = 9, sell = 3300000, sales = 4 },
+    { item = "Dal\'Rend\'s Sacred Charge", itemId = 12940, quality = 3, qty = 1,
+      buy = 2900000, buys = 2, sell = 3400000, sales = 1 },
+    { item = "Fiery Core", itemId = 17010, quality = 3, qty = 2,
+      buy = 210000, buys = 6, sell = 268000, sales = 6 },
+    { item = "Lava Core", itemId = 17011, quality = 3, qty = 2,
+      buy = 195000, buys = 6, sell = 245000, sales = 6 },
+    { item = "Large Brilliant Shard", itemId = 14344, quality = 3, qty = 3,
+      buy = 78000, buys = 8, sell = 99000, sales = 8 },
+    { item = "Arcanite Bar", itemId = 12360, quality = 2, qty = 5,
+      buy = 98000, buys = 10, sell = 126000, sales = 10 },
+    { item = "Arcane Crystal", itemId = 12363, quality = 2, qty = 2,
+      buy = 145000, buys = 7, sell = 181000, sales = 7 },
+    { item = "Blood of the Mountain", itemId = 11382, quality = 2, qty = 2,
+      buy = 160000, buys = 5, sell = 205000, sales = 5 },
+    { item = "Essence of Fire", itemId = 7078, quality = 2, qty = 5,
+      buy = 31000, buys = 8, sell = 39500, sales = 8 },
+    { item = "Greater Eternal Essence", itemId = 16203, quality = 2, qty = 5,
+      buy = 22000, buys = 9, sell = 29000, sales = 9 },
+    { item = "Dark Iron Bar", itemId = 11371, quality = 1, qty = 10,
+      buy = 14500, buys = 9, sell = 19000, sales = 9 },
+    { item = "Thorium Bar", itemId = 12359, quality = 1, qty = 20,
+      buy = 5200, buys = 12, sell = 7100, sales = 12 },
+    { item = "Black Dragonscale", itemId = 15416, quality = 1, qty = 4,
+      buy = 42000, buys = 7, sell = 56000, sales = 7 },
+    { item = "Enchanted Leather", itemId = 12810, quality = 1, qty = 5,
+      buy = 28000, buys = 6, sell = 36000, sales = 6 },
+    { item = "Illusion Dust", itemId = 16204, quality = 1, qty = 10,
+      buy = 9500, buys = 10, sell = 13000, sales = 10 },
+    { item = "Dense Grinding Stone", itemId = 12644, quality = 1, qty = 5,
+      buy = 12000, buys = 5, sell = 16500, sales = 5 },
+    { item = "Rune Thread", itemId = 14341, quality = 1, qty = 5,
+      buy = 4800, buys = 4, sell = nil, sales = 0 },
+    { item = "Runecloth", itemId = 14047, quality = 1, qty = 20,
+      buy = 1900, buys = 14, sell = 2650, sales = 14 },
+    { item = "Mageweave Cloth", itemId = 4338, quality = 1, qty = 20,
+      buy = 1400, buys = 10, sell = 1950, sales = 10 },
+    { item = "Silk Cloth", itemId = 4306, quality = 1, qty = 20,
+      buy = 900, buys = 9, sell = 1320, sales = 9 },
+    { item = "Linen Cloth", itemId = 2589, quality = 1, qty = 20,
+      buy = 180, buys = 8, sell = 310, sales = 8 },
+    { item = "Rugged Leather", itemId = 8170, quality = 1, qty = 20,
+      buy = 2100, buys = 9, sell = 2900, sales = 9 },
+    { item = "Thick Leather", itemId = 4304, quality = 1, qty = 20,
+      buy = 1250, buys = 7, sell = 1750, sales = 7 },
+    { item = "Dreamfoil", itemId = 13463, quality = 1, qty = 20,
+      buy = 2400, buys = 11, sell = 3350, sales = 11 },
+    { item = "Mountain Silversage", itemId = 13465, quality = 1, qty = 20,
+      buy = 2600, buys = 9, sell = 3600, sales = 9 },
+    { item = "Golden Sansam", itemId = 13464, quality = 1, qty = 20,
+      buy = 2200, buys = 8, sell = 3100, sales = 8 },
+    { item = "Peacebloom", itemId = 2447, quality = 1, qty = 20,
+      buy = 110, buys = 6, sell = 190, sales = 6 },
+    { item = "Silverleaf", itemId = 765, quality = 1, qty = 20,
+      buy = 120, buys = 6, sell = 205, sales = 6 },
+    { item = "Earthroot", itemId = 2449, quality = 1, qty = 20,
+      buy = 140, buys = 5, sell = 240, sales = 5 },
+    { item = "Briarthorn", itemId = 2450, quality = 1, qty = 20,
+      buy = 260, buys = 5, sell = 410, sales = 5 },
+}
+
+-- How far back the demo trades. Matches db.OldestMoney's demo answer, so the
+-- chart and the ledger cover the same ground.
+db.DEMO_LEDGER_DAYS = 180
+
+-- How far back a SALE still knows its quantity. The posting book that answers
+-- "how many were in that stack" only exists from v1.54.7, so older sales have
+-- no count and never will -- db.RecordTxn treats absent as unknown and
+-- ui.CountText renders it as "?". That is a real, permanent property of
+-- anyone's history and the demo shows it rather than pretending otherwise.
+--
+-- WHERE THE LINE SITS IS A PRESENTATION CHOICE, not a claim about any real
+-- install: it puts roughly a quarter of the demo's sales on the unknown side.
+-- Enough that the "?" is plainly there to be seen and asked about, few enough
+-- that the column still reads as a column of counts rather than as a table
+-- that failed to load.
+db.DEMO_QTY_KNOWN_DAYS = 90
+
+-- ...and one recent sale in this many still cannot say, because this character
+-- had several stacks of that item up at different sizes. See db.MatchPosting:
+-- there is no auction id on 1.12 to ask which one sold.
+db.DEMO_QTY_MIXED = 9
+
+-- The quality of a demo item, by id, or nil for anything else.
+--
+-- Consulted by db.LedgerStats and db.LedgerItems so the rows they hand the
+-- renderers carry a colour the client cannot supply.
+function db.DemoQuality(itemId)
+    -- GATED ON DEMO MODE, and that is not belt-and-braces. Twenty-one of the
+    -- pool's items are ordinary trade goods a real player really trades, so
+    -- an ungated lookup would state a quality for a REAL Linen Cloth row and
+    -- override the client -- which is the one source that is actually
+    -- authoritative. A suite caught exactly that.
+    if not db.demo then return nil end
+    if not itemId then return nil end
+    local pool = db.DEMO_LEDGER_ITEMS
+    local i = 1
+    while i <= table.getn(pool) do
+        if pool[i].itemId == itemId then return pool[i].quality end
+        i = i + 1
+    end
+    return nil
+end
+
+-- Build the demo's ledger: one array of transactions in exactly the shape
+-- db.RecordTxn writes, so every reader is none the wiser.
+--
+-- DETERMINISTIC. The same call always produces the same ledger -- a table
+-- whose figures changed between two repaints of the same window could not be
+-- read, and a seed taken from the clock looks perfectly stable to anything
+-- that checks twice in a row.
+function db.BuildDemoLedger(now)
+    now = now or time()
+    local rows = {}
+    local seed = db.DemoSeed("ledger")
+    local span  = db.DEMO_LEDGER_DAYS * 86400
+    local known = db.DEMO_QTY_KNOWN_DAYS * 86400
+    local chars = db.DEMO_CHARS
+    local nChars = table.getn(chars)
+    local pool = db.DEMO_LEDGER_ITEMS
+    local p = 1
+    while p <= table.getn(pool) do
+        local it = pool[p]
+        local k = 1
+        while k <= 2 do
+            local kind, unit, count
+            if k == 1 then kind, unit, count = "buy", it.buy, it.buys
+            else            kind, unit, count = "sale", it.sell, it.sales end
+            local j = 1
+            while unit and unit > 0 and j <= (count or 0) do
+                seed = db.DemoNext(seed)
+                -- WEIGHTED TOWARD THE PRESENT (r squared). Six months of
+                -- trading spread evenly leaves the Day and Week periods --
+                -- the two a player actually checks -- with nothing in them.
+                local r = seed / db.DEMO_MOD
+                local age = math.floor(span * r * r)
+                seed = db.DemoNext(seed)
+                local qty = it.qty or 1
+                if qty > 1 then
+                    qty = qty + math.mod(math.floor(seed / 131), qty)
+                end
+                -- Plus or minus 15%, so a column of identical figures does
+                -- not read as a table that failed to load.
+                local amount =
+                    math.floor(unit * qty * (0.85 + (seed / db.DEMO_MOD) * 0.30))
+                if amount < 1 then amount = 1 end
+                seed = db.DemoNext(seed)
+                local who = chars[math.mod(math.floor(seed / 17), nChars) + 1]
+                local q = qty
+                if kind == "sale" then
+                    -- A BUY HAS ALWAYS KNOWN ITS COUNT; a sale has to learn it
+                    -- from the posting book. See db.DEMO_QTY_KNOWN_DAYS.
+                    if age > known then
+                        q = nil
+                    elseif math.mod(math.floor(seed / 7), db.DEMO_QTY_MIXED) == 0
+                    then
+                        q = nil
+                    end
+                end
+                table.insert(rows, { t = now - age, kind = kind,
+                                     item = it.item, amount = amount,
+                                     id = it.itemId, qty = q, who = who })
+                j = j + 1
+            end
+            k = k + 1
+        end
+        p = p + 1
+    end
+    -- CHRONOLOGICAL, because that is the order a real ledger is appended in
+    -- and the transaction list's default sort reverses it. The tiebreaks are
+    -- not decoration: `pairs` is unordered and table.sort is not stable, so
+    -- two entries sharing a second would otherwise swap between repaints.
+    table.sort(rows, function(a, b)
+        if a.t ~= b.t then return a.t < b.t end
+        if a.item ~= b.item then return a.item < b.item end
+        if a.kind ~= b.kind then return a.kind < b.kind end
+        return a.amount < b.amount
+    end)
+    return rows
+end
+
+-- The built ledger, once per session.
+--
+-- CACHED because it is read several times per repaint -- the blocks, the
+-- strip, the item table and the transaction list all walk it -- and rebuilding
+-- five hundred rows behind every period button is work nobody asked for.
+-- Cleared when demo mode is toggled, so a second /aex demo re-anchors it to
+-- the current time rather than leaving a history that ends hours ago.
+db.demoLedger = nil
+
+function db.DemoLedger()
+    if not db.demoLedger then db.demoLedger = db.BuildDemoLedger() end
+    return db.demoLedger
+end
+
+-- for quality colouring, where a missing one costs nothing.
+function db.LedgerStats(sinceEpoch, now)
+    now = now or time()
+    local st = {
+        income = 0, spend = 0, net = 0,
+        saleN = 0, buyN = 0,
+        oldest = nil, days = 1,
+    }
+    local saleBy, buyBy = {}, {}
+
+    local led = db.LedgerSource()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        local t = e.t
+        if not sinceEpoch or (t and t >= sinceEpoch) then
+            local amount = e.amount or 0
+            if amount > 0 then
+                if t and (not st.oldest or t < st.oldest) then st.oldest = t end
+                local key = e.item or "?"
+                local bucket, top, topName
+                if e.kind == "sale" then
+                    st.income = st.income + amount
+                    st.saleN  = st.saleN + 1
+                    bucket = saleBy
+                    if not st.topSale or amount > st.topSale.amount then
+                        st.topSale = { item = e.item, itemId = e.id,
+                                       amount = amount }
+                    end
+                elseif e.kind == "buy" then
+                    st.spend = st.spend + amount
+                    st.buyN  = st.buyN + 1
+                    bucket = buyBy
+                    if not st.topBuy or amount > st.topBuy.amount then
+                        st.topBuy = { item = e.item, itemId = e.id,
+                                      amount = amount }
+                    end
+                end
+                if bucket then
+                    local rec = bucket[key]
+                    if not rec then
+                        rec = { item = e.item, itemId = e.id, total = 0 }
+                        bucket[key] = rec
+                    end
+                    -- An id learned on a LATER entry backfills the record, so
+                    -- an item whose early history predates id recording still
+                    -- gets its colour from whichever entry carried one.
+                    if not rec.itemId and e.id then rec.itemId = e.id end
+                    -- ...and failing that, the name->id map, which every scan,
+                    -- search and browse feeds. EVERY mail-logged sale before
+                    -- v1.54.3 stored a name and no id, so without this the
+                    -- Sales and Profit blocks could never colour or hover
+                    -- their Top item while the Expenses block -- fed by the
+                    -- Buy tab, which knows the id -- always could.
+                    if not rec.itemId then
+                        rec.itemId = db.IdFromName(rec.item)
+                    end
+                    rec.total = rec.total + amount
+                end
+            end
+        end
+        i = i + 1
+    end
+
+    -- The biggest SINGLE transaction of each kind gets the same backfill, for
+    -- the same reason: it is displayed by name and hovered by id.
+    if st.topSale and not st.topSale.itemId then
+        st.topSale.itemId = db.IdFromName(st.topSale.item)
+    end
+    if st.topBuy and not st.topBuy.itemId then
+        st.topBuy.itemId = db.IdFromName(st.topBuy.item)
+    end
+    st.net  = st.income - st.spend
+    st.days = db.WindowDays(sinceEpoch, st.oldest, now)
+    st.topSaleItem = db.TopOf(saleBy)
+    st.topBuyItem  = db.TopOf(buyBy)
+    -- A QUALITY THE CLIENT CANNOT ANSWER FOR. A real ledger row records none
+    -- and does not need to: ui.CraftQualityOf asks the client, which has the
+    -- item cached because the player traded it. A DEMO item the player has
+    -- never seen or linked is not cached, so without this the invented epics
+    -- drew in the ordinary text colour. Nil outside demo mode, which leaves
+    -- the renderers on their usual path.
+    local q = 1
+    local tops = { st.topSale, st.topBuy, st.topSaleItem, st.topBuyItem }
+    while q <= 4 do
+        local rec = tops[q]
+        if rec and not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end
+        q = q + 1
+    end
+    return st
+end
+
+-- The highest-`total` record in a keyed table, or nil when it is empty.
+--
+-- TIES GO TO THE LOWER KEY, sorted as a string, so the answer does not change
+-- between two repaints of the same data. `pairs` has no order, and a figure
+-- that flickers between two items on a timer is a bug somebody will chase for
+-- ---------------------------------------------------------------------------
+-- The ledger, per ITEM rather than per transaction
+-- ---------------------------------------------------------------------------
+
+-- An average unit price, or nil when there is nothing to divide by.
+function db.AvgUnit(money, units)
+    if not units or units <= 0 then return nil end
+    return math.floor((money or 0) / units)
+end
+
+-- Roll the ledger up by item: what you sold, what you paid, and what the
+-- difference was per unit.
+--
+-- MONEY AND UNITS ARE SUMMED OVER THE SAME TRANSACTIONS, and that is the whole
+-- care in this function. A sale logged before v1.54.7 has no quantity, and so
+-- does one this character could not match to a posting -- so summing ALL the
+-- money over only the countable units would divide a bigger number by a
+-- smaller one and report an average that is simply too high. Every unknown
+-- transaction is excluded from BOTH sums and counted separately, so the
+-- average is right for the subset it covers and the caller can say how much it
+-- does not cover.
+--
+-- Returns an array of:
+--   item, itemId
+--   sold,   soldMoney,   soldTxns,   soldUnknown
+--   bought, boughtMoney, boughtTxns, boughtUnknown
+--
+-- KEYED BY NAME, for the reason db.LedgerStats is: keying by id-or-name splits
+-- an item whose history straddles the release where ids started being
+-- recorded, and neither half is then the whole item.
+function db.LedgerItems(sinceEpoch, now)
+    local byName, order = {}, {}
+    local led = db.LedgerSource()
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        local t = e.t
+        if not sinceEpoch or (t and t >= sinceEpoch) then
+            local amount = e.amount or 0
+            if amount > 0 and (e.kind == "sale" or e.kind == "buy") then
+                local key = e.item or "?"
+                local rec = byName[key]
+                if not rec then
+                    rec = { item = e.item or "?", itemId = e.id,
+                            sold = 0, soldMoney = 0, soldTxns = 0,
+                            soldUnknown = 0,
+                            bought = 0, boughtMoney = 0, boughtTxns = 0,
+                            boughtUnknown = 0 }
+                    byName[key] = rec
+                    table.insert(order, rec)
+                end
+                if not rec.itemId and e.id then rec.itemId = e.id end
+                local qty = e.qty
+                if e.kind == "sale" then
+                    rec.soldTxns = rec.soldTxns + 1
+                    if qty and qty > 0 then
+                        rec.sold = rec.sold + qty
+                        rec.soldMoney = rec.soldMoney + amount
+                    else
+                        rec.soldUnknown = rec.soldUnknown + 1
+                    end
+                else
+                    rec.boughtTxns = rec.boughtTxns + 1
+                    if qty and qty > 0 then
+                        rec.bought = rec.bought + qty
+                        rec.boughtMoney = rec.boughtMoney + amount
+                    else
+                        rec.boughtUnknown = rec.boughtUnknown + 1
+                    end
+                end
+            end
+        end
+        i = i + 1
+    end
+
+    -- Failing an id off the transactions, the name map -- every scan, search
+    -- and browse feeds it, and it is what lets a row be quality-coloured and
+    -- hovered. Same lookup of last resort db.LedgerStats makes.
+    local r = 1
+    while r <= table.getn(order) do
+        local rec = order[r]
+        if not rec.itemId then rec.itemId = db.IdFromName(rec.item) end
+        -- Same reason db.LedgerStats states one: the client has never seen a
+        -- demo item, so it cannot colour the name. Nil on real data.
+        if not rec.quality then rec.quality = db.DemoQuality(rec.itemId) end
+        rec.avgSell   = db.AvgUnit(rec.soldMoney, rec.sold)
+        rec.avgBuy    = db.AvgUnit(rec.boughtMoney, rec.bought)
+        -- PER UNIT, and only when BOTH sides are known. An item you have only
+        -- sold has no purchase price to subtract, and an item whose sales all
+        -- predate quantities has no per-unit sale price at all.
+        if rec.avgSell and rec.avgBuy then
+            rec.avgProfit = rec.avgSell - rec.avgBuy
+        end
+        -- HOW MANY YOU ACTUALLY TURNED OVER: you cannot resell more than you
+        -- bought, nor more than you sold.
+        if rec.sold > 0 and rec.bought > 0 then
+            rec.resold = rec.sold
+            if rec.bought < rec.resold then rec.resold = rec.bought end
+        end
+        r = r + 1
+    end
+    return order
+end
+
+-- The footer: how many units were turned over, what that made, and how many
+-- rows could not be counted.
+--
+-- THE SKIPPED COUNT IS RETURNED, NOT SWALLOWED. A total summed over the rows
+-- it could do and silent about the rest is a number nobody can reconcile
+-- against their own history -- which is the whole failure this table's
+-- quantity work exists to avoid.
+function db.LedgerItemTotals(rows)
+    local resold, profit, skipped = 0, 0, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local rec = rows[i]
+        if rec.resold and rec.avgProfit then
+            resold = resold + rec.resold
+            profit = profit + rec.avgProfit * rec.resold
+        elseif (rec.soldTxns or 0) > 0 and (rec.boughtTxns or 0) > 0 then
+            -- Traded both ways but not countable: exactly the row a total
+            -- would otherwise drop without saying.
+            skipped = skipped + 1
+        end
+        i = i + 1
+    end
+    return resold, math.floor(profit), skipped
+end
+
+-- an hour before realising it is the iteration.
+function db.TopOf(bucket)
+    local best, bestKey = nil, nil
+    for key, rec in pairs(bucket or {}) do
+        local k = tostring(key)
+        if not best or rec.total > best.total
+            or (rec.total == best.total and k < bestKey) then
+            best, bestKey = rec, k
+        end
+    end
+    return best
 end
 
 function db.ClearLedger()
@@ -1578,7 +2380,7 @@ end
 function db.SaleHistory(itemName)
     if not itemName then return nil, 0 end
     local amounts, last = {}, nil
-    local led = db.Ledger()
+    local led = db.LedgerSource()
     local i = 1
     while i <= table.getn(led) do
         local e = led[i]

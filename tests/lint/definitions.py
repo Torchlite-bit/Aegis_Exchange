@@ -43,6 +43,41 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.54.11. Demo mode used to invent the History tab's FIGURES directly
+    # while everything that reads the LEDGER read the real store, which in
+    # demo mode is empty -- so the Ledger window opened blank and the numbers
+    # above it answered a question no visible data had asked. A generated
+    # LEDGER replaced both: db.LedgerSource substitutes it and every reader
+    # computes through the same arithmetic it runs on real data, so there is
+    # no parallel statistics function left to keep in step. db.DemoPick chose
+    # between the two-item epic and rare pools that went with it; the pool it
+    # picked from is now db.DEMO_LEDGER_ITEMS, and which item tops a column is
+    # decided by what was traded rather than by a seed.
+    "db.DemoStats": "v1.54.11 -- db.LedgerStats computes the demo's figures "
+                    "from db.DemoLedger through the real path",
+    "db.DemoPick":  "v1.54.11 -- with no epic/rare pools to choose between, "
+                    "nothing picks; db.DEMO_LEDGER_ITEMS states every item",
+    # v1.54.0. The History tab was split -- a table on the left, a chart on
+    # the right -- and this divided the panel between them. Neither half had
+    # room, so they became two screens: the tab is the dashboard and the chart
+    # has the whole panel, and the table lives in ui.BuildLedgerWindow. With
+    # nothing to divide, there is nothing for this to compute.
+    # v1.54.0. Its two callers were the History tab's stat rows, which are a
+    # six-cell strip and three blocks now -- every figure its own FontString in
+    # its own column, so there is no run-together line to build.
+    # v1.54.1. The ledger became an overlay over the window's content, the way
+    # the category picker is, so there is no floating frame to drag, no point
+    # to remember, and no height to compute -- it is anchored by two corners.
+    "ui.SaveLedgerPoint":    "v1.54.1 -- the ledger is an in-window overlay; "
+                             "nothing to drag, so nothing to save",
+    "ui.RestoreLedgerPoint": "v1.54.1 -- ditto; it is anchored to ui.content",
+    "ui.LedgerWindowHeight": "v1.54.1 -- two-corner anchored, so its height is "
+                             "the content area's and not a sum of rows",
+    "ui.StatLine": "v1.54.0 -- the figure rows became ui.PaintHistFigures' "
+                   "strip and blocks; nothing formats a line of pairs any more",
+    "ui.HistWidthsAt": "v1.54.0 -- the History tab is no longer split; the "
+                       "chart takes the whole panel and ui.HistPlotSizeAt "
+                       "measures it directly",
     # v1.53.7. The chart gained views whose series can go NEGATIVE -- a
     # cumulative balance below zero, a character down on the week -- so an
     # axis described by its maximum alone stopped being enough. ui.SeriesRange

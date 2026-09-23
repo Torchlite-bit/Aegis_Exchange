@@ -2166,10 +2166,59 @@ end
 -- cleared on the way out would clear in the middle of the thing it counts --
 -- the same reasoning that made the crafting tally manual-only.
 --
--- COUNTS UNITS, NOT AUCTIONS. Buying a stack of twenty Fine Thread is twenty
--- thread. "How many have I bought" is a question about items, and answering it
--- with a number of auctions is the kind of wrong that looks right.
-buy.session = {}   -- itemId -> { n = units, spent = copper, name = "..." }
+-- COUNTS UNITS, NOT AUCTIONS, and now counts both. "How many have I bought" is
+-- a question about items, so `n` is units and answering it with a number of
+-- auctions is the kind of wrong that looks right. But "how many auctions did
+-- that take" is a real second question -- twenty thread out of one stack and
+-- twenty out of twenty singles are different afternoons -- and the receipt
+-- window has a column for it. `buys` is that count; nothing that reads `n` is
+-- affected.
+buy.session = {}   -- itemId -> { n = units, buys = auctions, spent, name }
+
+-- How long the demo pretends this session has lasted: one day, so that the
+-- demo receipt and the demo Ledger's Day view describe the same purchases.
+buy.DEMO_SESSION_SECS = 86400
+
+-- The session, for demo mode: the demo LEDGER's purchases over the last day,
+-- folded into the same { itemId -> { n, buys, spent, name } } shape.
+--
+-- DERIVED, NOT INVENTED A SECOND TIME. The demo already has one trader's six
+-- months of buying and selling (db.DemoLedger); a receipt made up separately
+-- would disagree with the Ledger window one tab away, which is exactly what
+-- the demo ledger was built to stop happening. Taken from the same rows, the
+-- receipt's total IS the Ledger's Day-period spend, to the copper.
+function buy.DemoSession(now)
+    now = now or time()
+    local out = {}
+    local led = A.db and A.db.DemoLedger and A.db.DemoLedger() or {}
+    local since = now - buy.DEMO_SESSION_SECS
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if e.kind == "buy" and e.id and e.t and e.t >= since
+           and (e.amount or 0) > 0 then
+            local rec = out[e.id]
+            if not rec then
+                rec = { n = 0, buys = 0, spent = 0, name = e.item }
+                out[e.id] = rec
+            end
+            rec.n     = rec.n + (e.qty or 1)
+            rec.buys  = rec.buys + 1
+            rec.spent = rec.spent + e.amount
+        end
+        i = i + 1
+    end
+    return out
+end
+
+-- Where session READS come from. buy.session stays the store and the write
+-- target, so a purchase made while the demo is on is still booked for real --
+-- the same seam db.LedgerSource is, for the same reason: a substitute reader
+-- cannot write, and nothing invented can reach the real tally.
+function buy.SessionSource()
+    if A.db and A.db.demo then return buy.DemoSession() end
+    return buy.session
+end
 
 -- Book one purchase.
 --
@@ -2184,10 +2233,13 @@ function buy.RecordPurchase(itemId, name, stack, copper)
     if stack < 1 then stack = 1 end
     local rec = buy.session[itemId]
     if not rec then
-        rec = { n = 0, spent = 0, name = name }
+        rec = { n = 0, buys = 0, spent = 0, name = name }
         buy.session[itemId] = rec
     end
     rec.n     = rec.n + stack
+    -- ONE PER CALL, because this is called once per auction bought. Adding
+    -- `stack` here would make it a second copy of `n`.
+    rec.buys  = (rec.buys or 0) + 1
     rec.spent = rec.spent + (copper or 0)
     if name then rec.name = name end
     return rec.n, rec.spent
@@ -2196,13 +2248,52 @@ end
 -- Units and copper bought this session for one item. ALWAYS two numbers, so no
 -- caller has to branch on nil to render a zero.
 function buy.SessionBought(itemId)
-    local rec = itemId and buy.session[itemId]
+    local rec = itemId and buy.SessionSource()[itemId]
     if not rec then return 0, 0 end
     return rec.n, rec.spent
 end
 
 function buy.ClearSession()
     buy.session = {}
+end
+
+-- Everything bought this session, as rows the receipt can draw.
+--
+-- WHY IT IS BUILT HERE rather than in the window. `buy.session` is keyed by
+-- item id, so `pairs` gives it back in no order at all -- and a list whose rows
+-- swap places between two repaints of the same data cannot be read. The order
+-- is therefore decided once, here, where a suite can check it.
+--
+-- BIGGEST SPEND FIRST, because that is what the window is for: a receipt is
+-- read to find out where the gold went. Ties break on the item NAME so the
+-- order is total rather than merely mostly-decided -- two items bought for the
+-- same amount would otherwise still swap.
+--
+-- Returns rows, totalSpent, totalUnits, totalBuys.
+function buy.SessionRows()
+    local rows, spent, units, buys = {}, 0, 0, 0
+    for itemId, rec in pairs(buy.SessionSource()) do
+        table.insert(rows, {
+            itemId = itemId,
+            name   = rec.name or "?",
+            n      = rec.n or 0,
+            buys   = rec.buys or 0,
+            spent  = rec.spent or 0,
+            -- PER UNIT, and nil rather than zero when there are no units to
+            -- divide by: a receipt row that says an item cost 0 each is
+            -- claiming something it does not know.
+            unit   = (rec.n and rec.n > 0)
+                     and math.floor((rec.spent or 0) / rec.n) or nil,
+        })
+        spent = spent + (rec.spent or 0)
+        units = units + (rec.n or 0)
+        buys  = buys + (rec.buys or 0)
+    end
+    table.sort(rows, function(a, b)
+        if a.spent ~= b.spent then return a.spent > b.spent end
+        return a.name < b.name
+    end)
+    return rows, spent, units, buys
 end
 
 -- The one item a result set is about, or nil when it is about several.
@@ -2320,7 +2411,10 @@ function buy.BatchStep()
     -- one as it happens. Booking the whole batch at the end would lose
     -- everything bought before an abort -- and an abort is the case where an
     -- accurate ledger matters most.
-    if b.onStep then b.onStep(b.bought, b.want, info.name, info.price) end
+    if b.onStep then
+        b.onStep(b.bought, b.want, info.name, info.price, info.stack,
+                 info.itemId)
+    end
     return true
 end
 
@@ -2348,7 +2442,10 @@ function buy.Buyout(row)
     -- with; the batch path books its own per purchase and never comes
     -- through here.
     if A.db and A.db.RecordTxn then
-        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId)
+        -- WITH THE STACK COUNT. row.count is the number of items in the
+        -- auction, and buy.RecordPurchase on the line above has always taken
+        -- it -- the ledger simply threw it away. See db.RecordTxn.
+        A.db.RecordTxn("buy", row.name, row.buyout, row.itemId, row.count)
     end
     return true
 end

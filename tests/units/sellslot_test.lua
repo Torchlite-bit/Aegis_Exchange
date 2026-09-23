@@ -23,6 +23,7 @@ W.Reset()
 local A = W.LoadCore()
 W.FireAddonLoaded(A)
 local sell = A.sell
+local db = A.db
 
 -- The two post-completion decisions live in ui/frame.lua, which no suite
 -- loads -- it wants a real client to mean anything. Extracted at run time
@@ -641,6 +642,254 @@ do
     end
     H.eq("the stack is worked down to nothing", left, 0)
     H.eq("...and the walk moved on exactly once, at the end", moved, 1)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("what a sale actually nets")
+-- ---------------------------------------------------------------------------
+
+-- THE CUT COMES OFF, and that is the whole of it. The below-vendor warning
+-- compared the GROSS buyout to the vendor price, so an item listed at exactly
+-- vendor reported "at vendor" while netting 95% of it -- and everything inside
+-- that 5% band lost money without a word.
+H.eq("a sale nets the price less the cut", sell.NetUnit(10000, 0.05), 9500)
+H.eq("...at the addon's own rate", sell.NetUnit(10000), 9500)
+H.eq("a zero cut nets the lot", sell.NetUnit(10000, 0), 10000)
+
+-- THE DEPOSIT IS NOT IN HERE, and that is a fact about the game: a deposit is
+-- refunded in full when the auction SELLS, and forfeited only when it expires
+-- or is cancelled. It is a risk carried while the auction is up, not a cost of
+-- selling, and subtracting it would understate every price on the tab.
+--
+-- ROADMAP 5.3 asked for `price * 0.95 - deposit` and was wrong; the entry is
+-- corrected. This check is here so the wrong formula cannot come back.
+H.eq("the deposit does not come off a sale", sell.NetUnit(10000, 0.05), 9500)
+
+H.isNil("no price is no net", sell.NetUnit(nil))
+H.isNil("a zero price is no net", sell.NetUnit(0))
+
+-- ---------------------------------------------------------------------------
+H.section("comparing against the vendor")
+-- ---------------------------------------------------------------------------
+
+do
+    A.db.SetVendor(1234, 1000)
+
+    -- Gross ABOVE vendor but net BELOW it: the exact band the warning missed.
+    local gross = 1020
+    local net = sell.NetUnit(gross, 0.05)       -- 969
+    H.check("the gross reads as above vendor",
+            sell.VendorCompare(1234, gross).above)
+    H.check("...while the net is below it",
+            not sell.VendorCompare(1234, net).above,
+            net .. " vs 1000")
+
+    -- ...and the percentage is the net one, so the figure in the warning
+    -- matches the claim the warning makes.
+    H.eq("the percentage is of the net", sell.VendorCompare(1234, net).pct, 96)
+
+    -- Comfortably above stays above.
+    H.check("a real profit still reads as above",
+            sell.VendorCompare(1234, sell.NetUnit(2000, 0.05)).above)
+end
+
+-- THE CALL SITE HAS TO HAND IT THE NET. Everything above is about a function
+-- that will happily compare whichever number it is given, so the arithmetic
+-- can be perfect while the tab still shows the old warning. Read out of the
+-- source, because the Sell tab's repaint wants a real client to mean anything.
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    local src = f:read("*a")
+    f:close()
+    H.check("the Sell tab compares the net, not the buyout",
+            string.find(src, "A.sell.VendorCompare(it.itemId, netPerItem)",
+                        1, true) ~= nil,
+            "handing it unitBuy is the bug this release fixes")
+    H.check("...and says so",
+            string.find(src, "Nets below vendor price", 1, true) ~= nil,
+            "the old wording claimed something the figure no longer means")
+end
+
+-- An item no merchant has been seen to buy has no comparison to make, and a
+-- warning invented from nothing is worse than none.
+H.isNil("an unknown item compares to nothing", sell.VendorCompare(999999, 500))
+H.isNil("...and so does a missing price", sell.VendorCompare(1234, nil))
+
+-- ---------------------------------------------------------------------------
+H.section("is this row the item we asked for?")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG. sell.ScanItem used to keep a row only when `id == itemId`, and the
+-- id comes from GetAuctionItemLink -- which on 1.12 returns NIL for an item
+-- the client has not cached. A player who has never looted or linked
+-- Truesilver Bar gets nil for all 50 rows, every row is discarded, and the
+-- scan reports success with nothing in it: "0 price(s), scanned just now"
+-- over an auction house holding 158 of them.
+--
+-- It was reported with the detail that gives the game away -- searching the
+-- item on the Buy tab FIRST makes the Sell tab work, because the search is
+-- what caches the links.
+
+-- The id is authoritative wherever the client can supply one.
+H.check("the same id matches", sell.SameItem(2589, "Linen Cloth", 2589, "Linen Cloth"))
+H.check("a different id does not",
+        not sell.SameItem(4306, "Silk Cloth", 2589, "Linen Cloth"))
+
+-- A DIFFERENT ID IS NEVER OVERRULED BY A MATCHING NAME. Two items can share a
+-- name across a rename or a server's custom content, and pricing against the
+-- wrong one is worse than pricing against nothing.
+H.check("a different id loses even when the name agrees",
+        not sell.SameItem(9999, "Linen Cloth", 2589, "Linen Cloth"))
+
+-- The fallback: no link, exact name.
+H.check("no id falls back to an exact name",
+        sell.SameItem(nil, "Linen Cloth", 2589, "Linen Cloth"))
+
+-- EXACT, because the server matches the query as a SUBSTRING. A scan for
+-- "Silk Cloth" is answered with "Bolt of Silk Cloth" too, and pricing one
+-- against the other is how an undercut lands at a tenth of the market.
+H.check("...and not a substring of it",
+        not sell.SameItem(nil, "Bolt of Silk Cloth", 4306, "Silk Cloth"))
+H.check("...nor the other way round",
+        not sell.SameItem(nil, "Silk", 4306, "Silk Cloth"))
+H.check("...nor a different case",
+        not sell.SameItem(nil, "silk cloth", 4306, "Silk Cloth"))
+
+-- Nothing to go on is not a match.
+H.check("no id and no name is nothing",
+        not sell.SameItem(nil, nil, 2589, "Linen Cloth"))
+H.check("no id and nothing wanted is nothing",
+        not sell.SameItem(nil, "Linen Cloth", 2589, nil))
+
+-- A row we CAN identify is judged on the id even when we have no name to
+-- compare -- the id is the better evidence and it is present.
+H.check("an id match needs no name", sell.SameItem(2589, nil, 2589, nil))
+
+-- ...AND THE SCAN ACTUALLY USES IT. The arithmetic above is right either way
+-- if the callback still compares ids directly, which is exactly the shape
+-- this bug had.
+do
+    local f = assert(io.open("core/sell.lua", "r"), "run this from the repo root")
+    local body = f:read("*a")
+    f:close()
+    H.check("the listing filter goes through it",
+            string.find(body,
+                "if sell.SameItem(id, name, itemId, itemName) then",
+                1, true) ~= nil)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("one deposit measurement per opportunity")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG. The Sell tab learns the formula-to-client deposit ratio while it
+-- repaints, which is the right place: an item is slotted, so the client will
+-- answer, and both numbers are being computed anyway. But a repaint happens on
+-- every keystroke and every button click, and the measurement does not change
+-- between them -- same item, same stack, same duration.
+--
+-- db.RecordDepositRatio keeps a running mean over the last 20 samples, so
+-- clicking Undercut twenty times makes the account-wide correction ENTIRELY
+-- that one item's ratio. The deposit figure then walks while you click, which
+-- is how it was reported: "spam the undercut or price match button and it
+-- increases the deposit cost". Up or down depending on whether the slotted
+-- item sits above or below the running mean; either way it moves, and a
+-- number that moves because you clicked something else is a wrong number.
+
+-- The key is what defines one opportunity.
+H.eq("the same slot and duration is the same measurement",
+     sell.DepositSampleKey(2589, 20, 360),
+     sell.DepositSampleKey(2589, 20, 360))
+H.neq("a different item is a new one",
+      sell.DepositSampleKey(2589, 20, 360),
+      sell.DepositSampleKey(4306, 20, 360))
+-- THE STACK SIZE IS IN THE KEY because the client's figure is per stack:
+-- twenty linen and one linen are two different deposits.
+H.neq("a different stack size is a new one",
+      sell.DepositSampleKey(2589, 20, 360),
+      sell.DepositSampleKey(2589, 1, 360))
+H.neq("a different duration is a new one",
+      sell.DepositSampleKey(2589, 20, 360),
+      sell.DepositSampleKey(2589, 20, 1440))
+H.isNil("no item is no measurement", sell.DepositSampleKey(nil, 20, 360))
+H.isNil("no duration is no measurement", sell.DepositSampleKey(2589, 20, nil))
+
+do
+    local realCalc = CalculateAuctionDeposit
+    W.AddItem(6037, { name = "Truesilver Bar", quality = 1,
+                      stackCount = 20, sellPrice = 1250 })
+    db.account.deposit = nil
+    sell.ratioSampledFor = nil
+
+    -- An account that has already learned a ratio from other items.
+    W.AddItem(2589, { name = "Linen Cloth", quality = 1,
+                      stackCount = 20, sellPrice = 260 })
+    W.sellSlot = { link = "|cffffffff|Hitem:2589:0:0:0|h[Linen Cloth]|h|r",
+                   count = 20 }
+    CalculateAuctionDeposit = function() return 20 end
+    sell.LearnDepositRatio(360)
+    local before = db.DepositRatio()
+    H.check("a first measurement is recorded", before ~= nil)
+
+    -- Now slot something whose ratio is different and "click" repeatedly.
+    W.sellSlot = { link = "|cffffffff|Hitem:6037:0:0:0|h[Truesilver Bar]|h|r",
+                   count = 1 }
+    -- Duration-aware, as the client is: a fixed figure across durations is
+    -- not a deposit and the ratio guard rejects it, which would make the
+    -- "a new duration is measured" check below pass for the wrong reason.
+    CalculateAuctionDeposit = function(minutes)
+        return math.floor(43 * ((minutes or 360) / 360))
+    end
+    sell.LearnDepositRatio(360)
+    local once, n1 = db.DepositRatio()
+    H.check("slotting a new item takes a measurement", once ~= before)
+
+    for _ = 1, 15 do sell.LearnDepositRatio(360) end
+    local after, n2 = db.DepositRatio()
+    H.eq("...and clicking fifteen more times takes none", after, once)
+    H.eq("...so the sample count does not climb", n2, n1)
+
+    -- CHANGING THE DURATION IS A REAL NEW MEASUREMENT and must still be taken
+    -- -- the gate is about repeats, not about measuring less.
+    sell.LearnDepositRatio(1440)
+    local _, n3 = db.DepositRatio()
+    H.eq("a new duration is measured", n3, n1 + 1)
+
+    -- ...and so is a different stack of the same item.
+    W.sellSlot = { link = "|cffffffff|Hitem:6037:0:0:0|h[Truesilver Bar]|h|r",
+                   count = 5 }
+    sell.LearnDepositRatio(1440)
+    local _, n4 = db.DepositRatio()
+    H.eq("a new stack size is measured", n4, n3 + 1)
+
+    W.sellSlot = nil
+    CalculateAuctionDeposit = realCalc
+    db.account.deposit = nil
+    sell.ratioSampledFor = nil
+end
+
+-- ...AND THE SLOTTED DEPOSIT COMES FROM THE CLIENT, not from the formula.
+-- sell.DepositFor reconstructs the client's number from a vendor price and a
+-- learned correction; it exists for the BAG PREVIEW, which has no slotted item
+-- and so cannot ask. Preferring the reconstruction while the real answer is
+-- sitting there is what put a figure on screen that moved as the correction
+-- was learned.
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    local body = f:read("*a")
+    f:close()
+    H.check("the slotted deposit asks the client first",
+            string.find(body,
+                "    if size == (it.count or 1) then\n"
+             .. "        perStack = A.sell.EstimateDeposit(ui.sellDuration)",
+                1, true) ~= nil)
+    -- ...and only for the stack the client is actually holding. For any other
+    -- size the client's answer is about a different stack.
+    H.check("...and falls back to the formula for any other stack size",
+            string.find(body,
+                "    if not fromClient then\n"
+             .. "        perStack = A.sell.DepositFor(it.itemId, size,",
+                1, true) ~= nil)
 end
 
 os.exit(H.report("sellslot"))

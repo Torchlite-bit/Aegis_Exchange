@@ -583,7 +583,27 @@ function scan.GetProgress()
         lastGate    = st.lastGate,
         lastReply   = st.lastReply,
         fastGate    = st.fastGate and true or false,
+        -- WHAT is being scanned, when it is one named item rather than the
+        -- whole house. A targeted scan and a stalled full scan showed the
+        -- same "Requesting first page..." on the strip, and a player reading
+        -- that while their Sell tab scanned a single item reasonably took it
+        -- for a stuck scan and stopped it.
+        subject     = scan.Subject(),
     }
+end
+
+-- The name a targeted scan is for, or nil for anything broader.
+--
+-- NIL FOR A MULTI-QUERY RUN even if the first query happens to carry a name:
+-- a run over several categories is not "scanning Truesilver Bar", and a strip
+-- that said so would be worse than one that says nothing.
+function scan.Subject()
+    local st = scan.state
+    local queries = st.queries
+    if not queries or table.getn(queries) ~= 1 then return nil end
+    local name = queries[1] and queries[1].name
+    if type(name) ~= "string" or name == "" then return nil end
+    return name
 end
 
 -- The auction house category tree, from the 1.12 API (only valid while the AH

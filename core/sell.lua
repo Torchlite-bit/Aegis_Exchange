@@ -485,13 +485,13 @@ function sell.StartOwnerSweep()
         -- No auctions at all is a real answer, and it has to be RECORDED --
         -- otherwise cancelling your last auction leaves the old count on the
         -- tooltip until you post something again.
-        sell.FinishOwnerSweep({})
+        sell.FinishOwnerSweep({}, {})
         return nil
     end
     if pages > sell.OWNER_SWEEP_MAX_PAGES then
         pages = sell.OWNER_SWEEP_MAX_PAGES
     end
-    sell.ownerSweep = { page = 0, pages = pages, counts = {} }
+    sell.ownerSweep = { page = 0, pages = pages, counts = {}, stacks = {} }
     sell.RequestOwnerAuctions(0)
     return sell.ownerSweep
 end
@@ -512,6 +512,11 @@ function sell.OwnerSweepStep()
         if r.itemId then
             sw.counts[r.itemId] = (sw.counts[r.itemId] or 0) + (r.count or 1)
         end
+        -- One entry per AUCTION, not per item: the posting book is about stack
+        -- SIZES, and sw.counts has already thrown those away by summing. Kept
+        -- even for a row with no id, because a sale mail matches on the name.
+        table.insert(sw.stacks, { name = r.name, id = r.itemId,
+                                  qty = r.count or 1 })
         i = i + 1
     end
     sw.page = sw.page + 1
@@ -519,17 +524,25 @@ function sell.OwnerSweepStep()
         sell.RequestOwnerAuctions(sw.page)
         return true
     end
-    sell.FinishOwnerSweep(sw.counts)
+    sell.FinishOwnerSweep(sw.counts, sw.stacks)
     -- Put the client back on page 0, which is where the Auctions tab expects
     -- to find it and where the player left it.
     sell.RequestOwnerAuctions(0)
     return false
 end
 
-function sell.FinishOwnerSweep(counts)
+function sell.FinishOwnerSweep(counts, stacks)
     sell.ownerSweep = nil
     if A.db and A.db.SetInventoryBucket then
         A.db.SetInventoryBucket("ah", counts or {}, sell.PlayerClass())
+    end
+    -- The sweep is the only place the server tells us what is up and in what
+    -- stack sizes, which is the one thing a sale mail can never say. Folding it
+    -- into the posting book is what lets an auction posted before that book
+    -- existed -- or from anywhere else -- still report its quantity when it
+    -- sells. Additive only; see db.ReconcilePostings.
+    if A.db and A.db.ReconcilePostings then
+        A.db.ReconcilePostings(stacks or {})
     end
     return counts
 end
@@ -1041,15 +1054,45 @@ end
 -- looking at, so this costs one division whenever the Sell tab redraws.
 --
 -- Returns the ratio it recorded, or nil when it could not.
+-- ONE MEASUREMENT PER OPPORTUNITY, and the key is what defines one.
+--
+-- WHY IT IS NEEDED. The Sell tab learns this ratio while repainting, which is
+-- the right place -- an item is slotted, so the client will answer, and both
+-- numbers are being computed anyway. But a repaint happens on every keystroke
+-- and every button click, and the measurement does not change between them:
+-- it is the same item, the same stack, the same duration.
+--
+-- Recording it again on each repaint is not harmless. db.RecordDepositRatio
+-- keeps a running mean over the last 20 samples, so clicking Undercut twenty
+-- times makes the account-wide correction ENTIRELY that one item's ratio. The
+-- deposit figure then walks toward that item's number while you click, which
+-- is how it was reported: "spam the undercut or price match button and it
+-- increases the deposit cost".
+--
+-- The stack size is in the key because the client's figure is per stack.
+function sell.DepositSampleKey(itemId, count, minutes)
+    if not itemId or not minutes then return nil end
+    return tostring(itemId) .. ":" .. tostring(count or 1)
+        .. ":" .. tostring(minutes)
+end
+
+-- Which measurement has already been taken. A SESSION value: the ratio is a
+-- property of the server's arithmetic, so re-measuring the same item next
+-- login adds nothing, but forgetting across a reload costs only one sample.
+sell.ratioSampledFor = nil
+
 function sell.LearnDepositRatio(minutes)
     if not CalculateAuctionDeposit then return nil end
     if not minutes or minutes <= 0 then return nil end
     local it = sell.GetItem()
     if not it or not it.price or it.price <= 0 then return nil end
+    local key = sell.DepositSampleKey(it.itemId, it.count, minutes)
+    if key and sell.ratioSampledFor == key then return nil end
     local ours = sell.DepositAmount(it.price / (it.count or 1),
         it.count or 1, 1, minutes)
     local ratio = sell.DepositRatio(CalculateAuctionDeposit(minutes), ours)
     if not ratio then return nil end
+    sell.ratioSampledFor = key
     if A.db and A.db.RecordDepositRatio then A.db.RecordDepositRatio(ratio) end
     return ratio
 end
@@ -1300,6 +1343,33 @@ end
 -- {count, buyout, unit, minBid, owner, isMine}, sorts cheapest-first, and calls
 -- onDone(rows). onProgress(page, total) fires per page. Returns false if the
 -- scanner is busy with another scan.
+-- Is this auction row the item we asked for?
+--
+-- WHY IT IS NOT JUST `id == itemId`, which is what it was. The row's id comes
+-- from GetAuctionItemLink, and on 1.12 THAT RETURNS NIL FOR AN ITEM THE CLIENT
+-- HAS NOT CACHED. A player who has never linked or looted Truesilver Bar gets
+-- nil for all 50 rows on the page, every row is discarded, and the scan
+-- reports success with nothing in it -- "0 price(s), scanned just now" over an
+-- auction house holding 158 of them. It was reported exactly that way, along
+-- with the detail that explains it: searching for the item on the Buy tab
+-- first makes the Sell tab work, because the search is what caches the links.
+--
+-- THE NAME IS A SAFE FALLBACK HERE AND ONLY HERE, because the query WAS the
+-- name. The server matches names as a SUBSTRING -- a query for "Silk Cloth"
+-- returns "Bolt of Silk Cloth" too -- so the comparison has to be exact, and
+-- a row whose id we CAN read is still judged on the id. The fallback only
+-- covers the one case the id cannot: no link at all.
+--
+-- A row carrying a DIFFERENT id is never accepted on a name match. Two items
+-- can share a name across a rename or a server's custom content, and pricing
+-- against the wrong one is worse than pricing against nothing.
+function sell.SameItem(rowId, rowName, wantId, wantName)
+    if rowId and wantId then return rowId == wantId end
+    if rowId then return false end
+    if not rowName or not wantName then return false end
+    return rowName == wantName
+end
+
 function sell.ScanItem(itemName, itemId, onProgress, onDone)
     -- Cache hit: return stored results without a new scan.
     local entry = sell.cache[itemId]
@@ -1322,7 +1392,7 @@ function sell.ScanItem(itemName, itemId, onProgress, onDone)
     local me = UnitName("player")
     A.scan.Start({ name = itemName }, {
         onListing = function(id, name, count, buyout, minBid, owner)
-            if id == itemId then
+            if sell.SameItem(id, name, itemId, itemName) then
                 table.insert(sell.listings, {
                     count  = count,
                     buyout = buyout,   -- stack buyout (copper); 0 = bid only
@@ -1382,6 +1452,24 @@ function sell.GroupListings(rows, marketValue)
 end
 
 -- How a per-unit price compares to the item's vendor sell price. Returns
+-- What ONE unit actually nets you from a sale, after the auction house takes
+-- its consignment cut.
+--
+-- THE DEPOSIT IS NOT IN HERE, and that is a fact about the game rather than an
+-- omission: a deposit is REFUNDED in full when the auction sells, and
+-- forfeited only when it expires or you cancel. So it is a risk you carry
+-- while the auction is up, not a cost of selling -- and subtracting it from a
+-- successful sale would understate every price on the tab.
+--
+-- (ROADMAP 5.3 said otherwise -- `unitPrice * 0.95 - deposit` -- and the entry
+-- has been corrected. The number it asked for would have been wrong in the
+-- other direction from the one it was replacing.)
+function sell.NetUnit(unitPrice, cut)
+    if not unitPrice or unitPrice <= 0 then return nil end
+    cut = cut or sell.CUT
+    return math.floor(unitPrice * (1 - cut))
+end
+
 -- { vendor, pct, above, mult } or nil when we have no vendor data.
 function sell.VendorCompare(itemId, unitPrice)
     local vendor = A.db.GetVendor(itemId)
@@ -1695,6 +1783,12 @@ function sell.Post(unitBuyout, unitStart, minutes)
         return false, "Start bid can't exceed the buyout."
     end
     sell.ArmDepositWatch(minutes)
+    -- REMEMBERED BEFORE IT IS FIRED, because this is the only moment the stack
+    -- size exists anywhere: the sale mail carries a name and money and no
+    -- count. See db.RecordPosting.
+    if A.db and A.db.RecordPosting then
+        A.db.RecordPosting(it.name, it.itemId, count)
+    end
     StartAuction(start, buyout, minutes)
     return true
 end
@@ -2106,6 +2200,12 @@ function sell.PostTick(dt)
             local start  = math.floor(job.unitStart * job.stackSize)
             if start < 1 then start = 1 end
             sell.ArmDepositWatch(job.minutes)
+            -- ...and the same for every stack a multi-post puts up. One
+            -- posting per StartAuction, or a run of ten stacks leaves nine
+            -- sales unable to say how many they were.
+            if A.db and A.db.RecordPosting then
+                A.db.RecordPosting(it.name, job.itemId, job.stackSize)
+            end
             StartAuction(start, buyout, job.minutes)   -- posts, clears slot
             job.posted = job.posted + 1
             job.remaining = job.remaining - 1

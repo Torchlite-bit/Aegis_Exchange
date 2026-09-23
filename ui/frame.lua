@@ -1518,6 +1518,131 @@ end
 -- Window construction (once)
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- Window ordering: whatever you clicked last is in front
+-- ---------------------------------------------------------------------------
+--
+-- WHAT WAS WRONG. Opening the auction house opens your BACKPACK -- the client
+-- does that itself -- and the bag landed behind the Aegis window with no way
+-- to bring it forward. Clicking it did nothing. Clicking ours put ours on top
+-- again, which is the half that always worked and made the other half look
+-- deliberate.
+--
+-- It was not a z-order to fix by picking a better number. ANY fixed order is
+-- wrong half the time -- the right answer is "the one you just clicked", and
+-- the client already implements exactly that: SetToplevel(true) means "put me
+-- on top of my strata when I am clicked". Our window is created with it. The
+-- bags are not, and neither is the trade skill window.
+--
+-- So one frame in the argument could raise itself and the others could not.
+--
+-- THE FIX IS THAT SAME SWITCH, GIVEN TO EVERYTHING IN THE ARGUMENT, plus the
+-- one thing that makes it work at all: TOPLEVEL ONLY REORDERS WITHIN A
+-- STRATA. A frame a whole strata below ours can be clicked all day and will
+-- never come forward, so anything sitting lower is lifted into ours first.
+--
+-- RAISED, NEVER LOWERED. A frame that sits ABOVE us does so for a reason that
+-- has nothing to do with this -- a confirmation dialog, a popup -- and pulling
+-- it down into our strata to win an argument it was not having is how an addon
+-- ends up hiding the box asking whether you really meant to spend that gold.
+--
+-- WE DO NOT HOOK ANYTHING. There is no OnMouseDown to save and replace here
+-- and no per-frame script to fight with another addon over: every one of
+-- these is a single widget setting the client then acts on by itself.
+
+-- Where a strata sits in the client's fixed order. 0 for anything unknown,
+-- which reads as "below everything" and so gets lifted.
+--
+-- THE ORDER IS THE CLIENT'S AND NOT OURS TO REARRANGE. FULLSCREEN is ABOVE
+-- DIALOG, which looks wrong written down and is what the client does.
+function ui.StrataRank(name)
+    local order = {
+        "WORLD", "BACKGROUND", "LOW", "MEDIUM", "HIGH",
+        "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP",
+    }
+    local i = 1
+    while i <= table.getn(order) do
+        if order[i] == name then return i end
+        i = i + 1
+    end
+    return 0
+end
+
+-- Every frame that should trade places with ours, by global name.
+--
+-- `bags` is NUM_CONTAINER_FRAMES, passed in rather than read here: the bag
+-- frames are NUMBERED and how many there are is the client's business, so a
+-- hardcoded 1..5 misses the bank bags and a hardcoded 1..11 names frames that
+-- may not exist on this client.
+--
+-- THE REST IS A LIST BECAUSE IT HAS TO BE. There is no way to ask the client
+-- for "the windows a player has open while trading" -- UIPanelWindows is a
+-- table of panel behaviour, not of frames worth raising, and it does not
+-- contain the bags at all. A named list is honest about being a list: a frame
+-- that is not in it simply keeps the behaviour it has today, which is what it
+-- had before any of this.
+function ui.RaiseFrameNames(bags)
+    local names = {}
+    local n = bags or 5
+    local i = 1
+    while i <= n do
+        table.insert(names, "ContainerFrame" .. i)
+        i = i + 1
+    end
+    -- Professions are LOAD-ON-DEMAND. Neither frame exists until the player
+    -- has opened that window once, which is why ui.ApplyRaiseGroup runs again
+    -- on ADDON_LOADED rather than only at startup.
+    table.insert(names, "TradeSkillFrame")
+    table.insert(names, "CraftFrame")
+    -- ...and the rest of what is plausibly open while you are at the auction
+    -- house.
+    table.insert(names, "MerchantFrame")
+    table.insert(names, "BankFrame")
+    table.insert(names, "MailFrame")
+    table.insert(names, "TradeFrame")
+    table.insert(names, "CharacterFrame")
+    table.insert(names, "SpellBookFrame")
+    table.insert(names, "QuestLogFrame")
+    table.insert(names, "InspectFrame")
+    table.insert(names, "LootFrame")
+    return names
+end
+
+-- Put one frame into the group. Returns whether there was a frame to put.
+function ui.JoinRaiseGroup(frame, strata)
+    if not frame or not frame.SetToplevel then return false end
+    if strata and frame.GetFrameStrata and frame.SetFrameStrata then
+        if ui.StrataRank(frame:GetFrameStrata()) < ui.StrataRank(strata) then
+            frame:SetFrameStrata(strata)
+        end
+    end
+    frame:SetToplevel(true)
+    return true
+end
+
+-- Apply it to everything that exists right now. Returns how many were there.
+--
+-- IDEMPOTENT, because it runs again every time a load-on-demand window turns
+-- up and every time the auction house opens. Setting a flag that is already
+-- set costs nothing and a frame that does not exist yet is skipped rather
+-- than remembered, so the next run picks it up.
+function ui.ApplyRaiseGroup()
+    local strata = "HIGH"
+    if ui.frame and ui.frame.GetFrameStrata then
+        strata = ui.frame:GetFrameStrata() or strata
+    end
+    local names = ui.RaiseFrameNames(NUM_CONTAINER_FRAMES)
+    local found = 0
+    local i = 1
+    while i <= table.getn(names) do
+        if ui.JoinRaiseGroup(getglobal(names[i]), strata) then
+            found = found + 1
+        end
+        i = i + 1
+    end
+    return found
+end
+
 function ui.BuildWindow()
     if ui.frame then return end
 
@@ -1557,6 +1682,9 @@ function ui.BuildWindow()
     f:SetBackdropBorderColor(1, 1, 1)
     f:Hide()
     ui.frame = f
+    -- Everything else that can be on screen while trading learns the same
+    -- trick, so clicking a bag brings the bag forward. See ui.ApplyRaiseGroup.
+    ui.ApplyRaiseGroup()
 
     -- ESC closes our window (and, via OnHide below, the AH session). Without
     -- this the client swallows ESC while our top-level frame is up instead of
@@ -2681,15 +2809,18 @@ function ui.Refresh()
             -- Still before the first page. Say WHICH leg we're on so a stall
             -- is diagnosable from the strip alone (see /aex debug for the
             -- full trace).
+            -- NAME THE ITEM when there is one. A targeted scan from the
+            -- Sell tab and a stalled full scan used to read identically here.
+            local what = p.subject and (" \226\128\148 " .. p.subject) or ""
             if p.sent == 0 then
                 ui.statusText:SetText(
-                    "Starting scan \226\128\148 waiting for client...")
+                    "Starting scan \226\128\148 waiting for client..." .. what)
             elseif p.retries > 0 then
                 ui.statusText:SetText(string.format(
-                    "Requesting first page... (no reply \226\128\148 retry %d)",
-                    p.retries))
+                    "Requesting first page%s... (no reply \226\128\148 retry %d)",
+                    what, p.retries))
             else
-                ui.statusText:SetText("Requesting first page...")
+                ui.statusText:SetText("Requesting first page" .. what .. "...")
             end
         end
         ui.statusText:SetTextColor(C.text[1], C.text[2], C.text[3])
@@ -3809,6 +3940,21 @@ end
 -- because on a parent with several listings TIME LEFT IS GENUINELY UNDEFINED
 -- -- they all have different ones -- so that cell is free. A parent with
 -- exactly ONE listing has a real time left, and shows it: there is nothing to
+-- "8 auctions, 129 items" -- or just the auctions when the count adds nothing.
+--
+-- A GROUP WHERE EVERY LISTING IS A SINGLE says the same number twice, and a
+-- column that repeats itself teaches the eye to stop reading it. Same reason
+-- the unit column is blank on a group: a figure that cannot differ is not a
+-- figure.
+function ui.GroupCountText(listings, units)
+    listings = listings or 0
+    local txt = listings .. " auctions"
+    if units and units > listings then
+        txt = txt .. ", " .. units .. " items"
+    end
+    return txt
+end
+
 -- summarise and the row is that auction.
 function ui.FillGroupRow(row, e)
     row.entry = e
@@ -3849,7 +3995,11 @@ function ui.FillGroupRow(row, e)
         end
         row.left:SetText(tl)
     else
-        row.left:SetText((e.listings or 0) .. " auctions")
+        -- AUCTIONS *AND* ITEMS. `e.units` is the summed count across the
+        -- group, computed by ui.BuyTreeRows and discarded here until now --
+        -- and the two are different questions: eight auctions of Runecloth
+        -- might be eight singles or eight stacks of twenty.
+        row.left:SetText(ui.GroupCountText(e.listings, e.units))
     end
 
     -- A PARENT QUOTES ONE PRICE: the lowest you can actually pay. Bid is blank
@@ -4657,6 +4807,39 @@ local BUYL = {
     gutter_w    = 26,
 
 }
+
+-- ---------------------------------------------------------------------------
+-- The purchase receipt
+-- ---------------------------------------------------------------------------
+--
+-- ONE TABLE, not a family of file-scope locals: the 32-upvalue ceiling is real
+-- and ui/frame.lua has already shipped a file the client refused to load over
+-- exactly this. See the note above BUYL.
+local RCPT = {
+    top     = 70,    -- first row, below the headings
+    bot     = 52,    -- ...and the footer band below the last
+    scrolln = 30,    -- gutter for the FauxScrollFrame's outward-hanging bar
+    bar_w   = 200,   -- the Clear/Close well
+    bar_h   = 30,
+    btn_w   = 78,    -- the Receipt button on the Buy tab
+    btn_h   = 20,
+}
+local RCX = { item = 2, units = 300, buys = 398, unit = 496, spent = 614 }
+local RCW = { item = 294, units = 92, buys = 92, unit = 112, spent = 112 }
+local RECEIPT_HEADER_DEFS = {
+    { key = "item",  text = "Item" },
+    { key = "units", text = "Units",   just = "RIGHT" },
+    { key = "buys",  text = "Auctions", just = "RIGHT" },
+    { key = "unit",  text = "Avg Each", just = "RIGHT" },
+    { key = "spent", text = "Spent",   just = "RIGHT" },
+}
+-- The rows band, for ui.ListRowsAt. Multi-line so the geometry suite's
+-- loadTable can read it.
+local RCPTBOX = {
+    top = RCPT.top,
+    bot = RCPT.bot,
+}
+
 
 -- ADVANCED-mode layout, in ONE table for the same upvalue reason as BUYL --
 -- see the note above it. ui.BuildBuyTab is the function that reads both, and
@@ -5516,7 +5699,11 @@ local LISTBOX = {
                   bot = AUCL.gap + AUCL.bid_head + AUCL.bid_hdr + AUCL.bot },
     -- Thirty pixels shallower than it was: the period buttons moved into the
     -- chart's own title bar, and the band they occupied went to the table.
-    hist      = { top = 70, bot = 10 },
+    -- THE CHART HAS THE WHOLE PANEL, so this band holds nothing. It was 70,
+    -- which is what the ledger table's totals line, its note and its column
+    -- headers needed -- and all three moved into the ledger window in
+    -- v1.54.0, leaving an empty strip across the top of the tab.
+    hist      = { top = 14, bot = 10 },
     -- Identical to sellList on purpose: both boxes start under the same
     -- header band and end on the same line, which is the whole point of
     -- giving the bag list a box at all. Two lists side by side that begin
@@ -5525,6 +5712,12 @@ local LISTBOX = {
     sellList  = { top = SELLL.rows_top, bot = SELLL.table_bot },
 }
 ui.LISTBOX = LISTBOX     -- read by the geometry suite
+
+-- The em dash every table uses for "no answer". A CONSTANT because the three
+-- Ledger columns that can be empty are empty for three different reasons -- no
+-- price, no count, no counterpart -- and they have to look identical, or the
+-- reader starts hunting for a difference that is not there.
+local NO_VALUE = "\226\128\148"
 
 -- How many WHOLE rows a list shows at a given WINDOW height.
 --
@@ -6231,8 +6424,21 @@ function ui.BuildBuyTab()
     -- font string, so an equal offset left their text baselines ~9px apart.
     nextBtn:ClearAllPoints()
     nextBtn:SetPoint("TOPRIGHT", well, "BOTTOMRIGHT", 0, -8)
+
+    -- THE RECEIPT BUTTON SITS ON THAT SAME LINE, at the left edge, and the
+    -- status line starts after it. It belongs beside the tally it opens: the
+    -- line says how many of ONE item you have bought, and the button is where
+    -- you go when the answer is about six.
+    local receiptBtn = ui.MakeButton(well, "quiet",
+        "AegisExchangeReceiptButton")
+    receiptBtn:SetWidth(RCPT.btn_w); receiptBtn:SetHeight(RCPT.btn_h)
+    receiptBtn:SetPoint("TOPLEFT", well, "BOTTOMLEFT", 0, -8)
+    receiptBtn:SetText("Receipt")
+    receiptBtn:SetScript("OnClick", function() ui.ToggleReceiptWindow() end)
+    ui.buyReceiptBtn = receiptBtn
+
     ui.buyStatus:ClearAllPoints()
-    ui.buyStatus:SetPoint("LEFT", well, "BOTTOMLEFT", 6, 0)
+    ui.buyStatus:SetPoint("LEFT", receiptBtn, "RIGHT", 8, 0)
     ui.buyStatus:SetPoint("TOP", nextBtn, "TOP", 0, 0)
     ui.buyStatus:SetPoint("BOTTOM", nextBtn, "BOTTOM", 0, 0)
 
@@ -6479,8 +6685,11 @@ function ui.SetBuyView(name)
     -- invisible results were underneath, so a stray click queried the server.
     -- buyCheckTotal is here because it is the results table's "N selected"
     -- line and belongs to no other view.
+    -- ui.buyReceiptBtn rides with the results, not with the tab: it is
+    -- anchored to the table's well, so a view that hides the well and not the
+    -- button leaves it floating over whatever replaced it.
     local resultsBits = { ui.buyScroll, ui.buyPageText, ui.buyStatus,
-                          ui.buyPrevBtn, ui.buyNextBtn,
+                          ui.buyPrevBtn, ui.buyNextBtn, ui.buyReceiptBtn,
                           ui.buyListWell, ui.buyHdrRule, ui.buyCheckTotal }
     local i = 1
     while i <= table.getn(resultsBits) do
@@ -8924,11 +9133,18 @@ function ui.DoBatchBuyout()
             ui.RefreshBuyMoney()
             if ui.selectedSubTab == "History" then ui.RefreshHistory() end
         end,
-        function(bought, want, name, price)
+        function(bought, want, name, price, stack, itemId)
             -- Booked per purchase, not once at the end: a batch that aborts
             -- halfway has still spent the gold on what it did buy, and the
             -- ledger has to match the bag.
-            if name then A.db.RecordTxn("buy", name, price) end
+            --
+            -- WITH THE STACK AND THE ID, which buy.BatchStep has and this
+            -- callback was not being handed. Booking a batch purchase without
+            -- them wrote a thinner row than the single-buyout path did for the
+            -- same kind of purchase.
+            if name then
+                A.db.RecordTxn("buy", name, price, itemId, stack)
+            end
             if ui.buyCheckTotal then
                 ui.buyCheckTotal:SetText("Buying " .. bought .. " / " .. want
                     .. " \226\128\166")
@@ -12323,6 +12539,21 @@ end
 -- spare, and ui.SetTextClipped already handles the few that do not fit.
 local HCX = { when = 2, kind = 92, item = 176, amount = 416 }
 local HCW = { when = 86, kind = 80, item = 236, amount = 96 }
+-- The per-ITEM table's columns. Wider than the transaction table's because the
+-- ledger overlay has the whole content area now -- see ui.BuildLedgerWindow.
+local LCX = { item = 2, sold = 232, avgSell = 330, bought = 448,
+              avgBuy = 546, profit = 664 }
+local LCW = { item = 226, sold = 92, avgSell = 112, bought = 92,
+              avgBuy = 112, profit = 112 }
+local LEDGER_HEADER_DEFS = {
+    { key = "item",    text = "Item" },
+    { key = "sold",    text = "Sold",       just = "RIGHT" },
+    { key = "avgSell", text = "Avg Sell",   just = "RIGHT" },
+    { key = "bought",  text = "Bought",     just = "RIGHT" },
+    { key = "avgBuy",  text = "Avg Buy",    just = "RIGHT" },
+    { key = "profit",  text = "Avg Profit", just = "RIGHT" },
+}
+
 local HIST_HEADER_DEFS = {
     { key = "when",   text = "When" },
     { key = "kind",   text = "Type" },
@@ -12355,31 +12586,69 @@ local HIST_HEADER_DEFS = {
 local HISTL = {
     edge       = 10,
     gap        = 12,
-    -- The table's columns end at 512 plus the row padding and its scrollbar.
-    -- Below this the Amount column starts running under the scrollbar, which
-    -- is the clipping this number exists to prevent.
-    left_min   = 566,
+    -- THE LEDGER WINDOW'S WIDTH, and it used to be the table half's minimum
+    -- when the History tab was split. The number is the same for the same
+    -- reason: the table's columns end at 512 plus the row padding and its
+    -- scrollbar, and below this the Amount column runs under the scrollbar.
+    --
+    -- The tab is not split any more -- the chart has the whole panel and the
+    -- table lives in a window the Ledger button opens (ROADMAP 3.4). So this
+    -- is a fixed width now rather than a floor on a fraction, which is why
+    -- graph_frac and ui.HistWidthsAt are gone.
+    ledger_w   = 566,
+    -- Rows the ledger window opens at.
+    ledger_rows = 14,
+    -- Its chrome above and below the rows: title, the totals line, the note
+    -- and the sortable column headers up top; the divider and button row
+    -- below. Read through LEDGERBOX, which ui.ListRowsAt takes.
+    ledger_top = 92,
+    ledger_bot = 52,
     -- WIDE ENOUGH FOR THE CHART'S OWN TITLE BAR, which is what it holds now:
     -- two side paddings, the heading, and five period buttons with their gaps.
     -- The geometry suite checks that sum rather than trusting this number, so
     -- adding a sixth period cannot quietly push the buttons off the edge.
+    --
+    -- Still a floor even though the chart has the whole panel, because the
+    -- window itself has a minimum and the arithmetic has to survive a width
+    -- of zero on a login where UIParent has not been measured yet.
     graph_min  = 300,
-    -- Raised from 0.36. The chart was the half that had to hold an axis, a
-    -- legend, a line and two rows of figures in whatever was left over, and it
-    -- was the half that ran out.
-    graph_frac = 0.46,
     -- Inside the chart box: two rows of chrome above the plot -- the title
     -- with the period buttons, then the character picker -- and the axis
     -- labels below it.
     plot_top   = 54,
     -- Room under the plot for the x labels AND the two stat rows.
     --
-    -- TWO ROWS, because one was two FontStrings anchored to opposite ends of
-    -- the same line and they ran into each other -- "LOW 9g 14s 6c" and "IN
-    -- 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window. Two strings
-    -- that can both grow cannot share a line; stacking them removes the
-    -- collision rather than making it less likely.
-    plot_bot   = 64,
+    -- Room under the plot for the x labels, the six-cell figure strip, and the
+    -- three Sales / Expenses / Profit blocks.
+    --
+    -- IT GREW TWICE. It was 64 for two rows of running text, then 78 for
+    -- three, and it is 104 now that the chart has the whole panel and there is
+    -- width for a strip and columns. Each figure is its OWN FontString in its
+    -- own column, which is what finally removed the collision the two-row
+    -- version was working around -- "LOW 9g 14s 6c" and "IN 37s 92c" ran into
+    -- each other as "LOWN0g 14s 6c" because two strings that can both grow
+    -- shared a line.
+    plot_bot   = 136,
+    -- The figure strip: six cells across the plot's width.
+    strip_cells = 6,
+    -- ...three columns of two in the band,
+    band_cols  = 3,
+    -- ...and the three blocks under it, three rows each.
+    block_count = 3,
+    block_rows  = 3,
+    -- Gap between columns, in both the strip and the blocks.
+    col_gap    = 10,
+    -- One line of figures, and the two boxes under the plot, measured up from
+    -- the chart box's bottom edge. The reference puts both in their own
+    -- bordered wells, which is what band_* and stats_* size.
+    fig_line   = 13,
+    fig_pad    = 6,
+    band_y     = 78,
+    band_h     = 32,
+    stats_y    = 8,
+    stats_h    = 64,
+    -- The label column inside a block: "Per day" and its widest sibling.
+    block_label_w = 56,
     plot_side  = 10,
     -- The y-axis labels live to the LEFT of the drawing area, the way the
     -- reference chart has them -- so the plot starts this far in.
@@ -12416,6 +12685,15 @@ local HISTL = {
     fill_flip  = false,
     -- The chart's own title bar: the heading, and the period buttons beside
     -- it.
+    -- The Ledger button beside the chart's heading -- the way into the other
+    -- screen. Wider than a period button because it carries a word.
+    ledger_btn_w = 54,
+    -- The Items / Transactions toggle at the ledger overlay's top left.
+    ledger_view_w = 82,
+    -- The gutter a FauxScrollFrame's scrollbar needs on the right. It is drawn
+    -- OUTSIDE the scroll frame's own rect, so a frame flush to the window edge
+    -- puts its bar past it.
+    ledger_scroll_r = 30,
     per_w      = 32,
     per_h      = 18,
     per_gap    = 3,
@@ -12423,9 +12701,18 @@ local HISTL = {
     -- not a guess: nothing in tests/ can measure a FontString, so the fit
     -- check needs a number it can add up. Generous by a few pixels on purpose.
     head_w     = 80,
-    -- One column of the rasterised line. FOUR PIXELS is the whole compromise
-    -- described above: one per data point is a staircase, one per pixel is
-    -- hundreds of textures.
+    -- One column of the rasterised line.
+    --
+    -- TWO PIXELS, AND MEASURED, not a compromise anyone picked. (This comment
+    -- said FOUR while the value was 2, which is its own small lesson.) At 2px
+    -- a 1400px window costs 637 spans; at 1px, 1274.
+    --
+    -- GOING TO 1 BUYS NOTHING, and that is the finding: bucket_px puts a DATA
+    -- point every 3 pixels, so columns 2px apart are already sampling finer
+    -- than the series they draw -- consecutive columns frequently interpolate
+    -- between the same two points. Halving this doubles the texture count and
+    -- adds no information. What is left is aliasing on the diagonal EDGES,
+    -- which no amount of horizontal subdivision touches. See ROADMAP 3.2.
     col_w      = 2,
     line_h     = 2,
     -- HOW WIDE ONE BUCKET IS, in pixels -- not how many there are.
@@ -12439,8 +12726,33 @@ local HISTL = {
     -- invent.
     bucket_px  = 3,
     bucket_min = 8,
-    bucket_max = 400,
+    -- THE CEILING, and it was BITING at every window wider than about 1200px:
+    -- a 1400px window asks for 424 buckets and a 1920px one for 598, so the
+    -- chart was drawing fewer real points than it had room for and
+    -- interpolating across the difference.
+    --
+    -- 900 covers an ultrawide (a 2560px window's plot wants ~811) with room
+    -- over. The cost is one more pass per character in db.MoneySeries, which
+    -- walks its samples once and fills n buckets -- linear in this number and
+    -- measured in thousands of iterations on a repaint, not millions.
+    --
+    -- A CEILING IS STILL WANTED. MoneySeries allocates a table of n per call
+    -- and the Buy tab is not the only thing repainting; an uncapped count tied
+    -- to a resizable window is a number nobody has a bound for.
+    bucket_max = 900,
 }
+
+-- The ledger overlay's insets, in the shape ui.ListRowsAt takes. A table of
+-- its own rather than another LISTBOX entry, because LISTBOX is declared long
+-- before HISTL and these two numbers live with the rest of the ledger's
+-- layout.
+-- Multi-line on purpose: the geometry suite reads this table out of the source
+-- rather than copying it, and its reader wants a brace per line.
+local LEDGERBOX = {
+    top = HISTL.ledger_top,
+    bot = HISTL.ledger_bot,
+}
+ui.LEDGERBOX = LEDGERBOX     -- read by the geometry suite
 
 -- The two halves of the History panel at window width `w`. Returns tableW,
 -- graphW -- both in panel pixels, and they plus the edges and gap are the
@@ -12448,21 +12760,6 @@ local HISTL = {
 --
 -- THE TABLE WINS THE SQUEEZE. Its columns are fixed and its Amount column is
 -- the rightmost thing in the window that can be clipped; the chart has no
--- fixed content and degrades to a narrower chart gracefully.
-function ui.HistWidthsAt(w)
-    local inner = ui.PanelWidthAt(w) - HISTL.edge * 2 - HISTL.gap
-    if inner < 2 then inner = 2 end
-    local graph = math.floor(inner * HISTL.graph_frac)
-    if graph > inner - HISTL.left_min then graph = inner - HISTL.left_min end
-    if graph < HISTL.graph_min then graph = HISTL.graph_min end
-    -- ...but never to the point of taking the table away entirely. At a window
-    -- narrower than both minima together something has to give, and a chart
-    -- with no table beside it is not the History tab.
-    if graph > inner - 60 then graph = inner - 60 end
-    if graph < 1 then graph = 1 end
-    return inner - graph, graph
-end
-
 -- The time window the chart covers, divided into `n` buckets.
 --
 -- Returns from, step. This was ui.HistBuckets, which also bucketed the ledger
@@ -12630,7 +12927,12 @@ end
 -- Saved Searches columns and all six list row counts; measuring a two-corner
 -- frame is never the answer here.
 function ui.HistPlotSizeAt(winW, winH)
-    local _, graphW = ui.HistWidthsAt(winW)
+    -- THE WHOLE PANEL, less the box's own edges. The tab used to be split --
+    -- table on the left, chart on the right -- and ui.HistWidthsAt divided it.
+    -- The table is a window of its own now (ui.LedgerWindow), so the chart's
+    -- width is simply what the panel has.
+    local graphW = ui.PanelWidthAt(winW) - HISTL.edge * 2
+    if graphW < HISTL.graph_min then graphW = HISTL.graph_min end
     local w = graphW - HISTL.plot_side * 2 - HISTL.y_gutter
     local h = ui.PanelHeightAt(winH) - LISTBOX.hist.top - LISTBOX.hist.bot
               - HISTL.plot_top - HISTL.plot_bot
@@ -12886,16 +13188,759 @@ local HIST_PERIODS = {
     { label = "All", secs = 0 },
 }
 
--- Pull the item name out of an AH "sold" mail subject. enUS: the subject is
--- "Auction successful: <item>". Returns the item name, or nil for other mail.
-local function AuctionSoldItem(subject)
-    if not subject then return nil end
-    local s, e = string.find(subject, "Auction successful: ", 1, true)
+-- The fixed part of a mail subject, taken from the CLIENT'S OWN format string
+-- where it has one.
+--
+-- These were hardcoded English, so on any other client every sale went
+-- unlogged -- silently, because "no sale mail" and "did not recognise the
+-- subject" look identical from outside. Same treatment craft.CreatePrefix
+-- gives the "You create:" line, and for the same reason.
+--
+-- PLAIN find for "%s", so the needle is the two literal characters. Escaping
+-- it as "%%s" is right for a PATTERN and wrong here: with plain matching it
+-- would look for two percent signs, never match, and every locale would
+-- silently fall back to the English prefix.
+local function MailPrefix(fmt, fallback)
+    fmt = fmt or fallback
+    local at = string.find(fmt, "%s", 1, true)
+    if not at or at < 2 then return fallback end
+    return string.sub(fmt, 1, at - 1)
+end
+
+-- The item name out of a mail subject with `prefix`, or nil for other mail.
+local function SubjectItem(subject, prefix)
+    if not subject or not prefix then return nil end
+    local s, e = string.find(subject, prefix, 1, true)
     if s == 1 then return string.sub(subject, e + 1) end
     return nil
 end
 
+-- "Auction successful: <item>" -- the seller's copy of a completed sale.
+local function AuctionSoldItem(subject)
+    return SubjectItem(subject, MailPrefix(AUCTION_SOLD_MAIL_SUBJECT,
+                                           "Auction successful: "))
+end
+
+-- "Auction expired: <item>" -- an auction that came back unsold.
+--
+-- NOT LOGGED AS ANYTHING; no money moved. It is read for one reason: an
+-- expired posting is no longer waiting on a sale mail, and leaving it in the
+-- book is what turns a book of one stack size into a mixed one -- which costs
+-- the NEXT sale of that item its quantity.
+local function AuctionExpiredItem(subject)
+    return SubjectItem(subject, MailPrefix(AUCTION_EXPIRED_MAIL_SUBJECT,
+                                           "Auction expired: "))
+end
+
 -- Scan the open mailbox for AH sale mails and log each one once (deduped by an
+-- ---------------------------------------------------------------------------
+-- The Ledger window
+--
+-- WHY THE TAB SPLIT IN TWO. The History tab used to hold a table on the left
+-- and a chart on the right, and neither had room. The chart had to fit an
+-- axis, a legend, a line and its figures into whatever was left of 46% of the
+-- panel; the table's Amount column ran under its own scrollbar below a fixed
+-- minimum width. Two screens that each want the whole window do not become one
+-- screen by being placed side by side.
+--
+-- So they are two screens now, the way the reference does it: the tab is the
+-- DASHBOARD -- the chart across the full width, with its figures and the
+-- Sales / Expenses / Profit blocks under it -- and the table is a window the
+-- Ledger button opens. Neither is squeezed and each is the size of the thing
+-- it shows.
+--
+-- IT IS NOT A CHILD OF THE MAIN WINDOW. Parented to UIParent and strata
+-- DIALOG, like the shopping list, so it survives the Aegis window being closed
+-- and can be dragged anywhere. A ledger you can put beside the auction house
+-- is more useful than one trapped inside it.
+-- ---------------------------------------------------------------------------
+
+-- How many rows the ledger overlay shows. It covers the window's content area,
+-- so the count follows the window exactly as every other list in here does.
+--
+-- It was a fixed number while the ledger was a floating frame of its own size.
+-- Covering the content instead means there is a height to measure, and a
+-- fixed count under a full-height panel would have left rows' worth of empty
+-- space below the table on a tall window.
+function ui.LedgerRowCount()
+    return ui.ListRowsAt(ui.WindowH(), LEDGERBOX, HIST_ROW_H, HIST_ROWS_MAX)
+end
+
+function ui.BuildLedgerWindow()
+    if ui.ledgerFrame then return ui.ledgerFrame end
+
+    -- AN OVERLAY OVER THE WINDOW'S CONTENT, built the way the category picker
+    -- is (ui.BuildCategoryPicker) -- same two-corner anchoring to ui.content,
+    -- same click-swallowing, same "the tab strip stays visible above it".
+    --
+    -- It was a floating frame parented to UIParent, which could be dragged
+    -- beside the auction house. That sounded better than it read: at the size
+    -- a ledger wants it covered the chart it was launched from, and a backdrop
+    -- over a bright green area chart is a backdrop you can see straight
+    -- through. A ledger you cannot read is not worth being able to move.
+    local f = CreateFrame("Frame", "AegisExchangeLedger", ui.frame)
+    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    -- WELL ABOVE THE CONTENT, and the picker's +5 is why this is +50. Frame
+    -- level decides who draws on top within a strata, and a panel's own
+    -- widgets are children of children -- each nesting level is another +1, so
+    -- a small bump leaves the deepest of them drawing THROUGH the overlay.
+    -- That is what the shipped picker does, and it is the "you can still see
+    -- the settings behind it" this window exists not to do.
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)
+    f:EnableMouse(true)   -- swallow clicks so they don't fall through
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    -- A SOLID FILL UNDER THE BACKDROP AS WELL, because a tiling background
+    -- texture at alpha 1 is only as opaque as the texture is, and this one is
+    -- read over a bright filled area chart. Two layers of near-black is the
+    -- difference between a table you read and a table you squint at.
+    local fill = f:CreateTexture(nil, "BACKGROUND")
+    fill:SetPoint("TOPLEFT", f, "TOPLEFT", 3, -3)
+    fill:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, 3)
+    fill:SetTexture(C.well[1], C.well[2], C.well[3])
+    f:Hide()
+    ui.ledgerFrame = f
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Ledger")
+
+    -- THE BUTTON ROWS SIT IN WELLS, and that is not decoration -- it is what
+    -- makes them match the chart's.
+    --
+    -- A button's plate is TRANSLUCENT, so what it reads as depends on the
+    -- ground behind it. The chart's periods sit on a well (0.85 alpha over the
+    -- window's parchment); these sit on this overlay, which is deliberately
+    -- opaque near-black. Same kind, same ui.MarkChosen, two different-looking
+    -- rows -- the chosen one reading filled on the chart and outlined here.
+    -- Giving both rows the same ground is the fix; lightening the overlay is
+    -- not, because being opaque is the whole point of it.
+    local function bar(h, w)
+        local box = CreateFrame("Frame", nil, f)
+        box:SetHeight(h); box:SetWidth(w)
+        local well = ui.MakeWell(f, box, 3)
+        box:SetFrameLevel(well:GetFrameLevel() + 1)
+        return box
+    end
+
+    local perW = HISTL.per_w * table.getn(HIST_PERIODS)
+                 + HISTL.per_gap * (table.getn(HIST_PERIODS) - 1) + 8
+    local perBar = bar(HISTL.per_h + 8, perW)
+    perBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -8)
+    ui.ledgerPerBtns = ui.MakePeriodRow(perBar, -4, -4)
+
+    -- ...and the same for Clear history and Close. ui.BuildHistoryTab anchors
+    -- Clear into this, which is why it is kept on `ui`.
+    local footBar = bar(30, 200)
+    footBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
+    ui.ledgerFootBar = footBar
+
+    -- ---- the two views -------------------------------------------------
+    -- ITEMS FIRST, because it is the question the tab is for: what do I
+    -- actually make on this. Transactions is the receipt behind it.
+    ui.ledgerViewBtns = {}
+    local vprev = nil
+    local views = { { "items", "Items" }, { "txns", "Transactions" } }
+    local vi = 1
+    while vi <= table.getn(views) do
+        local b = ui.MakeButton(f, "quiet")
+        b:SetWidth(HISTL.ledger_view_w); b:SetHeight(HISTL.per_h)
+        if vprev then
+            b:SetPoint("LEFT", vprev, "RIGHT", HISTL.per_gap, 0)
+        else
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", 74, -9)
+        end
+        b:SetText(views[vi][2])
+        b.view = views[vi][1]
+        b:SetScript("OnClick", function() ui.SetLedgerView(b.view) end)
+        ui.ledgerViewBtns[vi] = b
+        vprev = b
+        vi = vi + 1
+    end
+
+    -- ---- the per-item table ----------------------------------------------
+    ui.ledgerSortKey, ui.ledgerSortDir = "profit", "desc"
+    ui.ledgerHeaders = ui.MakeSortHeaders(f, 6, -70, LCX, LCW,
+        function(key) ui.SetLedgerSort(key) end, LEDGER_HEADER_DEFS)
+
+    local iscroll = CreateFrame("ScrollFrame", "AegisExchangeLedgerItemScroll",
+        f, "FauxScrollFrameTemplate")
+    iscroll:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -HISTL.ledger_top)
+    -- THE SCROLLBAR LIVES TO THE RIGHT OF A FauxScrollFrame, outside its own
+    -- rect -- so a frame anchored flush to the window's edge puts its bar
+    -- past it, half-drawn against the border. ledger_scroll_r is the gutter it
+    -- needs, the same idea AUCL.scroll_r serves on the Auctions tab.
+    iscroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT",
+                     -HISTL.ledger_scroll_r,
+                     HISTL.ledger_bot + HISTL.fig_line)
+    -- 1.12 signature: (itemHeight, updateFn). The frame and offset are the
+    -- implicit globals `this` / `arg1`; the offset-first form is a later
+    -- client's and crashes FrameXML here.
+    iscroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.RefreshLedgerItems)
+    end)
+    ui.ledgerItemScroll = iscroll
+
+    ui.ledgerItemRows = {}
+ui.GrowLedgerItemRows = function(n)
+        if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
+        n = ui.RowBudget(ui.ledgerItemRows, n)
+        local li = table.getn(ui.ledgerItemRows) + 1
+        while li <= n do
+            local row = CreateFrame("Button", nil, f)
+            row:SetHeight(HIST_ROW_H)
+            -- A LIST ROW, so pfUI must not plate it -- tests/lint/rowskin.py
+            -- enforces this for anything that gets ui.AddRowChrome.
+            row.aegisNoSkin = true
+            ui.PlaceRow(row, iscroll, li, HIST_ROW_H, ROWPAD.l, ROWPAD.r)
+            ui.AddRowChrome(row, li)
+            local mk = function(cx, w, just)
+                local fs = row:CreateFontString(nil, "OVERLAY",
+                                                "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+                fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+                return fs
+            end
+            row.item    = mk(LCX.item, LCW.item)
+            row.sold    = mk(LCX.sold, LCW.sold, "RIGHT")
+            row.avgSell = mk(LCX.avgSell, LCW.avgSell, "RIGHT")
+            row.bought  = mk(LCX.bought, LCW.bought, "RIGHT")
+            row.avgBuy  = mk(LCX.avgBuy, LCW.avgBuy, "RIGHT")
+            row.profit  = mk(LCX.profit, LCW.profit, "RIGHT")
+            -- The item's own tooltip, the way the History blocks' Top item
+            -- has one. Armed only where the row carries an id.
+            row:SetScript("OnEnter", function()
+                if not row.itemId then return end
+                GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                local shown = false
+                if GameTooltip.SetHyperlink then
+                    shown = pcall(function()
+                        GameTooltip:SetHyperlink("item:" .. row.itemId
+                                                 .. ":0:0:0")
+                    end)
+                end
+                if not shown then GameTooltip:SetText(row.item:GetText() or "") end
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row:Hide()
+            ui.ledgerItemRows[li] = row
+            li = li + 1
+        end
+    end
+    ui.GrowLedgerItemRows(HIST_ROWS)
+
+    ui.ledgerFooter = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.ledgerFooter:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12,
+                             HISTL.ledger_bot - 8)
+    ui.ledgerFooter:SetJustifyH("LEFT")
+    ui.ledgerFooter:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    local closeBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangeLedgerCloseButton")
+    closeBtn:SetWidth(80); closeBtn:SetHeight(22)
+    closeBtn:SetPoint("RIGHT", footBar, "RIGHT", -4, 0)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.HideLedgerWindow() end)
+
+    return f
+end
+
+-- ---------------------------------------------------------------------------
+-- The purchase receipt window
+-- ---------------------------------------------------------------------------
+--
+-- WHAT IT REPLACES. The Buy tab's status line already carried a tally, and it
+-- could only show it when the search had narrowed to ONE item -- see
+-- buy.SoleItemId, which returns nil the moment a result set is about several.
+-- That is a real constraint on a real line: naming one item's total beside
+-- three items' results is a true number attached to the wrong thing. But it
+-- means a crafting run that buys six things has no surface at all, which is
+-- precisely the run worth tracking.
+--
+-- A window has no such constraint, and that is most of why it is better.
+
+-- The footer under the table: what the whole receipt comes to.
+--
+-- PURE, so it can be checked without a frame. Units and auctions are both
+-- named because they answer different questions -- twenty thread out of one
+-- stack and twenty out of twenty singles are different afternoons -- and the
+-- empty case says so in words rather than printing three zeroes.
+function ui.ReceiptFooterText(rows, spent, units, buys)
+    local n = table.getn(rows or {})
+    if n == 0 then
+        return "Nothing bought yet this session."
+    end
+    local items = n == 1 and "1 item" or (n .. " items")
+    local auctions = buys == 1 and "1 auction" or ((buys or 0) .. " auctions")
+    return items .. " \226\128\162 " .. (units or 0) .. " units over "
+        .. auctions .. " \226\128\162 " .. util.ShortMoneyColored(spent or 0)
+end
+
+function ui.ReceiptRowCount()
+    return ui.ListRowsAt(ui.WindowH(), RCPTBOX, HIST_ROW_H, HIST_ROWS_MAX)
+end
+
+function ui.BuildReceiptWindow()
+    if ui.receiptFrame then return ui.receiptFrame end
+
+    -- The Ledger overlay's shape, for the reasons written there: two-corner
+    -- anchored to ui.content, +50 frame level so nothing nested draws through
+    -- it, and a solid fill under the tiling backdrop so it is actually opaque.
+    local f = CreateFrame("Frame", "AegisExchangeReceipt", ui.frame)
+    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)
+    f:EnableMouse(true)
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    local fill = f:CreateTexture(nil, "BACKGROUND")
+    fill:SetPoint("TOPLEFT", f, "TOPLEFT", 3, -3)
+    fill:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, 3)
+    fill:SetTexture(C.well[1], C.well[2], C.well[3])
+    f:Hide()
+    ui.receiptFrame = f
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Receipt")
+    ui.receiptTitle = title
+
+    -- LABELLED FOR WHAT IT ACTUALLY COUNTS. buy.session runs from login to
+    -- logout and deliberately does not clear when the auction house closes --
+    -- a crafting run takes several trips, and a counter that cleared on the
+    -- way out would clear in the middle of the thing it counts. Calling this
+    -- "this visit" would be the one word that makes the number wrong.
+    local sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sub:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    sub:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    sub:SetText("this session \226\128\148 Clear resets it")
+
+    ui.receiptHeaders = ui.MakeSortHeaders(f, 6, -46, RCX, RCW,
+        function(key) ui.SetReceiptSort(key) end, RECEIPT_HEADER_DEFS)
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeReceiptScroll",
+        f, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -RCPT.top)
+    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -RCPT.scrolln, RCPT.bot)
+    -- 1.12 signature: (itemHeight, updateFn). The frame and offset are the
+    -- implicit globals `this` / `arg1`.
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.RefreshReceipt)
+    end)
+    ui.receiptScroll = scroll
+
+    ui.receiptRows = {}
+    ui.GrowReceiptRows = function(n)
+        if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
+        n = ui.RowBudget(ui.receiptRows, n)
+        local i = table.getn(ui.receiptRows) + 1
+        while i <= n do
+            local row = CreateFrame("Button", nil, f)
+            row:SetHeight(HIST_ROW_H)
+            row.aegisNoSkin = true
+            ui.PlaceRow(row, scroll, i, HIST_ROW_H, ROWPAD.l, ROWPAD.r)
+            ui.AddRowChrome(row, i)
+            local mk = function(cx, w, just)
+                local fs = row:CreateFontString(nil, "OVERLAY",
+                                                "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+                fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+                return fs
+            end
+            row.item  = mk(RCX.item, RCW.item)
+            row.units = mk(RCX.units, RCW.units, "RIGHT")
+            row.buys  = mk(RCX.buys, RCW.buys, "RIGHT")
+            row.unit  = mk(RCX.unit, RCW.unit, "RIGHT")
+            row.spent = mk(RCX.spent, RCW.spent, "RIGHT")
+            row:SetScript("OnEnter", function()
+                if not row.itemId then return end
+                GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                local shown = false
+                if GameTooltip.SetHyperlink then
+                    shown = pcall(function()
+                        GameTooltip:SetHyperlink("item:" .. row.itemId
+                                                 .. ":0:0:0")
+                    end)
+                end
+                if not shown then GameTooltip:SetText(row.item:GetText() or "") end
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row:Hide()
+            ui.receiptRows[i] = row
+            i = i + 1
+        end
+    end
+    ui.GrowReceiptRows(HIST_ROWS)
+
+    ui.receiptFooter = f:CreateFontString(nil, "OVERLAY",
+                                          "GameFontHighlightSmall")
+    ui.receiptFooter:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, RCPT.bot - 8)
+    ui.receiptFooter:SetJustifyH("LEFT")
+    ui.receiptFooter:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- Clear and Close share a well, the way the Ledger's footer pair does --
+    -- a button plate is translucent, so the ground behind it is what decides
+    -- whether the pair reads as a pair.
+    local footBar = CreateFrame("Frame", nil, f)
+    footBar:SetHeight(RCPT.bar_h); footBar:SetWidth(RCPT.bar_w)
+    local fwell = ui.MakeWell(f, footBar, 3)
+    footBar:SetFrameLevel(fwell:GetFrameLevel() + 1)
+    footBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
+
+    local closeBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangeReceiptCloseButton")
+    closeBtn:SetWidth(80); closeBtn:SetHeight(22)
+    closeBtn:SetPoint("RIGHT", footBar, "RIGHT", -4, 0)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.HideReceiptWindow() end)
+
+    local clearBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangeReceiptClearButton")
+    clearBtn:SetWidth(80); clearBtn:SetHeight(22)
+    clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    clearBtn:SetText("Clear")
+    ui.receiptClearBtn = clearBtn
+    clearBtn:SetScript("OnClick", function()
+        -- Guarded here as well as by the disabled state: demo mode promises
+        -- nothing real is touched, and the rows on screen are not the ones
+        -- this would clear.
+        if A.db.demo then return end
+        A.buy.ClearSession()
+        ui.RefreshReceipt()
+        -- The Buy tab's own status line carries the same tally, so it has to
+        -- be repainted too -- a Clear that empties the window and leaves the
+        -- line below it saying "12 bought" has cleared nothing the player can
+        -- see.
+        if ui.RefreshBuyStatus then ui.RefreshBuyStatus() end
+    end)
+
+    return f
+end
+
+-- Order the receipt by the chosen column. Biggest-spend-first is the default
+-- and lives in buy.SessionRows; this is what a header click changes.
+function ui.ReceiptSortValue(rec, key)
+    if key == "item" then return string.lower(rec.item or "") end
+    if key == "units" then return rec.units or rec.n or 0 end
+    if key == "buys" then return rec.buys or 0 end
+    if key == "unit" then return rec.unit end
+    return rec.spent or 0
+end
+
+function ui.SortReceiptRows(rows, key, dir)
+    return ui.SortByKey(rows, function(r)
+        return ui.ReceiptSortValue(r, key)
+    end, dir)
+end
+
+function ui.SetReceiptSort(key)
+    ui.receiptSortKey, ui.receiptSortDir =
+        ui.NextSort(ui.receiptSortKey, ui.receiptSortDir, key)
+    ui.RefreshReceipt()
+end
+
+function ui.RefreshReceipt()
+    if not ui.receiptFrame or not ui.receiptScroll then return end
+    local all, spent, units, buys = A.buy.SessionRows()
+    local rows = ui.SortReceiptRows(all, ui.receiptSortKey or "spent",
+                                    ui.receiptSortDir or "desc")
+    ui.PaintSortHeaders(ui.receiptHeaders, ui.receiptSortKey or "spent",
+                        ui.receiptSortDir or "desc")
+
+    local vis = ui.ReceiptRowCount()
+    ui.GrowReceiptRows(vis)
+    ui.SkinNewRows(ui.receiptRows)
+    FauxScrollFrame_Update(ui.receiptScroll, table.getn(rows), vis, HIST_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.receiptScroll)
+
+    local i = 1
+    while i <= table.getn(ui.receiptRows) do
+        local row = ui.receiptRows[i]
+        local rec = (i <= vis) and rows[i + offset] or nil
+        if rec then
+            row.item:SetText(rec.name or "?")
+            local q = rec.itemId and ui.CraftQualityOf(rec.itemId) or nil
+            local cr, cg, cb = ui.QualityColor(q)
+            row.item:SetTextColor(cr, cg, cb)
+            row.itemId = rec.itemId
+            row.units:SetText(tostring(rec.n or 0))
+            row.buys:SetText(tostring(rec.buys or 0))
+            row.unit:SetText(ui.MoneyOrDash(rec.unit))
+            row.spent:SetText(util.ShortMoneyColored(rec.spent or 0))
+            row:Show()
+        else
+            row.itemId = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+
+    ui.receiptFooter:SetText(ui.ReceiptFooterText(rows, spent, units, buys))
+
+    -- DEMO MODE SHOWS THE DEMO LEDGER'S LAST DAY OF BUYING -- see
+    -- buy.DemoSession -- and says so in red, the way the chart's heading does.
+    --
+    -- CLEAR IS OFF while it does. It clears the REAL session, which is not
+    -- what is on screen: pressing it would wipe your actual purchases and
+    -- leave the invented ones sitting there, looking as if it had done nothing.
+    -- Demo mode's one promise is that nothing real is touched.
+    local demo = A.db.demo and true or false
+    if ui.receiptTitle then
+        ui.receiptTitle:SetText(ui.ReceiptTitleText(demo))
+    end
+    if ui.receiptClearBtn then
+        if demo then ui.receiptClearBtn:Disable()
+        else ui.receiptClearBtn:Enable() end
+    end
+end
+
+-- The window's title. PURE, so the demo marking can be checked without a
+-- frame: a demo receipt that looked like a real one is a set of invented
+-- purchases someone might act on.
+function ui.ReceiptTitleText(demo)
+    if demo then return "Receipt  |cffe64c4c(DEMO)|r" end
+    return "Receipt"
+end
+
+function ui.ShowReceiptWindow()
+    ui.BuildReceiptWindow()
+    ui.receiptFrame:Show()
+    ui.RefreshReceipt()
+    ui.RefreshReceiptButton()
+end
+
+function ui.HideReceiptWindow()
+    if ui.receiptFrame then ui.receiptFrame:Hide() end
+    ui.RefreshReceiptButton()
+end
+
+function ui.ToggleReceiptWindow()
+    if ui.receiptFrame and ui.receiptFrame:IsShown() then
+        ui.HideReceiptWindow()
+    else
+        ui.ShowReceiptWindow()
+    end
+end
+
+-- The button's label and pressed state. PURE, for the reason
+-- ui.LedgerButtonState is: a button reading unpressed while its window is open
+-- is the same class of bug as a Clear that repaints one surface and not the
+-- other.
+function ui.ReceiptButtonState(shown)
+    return "Receipt", shown and true or false
+end
+
+function ui.RefreshReceiptButton()
+    if not ui.buyReceiptBtn then return end
+    local shown = ui.receiptFrame and ui.receiptFrame:IsShown() and true or false
+    local label, pressed = ui.ReceiptButtonState(shown)
+    ui.buyReceiptBtn:SetText(label)
+    ui.MarkChosen({ ui.buyReceiptBtn }, function() return pressed end)
+end
+
+function ui.ShowLedgerWindow()
+    ui.BuildHistoryTab()      -- the table lives in the overlay; build it first
+    ui.BuildLedgerWindow()
+    ui.ledgerFrame:Show()
+    ui.RefreshHistory()
+    ui.RefreshLedgerView()
+end
+
+function ui.HideLedgerWindow()
+    if ui.ledgerFrame then ui.ledgerFrame:Hide() end
+    -- The button reads as pressed while the overlay is up, so it has to be
+    -- told when the overlay goes down -- including by its own Close.
+    ui.RefreshLedgerButton()
+end
+
+function ui.ToggleLedgerWindow()
+    if ui.ledgerFrame and ui.ledgerFrame:IsShown() then
+        ui.HideLedgerWindow()
+    else
+        ui.ShowLedgerWindow()
+    end
+end
+
+-- The Ledger button's label and pressed state. PURE, so the pair cannot drift:
+-- a button that says "Ledger" while the window is open, or reads unpressed
+-- while it is, is the same class of bug as a Clear that repaints the bar and
+-- not the list.
+function ui.LedgerButtonState(shown)
+    if shown then return "Ledger", true end
+    return "Ledger", false
+end
+
+function ui.RefreshLedgerButton()
+    if not ui.histLedgerBtn then return end
+    local shown = ui.ledgerFrame and ui.ledgerFrame:IsShown() and true or false
+    local label, pressed = ui.LedgerButtonState(shown)
+    ui.histLedgerBtn:SetText(label)
+    ui.MarkChosen({ ui.histLedgerBtn }, function() return pressed end)
+end
+
+-- Sort key for the per-item table. A NIL SORTS LAST whichever direction the
+-- column runs, because "we do not know" is not a small number -- putting the
+-- unknowns at the top of a descending Avg Profit would read as the best rows
+-- in the table.
+function ui.LedgerSortValue(rec, key)
+    if key == "item" then return string.lower(rec.item or "") end
+    if key == "sold" then return rec.sold or 0 end
+    if key == "bought" then return rec.bought or 0 end
+    if key == "avgSell" then return rec.avgSell end
+    if key == "avgBuy" then return rec.avgBuy end
+    if key == "profit" then return rec.avgProfit end
+    return rec.item
+end
+
+function ui.SortLedgerItems(rows, key, dir)
+    local known, unknown = {}, {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local v = ui.LedgerSortValue(rows[i], key)
+        if v == nil then table.insert(unknown, rows[i])
+        else table.insert(known, rows[i]) end
+        i = i + 1
+    end
+    known = ui.SortByKey(known, function(r)
+        return ui.LedgerSortValue(r, key)
+    end, dir)
+    -- Appended, never interleaved, and in either direction.
+    local out = {}
+    i = 1
+    while i <= table.getn(known) do table.insert(out, known[i]); i = i + 1 end
+    i = 1
+    while i <= table.getn(unknown) do table.insert(out, unknown[i]); i = i + 1 end
+    return out
+end
+
+-- Which half of the ledger is showing. PURE: it returns what should be shown
+-- and hidden rather than doing it, so the pairing cannot drift -- a widget
+-- left on from the other view is the whole failure mode of a two-view frame.
+function ui.LedgerViewParts(view)
+    local items = (view ~= "txns")
+    return items, not items
+end
+
+function ui.SetLedgerView(view)
+    ui.ledgerView = (view == "txns") and "txns" or "items"
+    ui.RefreshLedgerView()
+end
+
+function ui.RefreshLedgerView()
+    local showItems, showTxns = ui.LedgerViewParts(ui.ledgerView)
+    ui.MarkChosen(ui.ledgerViewBtns, function(b)
+        return b.view == (ui.ledgerView or "items")
+    end)
+    -- WHATEVER ONE VIEW SHOWS, THE OTHER MUST HIDE. Listed rather than toggled
+    -- in two places: the headers, the scroll frame, every pooled row and the
+    -- footer all belong to one view or the other, and one left behind draws
+    -- through the other's table.
+    local function setShown(widget, on)
+        if not widget then return end
+        if on then widget:Show() else widget:Hide() end
+    end
+    setShown(ui.ledgerItemScroll, showItems)
+    setShown(ui.ledgerFooter, showItems)
+    setShown(ui.histScroll, showTxns)
+    setShown(ui.histTotals, showTxns)
+    setShown(ui.histNote, showTxns)
+    for _, h in pairs(ui.ledgerHeaders or {}) do setShown(h, showItems) end
+    for _, h in pairs(ui.histHeaders or {}) do setShown(h, showTxns) end
+    local i = 1
+    while i <= table.getn(ui.ledgerItemRows or {}) do
+        if not showItems then ui.ledgerItemRows[i]:Hide() end
+        i = i + 1
+    end
+    i = 1
+    while i <= table.getn(ui.histRows or {}) do
+        if not showTxns then ui.histRows[i]:Hide() end
+        i = i + 1
+    end
+    if showItems then ui.RefreshLedgerItems() else ui.UpdateHistoryList() end
+end
+
+function ui.SetLedgerSort(key)
+    if ui.ledgerSortKey == key then
+        ui.ledgerSortDir = (ui.ledgerSortDir == "asc") and "desc" or "asc"
+    else
+        ui.ledgerSortKey = key
+        -- A NEW COLUMN OPENS DESCENDING except the name, which reads forwards.
+        -- Every other column here is a quantity and the interesting end of a
+        -- quantity is the big one.
+        ui.ledgerSortDir = (key == "item") and "asc" or "desc"
+    end
+    ui.RefreshLedgerItems()
+end
+
+function ui.RefreshLedgerItems()
+    if not ui.ledgerItemRows then return end
+    local secs = HIST_PERIODS[ui.histPeriod or 2].secs
+    local since = (secs > 0) and (time() - secs) or nil
+    local all = A.db.LedgerItems(since)
+    local rows = ui.SortLedgerItems(all, ui.ledgerSortKey or "profit",
+                                    ui.ledgerSortDir or "desc")
+    ui.PaintSortHeaders(ui.ledgerHeaders, ui.ledgerSortKey or "profit",
+                        ui.ledgerSortDir or "desc")
+
+    local vis = ui.LedgerRowCount()
+    ui.GrowLedgerItemRows(vis)
+    ui.SkinNewRows(ui.ledgerItemRows)
+    FauxScrollFrame_Update(ui.ledgerItemScroll, table.getn(rows), vis,
+                           HIST_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.ledgerItemScroll)
+    local i = 1
+    while i <= table.getn(ui.ledgerItemRows) do
+        local row = ui.ledgerItemRows[i]
+        local rec = (i <= vis) and rows[i + offset] or nil
+        if rec then
+            row.item:SetText(rec.item or "?")
+            -- A STATED QUALITY WINS, the same way ui.HistBlocks prefers
+            -- row[4]. The client can only answer for an item it has cached,
+            -- which a demo item never is -- see db.DemoQuality.
+            local q = rec.quality
+                      or (rec.itemId and ui.CraftQualityOf(rec.itemId)) or nil
+            local cr, cg, cb = ui.QualityColor(q)
+            row.item:SetTextColor(cr, cg, cb)
+            row.itemId = rec.itemId
+
+            row.sold:SetText(ui.CountText(rec.sold, rec.soldUnknown))
+            row.bought:SetText(ui.CountText(rec.bought, rec.boughtUnknown))
+            row.avgSell:SetText(ui.MoneyOrDash(rec.avgSell))
+            row.avgBuy:SetText(ui.MoneyOrDash(rec.avgBuy))
+            local txt, pr, pg, pb = ui.ProfitText(rec.avgProfit)
+            row.profit:SetText(txt)
+            row.profit:SetTextColor(pr, pg, pb)
+            row:Show()
+        else
+            row.itemId = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+
+    local resold, profit, skipped = A.db.LedgerItemTotals(all)
+    if ui.ledgerFooter then
+        ui.ledgerFooter:SetText(ui.LedgerFooterText(resold, profit, skipped))
+    end
+end
+
 -- approximate arrival time so the same mail isn't re-counted across sessions).
 function ui.ScanMailSales()
     -- Stand down when a companion addon (Aegis: Courier) owns the mailbox.
@@ -12909,6 +13954,11 @@ function ui.ScanMailSales()
     while i <= n do
         local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
         local item = AuctionSoldItem(subject)
+        -- HEADER ONLY, STILL. GetInboxInvoiceInfo would give the buyer, the
+        -- deposit and the cut -- and it MARKS THE MAIL AS READ, which shortens
+        -- its timeout. Calling it here would do that to every mail in the box,
+        -- including mail Aegis has nothing to do with. It belongs on opening
+        -- ONE mail, never in this loop. See ROADMAP 5.6b.
         if item and money and money > 0 then
             -- Key built through the shared helper, which Courier also calls --
             -- that is what stops a mail Aegis already logged from being
@@ -12916,7 +13966,37 @@ function ui.ScanMailSales()
             local key = A.MailTxnKey(subject, money, daysLeft)
             if not A.db.WasSeen(key) then
                 A.db.MarkSeen(key)
-                A.db.RecordTxn("sale", item, money)
+                -- WITH AN ITEM ID WHERE ONE CAN BE FOUND. The 1.12 inbox
+                -- gives a subject line and no link, so the id has to come from
+                -- the name -- db.IdFromName exists for exactly this. Without
+                -- it every mail-logged sale stored a name and nothing else,
+                -- which is why the History tab's Top item could be hovered on
+                -- the Expenses side (bought through the Buy tab, which knows
+                -- the id) and not on the Sales side.
+                -- HOW MANY, from what we posted. The mailbox cannot say --
+                -- not in the subject, not in the invoice, and a sold auction
+                -- has no attachment to count. db.MatchPosting returns nil when
+                -- this character has several stacks of the item up at
+                -- different sizes, and db.RecordTxn treats that as unknown
+                -- rather than as one.
+                --
+                -- INSIDE THE DEDUPE, deliberately: matching CONSUMES a
+                -- posting, so the same call outside this guard would eat one
+                -- per re-scan of a mail already logged.
+                local qty = A.db.MatchPosting(item)
+                A.db.RecordTxn("sale", item, money, A.db.IdFromName(item), qty)
+            end
+        end
+        -- An auction that came back unsold stops waiting for a sale mail.
+        -- Deduped through the same seen-set, because this loop runs on every
+        -- MAIL_INBOX_UPDATE and an expiry consumed twice eats a posting that
+        -- is still up.
+        local back = AuctionExpiredItem(subject)
+        if back then
+            local ekey = A.MailTxnKey(subject, money or 0, daysLeft)
+            if not A.db.WasSeen(ekey) then
+                A.db.MarkSeen(ekey)
+                A.db.ExpirePosting(back)
             end
         end
         i = i + 1
@@ -12930,12 +14010,19 @@ function ui.BuildHistoryTab()
     ui.histBuilt = true
     ui.histPeriod = 2   -- default to 7d
 
+    -- THE TABLE'S WIDGETS ARE PARENTED TO THE LEDGER WINDOW, not to the panel.
+    -- Everything below that used to say `panel` for the list half now says
+    -- `host` -- that one word is what moved the table out of the tab. The
+    -- rows, their headers, the totals line and the Clear button are otherwise
+    -- identical, because what changed is where they live, not what they do.
+    local host = ui.BuildLedgerWindow()
+
     -- THE PERIOD BUTTONS ARE THE CHART'S NOW -- see ui.BuildHistoryGraph. They
     -- sat here, at the panel's top-left, a table's width away from the thing
     -- they change, so nothing about the layout said they were connected. The
     -- band they used to occupy is what LISTBOX.hist.top gave back to the
     -- table.
-    local clearBtn = ui.MakeButton(panel, "quiet")
+    local clearBtn = ui.MakeButton(host, "quiet")
     clearBtn:SetWidth(100); clearBtn:SetHeight(20)
     clearBtn:SetText("Clear history")
     clearBtn:SetScript("OnClick", function()
@@ -12944,12 +14031,12 @@ function ui.BuildHistoryTab()
     ui.histClearBtn = clearBtn
 
     -- Totals line.
-    ui.histTotals = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ui.histTotals:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -12)
+    ui.histTotals = host:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ui.histTotals:SetPoint("TOPLEFT", host, "TOPLEFT", HISTL.edge, -30)
     ui.histTotals:SetJustifyH("LEFT")
 
-    ui.histNote = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histNote:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -32)
+    ui.histNote = host:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.histNote:SetPoint("TOPLEFT", host, "TOPLEFT", HISTL.edge, -50)
     ui.histNote:SetJustifyH("LEFT")
     ui.histNote:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
@@ -12963,19 +14050,19 @@ function ui.BuildHistoryTab()
     local rowLeft = 6
     ui.histSortKey = "when"
     ui.histSortDir = "desc"
-    ui.histHeaders = ui.MakeSortHeaders(panel, rowLeft, -54, HCX, HCW,
+    ui.histHeaders = ui.MakeSortHeaders(host, rowLeft, -70, HCX, HCW,
         function(key) ui.SetHistSort(key) end, HIST_HEADER_DEFS)
 
     local scroll = CreateFrame("ScrollFrame", "AegisExchangeHistScroll",
-        panel, "FauxScrollFrameTemplate")
-    -- ANCHORED DOWN THE LEFT, not corner to corner. The panel is split now
-    -- and the table is its left half, so the width is set from
-    -- ui.HistWidthsAt rather than taken from a right-hand anchor -- a
-    -- BOTTOMRIGHT anchor here would put the table under the chart.
-    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", rowLeft, -LISTBOX.hist.top)
-    scroll:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", rowLeft,
-                    LISTBOX.hist.bot)
-    scroll:SetWidth(HISTL.left_min - HISTL.edge * 2)
+        host, "FauxScrollFrameTemplate")
+    -- CORNER TO CORNER of the ledger window, which is the whole reason the
+    -- table moved. It was anchored down the LEFT only, with its width set from
+    -- ui.HistWidthsAt, because a BOTTOMRIGHT anchor would have put it under
+    -- the chart it shared the panel with. Nothing shares this window, so both
+    -- corners are available and the width follows the frame.
+    scroll:SetPoint("TOPLEFT", host, "TOPLEFT", rowLeft, -HISTL.ledger_top)
+    scroll:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT",
+                    -HISTL.ledger_scroll_r, HISTL.ledger_bot)
 
     -- ANCHORED TO THE TABLE, not to the panel. Clear history used to sit at
     -- the panel's top-right, which is where the chart is now -- and the
@@ -12987,8 +14074,12 @@ function ui.BuildHistoryTab()
     -- sits between the totals line and the rows -- the button was anchored to
     -- the only thing that follows the split and then placed into the one band
     -- that was already occupied.
+    -- ON THE LEDGER'S FOOT BAR, beside Close, sharing its well so the two read
+    -- as one row on one ground -- see the note there about why the ground is
+    -- what makes a button's plate match.
     clearBtn:ClearAllPoints()
-    clearBtn:SetPoint("TOPRIGHT", scroll, "TOPRIGHT", 0, LISTBOX.hist.top - 8)
+    clearBtn:SetHeight(22)
+    clearBtn:SetPoint("LEFT", ui.ledgerFootBar, "LEFT", 4, 0)
     scroll:SetScript("OnVerticalScroll", function()
         FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.UpdateHistoryList)
     end)
@@ -13006,7 +14097,7 @@ ui.GrowHistRows = function(n)
             -- enabled at all, so they received no hover events of any kind --
             -- a ledger line is not clickable, but it should still light up
             -- under the cursor like every other row in the window.
-            local row = CreateFrame("Button", nil, panel)
+            local row = CreateFrame("Button", nil, host)
             row:SetHeight(HIST_ROW_H)
             -- A LIST ROW, so pfUI must not plate it. SkinWidget gives
             -- every Button its generic plate, and on a row that border is
@@ -13042,13 +14133,56 @@ end
 -- ITS OWN BUILDER, like ui.BuildBidsHalf, and for the same reason -- see the
 -- BUYL note on the 32-upvalue ceiling, which is a load failure rather than a
 -- warning. Splitting a tab's widgets across two functions splits its upvalue
+-- One row of period buttons, anchored by its RIGHT edge at (x, y) inside
+-- `parent`. Returns the array, indexed by period so ui.MarkChosen can find the
+-- chosen one.
+--
+-- EXTRACTED BECAUSE THERE ARE TWO OF THEM. The chart has a row in its title
+-- bar, and the ledger -- which covers the whole content area, so the chart's
+-- row is behind it -- needs its own. Two copies of this loop is two places for
+-- a sixth period to be forgotten.
+--
+-- BUILT RIGHT TO LEFT, because the row is anchored by its right edge: its
+-- container's width moves with the window and the periods have to stay against
+-- its far side.
+--
+-- EVERY ROW DRIVES THE SAME `ui.histPeriod` and calls the same repaint, so the
+-- two can never disagree about what week it is.
+function ui.MakePeriodRow(parent, x, y)
+    local out = {}
+    local prev = nil
+    local pi = table.getn(HIST_PERIODS)
+    while pi >= 1 do
+        local b = ui.MakeButton(parent, "quiet")
+        b:SetWidth(HISTL.per_w); b:SetHeight(HISTL.per_h)
+        if prev then
+            b:SetPoint("RIGHT", prev, "LEFT", -HISTL.per_gap, 0)
+        else
+            b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", x, y)
+        end
+        b:SetText(HIST_PERIODS[pi].label)
+        b.idx = pi
+        b:SetScript("OnClick", function()
+            ui.histPeriod = b.idx
+            ui.RefreshHistory()
+        end)
+        out[pi] = b
+        prev = b
+        pi = pi - 1
+    end
+    return out
+end
+
 -- count too.
 function ui.BuildHistoryGraph(panel)
+    -- ALL FOUR CORNERS. It used to be anchored down the RIGHT with a width
+    -- set from the split; the tab is the dashboard now and the chart has the
+    -- whole panel, so there is no width to compute and no left edge to leave
+    -- room at.
     local box = CreateFrame("Frame", nil, panel)
-    box:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -HISTL.edge, -LISTBOX.hist.top)
+    box:SetPoint("TOPLEFT", panel, "TOPLEFT", HISTL.edge, -LISTBOX.hist.top)
     box:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT",
                  -HISTL.edge, LISTBOX.hist.bot)
-    box:SetWidth(HISTL.graph_min)
     ui.MakeWell(panel, box, 4)
     ui.histGraph = box
 
@@ -13083,30 +14217,19 @@ function ui.BuildHistoryGraph(panel)
     -- a preview mode is someone reading it as their own gold.
     ui.histHeading = heading
 
-    ui.histPerBtns = {}
-    local prev = nil
-    local pi = table.getn(HIST_PERIODS)
-    -- BUILT RIGHT TO LEFT, because the row is anchored by its right edge --
-    -- the chart's width moves with the window and the periods have to stay
-    -- against its far side.
-    while pi >= 1 do
-        local b = ui.MakeButton(box, "quiet")
-        b:SetWidth(HISTL.per_w); b:SetHeight(HISTL.per_h)
-        if prev then
-            b:SetPoint("RIGHT", prev, "LEFT", -HISTL.per_gap, 0)
-        else
-            b:SetPoint("TOPRIGHT", box, "TOPRIGHT", -HISTL.plot_side, -5)
-        end
-        b:SetText(HIST_PERIODS[pi].label)
-        b.idx = pi
-        b:SetScript("OnClick", function()
-            ui.histPeriod = b.idx
-            ui.RefreshHistory()
-        end)
-        ui.histPerBtns[pi] = b
-        prev = b
-        pi = pi - 1
-    end
+    -- THE OTHER SCREEN. The table used to sit to the left of this chart; it is
+    -- its own window now (ui.BuildLedgerWindow) and this is the way in. Beside
+    -- the heading rather than out at the right edge, because the period
+    -- buttons own that end and a button that opens a window is not one of a
+    -- set of five that change this one.
+    local ledgerBtn = ui.MakeButton(box, "quiet")
+    ledgerBtn:SetWidth(HISTL.ledger_btn_w); ledgerBtn:SetHeight(HISTL.per_h)
+    ledgerBtn:SetPoint("LEFT", heading, "RIGHT", 12, 0)
+    ledgerBtn:SetText("Ledger")
+    ledgerBtn:SetScript("OnClick", function() ui.ToggleLedgerWindow() end)
+    ui.histLedgerBtn = ledgerBtn
+
+    ui.histPerBtns = ui.MakePeriodRow(box, -HISTL.plot_side, -5)
 
     -- ROW TWO: whose gold. The picker's own button says which, so there is no
     -- second label repeating it.
@@ -13192,12 +14315,99 @@ function ui.BuildHistoryGraph(panel)
     -- are the plotted line's own; earned, spent and net come from the same
     -- ledger totals the table's heading uses, so the two halves of this tab
     -- cannot disagree about the period.
-    ui.histStatL = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatL:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 18)
-    ui.histStatL:SetJustifyH("LEFT")
-    ui.histStatR = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    ui.histStatR:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", HISTL.plot_side, 4)
-    ui.histStatR:SetJustifyH("LEFT")
+    -- THE FIGURE STRIP AND THE BLOCKS UNDER IT. Created here with no points:
+    -- both are laid out in COLUMNS whose width follows the window, so
+    -- ui.PaintHistFigures places them on every repaint. See ui.BlockColumns
+    -- for why that is arithmetic rather than a chain of anchors.
+    --
+    -- Three rows of running text is what this was while the chart shared the
+    -- tab with the ledger table and had no width for a strip.
+    local function cell(parent, font)
+        local fs = parent:CreateFontString(nil, "OVERLAY",
+            font or "GameFontHighlightSmall")
+        fs:SetJustifyH("LEFT")
+        return fs
+    end
+
+    -- TWO WELLS, the way the reference frames these: the figure band in one,
+    -- the three blocks in another. Their contents are CHILDREN of the wells
+    -- rather than siblings, because a child frame draws above ALL of its
+    -- parent's regions whatever layer they are on -- the same rule that makes
+    -- pfUI's backdrops cover an edit box's text (see ui.skin's EditBoxPlate).
+    -- FontStrings on `box` with a well frame over them would be behind it.
+    local function well(h, y)
+        local f = CreateFrame("Frame", nil, box)
+        f:SetHeight(h)
+        f:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT",
+                   HISTL.plot_side + HISTL.y_gutter, y)
+        f:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -HISTL.plot_side, y)
+        local w = ui.MakeWell(box, f, 3)
+        f:SetFrameLevel(w:GetFrameLevel() + 1)
+        return f
+    end
+    ui.histBand  = well(HISTL.band_h,  HISTL.band_y)
+    ui.histStats = well(HISTL.stats_h, HISTL.stats_y)
+
+    ui.histStrip = {}
+    local si = 1
+    while si <= HISTL.strip_cells do
+        ui.histStrip[si] = { label = cell(ui.histBand),
+                             value = cell(ui.histBand) }
+        ui.histStrip[si].value:SetJustifyH("RIGHT")
+        si = si + 1
+    end
+
+    -- The caveat that rides on the strip -- "alts as last seen". Its own
+    -- string because it is right-aligned against the far edge while the strip
+    -- runs from the left, and two strings that can both grow may not share a
+    -- line from opposite ends. That is the collision the old two-row layout
+    -- was built around; it is still true, and this is the one case left.
+    ui.histNoteFS = cell(box)
+    ui.histNoteFS:SetJustifyH("RIGHT")
+    ui.histNoteFS:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    ui.histBlocks = {}
+    local bi = 1
+    while bi <= HISTL.block_count do
+        local blk = { title = cell(ui.histStats), rows = {} }
+        blk.title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+        local ri = 1
+        while ri <= HISTL.block_rows do
+            blk.rows[ri] = { label = cell(ui.histStats),
+                             value = cell(ui.histStats) }
+            blk.rows[ri].value:SetJustifyH("RIGHT")
+            ri = ri + 1
+        end
+        -- A HOVER TARGET OVER THE LAST ROW'S VALUE, which is the Top item. A
+        -- FontString takes no mouse events, so the tooltip needs a frame of
+        -- its own sitting on top of it -- placed and shown by the painter,
+        -- because only it knows whether that row has an item at all.
+        local hot = CreateFrame("Button", nil, ui.histStats)
+        hot:SetHeight(HISTL.fig_line)
+        -- NOT A BUTTON TO LOOK AT. It is an invisible hover target over a
+        -- FontString, and ui.skin's SkinWidget plates every Button it is given
+        -- -- which drew a blue bar straight through the item's name. Same
+        -- opt-out list rows use; see tests/lint/rowskin.py.
+        hot.aegisNoSkin = true
+        hot:EnableMouse(true)
+        hot:Hide()
+        hot:SetScript("OnEnter", function()
+            if not hot.itemId then return end
+            GameTooltip:SetOwner(hot, "ANCHOR_RIGHT")
+            local shown = false
+            if GameTooltip.SetHyperlink then
+                shown = pcall(function()
+                    GameTooltip:SetHyperlink("item:" .. hot.itemId .. ":0:0:0")
+                end)
+            end
+            if not shown then GameTooltip:SetText(hot.itemName or "") end
+            GameTooltip:Show()
+        end)
+        hot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        blk.hot = hot
+        ui.histBlocks[bi] = blk
+        bi = bi + 1
+    end
 
     -- THE HOVER READOUT: a vertical rule under the cursor and the figure it
     -- crosses. Drawn in OVERLAY so it sits above the fill and the line.
@@ -13502,14 +14712,12 @@ end
 
 -- Place the two halves at the current window width, and draw the chart.
 function ui.UpdateHistoryGraph()
-    if not ui.histGraph or not ui.histScroll then return end
-    local tableW, graphW = ui.HistWidthsAt(ui.WindowW())
-    -- The table is anchored top and bottom, so its WIDTH is what moves. The
-    -- opposite of the Auctions split, and for the opposite reason: there the
-    -- height was the variable, so the frame could not be anchored at both
-    -- ends; here the height is fixed and the width is set.
-    ui.histScroll:SetWidth(tableW - HISTL.edge * 2)
-    ui.histGraph:SetWidth(graphW)
+    if not ui.histGraph then return end
+    -- NO WIDTHS SET HERE ANY MORE. Both frames are anchored by two corners --
+    -- the chart to the panel, the table to the ledger window -- so each one
+    -- follows its container without arithmetic. This used to divide the panel
+    -- between them through ui.HistWidthsAt, which is the function the split
+    -- took with it.
 
     -- The menu is rebuilt here rather than at build time: the list of
     -- characters grows the first time an alt is seen.
@@ -13520,7 +14728,8 @@ function ui.UpdateHistoryGraph()
     -- BUCKETS FROM THE PLOT WIDTH. See ui.HistBucketCount: a fixed count is
     -- what made the line a staircase at any column width.
     local n = ui.HistBucketCount(pw)
-    local from, step = ui.HistWindow(A.db.Ledger(), time(), period.secs, n)
+    local from, step =
+        ui.HistWindow(A.db.LedgerSource(), time(), period.secs, n)
 
     local values, title, note =
         ui.HistGoldSeries(ui.histWho, from, step, n)
@@ -13620,13 +14829,14 @@ function ui.UpdateHistoryGraph()
     ui.histFrom, ui.histStep, ui.histN = from, step, n
 
     -- The figures a chart cannot be read precisely enough to give you.
+    --
+    -- ONE PASS over the ledger for all of them (A.db.LedgerStats), rather than
+    -- LedgerTotals plus a walk per figure. Which row each figure sits on is
+    -- ui.HistFigures' business, not this function's -- so the grid that 3.3b
+    -- wants changes the renderer and leaves the arithmetic alone.
     local since = (period.secs > 0) and (time() - period.secs) or nil
-    local earned, spent = A.db.LedgerTotals(since)
-    local top = ui.StatLine("HIGH", hi, "LOW", lo)
-    if note then top = top .. "   |cff8c7a4e" .. note .. "|r" end
-    ui.histStatL:SetText(top)
-    ui.histStatR:SetText(ui.StatLine("IN", earned, "OUT", spent,
-                                     "NET", earned - spent))
+    local st = A.db.LedgerStats(since)
+    ui.PaintHistFigures(st, hi, lo, pw, note)
 end
 
 -- Track the cursor across the plot. Called every frame the plot is shown; it
@@ -13662,26 +14872,381 @@ end
 --
 -- Pure, and it takes its pairs as plain arguments rather than a table so the
 -- call site reads as the line it produces. Lua 5.0 has no `select`, so the
--- varargs arrive in `arg` -- see HARD RULE 4.
-function ui.StatLine(...)
+-- The figure strip under the chart: SIX { label, value } cells in one row,
+-- the same six the reference carries above its blocks.
+--
+-- PURE, and it hands back cells rather than a finished string, because how
+-- they are laid out is a layout decision and the layout is the half that keeps
+-- changing. It returned three stacked rows while the chart was sharing the tab
+-- with the ledger table and had no width for a strip; the table is its own
+-- window now (ui.BuildLedgerWindow) and the chart has the panel.
+--
+-- AN ABSENT FIGURE IS AN EM DASH, not a zero. "TOP SALE 0c" claims you sold
+-- something for nothing; the dash says the period holds no sale at all, which
+-- is the true thing and the one the empty chart beside it is already saying.
+--
+-- VALUES ARE ALREADY STRINGS. util.ShortMoney is what the axis uses -- "12g",
+-- "4.2kg" -- and the whole reason these figures fit at all is that they are
+-- said the short way. util.FormatMoney's "1,240g 17s 3c" is longer than the
+-- narrowest the graph pane is allowed to be.
+--
+-- COUNTS ARE NOT MONEY. "SOLD 14" is a number of transactions, and running it
+-- through a money formatter would render it as 14 copper, which is a wrong
+-- answer that looks like a right one.
+function ui.HistFigures(st, hi, lo)
+    st = st or {}
+    return {
+        { "HIGH",     util.ShortMoneyColored(hi or 0) },
+        { "LOW",      util.ShortMoneyColored(lo or 0) },
+        { "SOLD",     tostring(st.saleN or 0) },
+        { "BOUGHT",   tostring(st.buyN or 0) },
+        { "TOP SALE", st.topSale and util.ShortMoneyColored(st.topSale.amount)
+                      or "\226\128\148" },
+        { "TOP BUY",  st.topBuy and util.ShortMoneyColored(st.topBuy.amount)
+                      or "\226\128\148" },
+    }
+end
+
+-- Truncate toward zero. math.floor rounds DOWN, which for a negative average
+-- is away from zero -- and a loss reported as bigger than it is, in the one
+-- figure on this tab that is allowed to be negative, is the wrong direction to
+-- be wrong in.
+function ui.Trunc(v)
+    v = v or 0
+    if v < 0 then return -math.floor(-v) end
+    return math.floor(v)
+end
+
+-- One row of { label, value } pairs as the coloured string a FontString takes.
+-- Labels dim, values plain, three spaces between pairs -- the spacing the two
+-- stat rows already used before there were three of them.
+function ui.FigureText(row)
     local out = ""
     local i = 1
-    while i + 1 <= arg.n do
-        local cap, v = arg[i], arg[i + 1]
+    while i <= table.getn(row or {}) do
+        local pair = row[i]
         if out ~= "" then out = out .. "   " end
-        local money
-        if v and v < 0 then money = "-" .. util.FormatMoney(-v, true)
-        else money = util.FormatMoney(v or 0, true) end
-        out = out .. "|cff8c7a4e" .. cap .. "|r " .. money
-        i = i + 2
+        out = out .. "|cff8c7a4e" .. (pair[1] or "") .. "|r "
+            .. (pair[2] or "")
+        i = i + 1
     end
     return out
 end
 
+-- Equal columns across a width. Returns { {x, w}, ... }, left to right.
+--
+-- ARITHMETIC, NOT ANCHORS. Three blocks each anchored to the one before it
+-- drift by a rounding error per gap and the third ends up short -- which shows
+-- as the Profit block's figures clipping and nothing else. One divide, three
+-- positions, and the geometry suite can ask what they are.
+--
+-- A width too small for the gaps alone still returns positive columns, because
+-- this runs before UIParent has been measured on some logins and a zero-width
+-- FontString is not laid out at all.
+function ui.BlockColumns(width, n, gap)
+    local out = {}
+    n = n or 1
+    if n < 1 then n = 1 end
+    gap = gap or 0
+    local avail = (width or 0) - gap * (n - 1)
+    local w = math.floor(avail / n)
+    -- NEVER ZERO, and not merely never negative: a FontString given a width of
+    -- zero is not laid out at all, so a column that collapses takes its text
+    -- with it rather than clipping it.
+    if w < 1 then w = 1 end
+    local i = 1
+    while i <= n do
+        table.insert(out, { x = (i - 1) * (w + gap), w = w })
+        i = i + 1
+    end
+    return out
+end
+
+-- The three stat blocks, as data: { title, rows = { {label, value, itemId} } }.
+--
+-- SAME SHAPE AS ui.HistFigures AND FOR THE SAME REASON -- the renderer is the
+-- half that keeps changing, so the arithmetic hands back values and says
+-- nothing about where they go.
+--
+-- TOP ITEM CARRIES ITS ITEM ID as a third element, because the reference
+-- colours that name by quality and a name alone cannot be coloured. It is nil
+-- for an item recorded before ids were kept, which ui.QualityColor already
+-- treats as a real state rather than an error.
+--
+-- PROFIT'S TOP ITEM IS THE TOP SELLER, not a per-item profit. Profit per item
+-- needs what you PAID for the thing you sold, and the ledger does not record a
+-- quantity yet -- see ROADMAP 5.6. Labelled "Top seller" so it does not claim
+-- to be the other thing.
+function ui.HistBlocks(st)
+    st = st or {}
+    local days = st.days or 1
+    -- { label, name, itemId, quality }. The quality is the FOURTH element and
+    -- is usually nil: a real ledger row does not record one, and the client
+    -- answers for it through ui.CraftQualityOf. Demo rows DO carry it, because
+    -- the client has never seen those items and so cannot answer -- which is
+    -- how three invented epics drew in the ordinary text colour.
+    local function top(rec, label)
+        if not rec then return { label, "\226\128\148" } end
+        return { label, rec.item or "?", rec.itemId, rec.quality }
+    end
+    return {
+        {
+            title = "SALES",
+            rows = {
+                { "Total",   util.ShortMoneyColored(st.income or 0) },
+                { "Per day", util.ShortMoneyColored(
+                    ui.Trunc(A.db.PerDay(st.income or 0, days))) },
+                top(st.topSaleItem, "Top item"),
+            },
+        },
+        {
+            title = "EXPENSES",
+            rows = {
+                { "Total",   util.ShortMoneyColored(st.spend or 0) },
+                { "Per day", util.ShortMoneyColored(
+                    ui.Trunc(A.db.PerDay(st.spend or 0, days))) },
+                top(st.topBuyItem, "Top item"),
+            },
+        },
+        {
+            title = "PROFIT",
+            rows = {
+                { "Total",   util.ShortMoneyColored(st.net or 0) },
+                { "Per day", util.ShortMoneyColored(
+                    ui.Trunc(A.db.PerDay(st.net or 0, days))) },
+                top(st.topSaleItem, "Top seller"),
+            },
+        },
+    }
+end
+
+-- Where figure `i` of the band sits: column, row.
+--
+-- PAIRED DOWN THE COLUMNS, not along the rows, which is how the reference
+-- groups them: the chart's own extremes together, then the two counts, then
+-- the two biggest transactions. Reading across would put HIGH beside SOLD,
+-- which are not two answers to one question.
+function ui.FigureSlot(i)
+    i = (i or 1) - 1
+    return math.floor(i / 2) + 1, math.mod(i, 2) + 1
+end
+
+-- A unit count that may be partly unknown.
+--
+-- UNKNOWN STAYS UNKNOWN. Every sale logged before v1.54.7 has no quantity, and
+-- so does one this character could not match against a posting -- so a column
+-- of unit counts is, for anyone with history, partly a column of things we do
+-- not know. Rendering those as 1, or leaving them out of the number without
+-- saying, are both a total the player cannot reconcile against their own mail.
+--
+--   "120"      every transaction counted
+--   "120 +2?"  120 units counted, and two transactions whose size is unknown
+--   "?"        nothing countable at all
+--
+-- The "+2?" is deliberately not a unit count: two UNCOUNTED SALES might be two
+-- items or forty, and writing "+2" without the question mark would read as the
+-- former.
+function ui.CountText(known, unknown)
+    known = known or 0
+    unknown = unknown or 0
+    if known <= 0 then
+        if unknown > 0 then return "?" end
+        return NO_VALUE
+    end
+    if unknown > 0 then return known .. " +" .. unknown .. "?" end
+    return tostring(known)
+end
+
+-- Money, or an em dash when there is no answer. Separate from CountText
+-- because a missing PRICE and a missing COUNT are different absences and the
+-- table shows both in one row.
+function ui.MoneyOrDash(copper)
+    if not copper then return NO_VALUE end
+    return util.ShortMoneyColored(copper)
+end
+
+-- A per-unit profit, signed and coloured. Returns text, r, g, b.
+--
+-- COLOURED BECAUSE THE SIGN IS THE POINT. This is the column the table exists
+-- for, and a minus sign in the same colour as everything else is a number you
+-- have to read rather than see.
+function ui.ProfitText(copper)
+    if not copper then return NO_VALUE, C.text[1], C.text[2], C.text[3] end
+    local c = (copper < 0) and C.spend or C.income
+    return util.ShortMoney(copper), c[1], c[2], c[3]
+end
+
+-- The footer: what was turned over, what it made, and what could not be
+-- counted.
+--
+-- THE SKIPPED ROWS ARE SAID OUT LOUD. A total over the rows it could do and
+-- silent about the rest is exactly the number this table's quantity work
+-- exists to avoid -- see db.LedgerItemTotals.
+function ui.LedgerFooterText(resold, profit, skipped)
+    local txt = (resold or 0) .. " items resold"
+    txt = txt .. "   \226\128\162   " .. util.ShortMoneyColored(profit or 0)
+        .. " total profit"
+    if skipped and skipped > 0 then
+        txt = txt .. "   \226\128\162   " .. skipped
+            .. " item(s) not counted (no quantity recorded)"
+    end
+    return txt
+end
+
+-- Place and fill the figure band and the three blocks.
+--
+-- POSITIONS SET ON EVERY PAINT, because the columns are a fraction of a width
+-- that moves with the window. ClearAllPoints first: SetPoint ADDS a point on
+-- 1.12, so a second call without it leaves a FontString pulled between two
+-- places -- which renders as text drifting a little further right every time
+-- the window is dragged.
+--
+-- LABEL LEFT, VALUE RIGHT-ALIGNED TO THE COLUMN'S FAR EDGE, the way the
+-- reference sets both its band and its blocks. Values that start wherever
+-- their label happens to end do not line up, and a column of figures you
+-- cannot compare down is most of what a figure column is for.
+function ui.PaintHistFigures(st, hi, lo, plotW, note)
+    if not ui.histBand or not ui.histStats then return end
+    local box = ui.histGraph
+    if not box then return end
+    local bandW  = ui.histBand:GetWidth() or 0
+    if bandW < 1 then bandW = plotW or 1 end
+
+    -- ---- the band: three columns of two -------------------------------
+    local cells = ui.HistFigures(st, hi, lo)
+    local cols = ui.BlockColumns(bandW - HISTL.fig_pad * 2,
+                                 HISTL.band_cols, HISTL.col_gap)
+    local i = 1
+    while i <= HISTL.strip_cells do
+        local w = ui.histStrip[i]
+        local cell = cells[i]
+        local ci, ri = ui.FigureSlot(i)
+        local col = cols[ci]
+        w.label:ClearAllPoints()
+        w.value:ClearAllPoints()
+        if cell and col then
+            local y = -(HISTL.fig_pad + (ri - 1) * HISTL.fig_line)
+            w.label:SetPoint("TOPLEFT", ui.histBand, "TOPLEFT",
+                             HISTL.fig_pad + col.x, y)
+            w.label:SetWidth(col.w)
+            w.label:SetText(cell[1])
+            w.label:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            w.value:SetPoint("TOPRIGHT", ui.histBand, "TOPLEFT",
+                             HISTL.fig_pad + col.x + col.w, y)
+            w.value:SetWidth(col.w)
+            w.value:SetText(cell[2])
+            w.value:SetTextColor(C.text[1], C.text[2], C.text[3])
+            w.label:Show(); w.value:Show()
+        else
+            w.label:Hide(); w.value:Hide()
+        end
+        i = i + 1
+    end
+
+    -- The alts-as-last-seen caveat, above the band and out at the right where
+    -- it qualifies the whole row rather than any one figure.
+    if ui.histNoteFS then
+        ui.histNoteFS:ClearAllPoints()
+        ui.histNoteFS:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT",
+                               -HISTL.plot_side,
+                               HISTL.band_y + HISTL.band_h + 2)
+        ui.histNoteFS:SetText(note or "")
+    end
+
+    -- ---- the blocks ----------------------------------------------------
+    local blocks = ui.HistBlocks(st)
+    local statsW = ui.histStats:GetWidth() or 0
+    if statsW < 1 then statsW = plotW or 1 end
+    local bcols = ui.BlockColumns(statsW - HISTL.fig_pad * 2,
+                                  HISTL.block_count, HISTL.col_gap)
+    local b = 1
+    while b <= HISTL.block_count do
+        local w, data, col = ui.histBlocks[b], blocks[b], bcols[b]
+        local x = HISTL.fig_pad + col.x
+        w.title:ClearAllPoints()
+        w.title:SetPoint("TOPLEFT", ui.histStats, "TOPLEFT", x, -HISTL.fig_pad)
+        w.title:SetWidth(col.w)
+        w.title:SetText(data and data.title or "")
+        local r = 1
+        while r <= HISTL.block_rows do
+            local pair = w.rows[r]
+            local row = data and data.rows[r]
+            local y = -(HISTL.fig_pad + HISTL.fig_line * r)
+            pair.label:ClearAllPoints()
+            pair.value:ClearAllPoints()
+            if row then
+                pair.label:SetPoint("TOPLEFT", ui.histStats, "TOPLEFT", x, y)
+                pair.label:SetWidth(HISTL.block_label_w)
+                pair.label:SetText(row[1])
+                pair.label:SetTextColor(C.goldDim[1], C.goldDim[2],
+                                        C.goldDim[3])
+                pair.value:SetPoint("TOPRIGHT", ui.histStats, "TOPLEFT",
+                                    x + col.w, y)
+                pair.value:SetWidth(col.w - HISTL.block_label_w)
+                pair.value:SetText(row[2])
+                -- A TOP ITEM CARRIES ITS QUALITY COLOUR; every other figure is
+                -- a number and reads in the ordinary text colour. row[3] is
+                -- the item id, nil for anything recorded before ids were kept.
+                --
+                -- A STATED QUALITY WINS OVER THE CLIENT'S. row[4] is set only
+                -- where the caller already knows -- demo rows, whose items the
+                -- client has never cached and so cannot answer for. Asking
+                -- ui.CraftQualityOf first would get nil and fall back to the
+                -- default colour, which is the honest answer to "I do not
+                -- know" and the wrong one for data we invented ourselves.
+                if row[3] or row[4] then
+                    local q = row[4] or ui.CraftQualityOf(row[3])
+                    local cr, cg, cb = ui.QualityColor(q)
+                    pair.value:SetTextColor(cr, cg, cb)
+                else
+                    pair.value:SetTextColor(C.text[1], C.text[2], C.text[3])
+                end
+                pair.label:Show(); pair.value:Show()
+            else
+                pair.label:Hide(); pair.value:Hide()
+            end
+            r = r + 1
+        end
+
+        -- THE HOVER TARGET follows the last row's value, and only exists when
+        -- that row names an item. Hidden otherwise, so an em dash cannot be
+        -- hovered for a tooltip about nothing.
+        local last = data and data.rows[HISTL.block_rows]
+        w.hot:ClearAllPoints()
+        if last and last[3] then
+            w.hot.itemId = last[3]
+            w.hot.itemName = last[2]
+            w.hot:SetPoint("TOPLEFT", ui.histStats, "TOPLEFT",
+                           x + HISTL.block_label_w,
+                           -(HISTL.fig_pad + HISTL.fig_line * HISTL.block_rows))
+            w.hot:SetWidth(col.w - HISTL.block_label_w)
+            w.hot:Show()
+        else
+            w.hot.itemId = nil
+            w.hot:Hide()
+        end
+        b = b + 1
+    end
+end
+
 function ui.RefreshHistory()
     if not ui.histBuilt then return end
-    -- Highlight the active period button.
-    ui.MarkChosen(ui.histPerBtns, function(b) return b.idx == ui.histPeriod end)
+    -- Highlight the active period button -- in BOTH rows. The chart has one
+    -- and the ledger overlay has one, and marking only the chart's leaves the
+    -- ledger showing five unpressed buttons over the period it is drawing.
+    local chosen = function(b) return b.idx == ui.histPeriod end
+    ui.MarkChosen(ui.histPerBtns, chosen)
+    ui.MarkChosen(ui.ledgerPerBtns, chosen)
+    -- The per-item table reads the same period, so a period button has to
+    -- repaint it too -- it is not fed by ui.UpdateHistoryList.
+    if ui.ledgerFrame and ui.ledgerFrame:IsShown()
+        and (ui.ledgerView or "items") ~= "txns" then
+        ui.RefreshLedgerItems()
+    end
+    -- ...and the Ledger button, which reads as pressed while its window is up.
+    -- Done on every repaint rather than only on the toggle, because the window
+    -- can also be closed by its own X.
+    ui.RefreshLedgerButton()
 
     local secs = HIST_PERIODS[ui.histPeriod].secs
     local since = (secs > 0) and (time() - secs) or nil
@@ -13698,7 +15263,7 @@ function ui.RefreshHistory()
     -- that used to live here is now the sort's default (`when` descending), so
     -- clicking a header can actually change the order -- reversing here as
     -- well would have fought it.
-    local led = A.db.Ledger()
+    local led = A.db.LedgerSource()
     ui.histView = {}
     local i = 1
     while i <= table.getn(led) do
@@ -13709,6 +15274,24 @@ function ui.RefreshHistory()
         i = i + 1
     end
     ui.UpdateHistoryList()
+
+    -- THE CHART, FROM THE TAB'S OWN REPAINT -- same ledger, same period, same
+    -- pass, which is what keeps the two halves agreeing about what week it is.
+    --
+    -- IT USED TO BE CALLED FROM THE END OF ui.UpdateHistoryList, and that is a
+    -- trap worth writing down. v1.54.9 taught the list painter to return early
+    -- whenever the Ledger's Items view is up, so the two views stop drawing
+    -- over each other -- and Items is the DEFAULT. From then on an ordinary
+    -- refresh never reached the chart. It drew nothing, and its picker showed
+    -- no one ticked, until you chose someone from it: the picker's own click
+    -- was the only other path that painted it. Reported as "it's set to none
+    -- and you have to select All Players or a character yourself".
+    --
+    -- The test that should have caught it checked that the call was WRITTEN
+    -- inside the list painter, not that it was REACHED. It now checks both
+    -- that it is here and that it is not back in a function that can stand
+    -- down.
+    ui.UpdateHistoryGraph()
 end
 
 function ui.SetHistSort(key)
@@ -13736,13 +15319,33 @@ end
 
 function ui.UpdateHistoryList()
     if not ui.histScroll then return end
+    -- THE LEDGER'S TWO VIEWS SHARE ONE FRAME, and this paints the transaction
+    -- half. ui.RefreshHistory ends by calling it -- unconditionally, and on
+    -- every period click and every mailbox update -- so without this guard the
+    -- transaction rows come back on top of the item table the moment anything
+    -- repaints. Which is exactly what they did.
+    --
+    -- HIDES RATHER THAN JUST RETURNING: whatever one fill writes, the other
+    -- must clear. Returning early would leave whatever was on screen from the
+    -- last time this view was up.
+    if (ui.ledgerView or "items") ~= "txns" then
+        local h = 1
+        while h <= table.getn(ui.histRows or {}) do
+            ui.histRows[h]:Hide()
+            h = h + 1
+        end
+        return
+    end
     local sortKey = ui.histSortKey or "when"
     local dir = ui.histSortDir or "desc"
     local rows = ui.SortHistory(ui.histView or {}, sortKey, dir)
     ui.PaintSortHeaders(ui.histHeaders, sortKey, dir)
     local total = table.getn(rows)
-    local vis = ui.ListRowsAt(ui.WindowH(), LISTBOX.hist,
-        HIST_ROW_H, HIST_ROWS_MAX)
+    -- FROM THE LEDGER WINDOW, which is a fixed height, and no longer from the
+    -- main window -- the table does not live in it any more. ui.ListRowsAt
+    -- measured the Aegis window's panel, so leaving it here would have grown
+    -- and shrunk the ledger's rows as the OTHER window was dragged.
+    local vis = ui.LedgerRowCount()
     ui.GrowHistRows(vis)
     ui.SkinNewRows(ui.histRows)
     FauxScrollFrame_Update(ui.histScroll, total, vis, HIST_ROW_H)
@@ -13784,10 +15387,6 @@ function ui.UpdateHistoryList()
     else
         ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
     end
-    -- The chart reads the SAME ledger and the SAME period, from the same
-    -- repaint. Driving it from its own path is how the two halves of one tab
-    -- come to disagree about what week it is.
-    ui.UpdateHistoryGraph()
 end
 
 StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {
@@ -15137,13 +16736,26 @@ function ui.RefreshSell()
     local deWorth = A.de and A.de.ShouldDisenchant
         and A.de.ShouldDisenchant(it.itemId, bestSale, A.de.MarketPrice) or nil
 
-    local vc = A.sell.VendorCompare(it.itemId, unitBuy)
+    -- AGAINST THE NET, not the gross. `netPerItem` is what you actually keep
+    -- once the consignment cut is taken, and it is already computed two lines
+    -- up for the disenchant comparison -- which was reading it correctly while
+    -- this read the raw buyout. An auction listed at exactly vendor price
+    -- therefore reported "at vendor" while netting 95% of it, and everything
+    -- in that band lost money without a word.
+    --
+    -- The deposit stays out of it: it is refunded in full when the auction
+    -- sells and forfeited only when it expires, so it is a risk carried while
+    -- the auction is up rather than a cost of selling.
+    local vc = A.sell.VendorCompare(it.itemId, netPerItem)
     if deWorth then
         ui.sellVendor:SetText("Worth more disenchanted: "
             .. util.FormatMoney(deWorth, true))
     elseif vc and not vc.above then
+        -- NAMED as what it compares. "Below vendor price" over a gross figure
+        -- and over a net one are two different claims, and the percentage
+        -- moved when this changed.
         ui.sellVendor:SetText(string.format(
-            "Below vendor price (%d%%)", vc.pct))
+            "Nets below vendor price (%d%%)", vc.pct))
     else
         ui.sellVendor:SetText("")
     end
@@ -15155,8 +16767,26 @@ function ui.RefreshSell()
     -- place the formula can be checked against the client is the same place
     -- the formula gets used. O(1): one client call and one division.
     A.sell.LearnDepositRatio(ui.sellDuration)
-    local perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
-        it.maxStack)
+    -- THE CLIENT'S OWN FIGURE FIRST, whenever it will answer -- which here it
+    -- will, because an item is in the slot. sell.DepositFor reconstructs that
+    -- number from the vendor price and a learned correction, and it exists for
+    -- the BAG PREVIEW, which has no slotted item and so cannot ask. Preferring
+    -- the reconstruction over the real thing while the real thing is sitting
+    -- there is how the two paths came to disagree, and it puts a figure on
+    -- screen that moves as the correction is learned.
+    --
+    -- The stack size is the one wrinkle: the client answers for what is IN the
+    -- slot, so it is only the right answer when that is the stack being
+    -- posted. For any other size the formula is all there is.
+    local perStack, fromClient = nil, false
+    if size == (it.count or 1) then
+        perStack = A.sell.EstimateDeposit(ui.sellDuration)
+        fromClient = (perStack or 0) > 0
+    end
+    if not fromClient then
+        perStack = A.sell.DepositFor(it.itemId, size, ui.sellDuration,
+            it.maxStack)
+    end
     local approx = true
     if not perStack then
         perStack = A.sell.EstimateDeposit(ui.sellDuration)
@@ -16058,7 +17688,12 @@ function ui.BuildCategoryPicker()
     local picker = CreateFrame("Frame", "AegisExchangePicker", ui.frame)
     picker:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
     picker:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
-    picker:SetFrameLevel(ui.content:GetFrameLevel() + 5)
+    -- WELL ABOVE THE CONTENT. This was +5, and a panel's widgets are children
+    -- of children -- each nesting level is another +1 -- so the deepest of
+    -- them drew THROUGH the picker: the Aegis tab's settings were legible
+    -- behind "Scan which categories?". Same number the ledger overlay uses,
+    -- for the same reason; see ui.BuildLedgerWindow.
+    picker:SetFrameLevel(ui.content:GetFrameLevel() + 50)
     picker:EnableMouse(true)   -- swallow clicks so they don't fall through
     picker:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -16243,6 +17878,16 @@ function ui.SelectSubTab(name)
     -- The vendor list belongs to the Sell tab; don't leave it over another.
     if name ~= "Sell" then
         ui.HideVendorList()
+    end
+    -- ...and the ledger belongs to History. It covers the whole content area,
+    -- so left open it would sit over whichever tab you switched to -- the same
+    -- fault as the picker above, and it reads as the window being stuck.
+    if name ~= "History" then
+        ui.HideLedgerWindow()
+    end
+    -- ...and the receipt belongs to Buy, on exactly the same terms.
+    if name ~= "Buy" then
+        ui.HideReceiptWindow()
     end
     -- ...and an open dropdown belongs to whatever form you just left. Not
     -- conditional on the tab: no dropdown should survive a tab change, and
@@ -16606,12 +18251,23 @@ A.RegisterEvent("ADDON_LOADED", function(evt, loadedName)
     if loadedName and string.lower(loadedName) == "blizzard_auctionui" then
         ui.HookAuctionFrame()
     end
+    -- A load-on-demand UI brings its frame with it -- the trade skill and
+    -- craft windows do not exist until the player has opened one -- so the
+    -- raise group is applied again rather than only at startup. Bounded: a
+    -- dozen getglobals, and ADDON_LOADED does not storm.
+    if loadedName and string.find(string.lower(loadedName), "blizzard_", 1, true)
+       == 1 then
+        ui.ApplyRaiseGroup()
+    end
 end)
 
 -- By AUCTION_HOUSE_SHOW, Blizzard_AuctionUI is loaded and AuctionFrame exists,
 -- and the auction API is usable — so this is the moment to take over.
 A.RegisterEvent("AUCTION_HOUSE_SHOW", function()
     ui.OpenWindow()
+    -- The client opens your BACKPACK here, which is the bag that used to land
+    -- behind the window and stay there.
+    ui.ApplyRaiseGroup()
 end)
 
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
@@ -17168,7 +18824,7 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         else
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
-        ChatMsg("  chart demo=" .. tostring(A.db.demo and true or false))
+        ChatMsg("  demo=" .. tostring(A.db.demo and true or false))
         -- WHICH dressing-room API this client has, if either. A check box
         -- that silently does nothing is the failure this line exists to make
         -- reportable in one word.
@@ -17395,10 +19051,13 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
     -- store, and why a /reload turns it off.
     if string.find(cmd, "demo", 1, true) then
         A.db.demo = not A.db.demo
+        -- Rebuilt on the next read, so toggling it back on re-anchors the
+        -- invented history to NOW instead of leaving one that ends hours ago.
+        A.db.demoLedger = nil
         if A.db.demo then
-            ChatMsg("Aegis: chart demo mode ON \226\128\148 the History chart"
-                .. " now draws INVENTED gold for four made-up characters, so"
-                .. " you can see what it looks like with a real history.")
+            ChatMsg("Aegis: demo mode ON \226\128\148 the History chart now"
+                .. " draws INVENTED gold for four made-up characters, so you"
+                .. " can see what it looks like with a real history.")
             ChatMsg("  Nothing is saved and nothing real is touched. /aex demo"
                 .. " again, or a /reload, turns it off.")
             ChatMsg("  The Crafting tab and the shopping list get four"
@@ -17406,10 +19065,13 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 .. " so the quality colours have something to show \226\128\148"
                 .. " with some reagents part-gathered and invented prices"
                 .. " on every line.")
-            ChatMsg("  The IN / OUT / NET row still reads your REAL ledger;"
-                .. " only the gold line and the recipes are invented.")
+            ChatMsg("  The LEDGER is invented too \226\128\148 six months of"
+                .. " one trader's buying and selling across 34 real items, so"
+                .. " both its views, the stat blocks and the IN / OUT / NET"
+                .. " row all have something to show, and all agree. The Buy"
+                .. " tab's Receipt shows that ledger's last day of buying.")
         else
-            ChatMsg("Aegis: chart demo mode OFF.")
+            ChatMsg("Aegis: demo mode OFF.")
         end
         -- Both tabs have to be told. The picker lists the demo characters
         -- while it is on and the Crafting tab's whole tree changes, so neither
@@ -17419,6 +19081,11 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ui.RefreshHistory()
         end
         if ui.craftBuilt then ui.RefreshCraft() end
+        -- ...and the receipt, which swaps between your real session and the
+        -- demo's last day of buying.
+        if ui.receiptFrame and ui.receiptFrame:IsShown() then
+            ui.RefreshReceipt()
+        end
         ui.RefreshShopCartButton()
         if ui.shopFrame and ui.shopFrame:IsVisible() then
             ui.RefreshShopWindow()

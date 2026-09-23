@@ -12,10 +12,26 @@
 --     on `now`, which is one past the last bucket unless somebody says so.
 --   * THE SCALE. Both series share one, because the question the chart
 --     answers is whether one line is above the other.
---   * THE RASTERISER. 1.12 has no line primitive and no texture rotation, so
---     the line is built from thin vertical spans. Every span has to stay
---     INSIDE the plot: these are textures on the chart frame and nothing
---     clips a texture that overruns it.
+--   * THE RASTERISER. 1.12 has no line primitive, so the line is built from
+--     thin vertical spans. Every span has to stay INSIDE the plot: these are
+--     textures on the chart frame and nothing clips a texture that overruns
+--     it.
+--
+--     THIS COMMENT USED TO SAY "and no texture rotation", and that was wrong.
+--     It was written in the same commit as the rasteriser it describes, with
+--     nothing behind it, and it is most likely the REASON the line is built
+--     from vertical spans. 1.12 has affine SetTexCoord: the eight-argument
+--     overload is declared in the 1.12 API definitions, GetTexCoord is
+--     documented as returning 8 coordinates as of 1.11, and a readback on a
+--     real client confirms it --
+--
+--         t:SetTexCoord(0,1,1,1,0,0,1,0)  ->  GetTexCoord() = 8 values,
+--         0,1,1,1,0,0,1,0
+--
+--     So a sheared one-texture-per-segment stroke is available and ROADMAP
+--     3.2 plans it. The clipping rule above survives the change and gets
+--     HARDER: a sheared parallelogram can overrun on both axes, not just
+--     vertically.
 --   * THE SPLIT. The table's columns are fixed and its Amount column is the
 --     rightmost thing that can be clipped, so the table wins the squeeze.
 
@@ -110,11 +126,31 @@ HIST_ALL_PLAYERS = strConstant("HIST_ALL_PLAYERS")
 PANEL_H_INSET = 40
 PANEL_V_INSET = 108
 LISTBOX = { hist = { top = 100, bot = 10 } }
+HIST_ROWS_MAX = constant("HIST_ROWS_MAX")
+-- `local HIST_ROWS, HIST_ROW_H = 10, 26` declares two names on one line, which
+-- the single-name reader above cannot see. Read out of the source all the
+-- same, for its reason: a copy keeps passing after the real one moves.
+HIST_ROW_H = (function()
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local v
+    for line in f:lines() do
+        local _, _, got = string.find(line,
+            "^local HIST_ROWS, HIST_ROW_H%s*=%s*%d+,%s*(%d+)")
+        if got then v = tonumber(got); break end
+    end
+    f:close()
+    if not v then error("did not find: local HIST_ROWS, HIST_ROW_H") end
+    return v
+end)()
 loadTable("HISTL")
+-- After HISTL, because it is derived from it.
+loadTable("LEDGERBOX")
 for _, sig in ipairs({
     "function ui.PanelWidthAt(",
     "function ui.PanelHeightAt(",
-    "function ui.HistWidthsAt(",
+    "function ui.LedgerRowCount(",
+    "function ui.ListRowsAt(",
+    "function ui.WindowH(",
     "function ui.HistPlotSizeAt(",
     "function ui.HistBucketCount(",
     "function ui.SeriesRange(",
@@ -175,6 +211,20 @@ H.check("...and a nil one", ui.HistBucketCount(nil) >= HISTL.bucket_min,
         ui.HistBucketCount(nil))
 H.eq("an absurd plot is capped", ui.HistBucketCount(100000),
      HISTL.bucket_max)
+
+-- ...BUT NOT AT A WIDTH ANYONE ACTUALLY PLAYS AT. The cap was 400, which a
+-- 1400px window (424 buckets) and a 1920px one (598) both ran into -- so the
+-- chart drew fewer real points than it had room for and interpolated across
+-- the difference. A ceiling that a normal window reaches is a resolution
+-- limit wearing a safety rail's name.
+do
+    local widest = 1794    -- the plot inside a 1920px window
+    H.check("a full-screen window is not capped",
+            ui.HistBucketCount(widest) < HISTL.bucket_max,
+            ui.HistBucketCount(widest) .. " vs cap " .. HISTL.bucket_max)
+    -- An ultrawide still is, and that is the point of having one.
+    H.eq("an ultrawide still is", ui.HistBucketCount(4000), HISTL.bucket_max)
+end
 
 -- THE COLUMNS HAVE TO BE NARROWER THAN THE GAP BETWEEN POINTS, or the
 -- interpolation is wasted: two data points inside one column is one of them
@@ -408,47 +458,75 @@ H.check("...and is never zero", ui.PlotColumnCount(0) >= 1,
         ui.PlotColumnCount(0))
 
 -- ---------------------------------------------------------------------------
-H.section("splitting the panel")
+H.section("the chart has the whole panel")
 -- ---------------------------------------------------------------------------
+
+-- THE TAB IS NOT SPLIT ANY MORE. It held a table on the left and a chart on
+-- the right, and neither had room: the chart had to fit an axis, a legend, a
+-- line and its figures into 46% of the panel, and the table's Amount column
+-- ran under its own scrollbar below a fixed minimum. They are two screens now
+-- -- the tab is the dashboard, the table is ui.BuildLedgerWindow -- so
+-- ui.HistWidthsAt is gone and the plot measures the panel directly.
 
 local MIN_W, MAX_W = 1000, 1400
 
 for _, winW in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
-    local tw, gw = ui.HistWidthsAt(winW)
-    H.eq("the two halves fill the panel at " .. winW,
-         tw + gw + HISTL.edge * 2 + HISTL.gap, ui.PanelWidthAt(winW))
-    H.check("the table gets its minimum at " .. winW, tw >= HISTL.left_min,
-            tw)
-    H.check("the chart gets its minimum at " .. winW, gw >= HISTL.graph_min,
-            gw)
+    local w = ui.HistPlotSizeAt(winW, 700)
+    -- The plot is the panel less the box's edges, the plot's own side padding
+    -- and the y-axis gutter. Never wider than the panel that holds it.
+    H.check("the plot fits the panel at " .. winW,
+            w <= ui.PanelWidthAt(winW), w)
+    H.check("...and has the width the split used to deny it at " .. winW,
+            w > ui.PanelWidthAt(winW) * 0.5, w)
 end
 
--- THE TABLE WINS THE SQUEEZE. Its columns are fixed and its Amount column is
--- the rightmost thing in the window that can be clipped; the chart has no
--- fixed content and narrows gracefully.
 do
-    local tw = ui.HistWidthsAt(MIN_W)
-    H.eq("at the smallest window the table gets exactly its minimum",
-         tw, HISTL.left_min)
-end
-
--- A wider window gives the chart more, which is the assertion a hard-coded
--- width fails.
-do
-    local _, g1 = ui.HistWidthsAt(MIN_W)
-    local _, g2 = ui.HistWidthsAt(MAX_W)
-    H.check("a wider window widens the chart", g2 > g1, g1 .. " -> " .. g2)
+    local w1 = ui.HistPlotSizeAt(MIN_W, 700)
+    local w2 = ui.HistPlotSizeAt(MAX_W, 700)
+    H.check("a wider window widens the plot", w2 > w1, w1 .. " -> " .. w2)
 end
 
 -- Degenerate widths, for the reason every other fit function has this section:
 -- this runs before UIParent has been measured on some logins.
 do
-    local tw, gw = ui.HistWidthsAt(0)
-    H.check("an unmeasured window still leaves a table", tw >= 1, tw)
-    H.check("...and a chart", gw >= 1, gw)
-    tw, gw = ui.HistWidthsAt(nil)
-    H.check("...and so does a nil one", tw >= 1 and gw >= 1, tw .. "/" .. gw)
+    local w, h = ui.HistPlotSizeAt(0, 0)
+    H.check("an unmeasured window still leaves a plot", w >= 1, w)
+    H.check("...with height", h >= 1, h)
+    w, h = ui.HistPlotSizeAt(nil, nil)
+    H.check("...and so does a nil one", w >= 1 and h >= 1, w .. "/" .. h)
 end
+
+-- ---------------------------------------------------------------------------
+H.section("the ledger window")
+-- ---------------------------------------------------------------------------
+
+-- IT COVERS THE WINDOW'S CONTENT, so its rows follow the window exactly as
+-- every other list's do. A fixed count -- which is what it had while the
+-- ledger was a floating frame of its own size -- leaves rows' worth of empty
+-- space under the table on a tall window.
+do
+    -- Own heights: MIN_H / MAX_H are declared further down, and a section that
+    -- reads a local from below it is the exact fault tests/lint/scoping.py
+    -- exists to catch in the addon.
+    local SHORT, TALL = 492, 900
+    ui.frame = { GetHeight = function() return SHORT end }
+    local small = ui.LedgerRowCount()
+    ui.frame = { GetHeight = function() return TALL end }
+    local big = ui.LedgerRowCount()
+    H.check("it shows at least a few rows at the smallest window",
+            small >= 5, small)
+    H.check("a taller window shows more rows", big > small,
+            small .. " -> " .. big)
+    H.check("...but never more than the row pool holds",
+            big <= HIST_ROWS_MAX, big)
+    ui.frame = nil
+end
+
+-- Its insets are the chrome above and below the rows, and the bottom one has
+-- to clear the divider and the button row the category picker puts there --
+-- otherwise the last row draws through Close.
+H.check("the bottom inset clears the button row",
+        HISTL.ledger_bot >= 42, HISTL.ledger_bot)
 
 -- ---------------------------------------------------------------------------
 H.section("the area under the line")
@@ -848,9 +926,11 @@ do
     H.check("the chart's floor holds its own title bar",
             HISTL.graph_min >= need,
             HISTL.graph_min .. " < " .. need)
-    -- ...and at every real window width, not just the floor.
+    -- ...and at every real window width, not just the floor. The chart is the
+    -- whole panel now, so the question is whether the PANEL holds the title
+    -- bar rather than whether a fraction of it did.
     for _, winW in ipairs({ MIN_W, 1100, 1200, MAX_W }) do
-        local _, gw = ui.HistWidthsAt(winW)
+        local gw = ui.PanelWidthAt(winW) - HISTL.edge * 2
         H.check("the title bar fits at " .. winW, gw >= need, gw)
     end
 end
@@ -1142,17 +1222,111 @@ do
     H.check("...after being cleared, because SetPoint ADDS a point",
             says(dropdown, "row.label:ClearAllPoints()"))
 
-    -- TWO STRINGS THAT CAN BOTH GROW CANNOT SHARE A LINE. These were anchored
-    -- to opposite ends of one line and ran into each other -- "LOW 9g 14s 6c"
-    -- and "IN 37s 92c" overlapped into "LOWN0g 14s 6c" on a narrow window.
-    -- Stacking removes the collision rather than making it less likely.
+    -- TWO STRINGS THAT CAN BOTH GROW CANNOT SHARE A LINE. The figures used to
+    -- be rows of running text anchored to opposite ends of one line, and they
+    -- ran into each other -- "LOW 9g 14s 6c" and "IN 37s 92c" overlapped into
+    -- "LOWN0g 14s 6c" on a narrow window.
+    --
+    -- Every figure is its own FontString in its own column now, which removes
+    -- the collision rather than working around it. The ONE string still
+    -- anchored from the right is the caveat, and nothing grows toward it.
     local build = bodyOf("function ui.BuildHistoryGraph(")
-    H.check("both stat rows hang off the same edge",
-            says(build, 'ui.histStatL:SetPoint("BOTTOMLEFT"')
-            and says(build, 'ui.histStatR:SetPoint("BOTTOMLEFT"'),
-            "opposite ends of one line is how they collided")
-    H.check("...and neither is right-justified into the other",
-            not says(build, 'ui.histStatR:SetJustifyH("RIGHT")'))
+    -- THE OVERLAY HAS TO ACTUALLY COVER WHAT IT SITS ON. Both of these are
+    -- faults that compile, load, and show only as a table you read through.
+    local ledger = bodyOf("function ui.BuildLedgerWindow(")
+    H.check("the ledger overlay is built", ledger ~= "")
+    H.check("...anchored over the window's content",
+            says(ledger, 'f:SetPoint("TOPLEFT", ui.content')
+            and says(ledger, 'f:SetPoint("BOTTOMRIGHT", ui.content'))
+    -- A panel's widgets are children of children, and each nesting level is
+    -- another +1. The category picker's +5 is why it can still be read
+    -- through, which is the whole complaint this overlay answers.
+    H.check("...well above the content it covers",
+            says(ledger, "ui.content:GetFrameLevel() + 50"),
+            "a small bump leaves the deepest widgets drawing through it")
+    H.check("...and swallowing clicks",
+            says(ledger, "f:EnableMouse(true)"),
+            "clicks that fall through land on whatever it is covering")
+    -- Two layers of near-black, because a tiling background texture at alpha 1
+    -- is only as opaque as the texture is and this is read over a bright
+    -- filled area chart.
+    H.check("...with a solid fill under the backdrop",
+            says(ledger, 'fill:SetTexture(C.well[1], C.well[2], C.well[3])'))
+
+    H.check("the figure strip is built", says(build, "ui.histStrip[si] ="))
+    H.check("...and the three blocks", says(build, "ui.histBlocks[bi] = blk"))
+
+    -- SETPOINT ADDS A POINT ON 1.12, and these are re-placed on every repaint
+    -- because their columns follow the window. Without ClearAllPoints a
+    -- FontString ends up pulled between two places, which reads as text
+    -- drifting further right every time the window is dragged.
+    local paint = bodyOf("function ui.PaintHistFigures(")
+    H.check("the painter exists", paint ~= "")
+    -- ALL THREE, named distinctly. The strip's cells, the blocks' titles and
+    -- the blocks' rows are three separate loops and each has to clear.
+    H.check("...and clears points before setting them",
+            says(paint, "w.label:ClearAllPoints()")
+            and says(paint, "w.title:ClearAllPoints()")
+            and says(paint, "pair.label:ClearAllPoints()"),
+            "SetPoint adds rather than replaces on 1.12")
+    -- BOTH column runs, because checking one leaves the other free to be
+    -- replaced by a chain of anchors -- which is exactly what a sabotage did.
+    H.check("...and places columns by arithmetic, not by chaining anchors",
+            says(paint, "ui.BlockColumns(bandW")
+            and says(paint, "ui.BlockColumns(statsW"))
+    -- VALUES RIGHT-ALIGNED TO THEIR COLUMN'S FAR EDGE, the way the reference
+    -- sets both boxes. A value that starts wherever its label ended does not
+    -- line up, and a column you cannot compare down is most of what a column
+    -- of figures is for.
+    H.check("...right-aligning the values",
+            says(paint, 'w.value:SetPoint("TOPRIGHT"')
+            and says(paint, 'pair.value:SetPoint("TOPRIGHT"'))
+    -- A STATED QUALITY WINS OVER THE CLIENT'S. ui.CraftQualityOf answers only
+    -- for items the client has cached, so asking it FIRST gets nil for a demo
+    -- item nobody has ever seen and falls back to the default colour -- which
+    -- is how three invented epics drew in ordinary tan until each was hovered.
+    H.check("...preferring a stated quality over the client's",
+            says(paint, "local q = row[4] or ui.CraftQualityOf(row[3])"),
+            "asking the client first gets nil for an uncached item")
+
+    -- The Top item's hover target exists only when the row names an item, so
+    -- an em dash cannot be hovered for a tooltip about nothing.
+    -- THE HOVER TARGET IS NOT A BUTTON TO LOOK AT. ui.skin plates every Button
+    -- it is given, and on an invisible target sitting over a FontString that
+    -- drew a bar straight through the item's name. tests/lint/rowskin.py
+    -- cannot see this one: it keys on ui.AddRowChrome, which marks a LIST row,
+    -- and this is not one.
+    H.check("the hover target opts out of the button skinner",
+            says(build, "hot.aegisNoSkin = true"),
+            "a plate over a FontString draws through the text")
+    H.check("...and takes mouse events at all",
+            says(build, "hot:EnableMouse(true)"))
+
+    H.check("...and only arms the tooltip when there is an item",
+            says(paint, "if last and last[3] then")
+            and says(paint, "w.hot.itemId = nil"))
+
+    -- THE BAND AND THE BLOCKS ARE IN WELLS, and their contents are CHILDREN of
+    -- those wells. A child frame draws above ALL of its parent's regions
+    -- whatever layer they are on -- FontStrings left on the chart box with a
+    -- well over them would be behind it, which is the same rule that makes
+    -- pfUI's backdrop cover an edit box's text.
+    H.check("the band and the blocks each get a well",
+            says(build, "ui.histBand  = well(")
+            and says(build, "ui.histStats = well("))
+    H.check("...with their contents parented INTO them",
+            says(build, "{ label = cell(ui.histBand),")
+            and says(build, "{ label = cell(ui.histStats),"),
+            "a FontString on the chart box would draw behind the well")
+
+    -- THE LEDGER BELONGS TO HISTORY. It covers the whole content area, so left
+    -- open on a tab change it sits over whichever tab you switched to -- the
+    -- same fault the category picker and the vendor list are guarded against
+    -- two lines above it, and it reads as the window being stuck.
+    local pick = bodyOf("function ui.SelectSubTab(")
+    H.check("leaving History closes the ledger",
+            says(pick, 'if name ~= "History" then')
+            and says(pick, "ui.HideLedgerWindow()"))
 end
 
 -- ---------------------------------------------------------------------------
@@ -1171,8 +1345,8 @@ do
     local w2, h2 = ui.HistPlotSizeAt(MAX_W, MAX_H)
     H.check("a wider window widens the plot", w2 > w1, w1 .. " -> " .. w2)
     H.check("a taller window heightens it", h2 > h1, h1 .. " -> " .. h2)
-    -- The plot sits INSIDE the chart box, which sits inside the panel.
-    local _, gw = ui.HistWidthsAt(MIN_W)
+    -- The plot sits INSIDE the chart box, which is now the whole panel.
+    local gw = ui.PanelWidthAt(MIN_W) - HISTL.edge * 2
     H.check("the plot is inside its box", w1 <= gw, w1 .. " vs " .. gw)
     H.check("...and inside the panel vertically",
             h1 <= ui.PanelHeightAt(MIN_H), h1)
@@ -1208,34 +1382,76 @@ do
         return string.find(body, needle, 1, true) ~= nil
     end
 
-    -- THE TABLE IS THE LEFT HALF NOW. A BOTTOMRIGHT anchor on its scroll
-    -- frame -- which is how every other list in this window is built, and so
-    -- the easy thing to "fix" it back to -- runs it under the chart.
+    -- THE TABLE LIVES IN ITS OWN WINDOW NOW, and these three assertions used
+    -- to say the opposite -- that the scroll frame is anchored down the LEFT
+    -- only and has its width SET, because it was the left half of a split
+    -- panel and a BOTTOMRIGHT anchor would have run it under the chart.
+    --
+    -- Inverted rather than deleted: the failure they guard is the same shape
+    -- in both designs -- a frame whose anchors and whose width disagree about
+    -- who decides its size -- and it points the other way now.
     local build = bodyOf("function ui.BuildHistoryTab(")
     H.check("the History tab is built at all", build ~= "")
-    H.check("the ledger table is anchored down the left, not corner to corner",
-            not says(build, 'scroll:SetPoint("BOTTOMRIGHT"'),
-            "its width is the split; a right-hand anchor discards SetWidth")
-    H.check("...and its width is set", says(build, "scroll:SetWidth("))
+    H.check("the table's widgets are parented to the ledger window",
+            says(build, "local host = ui.BuildLedgerWindow()"),
+            "a table parented to the panel is still in the tab")
+    H.check("the table is anchored corner to corner",
+            says(build, 'scroll:SetPoint("BOTTOMRIGHT", host'),
+            "nothing shares that window, so both corners are available")
+    H.check("...and its width is NOT set",
+            not says(build, "scroll:SetWidth("),
+            "a two-corner frame that also has SetWidth ignores one of them")
 
     -- ONE REPAINT, ONE LEDGER, ONE PERIOD. Driving the chart from its own
     -- path is how the two halves of one tab come to disagree about what week
     -- it is.
+    --
+    -- FROM THE TAB'S REPAINT, NOT THE LIST PAINTER. This used to assert that
+    -- ui.UpdateHistoryList contained the call -- and it did, at the very end,
+    -- after v1.54.9 had given that function an early return for the Ledger's
+    -- Items view, which is the default. The call was WRITTEN and never
+    -- REACHED: the chart drew nothing and its picker ticked no one until a
+    -- player chose someone from it. Asserting where the text sits is not the
+    -- same as asserting it runs, so this now pins both halves: the chart is
+    -- drawn by the function every refresh goes through, and it is NOT back in
+    -- one that can stand down.
+    local refresh = bodyOf("function ui.RefreshHistory(")
+    H.check("the tab's repaint draws the chart",
+            says(refresh, "ui.UpdateHistoryGraph()"))
     local paint = bodyOf("function ui.UpdateHistoryList(")
-    H.check("the repaint draws the chart too",
-            says(paint, "ui.UpdateHistoryGraph()"))
+    H.check("...and the list painter, which can return early, does not",
+            not says(paint, "ui.UpdateHistoryGraph()"),
+            "ui.UpdateHistoryList stands down in the Items view")
+    -- ...and the tab's repaint has no early return of its own after the
+    -- built-check, which would reopen the same hole one function up.
+    -- Counted in CODE only: the comments in there explain an early return,
+    -- and a word count that included them would fail for the explanation.
+    -- Only the shapes that LEAVE the function: `then return`, or a `return`
+    -- starting its own line. An inline `function(b) return ... end` is a
+    -- helper's return, not the repaint's.
+    local code = string.gsub(refresh, "%-%-[^\n]*", "")
+    local _, guarded = string.gsub(code, "then%s+return", "")
+    local _, bare = string.gsub(code, "\n%s*return", "")
+    H.eq("the tab's repaint returns only when the tab was never built",
+         guarded + bare, 1)
 
     local graph = bodyOf("function ui.UpdateHistoryGraph(")
     H.check("the chart exists", graph ~= "")
     H.check("...reads the same period the table does",
             says(graph, "HIST_PERIODS[ui.histPeriod"))
     H.check("...and the same ledger for its window",
-            says(graph, "ui.HistWindow(A.db.Ledger()"))
+            says(graph, "ui.HistWindow(A.db.LedgerSource()"))
     H.check("...sized by arithmetic, not by measuring a frame",
             says(graph, "ui.HistPlotSizeAt(") and not says(graph, ":GetWidth()"),
             "a two-corner-anchored frame reports its creation size")
-    H.check("...and both halves are placed from one split",
-            says(graph, "ui.HistWidthsAt(ui.WindowW())"))
+    -- NO WIDTHS SET IN THE REPAINT AT ALL. Both frames are anchored by two
+    -- corners -- the chart to the panel, the table to the ledger window -- so
+    -- each follows its container without arithmetic. This used to divide the
+    -- panel between them through ui.HistWidthsAt, which went with the split.
+    H.check("the repaint sets no widths",
+            not says(graph, "ui.histGraph:SetWidth(")
+            and not says(graph, "ui.histScroll:SetWidth("),
+            "a two-corner-anchored frame does not want a width")
 
     -- The spans are TEXTURES on the plot, not frames. A few hundred textures
     -- on one frame is a list of rows' worth of draw objects; a few hundred
@@ -1281,18 +1497,55 @@ do
             says(graph, "ui.HistBucketCount(pw)"),
             "a fixed count is what made the line a staircase")
 
-    -- THE PERIOD BUTTONS ARE THE CHART'S. Built right-to-left because the row
-    -- is anchored by its RIGHT edge -- the chart's width moves with the window
-    -- and the periods have to stay against its far side.
+    -- THE PERIOD BUTTONS ARE THE CHART'S, and the LEDGER'S -- the overlay
+    -- covers the chart's row, and a ledger you cannot change the period on
+    -- shows one week forever. Both rows come from one builder, so a sixth
+    -- period cannot be added to one and forgotten in the other.
     local gbuild = bodyOf("function ui.BuildHistoryGraph(")
-    H.check("the chart owns the period buttons",
-            says(gbuild, "ui.histPerBtns[pi] = b"),
+    local row = bodyOf("function ui.MakePeriodRow(")
+    H.check("there is one period-row builder", row ~= "")
+    H.check("the chart uses it", says(gbuild, "ui.histPerBtns = ui.MakePeriodRow(box"),
             "they sat a table's width away from what they change")
-    H.check("...anchored against the chart's right edge",
-            says(gbuild, 'b:SetPoint("TOPRIGHT", box, "TOPRIGHT"'))
+    local ledgerBody = bodyOf("function ui.BuildLedgerWindow(")
+    H.check("...and so does the ledger",
+            says(ledgerBody, "ui.ledgerPerBtns = ui.MakePeriodRow(perBar"))
+    -- BOTH ROWS ON THE SAME GROUND. A button's plate is translucent, so the
+    -- chosen one reads filled over the chart's well and outlined over this
+    -- overlay's opaque near-black. Same kind, same ui.MarkChosen, two
+    -- different-looking rows -- unless both sit in a well.
+    -- A FauxScrollFrame's bar is drawn OUTSIDE its own rect, so a frame flush
+    -- to the window edge puts the bar past it, half-drawn on the border.
+    H.check("...and leaves a gutter for the scrollbar",
+            HISTL.ledger_scroll_r > HISTL.edge,
+            HISTL.ledger_scroll_r .. " vs edge " .. HISTL.edge)
+    H.check("...which both its tables use",
+            says(ledgerBody, "-HISTL.ledger_scroll_r,")
+            and says(bodyOf("function ui.BuildHistoryTab("),
+                     "-HISTL.ledger_scroll_r, HISTL.ledger_bot)"))
+
+    H.check("...with its button rows in wells, so the plates match",
+            says(ledgerBody, "local well = ui.MakeWell(f, box, 3)")
+            and says(ledgerBody, "local perBar = bar(")
+            and says(ledgerBody, "ui.ledgerFootBar = footBar"),
+            "lightening the overlay is not the fix; being opaque is its point")
+    -- Built right-to-left because the row is anchored by its RIGHT edge: its
+    -- container's width moves with the window and the periods have to stay
+    -- against its far side.
+    H.check("...anchored against its container's right edge",
+            says(row, 'b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", x, y)'))
+    -- ONE PERIOD, TWO ROWS. Both must drive the same state and the same
+    -- repaint, or the ledger and the chart disagree about what week it is.
+    H.check("every row drives the one period", says(row, "ui.histPeriod = b.idx")
+            and says(row, "ui.RefreshHistory()"))
+    -- ...and both must be MARKED, or the ledger shows five unpressed buttons
+    -- over the period it is drawing.
+    local refresh = bodyOf("function ui.RefreshHistory(")
+    H.check("both rows are highlighted",
+            says(refresh, "ui.MarkChosen(ui.histPerBtns, chosen)")
+            and says(refresh, "ui.MarkChosen(ui.ledgerPerBtns, chosen)"))
     H.check("...and the tab no longer builds its own",
             not says(bodyOf("function ui.BuildHistoryTab("),
-                     "ui.histPerBtns[pi] = b"))
+                     "ui.MakePeriodRow("))
 
     -- A FLAT WASH, NOT A GRADIENT. v1.53.11 tried SetGradientAlpha guarded by
     -- a pcall with the flat fill as its fallback. The call SUCCEEDED and did
