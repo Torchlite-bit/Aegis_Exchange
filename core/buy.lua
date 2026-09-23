@@ -2166,10 +2166,14 @@ end
 -- cleared on the way out would clear in the middle of the thing it counts --
 -- the same reasoning that made the crafting tally manual-only.
 --
--- COUNTS UNITS, NOT AUCTIONS. Buying a stack of twenty Fine Thread is twenty
--- thread. "How many have I bought" is a question about items, and answering it
--- with a number of auctions is the kind of wrong that looks right.
-buy.session = {}   -- itemId -> { n = units, spent = copper, name = "..." }
+-- COUNTS UNITS, NOT AUCTIONS, and now counts both. "How many have I bought" is
+-- a question about items, so `n` is units and answering it with a number of
+-- auctions is the kind of wrong that looks right. But "how many auctions did
+-- that take" is a real second question -- twenty thread out of one stack and
+-- twenty out of twenty singles are different afternoons -- and the receipt
+-- window has a column for it. `buys` is that count; nothing that reads `n` is
+-- affected.
+buy.session = {}   -- itemId -> { n = units, buys = auctions, spent, name }
 
 -- Book one purchase.
 --
@@ -2184,10 +2188,13 @@ function buy.RecordPurchase(itemId, name, stack, copper)
     if stack < 1 then stack = 1 end
     local rec = buy.session[itemId]
     if not rec then
-        rec = { n = 0, spent = 0, name = name }
+        rec = { n = 0, buys = 0, spent = 0, name = name }
         buy.session[itemId] = rec
     end
     rec.n     = rec.n + stack
+    -- ONE PER CALL, because this is called once per auction bought. Adding
+    -- `stack` here would make it a second copy of `n`.
+    rec.buys  = (rec.buys or 0) + 1
     rec.spent = rec.spent + (copper or 0)
     if name then rec.name = name end
     return rec.n, rec.spent
@@ -2203,6 +2210,45 @@ end
 
 function buy.ClearSession()
     buy.session = {}
+end
+
+-- Everything bought this session, as rows the receipt can draw.
+--
+-- WHY IT IS BUILT HERE rather than in the window. `buy.session` is keyed by
+-- item id, so `pairs` gives it back in no order at all -- and a list whose rows
+-- swap places between two repaints of the same data cannot be read. The order
+-- is therefore decided once, here, where a suite can check it.
+--
+-- BIGGEST SPEND FIRST, because that is what the window is for: a receipt is
+-- read to find out where the gold went. Ties break on the item NAME so the
+-- order is total rather than merely mostly-decided -- two items bought for the
+-- same amount would otherwise still swap.
+--
+-- Returns rows, totalSpent, totalUnits, totalBuys.
+function buy.SessionRows()
+    local rows, spent, units, buys = {}, 0, 0, 0
+    for itemId, rec in pairs(buy.session) do
+        table.insert(rows, {
+            itemId = itemId,
+            name   = rec.name or "?",
+            n      = rec.n or 0,
+            buys   = rec.buys or 0,
+            spent  = rec.spent or 0,
+            -- PER UNIT, and nil rather than zero when there are no units to
+            -- divide by: a receipt row that says an item cost 0 each is
+            -- claiming something it does not know.
+            unit   = (rec.n and rec.n > 0)
+                     and math.floor((rec.spent or 0) / rec.n) or nil,
+        })
+        spent = spent + (rec.spent or 0)
+        units = units + (rec.n or 0)
+        buys  = buys + (rec.buys or 0)
+    end
+    table.sort(rows, function(a, b)
+        if a.spent ~= b.spent then return a.spent > b.spent end
+        return a.name < b.name
+    end)
+    return rows, spent, units, buys
 end
 
 -- The one item a result set is about, or nil when it is about several.

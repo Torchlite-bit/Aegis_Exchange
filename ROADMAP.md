@@ -5379,7 +5379,7 @@ from memory of retail is how it ends up subtly wrong.
 
 ---
 
-### 5.8 Purchase receipt window
+### 5.8 Purchase receipt window — ✅ **DONE** (v1.54.15)
 
 A small button on the Buy tab that pops out a receipt of what this run has
 bought, replacing the one-line status-bar tally. Per row: item name, quantity,
@@ -5396,7 +5396,20 @@ than inferred from bags, and `buy.SessionBought` reads it. Two gaps:
   is better: a crafting run buys six things, and the current surface can only
   talk about a search that narrowed to one.
 
-**Open — and it contradicts a settled decision, so it needs a call.** The
+**Settled by the owner: keep the session semantics.** The window is labelled
+"this session — Clear resets it", and Clear repaints the Buy tab's status line
+as well, because that line carries the same tally and a Clear that empties one
+surface and not the other has cleared nothing the player can see.
+
+`buy.SessionRows()` builds the rows in the engine rather than the window: the
+session table is keyed by item id, so `pairs` returns it in no order at all,
+and a list whose rows swap between two repaints of the same data cannot be
+read. Biggest spend first — a receipt is read to find out where the gold went
+— with ties broken on the name so the order is total.
+
+#### The original open question
+
+**It contradicted a settled decision, so it needed a call.** The
 request says *"for the current auction-house visit"*. `buy.session` deliberately
 does **not** clear on `AUCTION_HOUSE_CLOSED`; `craft.made` carries the reasoning
 verbatim — *"a crafting run spans several trips to the auctioneer, so a counter

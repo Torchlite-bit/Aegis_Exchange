@@ -1408,6 +1408,83 @@ end
      "    if true then",
      "sellslot"),
 
+    # ---- the purchase receipt ---------------------------------------------
+    # One per CALL, because RecordPurchase is called once per auction bought.
+    # Adding the stack size makes `buys` a second copy of `n` -- a column that
+    # looks plausible and is wrong by the stack size on every row.
+    ("receipt-counts-units-as-auctions", "core/buy.lua",
+     "    rec.buys  = (rec.buys or 0) + 1",
+     "    rec.buys  = (rec.buys or 0) + stack",
+     "session.buys"),
+
+    # buy.session is keyed by item id, so `pairs` returns it in no order at
+    # all. A list whose rows swap between two repaints cannot be read.
+    ("receipt-rows-are-unordered", "core/buy.lua",
+     "        if a.spent ~= b.spent then return a.spent > b.spent end\n"
+     "        return a.name < b.name",
+     "        return a.spent > b.spent",
+     "session.buys"),
+
+    # BIGGEST SPEND FIRST: a receipt is read to find out where the gold went.
+    ("receipt-rows-sort-cheapest-first", "core/buy.lua",
+     "        if a.spent ~= b.spent then return a.spent > b.spent end",
+     "        if a.spent ~= b.spent then return a.spent < b.spent end",
+     "session.buys"),
+
+    # A zero-unit row would divide by zero, and `inf` in a money column is a
+    # worse answer than an em dash.
+    ("receipt-divides-by-zero-units", "core/buy.lua",
+     "            unit   = (rec.n and rec.n > 0)\n"
+     "                     and math.floor((rec.spent or 0) / rec.n) or nil,",
+     "            unit   = math.floor((rec.spent or 0) / (rec.n or 0)),",
+     "session.buys"),
+
+    # The totals are summed over the same rows the table draws.
+    ("receipt-total-counts-auctions-as-units", "core/buy.lua",
+     "        units = units + (rec.n or 0)",
+     "        units = units + (rec.buys or 0)",
+     "session.buys"),
+
+    # "1 items" is the detail that makes a window look unfinished.
+    ("receipt-footer-has-no-singular", "ui/frame.lua",
+     'local items = n == 1 and "1 item" or (n .. " items")',
+     'local items = n .. " items"',
+     "session.buys"),
+
+    # Three zeroes in a row reads as broken rather than as empty.
+    ("receipt-footer-silent-when-empty", "ui/frame.lua",
+     '        return "Nothing bought yet this session."',
+     '        return ""',
+     "session.buys"),
+
+    # The units column reads `n`. A key pointed at a field the rows do not
+    # carry sorts every row as equal, which looks like a sort that ran.
+    ("receipt-sorts-units-on-a-missing-field", "ui/frame.lua",
+     'if key == "units" then return rec.units or rec.n or 0 end',
+     'if key == "units" then return rec.units or 0 end',
+     "session.buys"),
+
+    # A Clear that empties the window and leaves the status line below it
+    # saying "12 bought" has cleared nothing the player can see.
+    ("receipt-clear-leaves-the-status-line", "ui/frame.lua",
+     "        if ui.RefreshBuyStatus then ui.RefreshBuyStatus() end",
+     "        local _ = ui.RefreshBuyStatus",
+     "session.buys"),
+
+    # It covers the whole content area, so left open it sits over whichever
+    # tab you switched to -- which reads as the window being stuck.
+    ("receipt-survives-a-tab-change", "ui/frame.lua",
+     '    if name ~= "Buy" then\n        ui.HideReceiptWindow()\n    end',
+     "    local _ = name",
+     "session.buys"),
+
+    # The button reading unpressed while its window is open is the same class
+    # of bug as a Clear that repaints one surface and not the other.
+    ("receipt-button-never-reads-pressed", "ui/frame.lua",
+     '    return "Receipt", shown and true or false',
+     '    return "Receipt", false',
+     "session.buys"),
+
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
     # stack of twenty is twenty draws, not twenty times this. The price lines

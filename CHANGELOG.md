@@ -18,6 +18,31 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.15]
+
+### Added
+- **A Receipt button on the Buy tab**, opening a window of what you have
+  bought: item, units, **number of auctions**, average each, and total spent —
+  biggest spend first, with a total at the foot and a Clear.
+
+  The status line under the results already carried a tally, but it could only
+  show one when your search had narrowed to a single item — naming one item's
+  total beside three items' results would be a true number attached to the
+  wrong thing. So a crafting run buying six things had no surface at all, which
+  is exactly the run worth tracking. A window has no such constraint.
+
+  *It counts **this session** — login to logout — and says so under the title.
+  It deliberately does not reset when you leave the auction house: buying out a
+  crafting run takes several trips, and a counter that cleared on the way out
+  would clear in the middle of the thing it counts. Clear is the reset.*
+
+  *Auctions are a genuinely new number. The tally has always counted units,
+  because "how many have I bought" is a question about items — but twenty
+  Runecloth out of one stack and twenty out of twenty singles are different
+  afternoons, and now both are on screen.*
+
+---
+
 ## [1.54.14]
 
 ### Fixed
@@ -6191,6 +6216,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.12]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -4808,6 +4808,39 @@ local BUYL = {
 
 }
 
+-- ---------------------------------------------------------------------------
+-- The purchase receipt
+-- ---------------------------------------------------------------------------
+--
+-- ONE TABLE, not a family of file-scope locals: the 32-upvalue ceiling is real
+-- and ui/frame.lua has already shipped a file the client refused to load over
+-- exactly this. See the note above BUYL.
+local RCPT = {
+    top     = 70,    -- first row, below the headings
+    bot     = 52,    -- ...and the footer band below the last
+    scrolln = 30,    -- gutter for the FauxScrollFrame's outward-hanging bar
+    bar_w   = 200,   -- the Clear/Close well
+    bar_h   = 30,
+    btn_w   = 78,    -- the Receipt button on the Buy tab
+    btn_h   = 20,
+}
+local RCX = { item = 2, units = 300, buys = 398, unit = 496, spent = 614 }
+local RCW = { item = 294, units = 92, buys = 92, unit = 112, spent = 112 }
+local RECEIPT_HEADER_DEFS = {
+    { key = "item",  text = "Item" },
+    { key = "units", text = "Units",   just = "RIGHT" },
+    { key = "buys",  text = "Auctions", just = "RIGHT" },
+    { key = "unit",  text = "Avg Each", just = "RIGHT" },
+    { key = "spent", text = "Spent",   just = "RIGHT" },
+}
+-- The rows band, for ui.ListRowsAt. Multi-line so the geometry suite's
+-- loadTable can read it.
+local RCPTBOX = {
+    top = RCPT.top,
+    bot = RCPT.bot,
+}
+
+
 -- ADVANCED-mode layout, in ONE table for the same upvalue reason as BUYL --
 -- see the note above it. ui.BuildBuyTab is the function that reads both, and
 -- it is the one that broke the 32-upvalue ceiling once already.
@@ -6391,8 +6424,21 @@ function ui.BuildBuyTab()
     -- font string, so an equal offset left their text baselines ~9px apart.
     nextBtn:ClearAllPoints()
     nextBtn:SetPoint("TOPRIGHT", well, "BOTTOMRIGHT", 0, -8)
+
+    -- THE RECEIPT BUTTON SITS ON THAT SAME LINE, at the left edge, and the
+    -- status line starts after it. It belongs beside the tally it opens: the
+    -- line says how many of ONE item you have bought, and the button is where
+    -- you go when the answer is about six.
+    local receiptBtn = ui.MakeButton(well, "quiet",
+        "AegisExchangeReceiptButton")
+    receiptBtn:SetWidth(RCPT.btn_w); receiptBtn:SetHeight(RCPT.btn_h)
+    receiptBtn:SetPoint("TOPLEFT", well, "BOTTOMLEFT", 0, -8)
+    receiptBtn:SetText("Receipt")
+    receiptBtn:SetScript("OnClick", function() ui.ToggleReceiptWindow() end)
+    ui.buyReceiptBtn = receiptBtn
+
     ui.buyStatus:ClearAllPoints()
-    ui.buyStatus:SetPoint("LEFT", well, "BOTTOMLEFT", 6, 0)
+    ui.buyStatus:SetPoint("LEFT", receiptBtn, "RIGHT", 8, 0)
     ui.buyStatus:SetPoint("TOP", nextBtn, "TOP", 0, 0)
     ui.buyStatus:SetPoint("BOTTOM", nextBtn, "BOTTOM", 0, 0)
 
@@ -6639,8 +6685,11 @@ function ui.SetBuyView(name)
     -- invisible results were underneath, so a stray click queried the server.
     -- buyCheckTotal is here because it is the results table's "N selected"
     -- line and belongs to no other view.
+    -- ui.buyReceiptBtn rides with the results, not with the tab: it is
+    -- anchored to the table's well, so a view that hides the well and not the
+    -- button leaves it floating over whatever replaced it.
     local resultsBits = { ui.buyScroll, ui.buyPageText, ui.buyStatus,
-                          ui.buyPrevBtn, ui.buyNextBtn,
+                          ui.buyPrevBtn, ui.buyNextBtn, ui.buyReceiptBtn,
                           ui.buyListWell, ui.buyHdrRule, ui.buyCheckTotal }
     local i = 1
     while i <= table.getn(resultsBits) do
@@ -13405,6 +13454,277 @@ ui.GrowLedgerItemRows = function(n)
     return f
 end
 
+-- ---------------------------------------------------------------------------
+-- The purchase receipt window
+-- ---------------------------------------------------------------------------
+--
+-- WHAT IT REPLACES. The Buy tab's status line already carried a tally, and it
+-- could only show it when the search had narrowed to ONE item -- see
+-- buy.SoleItemId, which returns nil the moment a result set is about several.
+-- That is a real constraint on a real line: naming one item's total beside
+-- three items' results is a true number attached to the wrong thing. But it
+-- means a crafting run that buys six things has no surface at all, which is
+-- precisely the run worth tracking.
+--
+-- A window has no such constraint, and that is most of why it is better.
+
+-- The footer under the table: what the whole receipt comes to.
+--
+-- PURE, so it can be checked without a frame. Units and auctions are both
+-- named because they answer different questions -- twenty thread out of one
+-- stack and twenty out of twenty singles are different afternoons -- and the
+-- empty case says so in words rather than printing three zeroes.
+function ui.ReceiptFooterText(rows, spent, units, buys)
+    local n = table.getn(rows or {})
+    if n == 0 then
+        return "Nothing bought yet this session."
+    end
+    local items = n == 1 and "1 item" or (n .. " items")
+    local auctions = buys == 1 and "1 auction" or ((buys or 0) .. " auctions")
+    return items .. " \226\128\162 " .. (units or 0) .. " units over "
+        .. auctions .. " \226\128\162 " .. util.ShortMoneyColored(spent or 0)
+end
+
+function ui.ReceiptRowCount()
+    return ui.ListRowsAt(ui.WindowH(), RCPTBOX, HIST_ROW_H, HIST_ROWS_MAX)
+end
+
+function ui.BuildReceiptWindow()
+    if ui.receiptFrame then return ui.receiptFrame end
+
+    -- The Ledger overlay's shape, for the reasons written there: two-corner
+    -- anchored to ui.content, +50 frame level so nothing nested draws through
+    -- it, and a solid fill under the tiling backdrop so it is actually opaque.
+    local f = CreateFrame("Frame", "AegisExchangeReceipt", ui.frame)
+    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)
+    f:EnableMouse(true)
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    local fill = f:CreateTexture(nil, "BACKGROUND")
+    fill:SetPoint("TOPLEFT", f, "TOPLEFT", 3, -3)
+    fill:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, 3)
+    fill:SetTexture(C.well[1], C.well[2], C.well[3])
+    f:Hide()
+    ui.receiptFrame = f
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Receipt")
+
+    -- LABELLED FOR WHAT IT ACTUALLY COUNTS. buy.session runs from login to
+    -- logout and deliberately does not clear when the auction house closes --
+    -- a crafting run takes several trips, and a counter that cleared on the
+    -- way out would clear in the middle of the thing it counts. Calling this
+    -- "this visit" would be the one word that makes the number wrong.
+    local sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sub:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    sub:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    sub:SetText("this session \226\128\148 Clear resets it")
+
+    ui.receiptHeaders = ui.MakeSortHeaders(f, 6, -46, RCX, RCW,
+        function(key) ui.SetReceiptSort(key) end, RECEIPT_HEADER_DEFS)
+
+    local scroll = CreateFrame("ScrollFrame", "AegisExchangeReceiptScroll",
+        f, "FauxScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -RCPT.top)
+    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -RCPT.scrolln, RCPT.bot)
+    -- 1.12 signature: (itemHeight, updateFn). The frame and offset are the
+    -- implicit globals `this` / `arg1`.
+    scroll:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(HIST_ROW_H, ui.RefreshReceipt)
+    end)
+    ui.receiptScroll = scroll
+
+    ui.receiptRows = {}
+    ui.GrowReceiptRows = function(n)
+        if n > HIST_ROWS_MAX then n = HIST_ROWS_MAX end
+        n = ui.RowBudget(ui.receiptRows, n)
+        local i = table.getn(ui.receiptRows) + 1
+        while i <= n do
+            local row = CreateFrame("Button", nil, f)
+            row:SetHeight(HIST_ROW_H)
+            row.aegisNoSkin = true
+            ui.PlaceRow(row, scroll, i, HIST_ROW_H, ROWPAD.l, ROWPAD.r)
+            ui.AddRowChrome(row, i)
+            local mk = function(cx, w, just)
+                local fs = row:CreateFontString(nil, "OVERLAY",
+                                                "GameFontHighlightSmall")
+                fs:SetPoint("LEFT", row, "LEFT", cx, 0)
+                fs:SetWidth(w); fs:SetJustifyH(just or "LEFT")
+                return fs
+            end
+            row.item  = mk(RCX.item, RCW.item)
+            row.units = mk(RCX.units, RCW.units, "RIGHT")
+            row.buys  = mk(RCX.buys, RCW.buys, "RIGHT")
+            row.unit  = mk(RCX.unit, RCW.unit, "RIGHT")
+            row.spent = mk(RCX.spent, RCW.spent, "RIGHT")
+            row:SetScript("OnEnter", function()
+                if not row.itemId then return end
+                GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+                local shown = false
+                if GameTooltip.SetHyperlink then
+                    shown = pcall(function()
+                        GameTooltip:SetHyperlink("item:" .. row.itemId
+                                                 .. ":0:0:0")
+                    end)
+                end
+                if not shown then GameTooltip:SetText(row.item:GetText() or "") end
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            row:Hide()
+            ui.receiptRows[i] = row
+            i = i + 1
+        end
+    end
+    ui.GrowReceiptRows(HIST_ROWS)
+
+    ui.receiptFooter = f:CreateFontString(nil, "OVERLAY",
+                                          "GameFontHighlightSmall")
+    ui.receiptFooter:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, RCPT.bot - 8)
+    ui.receiptFooter:SetJustifyH("LEFT")
+    ui.receiptFooter:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    -- Clear and Close share a well, the way the Ledger's footer pair does --
+    -- a button plate is translucent, so the ground behind it is what decides
+    -- whether the pair reads as a pair.
+    local footBar = CreateFrame("Frame", nil, f)
+    footBar:SetHeight(RCPT.bar_h); footBar:SetWidth(RCPT.bar_w)
+    local fwell = ui.MakeWell(f, footBar, 3)
+    footBar:SetFrameLevel(fwell:GetFrameLevel() + 1)
+    footBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 10)
+
+    local closeBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangeReceiptCloseButton")
+    closeBtn:SetWidth(80); closeBtn:SetHeight(22)
+    closeBtn:SetPoint("RIGHT", footBar, "RIGHT", -4, 0)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.HideReceiptWindow() end)
+
+    local clearBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangeReceiptClearButton")
+    clearBtn:SetWidth(80); clearBtn:SetHeight(22)
+    clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    clearBtn:SetText("Clear")
+    clearBtn:SetScript("OnClick", function()
+        A.buy.ClearSession()
+        ui.RefreshReceipt()
+        -- The Buy tab's own status line carries the same tally, so it has to
+        -- be repainted too -- a Clear that empties the window and leaves the
+        -- line below it saying "12 bought" has cleared nothing the player can
+        -- see.
+        if ui.RefreshBuyStatus then ui.RefreshBuyStatus() end
+    end)
+
+    return f
+end
+
+-- Order the receipt by the chosen column. Biggest-spend-first is the default
+-- and lives in buy.SessionRows; this is what a header click changes.
+function ui.ReceiptSortValue(rec, key)
+    if key == "item" then return string.lower(rec.item or "") end
+    if key == "units" then return rec.units or rec.n or 0 end
+    if key == "buys" then return rec.buys or 0 end
+    if key == "unit" then return rec.unit end
+    return rec.spent or 0
+end
+
+function ui.SortReceiptRows(rows, key, dir)
+    return ui.SortByKey(rows, function(r)
+        return ui.ReceiptSortValue(r, key)
+    end, dir)
+end
+
+function ui.SetReceiptSort(key)
+    ui.receiptSortKey, ui.receiptSortDir =
+        ui.NextSort(ui.receiptSortKey, ui.receiptSortDir, key)
+    ui.RefreshReceipt()
+end
+
+function ui.RefreshReceipt()
+    if not ui.receiptFrame or not ui.receiptScroll then return end
+    local all, spent, units, buys = A.buy.SessionRows()
+    local rows = ui.SortReceiptRows(all, ui.receiptSortKey or "spent",
+                                    ui.receiptSortDir or "desc")
+    ui.PaintSortHeaders(ui.receiptHeaders, ui.receiptSortKey or "spent",
+                        ui.receiptSortDir or "desc")
+
+    local vis = ui.ReceiptRowCount()
+    ui.GrowReceiptRows(vis)
+    ui.SkinNewRows(ui.receiptRows)
+    FauxScrollFrame_Update(ui.receiptScroll, table.getn(rows), vis, HIST_ROW_H)
+    local offset = FauxScrollFrame_GetOffset(ui.receiptScroll)
+
+    local i = 1
+    while i <= table.getn(ui.receiptRows) do
+        local row = ui.receiptRows[i]
+        local rec = (i <= vis) and rows[i + offset] or nil
+        if rec then
+            row.item:SetText(rec.name or "?")
+            local q = rec.itemId and ui.CraftQualityOf(rec.itemId) or nil
+            local cr, cg, cb = ui.QualityColor(q)
+            row.item:SetTextColor(cr, cg, cb)
+            row.itemId = rec.itemId
+            row.units:SetText(tostring(rec.n or 0))
+            row.buys:SetText(tostring(rec.buys or 0))
+            row.unit:SetText(ui.MoneyOrDash(rec.unit))
+            row.spent:SetText(util.ShortMoneyColored(rec.spent or 0))
+            row:Show()
+        else
+            row.itemId = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+
+    ui.receiptFooter:SetText(ui.ReceiptFooterText(rows, spent, units, buys))
+end
+
+function ui.ShowReceiptWindow()
+    ui.BuildReceiptWindow()
+    ui.receiptFrame:Show()
+    ui.RefreshReceipt()
+    ui.RefreshReceiptButton()
+end
+
+function ui.HideReceiptWindow()
+    if ui.receiptFrame then ui.receiptFrame:Hide() end
+    ui.RefreshReceiptButton()
+end
+
+function ui.ToggleReceiptWindow()
+    if ui.receiptFrame and ui.receiptFrame:IsShown() then
+        ui.HideReceiptWindow()
+    else
+        ui.ShowReceiptWindow()
+    end
+end
+
+-- The button's label and pressed state. PURE, for the reason
+-- ui.LedgerButtonState is: a button reading unpressed while its window is open
+-- is the same class of bug as a Clear that repaints one surface and not the
+-- other.
+function ui.ReceiptButtonState(shown)
+    return "Receipt", shown and true or false
+end
+
+function ui.RefreshReceiptButton()
+    if not ui.buyReceiptBtn then return end
+    local shown = ui.receiptFrame and ui.receiptFrame:IsShown() and true or false
+    local label, pressed = ui.ReceiptButtonState(shown)
+    ui.buyReceiptBtn:SetText(label)
+    ui.MarkChosen({ ui.buyReceiptBtn }, function() return pressed end)
+end
+
 function ui.ShowLedgerWindow()
     ui.BuildHistoryTab()      -- the table lives in the overlay; build it first
     ui.BuildLedgerWindow()
@@ -17520,6 +17840,10 @@ function ui.SelectSubTab(name)
     -- fault as the picker above, and it reads as the window being stuck.
     if name ~= "History" then
         ui.HideLedgerWindow()
+    end
+    -- ...and the receipt belongs to Buy, on exactly the same terms.
+    if name ~= "Buy" then
+        ui.HideReceiptWindow()
     end
     -- ...and an open dropdown belongs to whatever form you just left. Not
     -- conditional on the tab: no dropdown should survive a tab change, and
