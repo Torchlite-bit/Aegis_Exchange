@@ -1603,6 +1603,33 @@ end
      "    local _ = demo",
      "session.buys"),
 
+    # ---- the History chart is painted by the tab, not the list -------------
+    # THE REGRESSION. Called only from the end of ui.UpdateHistoryList, the
+    # chart was never reached once that function learned to stand down in the
+    # Ledger's default Items view: no line, and a picker with no one ticked,
+    # until a player chose someone from it.
+    ("history-chart-not-painted-by-the-tab", "ui/frame.lua",
+     "    -- down.\n    ui.UpdateHistoryGraph()\nend",
+     "    -- down.\nend",
+     "histgraph"),
+
+    # ...and putting it BACK in the list painter is the shape it broke in.
+    ("history-chart-back-in-the-list-painter", "ui/frame.lua",
+     '        ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")\n'
+     "    end\nend",
+     '        ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")\n'
+     "    end\n    ui.UpdateHistoryGraph()\nend",
+     "histgraph"),
+
+    # An early return in the tab's own repaint reopens the same hole one
+    # function up.
+    ("history-repaint-gains-an-early-return", "ui/frame.lua",
+     "    ui.UpdateHistoryList()\n\n    -- THE CHART, FROM THE TAB'S OWN REPAINT",
+     "    ui.UpdateHistoryList()\n"
+     "    if ui.ledgerFrame and ui.ledgerFrame:IsShown() then return end\n\n"
+     "    -- THE CHART, FROM THE TAB'S OWN REPAINT",
+     "histgraph"),
+
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
     # stack of twenty is twenty draws, not twenty times this. The price lines

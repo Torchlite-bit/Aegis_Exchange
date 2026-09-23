@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.54.16
+# ⚔️ Aegis: Exchange v1.54.18
 
 ## ✨ New
 - **History is a dashboard** — the gold chart gets the whole tab, with High · Low · Sold · Bought · Top Sale · Top Buy underneath, and **Sales · Expenses · Profit** blocks (total, per day, top item — hover it)
@@ -8,7 +8,7 @@
 - Grouped results count items too: `8 auctions, 129 items`
 - Price lines on items **clicked in chat**
 - Money in gold / silver / copper colours
-- `/aex demo` fills the Ledger too
+- `/aex demo` fills the Ledger and Receipt too
 
 ## 🛠️ Fixed
 - **Disenchant values rebuilt from the server's own loot table** — epics have a value, weapons answer at every level, the 5% Brilliant Shard is back for ilvl 51–65 greens, shields & off-hands are priced right, thrown weapons no longer claim to disenchant, and your own disenchants now tell ilvl 56–60 greens from 61–65

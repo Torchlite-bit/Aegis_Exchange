@@ -15274,6 +15274,24 @@ function ui.RefreshHistory()
         i = i + 1
     end
     ui.UpdateHistoryList()
+
+    -- THE CHART, FROM THE TAB'S OWN REPAINT -- same ledger, same period, same
+    -- pass, which is what keeps the two halves agreeing about what week it is.
+    --
+    -- IT USED TO BE CALLED FROM THE END OF ui.UpdateHistoryList, and that is a
+    -- trap worth writing down. v1.54.9 taught the list painter to return early
+    -- whenever the Ledger's Items view is up, so the two views stop drawing
+    -- over each other -- and Items is the DEFAULT. From then on an ordinary
+    -- refresh never reached the chart. It drew nothing, and its picker showed
+    -- no one ticked, until you chose someone from it: the picker's own click
+    -- was the only other path that painted it. Reported as "it's set to none
+    -- and you have to select All Players or a character yourself".
+    --
+    -- The test that should have caught it checked that the call was WRITTEN
+    -- inside the list painter, not that it was REACHED. It now checks both
+    -- that it is here and that it is not back in a function that can stand
+    -- down.
+    ui.UpdateHistoryGraph()
 end
 
 function ui.SetHistSort(key)
@@ -15369,10 +15387,6 @@ function ui.UpdateHistoryList()
     else
         ui.histNote:SetText("Sales are logged from your mailbox; buys from the Buy tab.")
     end
-    -- The chart reads the SAME ledger and the SAME period, from the same
-    -- repaint. Driving it from its own path is how the two halves of one tab
-    -- come to disagree about what week it is.
-    ui.UpdateHistoryGraph()
 end
 
 StaticPopupDialogs["AEGIS_EXCHANGE_CLEARLEDGER"] = {

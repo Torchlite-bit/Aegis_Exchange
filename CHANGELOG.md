@@ -18,6 +18,20 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.18]
+
+### Fixed
+- **The History chart shows your whole account again as soon as you open the
+  tab.** Since 1.54.9 it opened blank, with no one ticked in the player picker,
+  until you chose *All Players* or a character yourself.
+
+  *All Players was always the default — the chart just wasn't being drawn.
+  1.54.9 stopped the Ledger's two views drawing over each other, and in doing
+  so cut off the only everyday path that drew the chart. Picking someone from
+  the menu was the one other way in, which is why that fixed it.*
+
+---
+
 ## [1.54.17]
 
 ### Changed
@@ -6249,6 +6263,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

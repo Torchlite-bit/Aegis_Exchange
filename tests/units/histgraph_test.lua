@@ -1405,9 +1405,35 @@ do
     -- ONE REPAINT, ONE LEDGER, ONE PERIOD. Driving the chart from its own
     -- path is how the two halves of one tab come to disagree about what week
     -- it is.
+    --
+    -- FROM THE TAB'S REPAINT, NOT THE LIST PAINTER. This used to assert that
+    -- ui.UpdateHistoryList contained the call -- and it did, at the very end,
+    -- after v1.54.9 had given that function an early return for the Ledger's
+    -- Items view, which is the default. The call was WRITTEN and never
+    -- REACHED: the chart drew nothing and its picker ticked no one until a
+    -- player chose someone from it. Asserting where the text sits is not the
+    -- same as asserting it runs, so this now pins both halves: the chart is
+    -- drawn by the function every refresh goes through, and it is NOT back in
+    -- one that can stand down.
+    local refresh = bodyOf("function ui.RefreshHistory(")
+    H.check("the tab's repaint draws the chart",
+            says(refresh, "ui.UpdateHistoryGraph()"))
     local paint = bodyOf("function ui.UpdateHistoryList(")
-    H.check("the repaint draws the chart too",
-            says(paint, "ui.UpdateHistoryGraph()"))
+    H.check("...and the list painter, which can return early, does not",
+            not says(paint, "ui.UpdateHistoryGraph()"),
+            "ui.UpdateHistoryList stands down in the Items view")
+    -- ...and the tab's repaint has no early return of its own after the
+    -- built-check, which would reopen the same hole one function up.
+    -- Counted in CODE only: the comments in there explain an early return,
+    -- and a word count that included them would fail for the explanation.
+    -- Only the shapes that LEAVE the function: `then return`, or a `return`
+    -- starting its own line. An inline `function(b) return ... end` is a
+    -- helper's return, not the repaint's.
+    local code = string.gsub(refresh, "%-%-[^\n]*", "")
+    local _, guarded = string.gsub(code, "then%s+return", "")
+    local _, bare = string.gsub(code, "\n%s*return", "")
+    H.eq("the tab's repaint returns only when the tab was never built",
+         guarded + bare, 1)
 
     local graph = bodyOf("function ui.UpdateHistoryGraph(")
     H.check("the chart exists", graph ~= "")

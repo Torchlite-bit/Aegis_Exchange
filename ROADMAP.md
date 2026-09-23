@@ -5169,6 +5169,25 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### The chart that was only drawn when you picked someone — ✅ **FIXED** (v1.54.18)
+
+Reported as "the History tab defaults to none; you have to select All Players
+or a character yourself". The default was always everyone — `ui.histWho = {}`
+and `ui.HistWhoTicks` ticks *All Players* for an empty set. **The chart was not
+being drawn.**
+
+`ui.UpdateHistoryGraph()` was called from exactly two places: the picker's own
+click, and the last line of `ui.UpdateHistoryList`. v1.54.9 gave that list
+painter an early return for the Ledger's Items view, to stop the two views
+drawing over each other — and Items is the default. From then on an ordinary
+refresh never reached the chart, and the picker's click was the only way in.
+
+The call now lives in `ui.RefreshHistory`, the tab's own repaint, which has no
+early exit after its built-check. The old test asserted the call was *written*
+inside the list painter; it was, and never ran. The new one pins where it is
+reached, that it is **not** back in a function that can stand down, and that
+the tab's repaint has exactly one early return.
+
 ### Separating bands by quantity — ✅ **DONE** (v1.54.16)
 
 Follow-up to v1.54.13, prompted by the reporter's screenshot of the old bands
