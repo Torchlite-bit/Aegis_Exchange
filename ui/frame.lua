@@ -13519,6 +13519,7 @@ function ui.BuildReceiptWindow()
     title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     title:SetText("Receipt")
+    ui.receiptTitle = title
 
     -- LABELLED FOR WHAT IT ACTUALLY COUNTS. buy.session runs from login to
     -- logout and deliberately does not clear when the auction house closes --
@@ -13615,7 +13616,12 @@ function ui.BuildReceiptWindow()
     clearBtn:SetWidth(80); clearBtn:SetHeight(22)
     clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
     clearBtn:SetText("Clear")
+    ui.receiptClearBtn = clearBtn
     clearBtn:SetScript("OnClick", function()
+        -- Guarded here as well as by the disabled state: demo mode promises
+        -- nothing real is touched, and the rows on screen are not the ones
+        -- this would clear.
+        if A.db.demo then return end
         A.buy.ClearSession()
         ui.RefreshReceipt()
         -- The Buy tab's own status line carries the same tally, so it has to
@@ -13687,6 +13693,30 @@ function ui.RefreshReceipt()
     end
 
     ui.receiptFooter:SetText(ui.ReceiptFooterText(rows, spent, units, buys))
+
+    -- DEMO MODE SHOWS THE DEMO LEDGER'S LAST DAY OF BUYING -- see
+    -- buy.DemoSession -- and says so in red, the way the chart's heading does.
+    --
+    -- CLEAR IS OFF while it does. It clears the REAL session, which is not
+    -- what is on screen: pressing it would wipe your actual purchases and
+    -- leave the invented ones sitting there, looking as if it had done nothing.
+    -- Demo mode's one promise is that nothing real is touched.
+    local demo = A.db.demo and true or false
+    if ui.receiptTitle then
+        ui.receiptTitle:SetText(ui.ReceiptTitleText(demo))
+    end
+    if ui.receiptClearBtn then
+        if demo then ui.receiptClearBtn:Disable()
+        else ui.receiptClearBtn:Enable() end
+    end
+end
+
+-- The window's title. PURE, so the demo marking can be checked without a
+-- frame: a demo receipt that looked like a real one is a set of invented
+-- purchases someone might act on.
+function ui.ReceiptTitleText(demo)
+    if demo then return "Receipt  |cffe64c4c(DEMO)|r" end
+    return "Receipt"
 end
 
 function ui.ShowReceiptWindow()
@@ -19024,7 +19054,8 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  The LEDGER is invented too \226\128\148 six months of"
                 .. " one trader's buying and selling across 34 real items, so"
                 .. " both its views, the stat blocks and the IN / OUT / NET"
-                .. " row all have something to show, and all agree.")
+                .. " row all have something to show, and all agree. The Buy"
+                .. " tab's Receipt shows that ledger's last day of buying.")
         else
             ChatMsg("Aegis: demo mode OFF.")
         end
@@ -19036,6 +19067,11 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ui.RefreshHistory()
         end
         if ui.craftBuilt then ui.RefreshCraft() end
+        -- ...and the receipt, which swaps between your real session and the
+        -- demo's last day of buying.
+        if ui.receiptFrame and ui.receiptFrame:IsShown() then
+            ui.RefreshReceipt()
+        end
         ui.RefreshShopCartButton()
         if ui.shopFrame and ui.shopFrame:IsVisible() then
             ui.RefreshShopWindow()

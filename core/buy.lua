@@ -2175,6 +2175,51 @@ end
 -- affected.
 buy.session = {}   -- itemId -> { n = units, buys = auctions, spent, name }
 
+-- How long the demo pretends this session has lasted: one day, so that the
+-- demo receipt and the demo Ledger's Day view describe the same purchases.
+buy.DEMO_SESSION_SECS = 86400
+
+-- The session, for demo mode: the demo LEDGER's purchases over the last day,
+-- folded into the same { itemId -> { n, buys, spent, name } } shape.
+--
+-- DERIVED, NOT INVENTED A SECOND TIME. The demo already has one trader's six
+-- months of buying and selling (db.DemoLedger); a receipt made up separately
+-- would disagree with the Ledger window one tab away, which is exactly what
+-- the demo ledger was built to stop happening. Taken from the same rows, the
+-- receipt's total IS the Ledger's Day-period spend, to the copper.
+function buy.DemoSession(now)
+    now = now or time()
+    local out = {}
+    local led = A.db and A.db.DemoLedger and A.db.DemoLedger() or {}
+    local since = now - buy.DEMO_SESSION_SECS
+    local i = 1
+    while i <= table.getn(led) do
+        local e = led[i]
+        if e.kind == "buy" and e.id and e.t and e.t >= since
+           and (e.amount or 0) > 0 then
+            local rec = out[e.id]
+            if not rec then
+                rec = { n = 0, buys = 0, spent = 0, name = e.item }
+                out[e.id] = rec
+            end
+            rec.n     = rec.n + (e.qty or 1)
+            rec.buys  = rec.buys + 1
+            rec.spent = rec.spent + e.amount
+        end
+        i = i + 1
+    end
+    return out
+end
+
+-- Where session READS come from. buy.session stays the store and the write
+-- target, so a purchase made while the demo is on is still booked for real --
+-- the same seam db.LedgerSource is, for the same reason: a substitute reader
+-- cannot write, and nothing invented can reach the real tally.
+function buy.SessionSource()
+    if A.db and A.db.demo then return buy.DemoSession() end
+    return buy.session
+end
+
 -- Book one purchase.
 --
 -- Called from the ENGINE, at the two places an auction is actually bought,
@@ -2203,7 +2248,7 @@ end
 -- Units and copper bought this session for one item. ALWAYS two numbers, so no
 -- caller has to branch on nil to render a zero.
 function buy.SessionBought(itemId)
-    local rec = itemId and buy.session[itemId]
+    local rec = itemId and buy.SessionSource()[itemId]
     if not rec then return 0, 0 end
     return rec.n, rec.spent
 end
@@ -2227,7 +2272,7 @@ end
 -- Returns rows, totalSpent, totalUnits, totalBuys.
 function buy.SessionRows()
     local rows, spent, units, buys = {}, 0, 0, 0
-    for itemId, rec in pairs(buy.session) do
+    for itemId, rec in pairs(buy.SessionSource()) do
         table.insert(rows, {
             itemId = itemId,
             name   = rec.name or "?",

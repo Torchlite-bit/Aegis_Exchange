@@ -1541,6 +1541,68 @@ end
      "                { 16204, 0.7500, 1.500, 1, 3 },   -- Illusion Dust",
      "disenchant"),
 
+    # ---- the receipt in demo mode -----------------------------------------
+    # The demo must be CONSULTED instead of the store, or the window opens on
+    # your real (often empty) session while the rest of the demo is invented.
+    ("receipt-demo-reads-the-store", "core/buy.lua",
+     "    if A.db and A.db.demo then return buy.DemoSession() end\n"
+     "    return buy.session",
+     "    return buy.session",
+     "session.buys"),
+
+    # ...and the WRITES must still go to the store. A purchase made while the
+    # demo is on is a real purchase; routed into the throwaway demo table it
+    # would simply vanish.
+    ("receipt-demo-swallows-real-purchases", "core/buy.lua",
+     "    local rec = buy.session[itemId]\n    if not rec then\n"
+     "        rec = { n = 0, buys = 0, spent = 0, name = name }\n"
+     "        buy.session[itemId] = rec",
+     "    local src = buy.SessionSource()\n    local rec = src[itemId]\n"
+     "    if not rec then\n"
+     "        rec = { n = 0, buys = 0, spent = 0, name = name }\n"
+     "        src[itemId] = rec",
+     "session.buys"),
+
+    # Derived from the demo LEDGER's buys -- counting its sales too would make
+    # the receipt disagree with the Ledger's own Day figures.
+    ("receipt-demo-counts-sales", "core/buy.lua",
+     '        if e.kind == "buy" and e.id and e.t and e.t >= since',
+     "        if e.id and e.t and e.t >= since",
+     "session.buys"),
+
+    # One per ledger ENTRY: a stack of twenty is one auction.
+    ("receipt-demo-counts-units-as-auctions", "core/buy.lua",
+     "            rec.buys  = rec.buys + 1\n            rec.spent = rec.spent + e.amount",
+     "            rec.buys  = rec.buys + (e.qty or 1)\n            rec.spent = rec.spent + e.amount",
+     "session.buys"),
+
+    # The status line has to read the same source, or a search that narrows to
+    # one demo item reports your real tally beside invented results.
+    ("status-line-ignores-the-demo", "core/buy.lua",
+     "    local rec = itemId and buy.SessionSource()[itemId]",
+     "    local rec = itemId and buy.session[itemId]",
+     "session.buys"),
+
+    # CLEAR CLEARS THE REAL SESSION, which is not what a demo receipt shows.
+    # Enabled, it wipes your actual purchases and leaves the invented rows
+    # sitting there looking as if nothing happened.
+    ("receipt-demo-clear-enabled", "ui/frame.lua",
+     "        if demo then ui.receiptClearBtn:Disable()",
+     "        if false then ui.receiptClearBtn:Disable()",
+     "session.buys"),
+
+    ("receipt-demo-clear-unguarded", "ui/frame.lua",
+     "        if A.db.demo then return end\n        A.buy.ClearSession()",
+     "        A.buy.ClearSession()",
+     "session.buys"),
+
+    # A demo receipt that looks like a real one is a list of invented
+    # purchases someone might act on.
+    ("receipt-demo-title-unmarked", "ui/frame.lua",
+     '    if demo then return "Receipt  |cffe64c4c(DEMO)|r" end',
+     "    local _ = demo",
+     "session.buys"),
+
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
     # stack of twenty is twenty draws, not twenty times this. The price lines

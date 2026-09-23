@@ -318,6 +318,7 @@ for _, sig in ipairs({
     "function ui.ReceiptFooterText(",
     "function ui.ReceiptSortValue(",
     "function ui.ReceiptButtonState(",
+    "function ui.ReceiptTitleText(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -398,5 +399,100 @@ do
     H.check("it closes when you leave the Buy tab",
             says('if name ~= "Buy" then\n        ui.HideReceiptWindow()'))
 end
+
+-- ---------------------------------------------------------------------------
+H.section("the receipt in demo mode")
+-- ---------------------------------------------------------------------------
+
+-- DERIVED FROM THE DEMO LEDGER, not invented a second time: the demo's last
+-- day of buying. A receipt made up separately would disagree with the Ledger
+-- window one tab away -- which is what the demo ledger exists to stop.
+local db = A.db
+do
+    buy.ClearSession()
+    db.demo = true
+    db.demoLedger = nil
+
+    local rows, spent, units, buys = buy.SessionRows()
+    H.check("the demo receipt has rows", table.getn(rows) > 5, table.getn(rows))
+    H.check("...with something spent", spent > 0)
+
+    -- AUCTIONS AND UNITS VISIBLY DIFFER, or the column that exists to show
+    -- the difference has nothing to show.
+    local differ = false
+    for i = 1, table.getn(rows) do
+        if rows[i].buys ~= rows[i].n then differ = true end
+    end
+    H.check("some row's units are not its auction count", differ)
+
+    local multi = false
+    for i = 1, table.getn(rows) do
+        if rows[i].buys > 1 then multi = true end
+    end
+    H.check("some item was bought more than once", multi)
+
+    -- THE CROSS-CHECK: the receipt's totals ARE the Ledger's Day-period
+    -- expenses, to the copper and to the transaction. Two views of one set
+    -- of invented purchases.
+    local now = time()
+    local st = db.LedgerStats(now - buy.DEMO_SESSION_SECS, now)
+    H.eq("the receipt's spend is the Ledger's Day spend", spent, st.spend)
+    H.eq("...and its auctions are the Ledger's Day buys", buys, st.buyN)
+
+    -- Every row can be hovered and coloured.
+    local noId = nil
+    for i = 1, table.getn(rows) do
+        if not rows[i].itemId then noId = rows[i].name end
+    end
+    H.isNil("every demo row carries an id", noId)
+
+    -- The status line reads the same source, so a search that narrows to one
+    -- demo item reports that item's demo tally rather than your real one.
+    local n1 = buy.SessionBought(rows[1].itemId)
+    H.eq("the status line agrees with the receipt", n1, rows[1].n)
+end
+
+-- NOTHING REAL IS TOUCHED. A purchase made while the demo is on is booked in
+-- the real session -- it is still a real purchase -- and is simply not what
+-- the window is showing until the demo is switched off.
+do
+    db.demo = true
+    buy.RecordPurchase(4306, "Silk Cloth", 20, 90000)
+    H.eq("a purchase in demo mode still lands in the real session",
+         buy.session[4306] and buy.session[4306].n, 20)
+    db.demo = nil
+    local rows, spent = buy.SessionRows()
+    H.eq("...and is what the receipt shows once the demo is off",
+         table.getn(rows), 1)
+    H.eq("...at its real price", spent, 90000)
+    buy.ClearSession()
+end
+
+-- The window says which one it is showing.
+H.check("a demo receipt is marked as one",
+        string.find(ui.ReceiptTitleText(true), "DEMO", 1, true) ~= nil)
+H.eq("...and a real one is not", ui.ReceiptTitleText(false), "Receipt")
+
+-- CLEAR IS OFF IN DEMO MODE. It clears the REAL session, which is not what is
+-- on screen: pressing it would wipe your actual purchases and leave the
+-- invented ones sitting there, looking as if it had done nothing.
+do
+    local f = assert(io.open(SRC, "r"), "run this from the repo root")
+    local body = f:read("*a")
+    f:close()
+    local function says(needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+    H.check("Clear is disabled while the demo is on",
+            says("if demo then ui.receiptClearBtn:Disable()"))
+    H.check("...and refuses even if it were pressed",
+            says("        if A.db.demo then return end\n        A.buy.ClearSession()"))
+    H.check("toggling the demo repaints an open receipt",
+            says("if ui.receiptFrame and ui.receiptFrame:IsShown() then\n"
+              .. "            ui.RefreshReceipt()"))
+end
+
+db.demo = nil
+db.demoLedger = nil
 
 os.exit(H.report("session.buys"))

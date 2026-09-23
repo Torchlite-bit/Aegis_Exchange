@@ -5439,6 +5439,14 @@ and a list whose rows swap between two repaints of the same data cannot be
 read. Biggest spend first — a receipt is read to find out where the gold went
 — with ties broken on the name so the order is total.
 
+**Demo mode (v1.54.17).** `buy.SessionSource()` is the seam, the same shape as
+`db.LedgerSource()`: `buy.session` stays the store and the write target, and
+demo mode substitutes `buy.DemoSession()` — the demo ledger's buys over the
+last day, folded into the session shape. Derived rather than invented a second
+time, so the receipt's total **is** the Ledger's Day-period spend, which the
+suite asserts to the copper. Clear is disabled in demo mode, because it clears
+the real session and not the rows on screen.
+
 #### The original open question
 
 **It contradicted a settled decision, so it needed a call.** The

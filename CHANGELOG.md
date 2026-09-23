@@ -18,6 +18,21 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.17]
+
+### Changed
+- **`/aex demo` fills the Receipt window too** — the demo Ledger's last day of
+  buying, so it agrees with the Ledger's Day figures to the copper rather than
+  being a second set of made-up numbers. The title says **(DEMO)** in red.
+
+  **Clear is greyed out while the demo is on.** It clears your *real* session,
+  which isn't what's on screen — pressing it would have wiped your actual
+  purchases and left the invented ones sitting there as if nothing happened.
+  Anything you buy while the demo is on is still recorded for real, and shows
+  once you turn it off.
+
+---
+
 ## [1.54.16]
 
 ### Fixed
@@ -6234,6 +6249,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

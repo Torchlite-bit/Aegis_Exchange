@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.16)
+# Aegis: Exchange (v1.54.17)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -351,7 +351,7 @@ That file just calls Aegis's own skinning, so both paths stay identical.
 | `/aex` or the **Blizzard UI** button | Hand the session back to the stock AH |
 | `/aex shop` | The crafting shopping list, anywhere |
 | `/aex flips` | What the last scan found **below vendor price** |
-| `/aex demo` | Fill the chart, Ledger and Crafting tab with invented data to see them working. Nothing is saved; `/reload` clears it |
+| `/aex demo` | Fill the chart, Ledger, Receipt and Crafting tab with invented data to see them working. Nothing is saved; `/reload` clears it |
 | `/aex diag <shift-click an item>` | Everything Aegis knows about that item, and how |
 | `/aex cache` | How many items Aegis has learned from the client |
 | `/aex debug` | Scanner trace, for when something looks wrong |
@@ -415,7 +415,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.16`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.17`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.
