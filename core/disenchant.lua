@@ -917,9 +917,19 @@ end
 -- Returns the LOWEST consistent band and HOW MANY are consistent. The count is
 -- the point: one disenchant is often not enough. An essence names its band
 -- outright, but a dust covers two or three -- Strange Dust spans bands 15, 20
--- and 25. Of the 30 material/quality combinations this table can produce, 21
--- pin a band on their own and 9 do not, so evidence has to accumulate rather
+-- and 25. Of the 36 material/quality combinations this table can produce, 24
+-- pin a band on their own and 12 do not, so evidence has to accumulate rather
 -- than be believed on the first result.
+--
+-- GREEN BANDS 60 AND 65 CAN NEVER BE SEPARATED THIS WAY. Both yield Illusion
+-- Dust, Greater Eternal Essence and a Large Brilliant Shard; only the QUANTITIES
+-- differ (dust 1-2 against 2-5). Before v1.54.13 the table had no shard in band
+-- 65, so a Large Brilliant Shard pinned band 60 -- and because observation
+-- outranks ClassicAPI in de.ItemLevel, an item level 62 green that had ever
+-- dropped one was valued on band 60's half-sized dust yield even for a player
+-- whose client knew the real level. Observations are stored raw and re-read
+-- against the current table, so that corrected itself with the table; the
+-- honest answer now is "two candidates", and the real item level decides.
 function de.BandCandidates(quality, seen)
     if not quality or not seen then return nil, 0 end
     local sets = MaterialSets()[quality]
@@ -965,9 +975,11 @@ end
 -- The 24 enchanting reagents. A disenchant produces exactly one stack of one
 -- of these and nothing else, which is the fact attribution leans on hardest.
 --
--- Written out rather than derived from BANDS because BANDS has no epics, and
--- so cannot name Nexus Crystal -- and an epic disenchant is exactly the kind
--- of observation worth keeping even while we decline to VALUE epics.
+-- Written out rather than derived from BANDS, because this list decides
+-- whether a loot window IS a disenchant, and that must not depend on which
+-- bands the value table happens to cover. BANDS refuses rares above item level
+-- 70 (their loot entry is not a distribution); a Nexus Crystal from one of
+-- them is still a disenchant, and still worth recording.
 local REAGENT = {
     [10940] = true, [11083] = true, [11137] = true, [11176] = true,
     [16204] = true,
