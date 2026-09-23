@@ -5169,6 +5169,38 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Separating bands by quantity — ✅ **DONE** (v1.54.16)
+
+Follow-up to v1.54.13, prompted by the reporter's screenshot of the old bands
+55 and 65. Green bands 60 and 65 yield the **same three materials** — Illusion
+Dust, Greater Eternal Essence, Large Brilliant Shard — so `de.BandCandidates`,
+which only asked *which* materials came out, could never separate them.
+
+Before v1.54.13 that was worse than undecided: the table had no shard in band
+65, so a Large Brilliant Shard **pinned band 60**, and observation outranks
+ClassicAPI in `de.ItemLevel`. Replayed against the old code, an item level 62
+green that had ever dropped one was valued on band 60's half-sized dust yield
+even for a player whose client knew the real level. Observations are stored
+raw, so that corrected itself with the table.
+
+- **The generator emits each material's count range** — rows are now
+  `{ id, chance, mean, min, max }`. The mean values an item; the range
+  identifies a band.
+- **The test is exact.** n rolls, each a whole number in [min, max], can sum to
+  `total` iff `n·min ≤ total ≤ n·max`, both ends inclusive. Three breaks
+  giving six dust is 2+2+2, which both bands roll, so it pins neither.
+- **Quantity narrows, never erases.** If the counts contradict every band the
+  materials allow, the likelier story is that this server rolls different
+  amounts (Turtle changes things), so the material answer stands. Quantity is
+  the weaker evidence and does not get to delete the stronger.
+
+**Left ambiguous, deliberately:** every other shared material set has
+*identical* rows — rare 20/25 and 60/65, epic 40/45 and 65–95 — so the band is
+uncertain but the value is not. `de.ItemLevel` still declines to pin those and
+falls through to ClassicAPI or required level, which gives the same answer.
+Accepting value-identical candidates would let observation answer for those
+too; not needed for correctness, noted in case it is ever wanted.
+
 ### Two Sell-tab bugs — ✅ **DONE** (v1.54.14)
 
 **The listings that were not there.** `sell.ScanItem` kept a scanned row only

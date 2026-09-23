@@ -18,6 +18,24 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.16]
+
+### Fixed
+- **Your own disenchants can now tell item level 56–60 and 61–65 greens
+  apart.** Both give Illusion Dust, Greater Eternal Essence and the odd Large
+  Brilliant Shard — only the *amounts* differ. Aegis used to look only at
+  which materials came out, so for those two bands it could never decide, and
+  fell back to an estimate. It now reads the counts too: **a single Illusion
+  Dust only happens at 56–60, three or more only at 61–65**, and a single
+  Greater Eternal Essence only at 56–60. For higher-level greens that roughly
+  doubles the dust Aegis expects, so it matters which band it picks.
+
+  *Nothing to reset — it reads the disenchants you've already done. And if
+  your server's amounts ever turn out different from the ones Aegis knows, it
+  goes by the materials alone rather than throwing the evidence away.*
+
+---
+
 ## [1.54.15]
 
 ### Added
@@ -6216,6 +6234,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.15]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.14]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.13]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

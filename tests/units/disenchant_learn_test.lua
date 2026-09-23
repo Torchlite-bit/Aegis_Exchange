@@ -170,7 +170,7 @@ local band, count = de.BandCandidates(GREEN, { [DUST] = true })
 H.eq("a dust leaves more than one band open", count > 1, true)
 H.eq("...and offers the lowest of them", band, 50)
 
--- An ESSENCE does. 21 of the 30 material/quality combinations do.
+-- An ESSENCE does. 24 of the 36 material/quality combinations do.
 band, count = de.BandCandidates(GREEN, { [ESSENCE] = true })
 H.eq("an essence names its band outright", count, 1)
 H.eq("...which is band 50", band, 50)
@@ -189,6 +189,103 @@ H.isNil("...and no answer", band)
 H.eq("no materials, no candidates",
      select(2, de.BandCandidates(GREEN, {})), 0)
 H.isNil("a nil quality gives nothing", de.BandCandidates(nil, { [DUST] = true }))
+
+-- ---------------------------------------------------------------------------
+H.section("quantities separate what materials cannot")
+-- ---------------------------------------------------------------------------
+
+-- WHY THIS EXISTS. Green bands 60 and 65 yield EXACTLY the same three
+-- materials, so a player's own disenchants could never tell them apart -- and
+-- before v1.54.13 the table was missing band 65's shard, so a Large Brilliant
+-- Shard pinned band 60 and an item level 62 green was valued on half the dust.
+-- The counts separate them: band 60 rolls Illusion Dust 1-2 and Greater
+-- Eternal Essence 1-2; band 65 rolls dust 2-5 and essence always 2.
+local IDUST, GEE, LBS = 16204, 16203, 14344
+local function obs(n, total) return { n = n, total = total } end
+
+-- Materials alone: still two bands, and that is the honest answer.
+band, count = de.BandCandidates(GREEN, { [IDUST] = true, [GEE] = true,
+                                         [LBS] = true })
+H.eq("materials alone cannot separate green 60 from 65", count, 2)
+
+-- A SINGLE Illusion Dust is impossible in band 65.
+band, count = de.BandCandidates(GREEN, { [IDUST] = obs(1, 1) })
+H.eq("one Illusion Dust names band 60", count, 1)
+H.eq("...which is 60", band, 60)
+
+-- THREE of them are impossible in band 60.
+band, count = de.BandCandidates(GREEN, { [IDUST] = obs(1, 3) })
+H.eq("three Illusion Dust name band 65", count, 1)
+H.eq("...which is 65", band, 65)
+
+-- Two is what both roll, so it proves nothing.
+band, count = de.BandCandidates(GREEN, { [IDUST] = obs(1, 2) })
+H.eq("two Illusion Dust leave both open", count, 2)
+
+-- The essence separates them too: band 65 ALWAYS gives two.
+band, count = de.BandCandidates(GREEN, { [GEE] = obs(1, 1) })
+H.eq("a single Greater Eternal Essence names band 60", band, 60)
+H.eq("...alone", count, 1)
+band, count = de.BandCandidates(GREEN, { [GEE] = obs(1, 2) })
+H.eq("two of them leave both open", count, 2)
+
+-- THE TEST IS EXACT, AND BOTH ENDS ARE INCLUSIVE. n rolls between min and max
+-- can sum to `total` if and only if n*min <= total <= n*max.
+--   3 breaks, 6 dust:  2+2+2 -- both bands can do it.
+band, count = de.BandCandidates(GREEN, { [IDUST] = obs(3, 6) })
+H.eq("six dust over three breaks fits both (2+2+2)", count, 2)
+--   3 breaks, 5 dust:  needs a 1 somewhere -- only band 60 rolls a 1.
+band, count = de.BandCandidates(GREEN, { [IDUST] = obs(3, 5) })
+H.eq("five dust over three breaks can only be band 60", band, 60)
+H.eq("...alone", count, 1)
+--   3 breaks, 7 dust:  needs a 3 somewhere -- only band 65 rolls a 3.
+band, count = de.BandCandidates(GREEN, { [IDUST] = obs(3, 7) })
+H.eq("seven dust over three breaks can only be band 65", band, 65)
+H.eq("...alone", count, 1)
+
+-- NOT AN AVERAGE. A mean-based test would put 1.67 per break "closer to 60"
+-- and 2.33 "closer to 65" and call both -- but the question is which band
+-- COULD have produced the rolls, and that is a yes/no.
+
+-- QUANTITIES MAY NARROW, NEVER ERASE. A server that rolls different counts
+-- from the 1.12.1 table -- Turtle changes things -- must not turn material
+-- evidence into no evidence. Strange Dust belongs to bands 15, 20 and 25 and
+-- tops out at six; nine of it contradicts all three, so the answer falls back
+-- to what the material alone says.
+band, count = de.BandCandidates(GREEN, { [10940] = obs(1, 9) })
+H.eq("counts that fit no band leave the material answer standing", count, 3)
+H.eq("...its lowest band", band, 15)
+
+-- ...and the same where the materials had already pinned a band: an essence
+-- names its band outright, and an out-of-range count must not unpin it.
+band, count = de.BandCandidates(GREEN, { [ESSENCE] = obs(1, 9) })
+H.eq("an out-of-range count cannot unpin an essence", count, 1)
+H.eq("...still band 50", band, 50)
+
+-- A malformed record is presence, not a contradiction.
+band, count = de.BandCandidates(GREEN, { [IDUST] = { n = 0, total = 0 } })
+H.eq("a record with no procs counts as presence only", count, 2)
+
+-- ...AND THE REAL PATH PASSES THE COUNTS. db.RecordDisenchant stores n and
+-- total per material; if de.BandFromObservation flattened that back to
+-- `true`, everything above would be tested and none of it used.
+W.AddItem(970, { name = "Nightshade Leggings", quality = GREEN,
+                 equipLoc = "INVTYPE_LEGS" })
+db.RecordDisenchant(970, IDUST, 4)
+band, count = de.BandFromObservation(970, GREEN)
+H.eq("a stored disenchant of four dust reads as band 65", band, 65)
+H.eq("...unambiguously", count, 1)
+local lvl2, src2 = de.ItemLevel(970, GREEN)
+H.eq("...and the item's level is taken from it", lvl2, 65)
+H.eq("...as an observation", src2, "observed")
+
+-- THE REPORTED CASE, and the one that used to go wrong: a Large Brilliant
+-- Shard on its own. Both bands drop one, one at a time, so it must NOT pin.
+W.AddItem(971, { name = "Shard Only Green", quality = GREEN,
+                 equipLoc = "INVTYPE_LEGS" })
+db.RecordDisenchant(971, LBS, 1)
+band, count = de.BandFromObservation(971, GREEN)
+H.eq("a lone Large Brilliant Shard still leaves both bands open", count, 2)
 
 -- ---------------------------------------------------------------------------
 H.section("what is observed outranks what the client says")

@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.15)
+# Aegis: Exchange (v1.54.16)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -295,8 +295,9 @@ separately, up to item level 95 (70 for rares). Shields and off-hand items break
 **The one thing 1.12 hides is the item level**, so Aegis finds it, best first:
 
 1. **You disenchanted one** — evidence from your own server outranks everything.
-   A single dust leaves two or three possibilities, so it waits for a second
-   break.
+   It reads what came out *and how much*: one Illusion Dust means 56–60, three
+   means 61–65. When even the amounts leave two possibilities, it waits for
+   another break.
 2. **[ClassicAPI](https://github.com/brues-code/ClassicAPI)** hands over the real
    number, Turtle's custom gear included.
 3. **The level required to equip it, plus five** — always labelled
@@ -414,7 +415,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.15`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.16`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

@@ -184,7 +184,13 @@ def read_dump(path):
 # ---------------------------------------------------------------------------
 
 def resolve(rows):
-    """One DisenchantID's rows -> [(matId, chance 0..1, meanYield)], or None.
+    """One DisenchantID's rows -> [(matId, chance 0..1, mean, lo, hi)], or None.
+
+    `lo` and `hi` are the count the server rolls, inclusive. They are kept
+    beside the mean because the mean is what VALUES an item but the range is
+    what IDENTIFIES a band: green bands 60 and 65 yield the same three
+    materials, and only "Illusion Dust x1 is impossible in 65, x3 is impossible
+    in 60" can tell a player's own disenchants apart.
 
     MANGOS LOOT GROUP SEMANTICS, and the whole shard question turns on them: a
     row with an explicit chance takes that chance, and a row written as 0 takes
@@ -199,19 +205,22 @@ def resolve(rows):
     total = sum(r[1] for r in explicit)
     out = []
     for mid, chance, lo, hi in explicit:
-        out.append((mid, chance, (lo + hi) / 2.0))
+        out.append((mid, chance, (lo + hi) / 2.0, lo, hi))
     if remainder:
         mid, _, lo, hi = remainder[0]
         left = CHANCE_TOTAL - total
         if left <= 0:
             return None, "no chance left for the remainder row"
-        out.append((mid, left, (lo + hi) / 2.0))
+        out.append((mid, left, (lo + hi) / 2.0, lo, hi))
         total = CHANCE_TOTAL
     if abs(total - CHANCE_TOTAL) > CHANCE_EPS:
         return None, "chances total %.1f%%, not 100%%" % total
-    if any(mid not in NAME for mid, _, _ in out):
+    if any(mid not in NAME for mid, _, _, _, _ in out):
         return None, "yields something that is not an enchanting reagent"
-    out = [(mid, c / CHANCE_TOTAL, mean) for mid, c, mean in out]
+    if any(lo < 1 or hi < lo for _, _, _, lo, hi in out):
+        return None, "a count range that is not a range"
+    out = [(mid, c / CHANCE_TOTAL, mean, lo, hi)
+           for mid, c, mean, lo, hi in out]
     out.sort(key=lambda e: -e[1])
     return out, None
 
@@ -291,9 +300,9 @@ def emit(built):
     print("-- Re-run the generator rather than patching a number here.")
     print("--")
     print("-- BANDS[quality][band] = { a = armour, w = weapon }, each a list")
-    print("-- of { materialId, chance, meanYield }. `chance` sums to 1 across")
-    print("-- the list; `meanYield` is the midpoint of the count the server")
-    print("-- rolls for that material.")
+    print("-- of { materialId, chance, meanYield, min, max }. `chance` sums to")
+    print("-- 1 across the list; `min`..`max` is the count the server rolls for")
+    print("-- that material, inclusive, and `meanYield` is its midpoint.")
     print("local BANDS = {")
     for qid, qname in ((2, "green"), (3, "rare"), (4, "epic")):
         bands = sorted(set(b for (q, b, _) in built if q == qid))
@@ -310,9 +319,9 @@ def emit(built):
                     continue
                 print("            %s = {   -- %d items, DisenchantID %d"
                       % (cls, rec["items"], rec["deid"]))
-                for mid, chance, mean in rec["dist"]:
-                    print("                { %d, %.4f, %.3f },   -- %s"
-                          % (mid, chance, mean, NAME[mid]))
+                for mid, chance, mean, lo, hi in rec["dist"]:
+                    print("                { %d, %.4f, %.3f, %d, %d },   -- %s"
+                          % (mid, chance, mean, lo, hi, NAME[mid]))
                 print("            },")
             print("        },")
         print("    },")
@@ -356,9 +365,9 @@ def main():
                         continue
                     print("%-5s <=%-2d %-6s de=%-3d items=%-4d %s"
                           % (qname, band, label, rec["deid"], rec["items"],
-                             "  ".join("%s %.1f%% x%.1f"
-                                       % (NAME[m], c * 100, y)
-                                       for m, c, y in rec["dist"])))
+                             "  ".join("%s %.1f%% x%d-%d"
+                                       % (NAME[m], c * 100, lo, hi)
+                                       for m, c, y, lo, hi in rec["dist"])))
         return 0
 
     emit(built)

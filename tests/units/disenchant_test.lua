@@ -374,6 +374,17 @@ for qi = 1, table.getn(QUALITIES) do
                             r.chance > 0 and r.chance <= 1)
                     H.check(label .. ": mean yield is at least one",
                             r.mean >= 1)
+                    -- THE RANGE IS WHAT IDENTIFIES A BAND from a player's
+                    -- own disenchants, so it has to be a real range and the
+                    -- mean has to be its midpoint -- the generator derives
+                    -- one from the other, and a paste that broke either
+                    -- would pass every check about the value.
+                    H.check(label .. ": count range starts at one or more",
+                            r.min and r.min >= 1)
+                    H.check(label .. ": count range is not backwards",
+                            r.min and r.max and r.min <= r.max)
+                    H.near(label .. ": mean is the range's midpoint",
+                           r.mean, ((r.min or 0) + (r.max or 0)) / 2, 0.0005)
                     sum = sum + r.chance
                 end
                 H.near(label .. ": chances sum to 1", sum, 1, 0.0005)

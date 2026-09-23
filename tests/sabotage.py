@@ -1200,7 +1200,8 @@ end
      """    local out, i, n = {}, 1, table.getn(rows)
     while i <= n do
         local r = rows[i]
-        table.insert(out, { itemId = r[1], chance = r[2], mean = r[3] })
+        table.insert(out, { itemId = r[1], chance = r[2], mean = r[3],
+                            min = r[4], max = r[5] })
         i = i + 1
     end
     return out""",
@@ -1208,6 +1209,7 @@ end
     while i <= n do
         local r = rows[i]
         r.itemId, r.chance, r.mean = r[1], r[2], r[3]
+        r.min, r.max = r[4], r[5]
         i = i + 1
     end
     return out""",
@@ -1253,16 +1255,16 @@ end
     # meaning "take whatever the group has left" -- 5%. Dropping it is what
     # made an item level 62 green look like dust and essence only.
     ("de-green-65-loses-its-shard", "core/disenchant.lua",
-     "                { 16203, 0.2000, 2.000 },   -- Greater Eternal Essence\n"
-     "                { 14344, 0.0500, 1.000 },   -- Large Brilliant Shard",
-     "                { 16203, 0.2500, 2.000 },   -- Greater Eternal Essence",
+     "                { 16203, 0.2000, 2.000, 2, 2 },   -- Greater Eternal Essence\n"
+     "                { 14344, 0.0500, 1.000, 1, 1 },   -- Large Brilliant Shard",
+     "                { 16203, 0.2500, 2.000, 2, 2 },   -- Greater Eternal Essence",
      "disenchant"),
 
     # ...and the same one band down, where it is a Small Brilliant Shard.
     ("de-green-55-loses-its-shard", "core/disenchant.lua",
-     "                { 16202, 0.2000, 1.500 },   -- Lesser Eternal Essence\n"
-     "                { 14343, 0.0500, 1.000 },   -- Small Brilliant Shard",
-     "                { 16202, 0.2500, 1.500 },   -- Lesser Eternal Essence",
+     "                { 16202, 0.2000, 1.500, 1, 2 },   -- Lesser Eternal Essence\n"
+     "                { 14343, 0.0500, 1.000, 1, 1 },   -- Small Brilliant Shard",
+     "                { 16202, 0.2500, 1.500, 1, 2 },   -- Lesser Eternal Essence",
      "disenchant"),
 
     # A SHIELD IS A WEAPON. This file had it as armour for a year, with a test
@@ -1297,18 +1299,18 @@ end
     # structural check: it sums to 1, uses a real reagent, climbs in order.
     ("de-epic-borrows-the-rare-yield", "core/disenchant.lua",
      "            a = {   -- 15 items, DisenchantID 63\n"
-     "                { 14343, 1.0000, 3.000 },   -- Small Brilliant Shard",
+     "                { 14343, 1.0000, 3.000, 2, 4 },   -- Small Brilliant Shard",
      "            a = {   -- 15 items, DisenchantID 63\n"
-     "                { 14343, 1.0000, 1.000 },   -- Small Brilliant Shard",
+     "                { 14343, 1.0000, 1.000, 1, 1 },   -- Small Brilliant Shard",
      "disenchant"),
 
     # The top epic band is a Nexus Crystal, which is the single most valuable
     # thing this rule can report.
     ("de-epic-60-is-not-a-nexus-crystal", "core/disenchant.lua",
      "            a = {   -- 45 items, DisenchantID 64\n"
-     "                { 20725, 1.0000, 1.000 },   -- Nexus Crystal",
+     "                { 20725, 1.0000, 1.000, 1, 1 },   -- Nexus Crystal",
      "            a = {   -- 45 items, DisenchantID 64\n"
-     "                { 14344, 1.0000, 1.000 },   -- Large Brilliant Shard",
+     "                { 14344, 1.0000, 1.000, 1, 1 },   -- Large Brilliant Shard",
      "disenchant"),
 
     # ---- the Sell tab's listings ------------------------------------------
@@ -1484,6 +1486,60 @@ end
      '    return "Receipt", shown and true or false',
      '    return "Receipt", false',
      "session.buys"),
+
+    # ---- disenchant: telling bands apart by quantity -----------------------
+    # Green bands 60 and 65 yield the same three materials. Ignoring the counts
+    # leaves them inseparable forever -- the state this change exists to end.
+    ("de-learn-ignores-quantities", "core/disenchant.lua",
+     '    if type(obs) ~= "table" then return true end      -- presence only',
+     "    do return true end",
+     "disenchant.learn"),
+
+    # BOTH ENDS INCLUSIVE. Three breaks giving six dust is 2+2+2, which both
+    # bands roll; an exclusive bound calls it for one of them.
+    ("de-learn-lower-bound-exclusive", "core/disenchant.lua",
+     "    return total >= n * range[1] and total <= n * range[2]",
+     "    return total > n * range[1] and total <= n * range[2]",
+     "disenchant.learn"),
+
+    ("de-learn-upper-bound-exclusive", "core/disenchant.lua",
+     "    return total >= n * range[1] and total <= n * range[2]",
+     "    return total >= n * range[1] and total < n * range[2]",
+     "disenchant.learn"),
+
+    # An AVERAGE test: "1.67 per break is nearer band 60's mean". The question
+    # is which band COULD have rolled it, not which mean it sits nearest.
+    ("de-learn-tests-the-average-not-the-range", "core/disenchant.lua",
+     "    return total >= n * range[1] and total <= n * range[2]",
+     "    return math.abs(total / n - (range[1] + range[2]) / 2) <= 0.5",
+     "disenchant.learn"),
+
+    # QUANTITY MAY NARROW, NEVER ERASE. A server rolling different counts from
+    # the 1.12.1 table must not turn material evidence into no evidence.
+    ("de-learn-quantity-erases-the-materials", "core/disenchant.lua",
+     "    if table.getn(use) == 0 then use = byMaterial end",
+     "    local _ = byMaterial",
+     "disenchant.learn"),
+
+    # The real path has to pass the counts it stores. Flattened back to
+    # `true`, every test of the arithmetic passes and none of it is used.
+    ("de-learn-observation-drops-the-counts", "core/disenchant.lua",
+     "            seen[matId] = { n = m.n, total = m.total }",
+     "            seen[matId] = true",
+     "disenchant.learn"),
+
+    # A generator that swapped min and max, or a paste that did, would still
+    # value every item correctly -- the mean does not care -- and quietly rule
+    # out every band.
+    ("de-table-range-backwards", "core/disenchant.lua",
+     "                { 16204, 0.7500, 3.500, 2, 5 },   -- Illusion Dust",
+     "                { 16204, 0.7500, 3.500, 5, 2 },   -- Illusion Dust",
+     "disenchant"),
+
+    ("de-table-mean-is-not-the-midpoint", "core/disenchant.lua",
+     "                { 16204, 0.7500, 1.500, 1, 2 },   -- Illusion Dust",
+     "                { 16204, 0.7500, 1.500, 1, 3 },   -- Illusion Dust",
+     "disenchant"),
 
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
@@ -1661,8 +1717,8 @@ end
     # The candidate test is a SUBSET test: every material seen must be one
     # the band can produce. Inverted, every band matches everything.
     ("de-band-subset-inverted", "core/disenchant.lua",
-     "                if not set[matId] then ok = false end",
-     "                if set[matId] then ok = ok end",
+     "                if not range then\n                    ok = false",
+     "                if false then\n                    ok = false",
      "disenchant.learn"),
     # ---- disenchant, phase 4 (the filters) -------------------------------
     # AN UNKNOWN VALUE IS NOT ZERO. As zero, disenchant-profit/1g silently

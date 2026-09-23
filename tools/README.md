@@ -74,6 +74,14 @@ about how a 1.12 server behaves. Those are facts about the game, not
 Classic-DB's expression of them, and they are re-derivable by anyone with the
 same dump. Same reasoning that applied to Enchantrix (GPL v2) before it.
 
+### Each row carries its count range
+
+Rows are `{ materialId, chance, meanYield, min, max }`. The **mean** values an
+item; the **range** is what lets a player's own disenchants identify a band.
+Green bands 60 and 65 yield the same three materials and differ only in count
+(Illusion Dust 1–2 against 2–5), so without the range they can never be told
+apart. `resolve()` refuses an entry whose range is not a range.
+
 ### The one judgement call left
 
 **Mangos loot-group semantics.** Within a group, a row with an explicit chance
