@@ -5475,7 +5475,7 @@ local CRAFTL = {
     mid_cushion = 6,
 
     est_y   = 22, est_h   = 12,    -- Cost / Sells, above the recipe list
-    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Reset
+    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Remove all | Reset
     -- The search box, the Search button and the pager are all 20 now and all
     -- start on the same line as the left panel's two buttons, so the whole
     -- band under the headings has ONE top and ONE bottom instead of four
@@ -9428,13 +9428,14 @@ function ui.BuildCraftTab()
 
     -- ---- the action row --------------------------------------------------
     --
-    -- FOUR BUTTONS ACROSS THE PANEL, and they are on three different scopes:
-    -- Price and Remove act on the SELECTED recipe, Price all on the whole list,
-    -- Reset on the made-this-session counts. Each says what it acts on rather
-    -- than sharing a verb, because the row cannot show the scope any other
-    -- way. They fit here at all because the panel is 358px and not 174 --
-    -- three of them were on a third panel until the tab became two.
-    local btnW = ui.CraftBtnW(ui.WindowW(), 4)
+    -- FIVE BUTTONS ACROSS THE PANEL, and they are on three different scopes:
+    -- Price and Remove act on the SELECTED recipe, Price all and Remove all on
+    -- the whole list, Reset on the made-this-session counts. Each says what it
+    -- acts on rather than sharing a verb, because the row cannot show the
+    -- scope any other way. At the minimum window width that is 62px each --
+    -- "Remove all" in the small font is about 52 -- so a longer label here
+    -- needs checking at MIN_W in a real client, not just in the suite.
+    local btnW = ui.CraftBtnW(ui.WindowW(), 5)
     local function ActionBtn(style, name, label, slot, onclick)
         local b = ui.MakeButton(panel, style, name)
         b:SetWidth(btnW); b:SetHeight(CRAFTL.btn_h)
@@ -9456,8 +9457,10 @@ function ui.BuildCraftTab()
         "Price all", 1, function() ui.CraftPriceAll() end)
     ui.craftDelBtn = ActionBtn("quiet", "AegisExchangeCraftDelButton",
         "Remove", 2, function() ui.CraftDeleteProject() end)
+    ui.craftDelAllBtn = ActionBtn("quiet", "AegisExchangeCraftDelAllButton",
+        "Remove all", 3, function() ui.ConfirmCraftDeleteAll() end)
     ui.craftResetBtn = ActionBtn("quiet", "AegisExchangeCraftResetButton",
-        "Reset", 3, function() ui.ResetCraftMade() end)
+        "Reset", 4, function() ui.ResetCraftMade() end)
 
     local sideBox = CraftBox(panel)
     sideBox:SetPoint("TOPLEFT", panel, "TOPLEFT", CRAFTL.edge,
@@ -9803,10 +9806,10 @@ function ui.LayoutCraftPanels()
     local w = ui.WindowW()
     local leftW = ui.CraftWidthsAt(w)
     local midX, midR = ui.CraftMidX(w), ui.CraftMidR()
-    -- The action row's quarters. The money lines are anchored to the panel's
+    -- The action row's fifths. The money lines are anchored to the panel's
     -- two edges and need no division at all; the footer's thirds live inside
     -- ui.CraftFootMid, which is the only one that needs a midpoint.
-    local btnW = ui.CraftBtnW(w, 4)
+    local btnW = ui.CraftBtnW(w, 5)
 
     local function place(f, point, rel, relPoint, x, y)
         if not f then return end
@@ -9832,7 +9835,8 @@ function ui.LayoutCraftPanels()
     -- exactly one window size.
     local slot = 0
     for _, b in ipairs({ ui.craftPriceBtn, ui.craftPriceAllBtn,
-                         ui.craftDelBtn, ui.craftResetBtn }) do
+                         ui.craftDelBtn, ui.craftDelAllBtn,
+                         ui.craftResetBtn }) do
         b:ClearAllPoints()
         b:SetPoint("TOPLEFT", panel, "TOPLEFT",
             CRAFTL.edge + CRAFTL.row_l + (btnW + CRAFTL.btn_gap) * slot,
@@ -10994,14 +10998,57 @@ function ui.UpdateCraftNeed()
 end
 
 function ui.CraftDeleteProject()
-    if not A.craft or not ui.craftSel then
+    if not A.craft then return end
+    if table.getn(A.craft.Projects()) == 0 then
+        ChatMsg("Aegis: there are no recipes on the shopping list.")
+        return
+    end
+    if not ui.craftSel then
         ChatMsg("Aegis: select a recipe in the Shopping list first.")
         return
     end
-    A.craft.DeleteProject(ui.craftSel)
+    -- DOWN THE LINE. The recipe below slides up into this row and becomes the
+    -- selection, so pressing Remove again removes it -- unless you click a
+    -- different recipe first, which simply moves the selection there. See
+    -- craft.SelectionAfterRemove for why the selection is no longer cleared.
+    local at = ui.craftSel
+    local left = A.craft.DeleteProject(at)
+    ui.craftSel = A.craft.SelectionAfterRemove(at, left)
+    ui.RefreshCraftTree()
+    ui.UpdateCraftMoney()
+    ui.UpdateCraftNeed()
+end
+
+-- REMOVE ALL, behind a confirmation. It is the one button on the row with no
+-- undo: every recipe has to be captured again from its profession window, one
+-- at a time. The prompt names the count, because "remove all" on a list you
+-- are not looking at is a number you want before you press it.
+StaticPopupDialogs["AEGIS_EXCHANGE_CRAFTDELALL"] = {
+    text = "Remove all %s from the shopping list?\nYou will need to add them "
+        .. "again from their profession windows.",
+    button1 = "Remove all", button2 = "Keep",
+    OnAccept = function() ui.CraftDeleteAll() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmCraftDeleteAll()
+    if not A.craft then return end
+    local n = table.getn(A.craft.Projects())
+    if n == 0 then
+        ChatMsg("Aegis: there are no recipes on the shopping list.")
+        return
+    end
+    StaticPopup_Show("AEGIS_EXCHANGE_CRAFTDELALL",
+        (n == 1) and "1 recipe" or (n .. " recipes"))
+end
+
+function ui.CraftDeleteAll()
+    if not A.craft then return end
+    A.craft.DeleteAllProjects()
     ui.craftSel = nil
     ui.RefreshCraftTree()
     ui.UpdateCraftMoney()
+    ui.UpdateCraftNeed()
 end
 
 -- ---- search + results (Buy-style, shared row helpers) ------------------
@@ -11156,6 +11203,7 @@ function ui.RefreshCraftButtons()
     end
     gate(ui.craftPriceBtn)
     gate(ui.craftDelBtn)
+    gate(ui.craftDelAllBtn)
     gate(ui.craftResetBtn)
 end
 
@@ -19054,6 +19102,9 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         -- Rebuilt on the next read, so toggling it back on re-anchors the
         -- invented history to NOW instead of leaving one that ends hours ago.
         A.db.demoLedger = nil
+        -- ...and the demo's recipes, which Remove and the stepper can now
+        -- edit: each demo starts with all of them back.
+        if A.craft then A.craft.demoProjects = nil end
         if A.db.demo then
             ChatMsg("Aegis: demo mode ON \226\128\148 the History chart now"
                 .. " draws INVENTED gold for four made-up characters, so you"
@@ -19080,7 +19131,12 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ui.histWho = {}
             ui.RefreshHistory()
         end
-        if ui.craftBuilt then ui.RefreshCraft() end
+        if ui.craftBuilt then
+            -- A DIFFERENT LIST underneath, so the old row number means nothing
+            -- -- ui.RefreshCraft selects the top recipe of whichever is up.
+            ui.craftSel = nil
+            ui.RefreshCraft()
+        end
         -- ...and the receipt, which swaps between your real session and the
         -- demo's last day of buying.
         if ui.receiptFrame and ui.receiptFrame:IsShown() then

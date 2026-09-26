@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.54.18
+# ⚔️ Aegis: Exchange v1.54.19
 
 ## ✨ New
 - **History is a dashboard** — the gold chart gets the whole tab, with High · Low · Sold · Bought · Top Sale · Top Buy underneath, and **Sales · Expenses · Profit** blocks (total, per day, top item — hover it)
@@ -8,6 +8,7 @@
 - Grouped results count items too: `8 auctions, 129 items`
 - Price lines on items **clicked in chat**
 - Money in gold / silver / copper colours
+- **Remove all** on the Crafting tab, and Remove now works down the list
 - `/aex demo` fills the Ledger and Receipt too
 
 ## 🛠️ Fixed
@@ -16,6 +17,7 @@
 - **Deposit crept** while you clicked Undercut / Price match
 - **Bags stuck behind the window** — click a bag, profession or panel and it comes to the front
 - Sales weren't logged on **non-English clients**
+- `/aex demo` could change or delete your **real** crafting recipes
 - Below-vendor warning now counts the 5% AH cut
 - Sale counts work for auctions posted before you updated
 

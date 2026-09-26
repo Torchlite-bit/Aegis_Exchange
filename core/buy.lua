@@ -2689,8 +2689,47 @@ function craft.VendorUnit(itemId)
     return nil
 end
 
+-- The demo's recipes as a WORKING COPY, made once per demo session.
+--
+-- A COPY, because the demo can now be edited: the stepper changes a recipe's
+-- quantity and Remove takes recipes off the list, and both have to be testable
+-- under /aex demo. Editing craft.DEMO_PROJECTS itself would leave a toggle of
+-- the demo showing whatever the last one did to it. Each project is copied
+-- field by field so a quantity change stays on the copy; the reagent lists
+-- are only ever read and are shared.
+--
+-- Cleared by /aex demo, alongside db.demoLedger, so each demo starts whole.
+craft.demoProjects = nil
+
+function craft.DemoProjects()
+    if not craft.demoProjects then
+        local out, i = {}, 1
+        while i <= table.getn(craft.DEMO_PROJECTS) do
+            local c = {}
+            for k, v in pairs(craft.DEMO_PROJECTS[i]) do c[k] = v end
+            table.insert(out, c)
+            i = i + 1
+        end
+        craft.demoProjects = out
+    end
+    return craft.demoProjects
+end
+
+-- THE LIST ON SCREEN, for reading AND for editing.
+--
+-- Every writer that acts on "the recipe at row N" goes through this rather
+-- than the store, and that is the fix for a real bug: the stepper and Remove
+-- used to index CStore().projects directly while the tab drew
+-- craft.DEMO_PROJECTS. Under /aex demo, pressing Remove on the third demo
+-- recipe deleted your third REAL recipe -- silently, because the list on
+-- screen did not change -- and the stepper rewrote a real recipe's quantity.
+-- Row N on screen and row N being edited are now the same table.
+--
+-- Capturing a NEW recipe (craft.AddProject) still writes the store: that is a
+-- real action at a real profession window, the same way a purchase made in
+-- demo mode is still booked for real.
 function craft.Projects()
-    if A.db and A.db.demo then return craft.DEMO_PROJECTS end
+    if A.db and A.db.demo then return craft.DemoProjects() end
     local s = CStore()
     return s and s.projects or {}
 end
@@ -2711,9 +2750,42 @@ function craft.AddProject(project)
     return project
 end
 
+-- Take one recipe off the list. Returns how many are left.
 function craft.DeleteProject(index)
-    local s = CStore()
-    if s and s.projects[index] then table.remove(s.projects, index) end
+    local list = craft.Projects()
+    if index and list[index] then table.remove(list, index) end
+    return table.getn(list)
+end
+
+-- Take every recipe off the list. Returns how many there were.
+--
+-- EMPTIED IN PLACE, never replaced with a new table: the store's `projects` is
+-- the table SavedVariables writes out, and anything else holding it would be
+-- left pointing at the old list.
+function craft.DeleteAllProjects()
+    local list = craft.Projects()
+    local n = table.getn(list)
+    while table.getn(list) > 0 do table.remove(list) end
+    return n
+end
+
+-- Which recipe is selected after removing the one at `removedAt`, with
+-- `remaining` left. Nil when the list is now empty.
+--
+-- THE ONE THAT SLID UP INTO ITS PLACE, which is the next one down the list --
+-- so pressing Remove again removes the next recipe, and holding the list's
+-- attention on one position is how you clear a run of them. Removing the LAST
+-- recipe selects the new last one rather than nothing: a Remove that goes
+-- quiet halfway through a run reads as broken.
+--
+-- It used to clear the selection outright. Every second press then said
+-- "select a recipe first", and anything that repainted the tab in between
+-- quietly reselected the TOP recipe -- so a run of presses wandered.
+function craft.SelectionAfterRemove(removedAt, remaining)
+    if not removedAt or not remaining or remaining < 1 then return nil end
+    if removedAt > remaining then return remaining end
+    if removedAt < 1 then return 1 end
+    return removedAt
 end
 
 -- Capture the recipe currently selected in the trade-skill window (most
@@ -2858,8 +2930,7 @@ end
 
 -- Set it, clamped, and persist. Returns the value actually stored.
 function craft.SetWant(index, n)
-    local s = CStore()
-    local p = s and s.projects[index]
+    local p = craft.Projects()[index]
     if not p then return nil end
     n = math.floor(tonumber(n) or 1)
     if n < 1 then n = 1 end
@@ -2870,8 +2941,7 @@ end
 
 -- Nudge it by `delta` and persist. The stepper's whole job.
 function craft.StepWant(index, delta)
-    local s = CStore()
-    local p = s and s.projects[index]
+    local p = craft.Projects()[index]
     if not p then return nil end
     return craft.SetWant(index, craft.Want(p) + (delta or 0))
 end

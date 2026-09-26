@@ -188,6 +188,7 @@ local function ArmButtons()
     ui.craftPriceAllBtn = FakeBtn()
     ui.craftPriceBtn = FakeBtn()
     ui.craftDelBtn   = FakeBtn()
+    ui.craftDelAllBtn = FakeBtn()
     ui.craftResetBtn = FakeBtn()
 end
 
@@ -214,14 +215,18 @@ H.check("Price is gated while it runs", not ui.craftPriceBtn.on,
         "a second walk could be started over the first")
 H.check("Remove is gated while it runs", not ui.craftDelBtn.on,
         "the recipe being shopped for could be deleted mid-walk")
+-- Remove all is the same hazard with every recipe at once.
+H.check("Remove all is gated while it runs", not ui.craftDelAllBtn.on,
+        "every recipe being shopped for could be deleted mid-walk")
 H.check("Reset is gated while it runs", not ui.craftResetBtn.on,
         "the made counts the walk is filling could be cleared")
 
 ui.CancelCraftQueue()
 H.eq("stopping gives the button back",
      ui.craftPriceAllBtn.text, "Price all")
-H.check("...and all three come back with it",
-        ui.craftPriceBtn.on and ui.craftDelBtn.on and ui.craftResetBtn.on,
+H.check("...and all of them come back with it",
+        ui.craftPriceBtn.on and ui.craftDelBtn.on and ui.craftDelAllBtn.on
+        and ui.craftResetBtn.on,
         "a button stayed disabled after the walk stopped")
 
 -- ...and it survives being called before the widgets exist. The builder calls
@@ -230,6 +235,7 @@ H.check("...and all three come back with it",
 ArmButtons()
 ui.craftPriceAllBtn, ui.craftPriceBtn = nil, nil
 ui.craftDelBtn, ui.craftResetBtn = nil, nil
+ui.craftDelAllBtn = nil
 H.survives("no buttons yet is not a crash", function()
     ui.RefreshCraftButtons()
 end)

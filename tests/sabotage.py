@@ -1630,6 +1630,84 @@ end
      "    -- THE CHART, FROM THE TAB'S OWN REPAINT",
      "histgraph"),
 
+    # ---- Crafting: Remove walks down the list, and Remove all -------------
+    # THE REPORT. Clearing the selection after a Remove made every second
+    # press say "select a recipe first", and a repaint in between reselected
+    # the TOP recipe -- so a run of presses wandered instead of walking down.
+    ("craft-remove-clears-the-selection", "ui/frame.lua",
+     "    ui.craftSel = A.craft.SelectionAfterRemove(at, left)",
+     "    ui.craftSel = nil",
+     "craft.plan"),
+
+    # Removing the LAST recipe has to land on the new last, not on nothing.
+    ("craft-remove-last-selects-nothing", "core/buy.lua",
+     "    if removedAt > remaining then return remaining end",
+     "    if removedAt > remaining then return nil end",
+     "craft.plan"),
+
+    # ...and "the one below slides up" means the SAME row number, not the next.
+    ("craft-remove-skips-a-recipe", "core/buy.lua",
+     "    if removedAt < 1 then return 1 end\n    return removedAt",
+     "    if removedAt < 1 then return 1 end\n"
+     "    return math.min(removedAt + 1, remaining)",
+     "craft.plan"),
+
+    # THE DEMO BUG. Indexing the STORE by row number while the tab draws the
+    # demo recipes deletes a real recipe you cannot see.
+    ("craft-remove-edits-the-real-store-in-demo", "core/buy.lua",
+     "function craft.DeleteProject(index)\n    local list = craft.Projects()",
+     "function craft.DeleteProject(index)\n"
+     "    local s = A.db and A.db.account and A.db.account.crafting\n"
+     "    local list = s and s.projects or {}",
+     "craft.plan"),
+
+    ("craft-stepper-edits-the-real-store-in-demo", "core/buy.lua",
+     "function craft.StepWant(index, delta)\n    local p = craft.Projects()[index]",
+     "function craft.StepWant(index, delta)\n"
+     "    local s = A.db and A.db.account and A.db.account.crafting\n"
+     "    local p = s and s.projects[index]",
+     "craft.plan"),
+
+    # Editing the demo TEMPLATE instead of a copy leaves the next demo showing
+    # whatever the last one removed.
+    ("craft-demo-edits-the-template", "core/buy.lua",
+     "            for k, v in pairs(craft.DEMO_PROJECTS[i]) do c[k] = v end\n"
+     "            table.insert(out, c)",
+     "            table.insert(out, craft.DEMO_PROJECTS[i])",
+     "craft.plan"),
+
+    ("craft-demo-list-is-the-template", "core/buy.lua",
+     "        craft.demoProjects = out",
+     "        craft.demoProjects = craft.DEMO_PROJECTS",
+     "craft.plan"),
+
+    # Remove all empties the saved table IN PLACE; a new table leaves the one
+    # SavedVariables writes out untouched.
+    ("craft-remove-all-replaces-the-table", "core/buy.lua",
+     "    while table.getn(list) > 0 do table.remove(list) end",
+     "    list = {}",
+     "craft.plan"),
+
+    # The one button on the row with no undo does not get to skip its prompt.
+    ("craft-remove-all-skips-the-prompt", "ui/frame.lua",
+     '    StaticPopup_Show("AEGIS_EXCHANGE_CRAFTDELALL",',
+     "    ui.CraftDeleteAll()\n    local _ = (",
+     "craft.plan"),
+
+    # A walk that leaves Remove all live can delete every recipe it is still
+    # searching for.
+    ("craft-remove-all-live-mid-walk", "ui/frame.lua",
+     "    gate(ui.craftDelAllBtn)\n",
+     "",
+     "craftqueue"),
+
+    # A resize that re-lays out four buttons leaves the fifth where the build
+    # put it, overlapping Reset at any other width.
+    ("craft-resize-forgets-remove-all", "ui/frame.lua",
+     "                         ui.craftDelBtn, ui.craftDelAllBtn,\n",
+     "                         ui.craftDelBtn,\n",
+     "craft.plan"),
+
     # ---- tooltip ---------------------------------------------------------
     # A disenchant value is PER ITEM: each break rolls the table again, so a
     # stack of twenty is twenty draws, not twenty times this. The price lines
@@ -3110,7 +3188,7 @@ end
     # and the shopping list have nothing to draw -- which is half of what the
     # mode exists for.
     ('demo-recipes-written-to-the-store', 'core/buy.lua',
-     '    if A.db and A.db.demo then return craft.DEMO_PROJECTS end',
+     '    if A.db and A.db.demo then return craft.DemoProjects() end',
      '    local _ = A',
      'purse'),
 
@@ -4592,8 +4670,8 @@ end
 
     # The left panel's buttons run down through the top of its own box.
     ("craft-buttons-through-the-box", "ui/frame.lua",
-     "    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Reset",
-     "    btn_y   = 56, btn_h   = 18,    -- Price | Price all | Remove | Reset",
+     "    btn_y   = 38, btn_h   = 18,    -- Price | Price all | Remove | Remove all | Reset",
+     "    btn_y   = 56, btn_h   = 18,    -- Price | Price all | Remove | Remove all | Reset",
      "geometry"),
 
     # A name measured against the whole row, ignoring what the row ENDS with --
@@ -4805,8 +4883,9 @@ end
     ("craftqueue-remove-live-mid-walk", "ui/frame.lua",
      """    gate(ui.craftPriceBtn)
     gate(ui.craftDelBtn)
+    gate(ui.craftDelAllBtn)
     gate(ui.craftResetBtn)""",
-     "    gate(ui.craftPriceBtn)",
+     "    gate(ui.craftPriceBtn)\n    gate(ui.craftDelAllBtn)",
      "craftqueue"),
 
     # ...and one that leaves the gate inverted, so the buttons are dead when

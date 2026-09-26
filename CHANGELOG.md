@@ -18,6 +18,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.19]
+
+### Fixed
+- **Remove on the Crafting tab now works its way down the list.** It takes the
+  selected recipe off and selects the one that slides up into its place, so
+  pressing it again removes the next one — unless you click a different recipe
+  first, which just moves the selection there. It used to clear the selection,
+  so every other press said *"select a recipe first"*, and anything that
+  repainted the tab in between reselected the top recipe.
+- **`/aex demo` could change or delete your real crafting recipes.** The tab
+  showed the demo's recipes, but Remove and the `[-] 5 [+]` stepper edited
+  your *saved* list by row number — so removing the third demo recipe deleted
+  your third real one, with nothing on screen changing. Both now edit only the
+  demo's own copy, which comes back whole the next time you turn the demo on.
+
+### Added
+- **Remove all** on the Crafting tab's button row. It asks first and names the
+  count, because every recipe has to be added again from its profession window.
+
+---
+
 ## [1.54.18]
 
 ### Fixed
@@ -6263,6 +6284,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.16]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
