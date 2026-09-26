@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.18)
+# Aegis: Exchange (v1.54.19)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -177,6 +177,9 @@ and a small `v` means a **vendor sells it cheaper**.
 - **Expand a recipe** for what *it* needs at your quantity — five of something
   made in twos is three crafts, so six, not ten.
 - **Something you can craft yourself** goes dim: its reagents are already listed.
+- **Remove** takes the selected recipe off and moves to the one below, so
+  pressing it again works down the list; **Remove all** clears it (and asks
+  first).
 - **Spent 41g 20s of 104g 30s** tracks the run as you buy.
 
 > **mats 12g 40s → sells 18g** · **Profit 4g 71s** *(after the 5% cut)*
@@ -415,7 +418,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.18`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.19`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

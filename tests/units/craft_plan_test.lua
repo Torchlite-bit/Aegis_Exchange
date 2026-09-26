@@ -582,4 +582,179 @@ H.eq("...and a nil one too", table.getn(ui.ShoppingQueue(nil)), 0)
 H.eq("a nameless line is skipped",
      table.getn(ui.ShoppingQueue({ { short = 5 } })), 0)
 
+-- ---------------------------------------------------------------------------
+H.section("Remove walks down the list")
+-- ---------------------------------------------------------------------------
+
+-- THE REPORT: "spamming the button just moves it down the line". Remove used
+-- to clear the selection, so every second press said "select a recipe
+-- first", and anything that repainted the tab in between quietly reselected
+-- the TOP recipe. Now the recipe below slides up into the row and becomes the
+-- selection, so each press removes the next one -- unless you click a
+-- different recipe, which just moves the selection there.
+H.isNil("nothing left, nothing selected", craft.SelectionAfterRemove(2, 0))
+H.eq("the one that slid up is selected", craft.SelectionAfterRemove(2, 3), 2)
+H.eq("removing the last selects the new last",
+     craft.SelectionAfterRemove(4, 3), 3)
+H.eq("removing the first keeps the top", craft.SelectionAfterRemove(1, 3), 1)
+H.isNil("no selection gives none", craft.SelectionAfterRemove(nil, 3))
+
+local function names()
+    local out, list = {}, craft.Projects()
+    for i = 1, table.getn(list) do table.insert(out, list[i].name) end
+    return table.concat(out, ",")
+end
+local function fresh(list)
+    craft.DeleteAllProjects()
+    -- AddProject inserts at the FRONT, so add in reverse to read A,B,C,D.
+    for i = table.getn(list), 1, -1 do
+        craft.AddProject({ name = list[i], made = 1, reagents = {} })
+    end
+end
+
+-- A RUN OF PRESSES from the second row: B, then C, then D, then -- with
+-- nothing below any more -- A, the new last one.
+do
+    fresh({ "A", "B", "C", "D" })
+    H.eq("four recipes to start", names(), "A,B,C,D")
+    local sel = 2
+    local left = craft.DeleteProject(sel)
+    H.eq("the first press removes B", names(), "A,C,D")
+    H.eq("...and says how many are left", left, 3)
+    sel = craft.SelectionAfterRemove(sel, left)
+    H.eq("...and C is now selected", craft.Projects()[sel].name, "C")
+
+    left = craft.DeleteProject(sel)
+    sel = craft.SelectionAfterRemove(sel, left)
+    H.eq("the second press removes C", names(), "A,D")
+    H.eq("...and D is now selected", craft.Projects()[sel].name, "D")
+
+    left = craft.DeleteProject(sel)
+    sel = craft.SelectionAfterRemove(sel, left)
+    H.eq("the third press removes D", names(), "A")
+    H.eq("...and with nothing below, A is selected", craft.Projects()[sel].name, "A")
+
+    left = craft.DeleteProject(sel)
+    sel = craft.SelectionAfterRemove(sel, left)
+    H.eq("the fourth press removes A", names(), "")
+    H.isNil("...and there is nothing left to select", sel)
+end
+
+-- A row that is not there removes nothing.
+do
+    fresh({ "A", "B" })
+    H.eq("removing a row past the end removes nothing",
+         craft.DeleteProject(9), 2)
+    H.eq("...and no row is nothing", craft.DeleteProject(nil), 2)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("Remove all")
+-- ---------------------------------------------------------------------------
+
+do
+    fresh({ "A", "B", "C" })
+    local stored = A.db.account.crafting.projects
+    H.eq("Remove all says how many it removed", craft.DeleteAllProjects(), 3)
+    H.eq("...and the list is empty", table.getn(craft.Projects()), 0)
+    -- EMPTIED IN PLACE: the store's table is the one SavedVariables writes
+    -- out, so a new table here would leave the saved one untouched.
+    H.check("...in the SAME table the saved variables hold",
+            A.db.account.crafting.projects == stored)
+    H.eq("removing all of nothing is nothing", craft.DeleteAllProjects(), 0)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("in demo mode, the demo's recipes are what get edited")
+-- ---------------------------------------------------------------------------
+
+-- THE BUG FOUND WHILE DOING THIS. The stepper and Remove indexed the STORE by
+-- row number while the tab drew the DEMO recipes -- so under /aex demo,
+-- pressing Remove on the third demo recipe deleted your third REAL recipe,
+-- silently, because nothing on screen changed. The stepper rewrote a real
+-- recipe's quantity the same way.
+do
+    fresh({ "Real A", "Real B", "Real C" })
+    A.db.demo = true
+    craft.demoProjects = nil
+    local demoN = table.getn(craft.DEMO_PROJECTS)
+    H.check("the demo has recipes to show", demoN > 1)
+    H.eq("the tab shows the demo's recipes",
+         table.getn(craft.Projects()), demoN)
+
+    local firstDemo = craft.Projects()[1].name
+    local left = craft.DeleteProject(1)
+    H.eq("Remove takes a DEMO recipe off", left, demoN - 1)
+    H.check("...the one that was on screen",
+            craft.Projects()[1].name ~= firstDemo)
+
+    -- A QUANTITY THE REAL RECIPE DOES NOT HAVE. Both started at 1, so a
+    -- stepper reading the wrong one got the same answer -- which is how the
+    -- first version of this check passed a sabotage pointing it at the store.
+    local tmpl = craft.DEMO_PROJECTS[2]
+    local tmplWant = tmpl.want
+    craft.SetWant(1, 5)
+    craft.StepWant(1, 3)
+    H.eq("the stepper steps the DEMO recipe's own quantity",
+         craft.Projects()[1].want, 8)
+    -- ...ON THE COPY. Editing the template would leave the next demo showing
+    -- whatever this one did to it.
+    H.eq("the demo template's quantity is untouched", tmpl.want, tmplWant)
+
+    craft.DeleteAllProjects()
+    H.eq("Remove all empties the demo's list", table.getn(craft.Projects()), 0)
+
+    -- NOTHING REAL WAS TOUCHED, and the demo's template is intact.
+    A.db.demo = nil
+    H.eq("the real recipes are all still there", names(), "Real A,Real B,Real C")
+    H.eq("...at their real quantities", craft.Projects()[1].want, nil)
+    H.eq("the demo template still has every recipe",
+         table.getn(craft.DEMO_PROJECTS), demoN)
+
+    -- ...and the next demo starts whole again.
+    A.db.demo = true
+    craft.demoProjects = nil
+    H.eq("a fresh demo has all its recipes back",
+         table.getn(craft.Projects()), demoN)
+    A.db.demo = nil
+    craft.demoProjects = nil
+end
+
+-- Capturing a NEW recipe is a real action at a real profession window, so it
+-- is stored for real even with the demo on -- the same way a purchase made in
+-- demo mode is.
+do
+    fresh({})
+    A.db.demo = true
+    craft.AddProject({ name = "Captured In Demo", made = 1, reagents = {} })
+    A.db.demo = nil
+    H.eq("a recipe captured during the demo is kept", names(),
+         "Captured In Demo")
+    craft.DeleteAllProjects()
+end
+
+-- ...AND THE TAB IS WIRED TO ALL OF IT. ui/frame.lua is never loaded by a
+-- suite, so each of these is read as source.
+do
+    local f = assert(io.open("ui/frame.lua", "r"), "run this from the repo root")
+    local body = f:read("*a")
+    f:close()
+    local function says(needle)
+        return string.find(body, needle, 1, true) ~= nil
+    end
+    H.check("Remove moves the selection down the line",
+            says("ui.craftSel = A.craft.SelectionAfterRemove(at, left)"))
+    H.check("Remove all asks first",
+            says('StaticPopup_Show("AEGIS_EXCHANGE_CRAFTDELALL"'))
+    H.check("...and only removes once you accept",
+            says("OnAccept = function() ui.CraftDeleteAll() end"))
+    H.check("the button row has room for five",
+            says("local btnW = ui.CraftBtnW(ui.WindowW(), 5)")
+            and says("local btnW = ui.CraftBtnW(w, 5)"))
+    H.check("...and a resize moves Remove all with the rest",
+            says("ui.craftDelBtn, ui.craftDelAllBtn,"))
+    H.check("toggling the demo starts its recipes whole",
+            says("if A.craft then A.craft.demoProjects = nil end"))
+end
+
 os.exit(H.report("craft.plan"))

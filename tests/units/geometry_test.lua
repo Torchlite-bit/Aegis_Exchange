@@ -1451,10 +1451,10 @@ for _, w in ipairs({ MIN_W, 1200, MAX_W }) do
          ui.CraftSideRowW(w), room)
 
     -- N THINGS AND N-1 GUTTERS MUST NOT EXCEED THE ROW. This is the check
-    -- ui.CraftBtnW exists for: the action row's four buttons draw a plate
+    -- ui.CraftBtnW exists for: the action row's five buttons draw a plate
     -- BTN_EDGE outside themselves, so a division that is a few pixels
     -- generous is a button running under the box border.
-    for _, n in ipairs({ 2, 3, 4 }) do
+    for _, n in ipairs({ 2, 3, 4, 5 }) do
         local each = ui.CraftBtnW(w, n)
         H.check("at " .. w .. ", " .. n .. " across fit the row",
                 each * n + CRAFTL.btn_gap * (n - 1) <= room,
