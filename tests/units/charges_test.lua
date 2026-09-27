@@ -156,12 +156,14 @@ splits = {}
 local ok, why = sell.StartPosting(20750, "Wizard Oil", 1, 2, 10000, 10000,
                                   480, {})
 H.check("a post of two single oils starts", ok, tostring(why))
-W.TickUntil(sell._postDriver,
-    function() return table.getn(W.posted) >= 2 or not sell.job end, 300)
+-- Run to the END of the job, not to the last post: a job still open here
+-- would refuse the next section's post as "Already posting".
+W.TickUntil(sell._postDriver, function() return not sell.job end, 600)
+H.isNil("the job finished", sell.job)
 H.eq("both oils were posted", table.getn(W.posted), 2)
 H.eq("...each at one oil's price", W.posted[2] and W.posted[2].buyout, 10000)
 H.eq("...and nothing was split", table.getn(splits), 0)
-if sell.StopPosting then sell.StopPosting() end
+if sell.job then sell.CancelPosting() end
 
 -- ---------------------------------------------------------------------------
 H.section("The auction house: an oil auction is one oil")
@@ -255,6 +257,86 @@ W.ResetTooltip()
 GameTooltip:SetBagItem(0, 1)
 H.eq("...and a stack of Linen still counts its twenty",
      A.tooltip.current and A.tooltip.current.count, 20)
+
+-- ---------------------------------------------------------------------------
+H.section("THE CLIENT'S REAL SHAPE: charges as a NEGATIVE count")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED, WITH A SCREENSHOT, against the fix above: "Wizard Oil (-25 total)",
+-- "= 1 of -25", and neither Post nor Max doing anything. The bags hand back
+-- -5 for one oil, not 5 -- and every section above was written with +5, the
+-- shape that was ASSUMED, so all of it passed while the addon failed.
+--
+-- A count below zero is charges whatever the item, so this holds without the
+-- table and without a max stack: 44444 is on neither.
+H.eq("-5 is one item", util.ItemUnits(20750, -5), 1)
+H.eq("...for an item nothing is known about too", util.ItemUnits(44444, -3), 1)
+H.eq("...and with no id at all", util.ItemUnits(nil, -5), 1)
+
+-- The reported bags: five oils.
+local fiveOils = {}
+for i = 1, 5 do fiveOils[i] = { link = OIL, count = -5 } end
+table.insert(fiveOils, {})                     -- room to carve, if it tried
+W.SetBags({ [0] = fiveOils })
+H.eq("five oils are five, not -25", sell.CountInBags(20750), 5)
+H.eq("the largest single post is one", sell.LargestStack(20750), 1)
+H.eq("Max: five stacks of one", sell.MaxStacks(20750, 1), 5)
+local cats2 = sell.ScanBags()
+local neg
+for ci = 1, table.getn(cats2) do
+    for ei = 1, table.getn(cats2[ci].items) do
+        if cats2[ci].items[ei].itemId == 20750 then neg = cats2[ci].items[ei] end
+    end
+end
+H.eq("the Sell tab's header total is 5", neg and neg.count, 5)
+H.eq("the inventory tally is 5", sell.CountContainers({ 0 })[20750], 5)
+
+-- The Post button: all five, each whole, none split.
+W.posted = {}
+splits = {}
+local pok, pwhy = sell.StartPosting(20750, "Wizard Oil", 1, 5, 12000, 12000,
+                                    480, {})
+H.check("posting five single oils starts", pok, tostring(pwhy))
+W.TickUntil(sell._postDriver, function() return not sell.job end, 900)
+H.isNil("the job finished", sell.job)
+H.eq("all five were posted", table.getn(W.posted), 5)
+H.eq("...each at one oil's price", W.posted[5] and W.posted[5].buyout, 12000)
+H.eq("...none split", table.getn(splits), 0)
+if sell.job then sell.CancelPosting() end
+
+-- The sell slot, the tooltip and the auction house, in the same shape.
+W.SetBags({ [0] = { { link = OIL, count = -5 } } })
+W.sellSlot = { link = OIL, count = -5, bag = 0, slot = 1 }
+local negSlot = sell.GetItem()
+H.eq("a slotted oil reading -5 is one", negSlot and negSlot.count, 1)
+W.posted = {}
+sell.Post(12000, 12000, 480)
+H.eq("...and posts at one oil's price", W.posted[1] and W.posted[1].buyout,
+     12000)
+W.sellSlot = nil
+
+W.ResetTooltip()
+GameTooltip:SetBagItem(0, 1)
+H.eq("a tooltip over it counts one",
+     A.tooltip.current and A.tooltip.current.count, 1)
+
+-- A negative count on a result page is an oil to price, not a blank row to
+-- skip -- the price DB's guard used to be `count > 0`.
+db.Items()[20750] = nil
+local negAuction = oilAuction(13000)
+negAuction.count = -5
+W.SetPage({ negAuction })
+W.FireEvent(A.frame, "AUCTION_ITEM_LIST_UPDATE")
+H.eq("a -5 auction is priced, per oil", db.MinBuyout(20750), 13000)
+
+buy.state.phase = "wait_results"
+buy.ReadPage()
+local negRow = buy.state.rows[1]
+H.eq("a -5 result row is one oil", negRow and negRow.count, 1)
+H.eq("...priced per oil", negRow and negRow.unit, 13000)
+H.check("...and still matches the page it came from",
+        negRow and buy.Verify(negRow)
+        and buy.FindByFingerprint(buy.Fingerprint(negRow)) == 1)
 
 -- ---------------------------------------------------------------------------
 H.section("Prices recorded per charge are thrown away, once")

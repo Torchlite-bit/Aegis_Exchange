@@ -18,6 +18,20 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.22]
+
+### Fixed
+- **Wizard Oil and other charge items can be posted — 1.54.21 didn't fix it.**
+  The Sell tab showed *"Wizard Oil (-25 total)"* and *"= 1 of -25"*, and
+  neither **Post** nor **Max** did anything. The game reports an oil's charges
+  as a **negative** number in your bags (−5 for one oil), and 1.54.21 only
+  handled a positive one. Any negative count is now read as one item, so five
+  oils are five, Max offers five stacks of one, and Post puts up each oil whole.
+- Oil auctions listed with a negative count were skipped when recording prices;
+  they are priced now, per oil.
+
+---
+
 ## [1.54.21]
 
 ### Fixed
@@ -6328,6 +6342,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

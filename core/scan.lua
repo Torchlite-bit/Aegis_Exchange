@@ -206,7 +206,9 @@ local function RecordVisiblePage(numOnPage, ours)
     for i = 1, numOnPage do
         local name, _, count, quality, _, _, minBid, _, buyoutPrice, _, _, owner =
             GetAuctionItemInfo("list", i)
-        if name and count and count > 0 then
+        -- NOT `count > 0`: a charge item's count can be NEGATIVE (its
+        -- charges), and that row is an oil worth pricing, not a blank one.
+        if name and count and count ~= 0 then
             local itemId = util.ItemIdFromLink(GetAuctionItemLink("list", i))
             -- IN ITEMS from here on. A Wizard Oil's count is its charges, and
             -- a price recorded per charge is a fifth of what one costs. Two

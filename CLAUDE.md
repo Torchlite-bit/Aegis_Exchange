@@ -60,8 +60,9 @@ or silent breakage on the 1.12 / Lua 5.0 client.
    ```
    Nothing else. **`owner` may be `nil`** until the name resolves — re-read the
    page or handle nil gracefully.
-   - **`count` is CHARGES for a charge item** (Wizard Oil reports 5 for one
-     oil) — here, in `GetContainerItemInfo` and in `GetAuctionSellItemInfo`.
+   - **`count` is CHARGES for a charge item** — and in the bags it is
+     **NEGATIVE** (one Wizard Oil reads −5; five read "−25 total") — here, in
+     `GetContainerItemInfo` and in `GetAuctionSellItemInfo`.
      Any arithmetic or display on a client count goes through
      **`util.ItemUnits(itemId, count)`** (or `util.SlotUnits` for a bag slot).
      Anything that MATCHES a row against the client again (`buy.Verify`,

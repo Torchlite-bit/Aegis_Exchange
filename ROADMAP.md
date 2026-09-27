@@ -5201,6 +5201,18 @@ charge, a stack-size control of 1–5, and a post of "one" that tried
 Not done: past **ledger** rows for these items keep the quantity they were
 recorded with.
 
+**v1.54.22 — the shape was wrong.** The report came back with a screenshot:
+*"Wizard Oil (-25 total)"*, *"= 1 of -25"*, Post and Max dead. The bags report
+charges **negative** (−5 per oil). `util.ItemUnits` tested `count <= 1` first
+and returned −5 untouched, and every test had been written with **+5**, the
+shape assumed from aux's code rather than seen. A count below zero is now one
+item whatever the item (no table or max stack needed), `scan`'s price guard is
+`count ~= 0` instead of `count > 0`, and the suite has a section that replays
+the report in the real shape — five oils at −5 posted as five singles.
+
+Lesson for the next client quirk: a test written in the shape you **expect**
+proves the code agrees with you, not with the client.
+
 ### Buying again after a buyout — ✅ **FIXED** (v1.54.20)
 
 Reported as "buy one, tick another, press Buyout: *bought 0 of 2 — A selected

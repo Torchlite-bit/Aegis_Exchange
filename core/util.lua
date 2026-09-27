@@ -223,7 +223,8 @@ end
 -- ---------------------------------------------------------------------------
 --
 -- A Wizard Oil is ONE item with five charges, and 1.12 reports the CHARGES
--- where a stack count would go. Read as a count, one oil is five items: a unit
+-- where a stack count would go -- as a NEGATIVE number in the bags (-5 for one
+-- oil), and possibly positive elsewhere. Read as a count, one oil is five items: a unit
 -- price a fifth of the real one, a stack-size control offering 1 to 5, and a
 -- post of "one" that tries to split an item nothing can split. That is how it
 -- was reported: "it considers one charge one item".
@@ -335,6 +336,12 @@ util.CHARGE_ITEMS = {
 -- client said, so it keeps the raw figure alongside (`charges` on a row).
 function util.ItemUnits(itemId, count)
     count = count or 1
+    -- A NEGATIVE COUNT IS CHARGES, AND ONLY CHARGES. It is what the bags
+    -- actually hand back for a Wizard Oil: -5 per oil, so five oils read as
+    -- "-25 total", "1 of -25", and a Post and a Max button with nothing to
+    -- work with. No table and no max stack is needed to know that a count
+    -- below zero is not a number of items -- the item in that slot is one.
+    if count < 0 then return 1 end
     if count <= 1 or not itemId then return count end
     local db = A.db
     local maxStack = db and db.GetMaxStack and db.GetMaxStack(itemId)
