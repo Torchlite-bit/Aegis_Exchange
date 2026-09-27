@@ -120,6 +120,120 @@ SABOTAGES = [
      "",
      "buy.batch"),
 
+    # ---- buy: the page a purchase leaves behind ---------------------------
+    # The report: buy one, tick the next, "bought 0 of 2 -- no longer
+    # available" until a new search. A missing auction is called gone on the
+    # first look instead of after a fresh read.
+    ("batch-no-reread", "core/buy.lua",
+     """            if not b.reread and buy.RereadPage() then
+                b.reread = true
+                return true, "rereading"
+            end""",
+     "",
+     "buy.batch"),
+
+    # The re-read is never earned back by a purchase: the first miss of the
+    # batch uses it up, and every later miss stops on the spot.
+    ("batch-reread-never-reset", "core/buy.lua",
+     """    -- A fresh purchase earns the next missing auction its own re-read.
+    b.reread = false
+""",
+     "",
+     "buy.batch"),
+
+    # Re-reads until the auction turns up -- which, for one somebody else
+    # bought, is forever.
+    ("batch-rereads-forever", "core/buy.lua",
+     "            if not b.reread and buy.RereadPage() then",
+     "            if buy.RereadPage() then",
+     "buy.batch"),
+
+    # A page nobody searched for is re-read anyway: a batch with nothing to
+    # repeat hangs instead of stopping.
+    ("reread-without-a-search", "core/buy.lua",
+     "    if not st.searched then return false end\n",
+     "",
+     "buy.batch"),
+
+    # Search stops saying a search ran, so no batch ever gets its re-read.
+    ("search-not-marked", "core/buy.lua",
+     "    st.searched  = true\n",
+     "",
+     "buy.batch"),
+
+    # A batch buys from the page in hand while a fresh one is in flight.
+    ("batch-buys-from-page-in-flight", "core/buy.lua",
+     """    if buy.state.phase ~= "idle" then return true, "waiting" end
+    return buy.BatchStep()""",
+     "    return buy.BatchStep()",
+     "buy.batch"),
+
+    # The page a purchase leaves behind is assumed, not asked for: the list
+    # goes on showing the auction you just bought.
+    ("purchase-page-never-confirmed", "core/buy.lua",
+     """    if st.confirm and st.phase == "idle"
+       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then
+        buy.Refresh()
+    end""",
+     "",
+     "buy.batch"),
+
+    # Asked for forever: a query never settles the debt, so every read asks
+    # for another.
+    ("confirm-never-settled", "core/buy.lua",
+     """    st.confirm = false
+    st.phase   = "wait_results"
+    st.timeout = buy.TIMEOUT
+    Notify()""",
+     """    st.phase   = "wait_results"
+    st.timeout = buy.TIMEOUT
+    Notify()""",
+     "buy.batch"),
+
+    ("batch-purchase-not-confirmed", "core/buy.lua",
+     """    st.confirm = true
+    buy.driver:Show()
+    PlaceAuctionBid("list", index, info.price)""",
+     """    buy.driver:Show()
+    PlaceAuctionBid("list", index, info.price)""",
+     "buy.batch"),
+
+    ("buyout-not-confirmed", "core/buy.lua",
+     """    st.confirm = true
+    buy.driver:Show()
+    PlaceAuctionBid("list", row.index, row.buyout)""",
+     """    buy.driver:Show()
+    PlaceAuctionBid("list", row.index, row.buyout)""",
+     "buy.batch"),
+
+    ("bid-not-confirmed", "core/buy.lua",
+     """    st.confirm = true
+    buy.driver:Show()
+    PlaceAuctionBid("list", row.index, amount)""",
+     """    buy.driver:Show()
+    PlaceAuctionBid("list", row.index, amount)""",
+     "buy.batch"),
+
+    # The confirming read goes out while a scan is querying, and the scan
+    # records our page as one of its own.
+    ("confirm-read-during-a-scan", "core/buy.lua",
+     "       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then",
+     "       and not (buy.batch and buy.batch.active) then",
+     "buy.batch"),
+
+    ("reread-during-a-scan", "core/buy.lua",
+     """    -- buy.ReadPage. No second look, so the batch stops as it always did.
+    if buy.IsBusy() then return false end""",
+     "    -- buy.ReadPage. No second look, so the batch stops as it always did.",
+     "buy.batch"),
+
+    # Closing the AH leaves the batch running, and every later one is refused
+    # as "already running" until a reload.
+    ("ah-close-leaves-batch-running", "core/buy.lua",
+     """    buy.AbortBatch("The auction house closed.")""",
+     "",
+     "buy.batch"),
+
     # ---- buy: reading a page --------------------------------------------
     # unit = 0 for a bid-only auction sorts as the cheapest thing on the page
     # and reads as free.

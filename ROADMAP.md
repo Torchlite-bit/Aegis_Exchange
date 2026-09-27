@@ -5169,6 +5169,38 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Buying again after a buyout — ✅ **FIXED** (v1.54.20)
+
+Reported as "buy one, tick another, press Buyout: *bought 0 of 2 — A selected
+auction is no longer available*, and I have to search again". The **0** is the
+clue: the first auction the batch looked for was not on the client's page at
+all, on its very first look.
+
+A purchase is not a query. After `PlaceAuctionBid` the engine reads the page on
+the **first** `AUCTION_ITEM_LIST_UPDATE`, and 1.12 fires that event for more
+than replies — an owner name resolving on the page already held fires it too
+(aux waits out exactly those before it trusts a page). Read that early and the
+list keeps showing the auction just bought, at the top, where the next tick
+lands. The client's page moves on without us; the batch, correctly, cannot find
+the phantom. **Inferred, not observed** — the event order was not captured on a
+live client — so the fix does not depend on it:
+
+- **The page a purchase leaves behind is asked for.** `st.confirm` is set by
+  every purchase and bid and cleared by `SendQuery`, because a query sent after
+  a purchase is answered after it. `buy.ReadPage` re-queries once the batch is
+  over if nothing has been asked since. One query per round of buying.
+- **One fresh read before "gone".** `buy.BatchStep` calls `buy.RereadPage` for
+  a missing fingerprint, once per purchase (`b.reread`), and stops as before if
+  the fresh page still lacks it. What may be bought is untouched — the
+  fingerprint still has to match a ticked row.
+- **`buy.StartBatch` waits for a page in flight** rather than picking an index
+  out of the one it replaces — and a purchase's read could otherwise be handed
+  the reply to a query asked before it.
+- **Neither extra query goes out while a scan is querying** (`buy.IsBusy`): the
+  scan would record our page as one of its own.
+- `AUCTION_HOUSE_CLOSED` now aborts a batch. It waited forever on a page that
+  would never come, and refused every later batch as "already running".
+
 ### The chart that was only drawn when you picked someone — ✅ **FIXED** (v1.54.18)
 
 Reported as "the History tab defaults to none; you have to select All Players

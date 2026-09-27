@@ -44,6 +44,9 @@ buy.state = {
     sweepSteps = 0,        -- pages this search has skipped past (see SweepDecision)
     sweeping   = false,    -- a skipped page is in flight right now
     sweepStop  = nil,      -- why the last sweep stopped, for the status line
+    searched   = false,    -- a search has run, so there is a page to re-read
+    confirm    = false,    -- a purchase changed the page since we last ASKED
+                           -- for it (see the end of buy.ReadPage)
 }
 
 buy.driver = CreateFrame("Frame", "AegisExchangeBuyDriver")
@@ -1629,6 +1632,7 @@ function buy.Search(text, callbacks)
     st.name      = st.terms[1].blizz.name   -- kept for existing readers
     st.page      = 0
     st.callbacks = callbacks or st.callbacks
+    st.searched  = true
     st.phase     = "wait_query"
     st.cooldown  = 0
     st.timeout   = 0
@@ -1831,6 +1835,10 @@ local function SendQuery()
     -- "no filter".
     QueryAuctionItems(b.name, b.minLevel, b.maxLevel, b.invType, b.class,
         b.subclass, st.page, b.isUsable, b.quality)
+    -- A query sent AFTER a purchase is answered after it: the server handles
+    -- one player's requests in order. So this reply is the confirmed page,
+    -- and the extra read at the end of buy.ReadPage is no longer owed.
+    st.confirm = false
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
     Notify()
@@ -1998,6 +2006,27 @@ function buy.ReadPage()
     -- the whole bug the batch exists to avoid.
     if buy.batch and buy.batch.active then
         buy.BatchStep()
+    end
+
+    -- THE PAGE A PURCHASE LEAVES BEHIND IS ASKED FOR, NOT ASSUMED.
+    --
+    -- A purchase is not a query, so the page read after one is simply the
+    -- FIRST list update to arrive -- and 1.12 fires that event for more than
+    -- replies (an owner name resolving on the page we already had fires it
+    -- too). Read that early and the list goes on showing the auction you
+    -- just bought. Tick it again, as anyone would when it still sits at the
+    -- top of the list, and the batch rightly finds it gone: "bought 0 of 2 --
+    -- no longer available", until a new search replaced the list.
+    --
+    -- So once the purchases are over, ask for the page. SendQuery clears the
+    -- flag, which bounds this at one query per round of buying.
+    --
+    -- NOT WHILE A SCAN IS ON THE WIRE. A scan reads the next list update as
+    -- the reply to ITS query; a page of ours landing in between would be
+    -- recorded as a page of the scan.
+    if st.confirm and st.phase == "idle"
+       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then
+        buy.Refresh()
     end
 end
 
@@ -2351,7 +2380,26 @@ function buy.StartBatch(rows, onDone, onStep)
         bought = 0, spent = 0, want = n, total = total,
         onDone = onDone, onStep = onStep,
     }
+    -- A PAGE ALREADY ON ITS WAY is the one to buy from. Buying now would
+    -- pick an index out of the page that read is about to replace -- and a
+    -- purchase is not a query, so its own read could be handed the reply to
+    -- the query already in flight, which was asked BEFORE the purchase.
+    -- buy.ReadPage steps the batch when that page lands.
+    if buy.state.phase ~= "idle" then return true, "waiting" end
     return buy.BatchStep()
+end
+
+-- Ask for the current page again. True when a fresh read is on its way --
+-- already pending, or asked for here; false when there is no search to
+-- repeat, and so nothing a second look could find.
+function buy.RereadPage()
+    local st = buy.state
+    if not st.searched then return false end
+    -- The same query channel a running scan is using -- see the end of
+    -- buy.ReadPage. No second look, so the batch stops as it always did.
+    if buy.IsBusy() then return false end
+    if st.phase == "idle" then buy.Refresh() end
+    return true
 end
 
 function buy.AbortBatch(reason)
@@ -2376,6 +2424,26 @@ function buy.BatchStep()
         if rec and rec.count > 0 then
             local at = buy.FindByFingerprint(f)
             if at then fp, info, index = f, rec, at; break end
+            -- NOT ON THE PAGE THE CLIENT IS HOLDING -- which is not yet the
+            -- same thing as gone. Read that page from the server ONCE more
+            -- before saying so; the step runs again when it lands.
+            --
+            -- THE REPORT: buy one, then tick the next one and press Buyout,
+            -- and it says "no longer available" until you search again. The
+            -- list you tick from and the page the client holds can disagree
+            -- -- see the end of buy.ReadPage for how -- and this gave up on
+            -- the first look. A new search "fixed" it because a search is a
+            -- fresh read. So is this, and the list repaints from it, so
+            -- whatever does turn out to be gone leaves the list with it.
+            --
+            -- ONCE PER PURCHASE, not forever: if a fresh read still has not
+            -- got it, somebody else bought it, and the answer is the same
+            -- stop it always was. Nothing about WHAT may be bought changes --
+            -- the fingerprint still has to match a ticked row.
+            if not b.reread and buy.RereadPage() then
+                b.reread = true
+                return true, "rereading"
+            end
             -- Owed but gone: someone else took it, or the page moved under
             -- us. Stop -- do NOT fall through to a different auction.
             buy.AbortBatch("A selected auction is no longer available.")
@@ -2400,10 +2468,13 @@ function buy.BatchStep()
     info.count = info.count - 1
     b.bought = b.bought + 1
     b.spent = b.spent + info.price
+    -- A fresh purchase earns the next missing auction its own re-read.
+    b.reread = false
 
     local st = buy.state
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
+    st.confirm = true
     buy.driver:Show()
     PlaceAuctionBid("list", index, info.price)
     buy.RecordPurchase(info.itemId, info.name, info.stack, info.price)
@@ -2432,6 +2503,7 @@ function buy.Buyout(row)
     local st = buy.state
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
+    st.confirm = true
     buy.driver:Show()
     PlaceAuctionBid("list", row.index, row.buyout)
     buy.RecordPurchase(row.itemId, row.name, row.count, row.buyout)
@@ -2496,6 +2568,7 @@ function buy.Bid(row, amount)
     local st = buy.state
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
+    st.confirm = true
     buy.driver:Show()
     PlaceAuctionBid("list", row.index, amount)
     return true
@@ -2522,7 +2595,12 @@ end)
 -- Walking away from the auctioneer ends any in-flight browse.
 A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     buy.state.phase = "idle"
+    buy.state.confirm = false
     buy.driver:Hide()
+    -- ...INCLUDING a batch buyout. It waits on a page that will never come
+    -- now, and a batch left active refuses every later one ("A buyout is
+    -- already running") until the UI is reloaded.
+    buy.AbortBatch("The auction house closed.")
     -- The category names came from the session that just ended; drop them so
     -- the next one rebuilds (they are only readable while the AH is open).
     buy.ResetCategories()
