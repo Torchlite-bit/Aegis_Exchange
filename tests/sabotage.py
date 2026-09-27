@@ -123,6 +123,20 @@ SABOTAGES = [
     # ---- items with charges ------------------------------------------------
     # The report: "Wizard Oil selling is buggy, it considers one charge one
     # item". 1.12 reports an oil's five charges where a stack count goes.
+    # THE 1.54.21 MISS, reported with a screenshot: "Wizard Oil (-25 total)".
+    # The bags report charges NEGATIVE, and a rule written for "count above
+    # one" passed -5 straight through -- Post and Max had -25 oils to work with.
+    ("negative-count-passes-through", "core/util.lua",
+     "    if count < 0 then return 1 end\n",
+     "",
+     "charges"),
+
+    # The price DB skips a row with a negative count as if it were blank.
+    ("scan-skips-negative-counts", "core/scan.lua",
+     "        if name and count and count ~= 0 then",
+     "        if name and count and count > 0 then",
+     "charges"),
+
     ("units-table-ignored", "core/util.lua",
      "    if util.CHARGE_ITEMS[itemId] then return 1 end\n",
      "",
