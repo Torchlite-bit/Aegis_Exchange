@@ -1900,24 +1900,31 @@ function buy.ReadPage()
                 local okT, v = pcall(GetAuctionItemTimeLeft, "list", i)
                 if okT then timeLeft = v end
             end
+            local itemId = util.ItemIdFromLink(link)
+            -- IN ITEMS. A Wizard Oil's count is its five charges; priced per
+            -- charge it reads at a fifth of what it costs. `charges` keeps
+            -- what the client said, because matching this auction against the
+            -- client again (buy.Verify, buy.Fingerprint) has to compare that.
+            local units = util.ItemUnits(itemId, count)
             table.insert(rawRows, {
                 index   = i,
                 name    = name,
                 texture = texture,
-                count   = count,
+                count   = units,
+                charges = (units ~= count) and count or nil,
                 quality = quality,
                 canUse  = canUse,
                 level   = level,
                 timeLeft = timeLeft,
                 buyout  = buyout or 0,
-                unit    = (buyout and buyout > 0) and math.floor(buyout / count)
+                unit    = (buyout and buyout > 0) and math.floor(buyout / units)
                           or nil,
                 minBid  = minBid or 0,
                 bidAmount = bidAmount or 0,
                 nextBid = nextBid,
                 owner   = owner,
                 link    = link,
-                itemId  = util.ItemIdFromLink(link),
+                itemId  = itemId,
                 mine    = (owner and me and owner == me) and true or false,
             })
         end
@@ -2034,8 +2041,15 @@ end
 -- the page shifting between read and click).
 function buy.Verify(row)
     local name, _, count, _, _, _, _, _, buyout = GetAuctionItemInfo("list", row.index)
-    return name == row.name and count == row.count
+    return name == row.name and count == buy.ClientCount(row)
         and (buyout or 0) == row.buyout
+end
+
+-- The count the CLIENT reports for `row` -- its charges, for a charge item.
+-- A row's `count` is in items (see buy.ReadPage); anything comparing the row
+-- with the client again has to compare what the client says.
+function buy.ClientCount(row)
+    return row.charges or row.count or 1
 end
 
 -- ---------------------------------------------------------------------------
@@ -2076,8 +2090,13 @@ end
 -- A fingerprint identifies a KIND of auction, not an instance. Deliberately
 -- the same three fields buy.Verify compares, so a row that passes Verify at
 -- its own index also matches its own fingerprint.
+--
+-- THE CLIENT'S COUNT, not the row's item count: buy.FindByFingerprint builds
+-- the other side of the comparison straight from GetAuctionItemInfo. For a
+-- charge item that is also the more careful key -- an oil with five charges
+-- and one with three are not the same purchase.
 function buy.Fingerprint(row)
-    return (row.name or "") .. "\001" .. (row.count or 1)
+    return (row.name or "") .. "\001" .. buy.ClientCount(row)
         .. "\001" .. (row.buyout or 0)
 end
 

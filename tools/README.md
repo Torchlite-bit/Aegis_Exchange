@@ -22,6 +22,36 @@ needed again.
 
 ---
 
+## `gen_charges.py` — `util.CHARGE_ITEMS` in `core/util.lua`
+
+```sh
+python3 tools/gen_charges.py --db ClassicDB_1_12_1_z2815.sql.gz --report
+python3 tools/gen_charges.py --db ClassicDB_1_12_1_z2815.sql.gz > /tmp/charges.lua
+```
+
+Same database as below. It lists every item whose use spell has **more than one
+charge** — Wizard and Mana Oils, the gnomish and goblin devices, 83 in all.
+Paste the output between the `BEGIN GENERATED` / `END GENERATED` markers.
+
+**Why it exists.** 1.12 reports a charge item's charges where a stack count
+goes, so one Wizard Oil read as five items: priced per charge, offered as a
+stack of five, and split when posted "one". `util.ItemUnits` turns a client
+count into items, and this list is how it knows which items to do that for.
+
+**Every item on it is non-stacking,** and `--report` says so — it counts the
+ones that stack and leaves them out (there are none). That is what makes the
+rule safe: an item that can never stack has no real count above one, so a count
+above one is its charges. The list is still only a fallback: a max stack the
+client has stated wins over it, either way.
+
+aux keeps a hand-typed list of twelve of these; `tests/units/charges_test.lua`
+checks that all twelve are in the generated one.
+
+The script checks the dump's column layout against the positions it reads, and
+refuses to run if `item_template` has moved them.
+
+---
+
 ## `gen_disenchant.py` — the BANDS table in `core/disenchant.lua`
 
 ```sh

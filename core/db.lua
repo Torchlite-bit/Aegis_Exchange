@@ -728,6 +728,38 @@ local function MigrateFacts(acct)
     acct.factsVersion = FACTS_VERSION
 end
 
+-- Prices recorded for items with CHARGES before v1.54.21 are per charge: the
+-- client reports a Wizard Oil's five charges where a stack count goes, and
+-- every page divided the buyout by them. A fifth of the real price, sitting in
+-- a 30-day median, would drag an oil's market value down for a month after the
+-- fix. So they go, once -- the same shape as MigrateFacts -- along with any
+-- vendor price learned from the sell slot the same way. The client's own sell
+-- price (util.ClientSellPrice) answers first anyway, and the next slotting or
+-- merchant visit learns a correct one.
+--
+-- Only the listed items are touched. util.ItemUnits also treats an item the
+-- client says never stacks as one per count, but nothing can say which of an
+-- unlisted item's old records were per charge, and a record that was right
+-- would be lost for nothing.
+local CHARGES_VERSION = 1
+
+local function MigrateCharges(acct)
+    if not acct then return end
+    if acct.chargesVersion == CHARGES_VERSION then return end
+    local list = A.util and A.util.CHARGE_ITEMS or {}
+    if type(acct.realms) == "table" then
+        for _, bucket in pairs(acct.realms) do
+            if type(bucket) == "table" and type(bucket.items) == "table" then
+                for id in pairs(list) do bucket.items[id] = nil end
+            end
+        end
+    end
+    if type(acct.vendors) == "table" then
+        for id in pairs(list) do acct.vendors[id] = nil end
+    end
+    acct.chargesVersion = CHARGES_VERSION
+end
+
 local function MigrateToRealms(acct, realmKey)
     if type(acct.items) ~= "table" then return end
     if not acct.realms then acct.realms = {} end
@@ -788,6 +820,7 @@ function db.Init()
     -- here rather than in the sweep so it runs exactly once per session, before
     -- anything can read a stale record.
     MigrateFacts(AegisExchangeDB)
+    MigrateCharges(AegisExchangeDB)
 
     if AegisExchangeCharDB == nil then
         AegisExchangeCharDB = DefaultCharDB()

@@ -5169,6 +5169,38 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Items with charges — ✅ **FIXED** (v1.54.21)
+
+Reported as "Wizard Oil selling is buggy, it considers one charge one item".
+1.12 reports a charge item's CHARGES where a stack count goes — five for one
+Wizard Oil — in `GetContainerItemInfo`, `GetAuctionItemInfo` and
+`GetAuctionSellItemInfo`. Every reader treated it as items: a unit price per
+charge, a stack-size control of 1–5, and a post of "one" that tried
+`SplitContainerItem` on an item that cannot be split.
+
+- **`util.ItemUnits(itemId, count)`** turns a client count into items. A max
+  stack the client has stated wins (1 → the count is charges; more → it is a
+  stack); otherwise **`util.CHARGE_ITEMS`** answers. `util.SlotUnits` is the
+  bag-slot read every sell-side walk now makes.
+- **The list is generated** (`tools/gen_charges.py`) from Classic-DB: every
+  item whose use spell has more than one charge. 83, **all non-stacking** —
+  checked, not assumed — which is what makes "a count above one is charges"
+  safe. aux's hand list of twelve is a subset; the suite checks that.
+- **Rows keep the raw figure as `charges`**, because anything matching an
+  auction against the client again compares what the client says:
+  `buy.ClientCount` feeds `buy.Verify` and `buy.Fingerprint`.
+- **Normalised at:** `buy.ReadPage`, `scan`'s `RecordVisiblePage` (price DB,
+  vendor flips, sell-tab listings), `sell.GetItem` (with a name-map fallback
+  for a stock client's link-less sell slot), `sell.OwnerAuctions`,
+  `sell.BidderAuctions`, every sell-side bag walk, the bag-click entry and the
+  tooltip hook.
+- **`MigrateCharges`** drops recorded prices and learned vendor prices for the
+  listed items once (`chargesVersion`). Unlisted items are never purged: nothing
+  can say which of their old records were per charge.
+
+Not done: past **ledger** rows for these items keep the quantity they were
+recorded with.
+
 ### Buying again after a buyout — ✅ **FIXED** (v1.54.20)
 
 Reported as "buy one, tick another, press Buyout: *bought 0 of 2 — A selected

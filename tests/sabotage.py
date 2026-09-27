@@ -84,9 +84,9 @@ SABOTAGES = [
     # ---- buy: the batch --------------------------------------------------
     # Fields joined with nothing: ("Cloth",1,234) and ("Cloth",12,34) collide.
     ("fingerprint-no-separator", "core/buy.lua",
-     """    return (row.name or "") .. "\\001" .. (row.count or 1)
+     """    return (row.name or "") .. "\\001" .. buy.ClientCount(row)
         .. "\\001" .. (row.buyout or 0)""",
-     """    return (row.name or "") .. (row.count or 1) .. (row.buyout or 0)""",
+     """    return (row.name or "") .. buy.ClientCount(row) .. (row.buyout or 0)""",
      "buy.batch"),
 
     # THE bug the batch exists to prevent: fall through to whatever auction
@@ -119,6 +119,125 @@ SABOTAGES = [
     end""",
      "",
      "buy.batch"),
+
+    # ---- items with charges ------------------------------------------------
+    # The report: "Wizard Oil selling is buggy, it considers one charge one
+    # item". 1.12 reports an oil's five charges where a stack count goes.
+    ("units-table-ignored", "core/util.lua",
+     "    if util.CHARGE_ITEMS[itemId] then return 1 end\n",
+     "",
+     "charges"),
+
+    # The client's stated max stack is ignored, so a server that made an oil
+    # stack would be overruled by the table -- and an item the table has
+    # never heard of, which the client says never stacks, counts charges.
+    ("units-client-word-ignored", "core/util.lua",
+     """    if maxStack then
+        if maxStack == 1 then return 1 end
+        return count
+    end""",
+     "",
+     "charges"),
+
+    ("units-client-stacks-overruled", "core/util.lua",
+     """        if maxStack == 1 then return 1 end
+        return count
+    end""",
+     """        if maxStack == 1 then return 1 end
+    end""",
+     "charges"),
+
+    ("slotunits-returns-charges", "core/util.lua",
+     """    if not count then return nil end
+    return util.ItemUnits(itemId, count)""",
+     """    return count""",
+     "charges"),
+
+    ("countcontainers-counts-charges", "core/sell.lua",
+     "                local count = util.SlotUnits(bag, slot, id)",
+     "                local _, count = GetContainerItemInfo(bag, slot)",
+     "charges"),
+
+    # The exact-stack finder counts charges, so "a stack of one oil" is never
+    # found and the assembler tries to carve one off with a split.
+    ("find-exact-stack-counts-charges", "core/sell.lua",
+     "                local c = util.SlotUnits(bag, slot, itemId)",
+     "                local _, c = GetContainerItemInfo(bag, slot)",
+     "charges"),
+
+    ("scanbags-counts-charges", "core/sell.lua",
+     "                local c = util.ItemUnits(id, count or 1)",
+     "                local c = count or 1",
+     "charges"),
+
+    ("sellslot-counts-charges", "core/sell.lua",
+     "        count    = units,\n        -- What the client said, when that was charges rather than items.",
+     "        count    = count,\n        -- What the client said, when that was charges rather than items.",
+     "charges"),
+
+    # A stock client gives the slot no link; without the name map the oil is
+    # five again.
+    ("sellslot-needs-a-link", "core/sell.lua",
+     """    local unitsId = itemId
+        or (A.db and A.db.IdFromName and A.db.IdFromName(name))""",
+     "    local unitsId = itemId",
+     "charges"),
+
+    ("scan-records-per-charge", "core/scan.lua",
+     "            count = util.ItemUnits(itemId, count)\n",
+     "",
+     "charges"),
+
+    ("buy-row-counts-charges", "core/buy.lua",
+     "                count   = units,\n                charges = (units ~= count) and count or nil,",
+     "                count   = count,\n                charges = (units ~= count) and count or nil,",
+     "charges"),
+
+    ("buy-row-unit-per-charge", "core/buy.lua",
+     "                unit    = (buyout and buyout > 0) and math.floor(buyout / units)",
+     "                unit    = (buyout and buyout > 0) and math.floor(buyout / count)",
+     "charges"),
+
+    # Matching an oil against the client by its ITEM count: Verify and the
+    # batch's fingerprint never find it again, and an oil cannot be bought.
+    ("fingerprint-uses-items", "core/buy.lua",
+     "    return row.charges or row.count or 1",
+     "    return row.count or 1",
+     "charges"),
+
+    ("owner-counts-charges", "core/sell.lua",
+     "                count      = units,\n                charges    = (units ~= count) and count or nil,",
+     "                count      = count,\n                charges    = (units ~= count) and count or nil,",
+     "charges"),
+
+    ("bidder-counts-charges", "core/sell.lua",
+     "                count    = units,\n                charges  = (units ~= count) and count or nil,\n                quality  = quality,\n                bid      = bid,",
+     "                count    = count,\n                charges  = (units ~= count) and count or nil,\n                quality  = quality,\n                bid      = bid,",
+     "charges"),
+
+    # The per-charge prices recorded before the fix are kept, and drag an
+    # oil's market value down for a month.
+    ("charge-prices-not-purged", "core/db.lua",
+     "    MigrateCharges(AegisExchangeDB)\n",
+     "",
+     "charges"),
+
+    # Purged on every load, so nothing recorded after the fix ever sticks.
+    ("charge-purge-every-login", "core/db.lua",
+     "    if acct.chargesVersion == CHARGES_VERSION then return end\n",
+     "",
+     "charges"),
+
+    # Purged for every item, not just the listed ones.
+    ("charge-purge-takes-everything", "core/db.lua",
+     "                for id in pairs(list) do bucket.items[id] = nil end",
+     "                for id in pairs(bucket.items) do bucket.items[id] = nil end",
+     "charges"),
+
+    ("tooltip-counts-charges", "ui/tooltip.lua",
+     "            count = util.ItemUnits(id, count)\n",
+     "",
+     "charges"),
 
     # ---- buy: the page a purchase leaves behind ---------------------------
     # The report: buy one, tick the next, "bought 0 of 2 -- no longer
@@ -238,9 +357,9 @@ SABOTAGES = [
     # unit = 0 for a bid-only auction sorts as the cheapest thing on the page
     # and reads as free.
     ("bid-only-unit-zero", "core/buy.lua",
-     """                unit    = (buyout and buyout > 0) and math.floor(buyout / count)
+     """                unit    = (buyout and buyout > 0) and math.floor(buyout / units)
                           or nil,""",
-     """                unit    = math.floor((buyout or 0) / count),""",
+     """                unit    = math.floor((buyout or 0) / units),""",
      "buy.page"),
 
     # nextBid from minBid even when someone has already bid: the server
@@ -7361,6 +7480,7 @@ SUITES = {
     "raise": "tests/units/raise_test.lua",
     "ledgeritems": "tests/units/ledgeritems_test.lua",
     "histstats": "tests/units/histstats_test.lua",
+    "charges": "tests/units/charges_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

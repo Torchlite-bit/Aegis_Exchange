@@ -138,16 +138,27 @@ function sell.GetItem()
         GetAuctionSellItemInfo()
     if not name then return nil end
     count = count or 1
+    local itemId = link and util.ItemIdFromLink(link) or nil
+    -- IN ITEMS. A charge item reports its charges as the count, and every
+    -- reader of this -- the post's buyout (unit x count), the posting book,
+    -- the vendor price per unit, the assembler's "is this the stack I asked
+    -- for" -- means items. A client with no link here still names the item,
+    -- and the name map knows its id.
+    local unitsId = itemId
+        or (A.db and A.db.IdFromName and A.db.IdFromName(name))
+    local units = util.ItemUnits(unitsId, count)
     return {
         name     = name,
         texture  = texture,
-        count    = count,
+        count    = units,
+        -- What the client said, when that was charges rather than items.
+        charges  = (units ~= count) and count or nil,
         quality  = quality,
         canUse   = canUse,
         price    = price or 0,          -- vendor deposit-base for the whole stack
-        maxStack = maxStack or count,
+        maxStack = maxStack or units,
         link     = link,
-        itemId   = link and util.ItemIdFromLink(link) or nil,
+        itemId   = itemId,
     }
 end
 
@@ -165,12 +176,13 @@ end
 -- thing they already opened the auction house to do. Every item anyone ever
 -- posts teaches its exact vendor price.
 --
--- CHARGE ITEMS ARE THE KNOWN INEXACTNESS. On 1.12 the client reports the
--- FULL-charge price here, so a partly-used charge item resolves high. There is
--- no charge count in this API to divide by -- aux carries the same exposure and
--- ships it -- so the value is recorded anyway rather than the feature being
--- dropped over a narrow case. A merchant-learned price for the same item
--- overwrites it, and that one is exact.
+-- CHARGE ITEMS. The client reports the FULL-charge price here, and the count
+-- beside it is the item's charges. sell.GetItem turns that count into items --
+-- one Wizard Oil is one -- so the division below gives the price of one whole
+-- item, which is what a merchant pays for an unused one. A partly-used one
+-- still resolves at that full price (aux carries the same exposure and ships
+-- it); a merchant-learned price for the same item overwrites it, and that one
+-- is exact.
 
 -- itemId and per-unit vendor price for whatever is in the sell slot, or nil.
 --
@@ -292,7 +304,7 @@ function sell.CountContainers(bags)
             local link = GetContainerItemLink(bag, slot)
             local id = link and util.ItemIdFromLink(link)
             if id then
-                local _, count = GetContainerItemInfo(bag, slot)
+                local count = util.SlotUnits(bag, slot, id)
                 out[id] = (out[id] or 0) + (count or 1)
             end
             slot = slot + 1
@@ -688,15 +700,18 @@ function sell.OwnerAuctions()
             if GetAuctionItemTimeLeft then
                 timeLeft = GetAuctionItemTimeLeft("owner", i)
             end
+            -- In items: one posted Wizard Oil is one, not its five charges.
+            local units = util.ItemUnits(itemId, count)
             table.insert(rows, {
                 index      = i,
                 name       = name,
                 texture    = texture,
-                count      = count,
+                count      = units,
+                charges    = (units ~= count) and count or nil,
                 quality    = quality,
                 buyout     = buyout or 0,
                 unit       = (buyout and buyout > 0)
-                             and math.floor(buyout / count) or nil,
+                             and math.floor(buyout / units) or nil,
                 bid        = bidAmount or 0,
                 minBid     = minBid or 0,
                 hasBid     = (bidAmount and bidAmount > 0) and true or false,
@@ -860,14 +875,16 @@ function sell.BidderAuctions()
                 timeLeft = GetAuctionItemTimeLeft("bidder", i)
             end
             local bid = bidAmount or 0
+            local units = util.ItemUnits(itemId, count)
             table.insert(rows, {
                 index    = i,
                 name     = name,
                 texture  = texture,
-                count    = count,
+                count    = units,
+                charges  = (units ~= count) and count or nil,
                 quality  = quality,
                 bid      = bid,
-                unit     = (bid > 0) and math.floor(bid / count) or nil,
+                unit     = (bid > 0) and math.floor(bid / units) or nil,
                 minBid   = minBid or 0,
                 minInc   = minInc or 0,
                 buyout   = buyout or 0,
@@ -1598,7 +1615,9 @@ function sell.ScanBags()
                 -- groups by the only thing it does know rather than making
                 -- every slot its own entry again.
                 local key = id or ("n:" .. tostring(iname or link))
-                local c = count or 1
+                -- In ITEMS: a Wizard Oil's count is its charges. See
+                -- util.ItemUnits.
+                local c = util.ItemUnits(id, count or 1)
                 local entry = byId[key]
                 if not entry then
                     entry = {
@@ -1670,7 +1689,7 @@ function sell.FindItemSlot(itemId)
             local link = GetContainerItemLink(bag, slot)
             if link and util.ItemIdFromLink(link) == itemId
                 and sell.IsAuctionable(bag, slot) then
-                local _, count = GetContainerItemInfo(bag, slot)
+                local count = util.SlotUnits(bag, slot, itemId)
                 if (count or 0) > bestCount then
                     bestBag, bestSlot, bestCount = bag, slot, count or 0
                 end
@@ -1820,7 +1839,7 @@ function sell.CountInBags(itemId)
             local link = GetContainerItemLink(bag, slot)
             if link and util.ItemIdFromLink(link) == itemId
                 and sell.IsAuctionable(bag, slot) then
-                local _, count = GetContainerItemInfo(bag, slot)
+                local count = util.SlotUnits(bag, slot, itemId)
                 total = total + (count or 0)
             end
             slot = slot + 1
@@ -1845,7 +1864,7 @@ function sell.MaxStacks(itemId, stackSize)
             local link = GetContainerItemLink(bag, slot)
             if link and util.ItemIdFromLink(link) == itemId
                 and sell.IsAuctionable(bag, slot) then
-                local _, count = GetContainerItemInfo(bag, slot)
+                local count = util.SlotUnits(bag, slot, itemId)
                 n = n + math.floor((count or 0) / stackSize)
             end
             slot = slot + 1
@@ -1873,7 +1892,7 @@ function sell.LargestStack(itemId)
             local link = GetContainerItemLink(bag, slot)
             if link and util.ItemIdFromLink(link) == itemId
                 and sell.IsAuctionable(bag, slot) then
-                local _, count = GetContainerItemInfo(bag, slot)
+                local count = util.SlotUnits(bag, slot, itemId)
                 if (count or 0) > best then best = count or 0 end
             end
             slot = slot + 1
@@ -1918,7 +1937,7 @@ local function FindStack(itemId, minCount)
             local link = GetContainerItemLink(bag, slot)
             if link and util.ItemIdFromLink(link) == itemId
                 and sell.IsAuctionable(bag, slot) then
-                local _, count = GetContainerItemInfo(bag, slot)
+                local count = util.SlotUnits(bag, slot, itemId)
                 if (count or 0) >= minCount then return bag, slot end
             end
             slot = slot + 1
@@ -1940,7 +1959,7 @@ local function FindExactStack(itemId, count)
             local link = GetContainerItemLink(bag, slot)
             if link and util.ItemIdFromLink(link) == itemId
                 and sell.IsAuctionable(bag, slot) then
-                local _, c = GetContainerItemInfo(bag, slot)
+                local c = util.SlotUnits(bag, slot, itemId)
                 if (c or 0) == count then return bag, slot end
             end
             slot = slot + 1

@@ -208,6 +208,11 @@ local function RecordVisiblePage(numOnPage, ours)
             GetAuctionItemInfo("list", i)
         if name and count and count > 0 then
             local itemId = util.ItemIdFromLink(GetAuctionItemLink("list", i))
+            -- IN ITEMS from here on. A Wizard Oil's count is its charges, and
+            -- a price recorded per charge is a fifth of what one costs. Two
+            -- table reads (util.ItemUnits) -- nothing here asks the client
+            -- about the item, which this storming event cannot afford.
+            count = util.ItemUnits(itemId, count)
             -- Tally BEFORE recording, so "added" means new to the price DB.
             if tally then
                 if itemId then
