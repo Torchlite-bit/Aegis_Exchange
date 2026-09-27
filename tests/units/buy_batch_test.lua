@@ -50,8 +50,43 @@ end
 
 local function resetBatch()
     buy.batch = { active = false }
+    -- A real batch steps from buy.ReadPage, which idles the engine before it
+    -- calls BatchStep. The sections that call BatchStep by hand start from the
+    -- same place -- and nothing in them has searched, so no fresh read of the
+    -- page is on offer and a missing auction stops the batch at once.
+    buy.state.phase = "idle"
+    buy.state.searched = false
+    buy.state.confirm = false
     W.bids = {}
     W.money = 10000000
+end
+
+-- Search for real, so the engine has a page it can ask for again.
+local function search(text)
+    W.queries = {}
+    W.queryOpen = true
+    buy.Search(text)
+end
+
+-- Tick the driver until it sends the next query, then answer it with `rows`
+-- -- the sweep suite's helper, for the same reason: the engine must WAIT on
+-- the gate (HARD RULE 10), so a test has to drive it through one.
+local function answer(rows)
+    W.queryOpen = true
+    local before = table.getn(W.queries)
+    W.TickUntil(buy.driver,
+        function() return table.getn(W.queries) > before end, 50)
+    putPage(rows)
+    buy.ReadPage()
+end
+
+-- Tick the driver a while and count the queries it sent. The gate is open
+-- throughout, so anything the engine WANTS to ask, it asks.
+local function queriesAfterTicking()
+    W.queryOpen = true
+    local before = table.getn(W.queries)
+    for i = 1, 30 do W.Tick(buy.driver) end
+    return table.getn(W.queries) - before
 end
 
 -- ---------------------------------------------------------------------------
@@ -291,6 +326,213 @@ putPage({ dup() })          -- one identical listing still on the page
 buy.BatchStep()
 H.eq("the third identical listing was NOT bought", table.getn(W.bids), 2)
 H.eq("the batch finished rather than continuing", buy.batch.active, false)
+
+-- ---------------------------------------------------------------------------
+H.section("A missing auction gets ONE fresh read before it is called gone")
+-- ---------------------------------------------------------------------------
+
+-- THE REPORT: buy one, tick the next and press Buyout -- "bought 0 of 2, a
+-- selected auction is no longer available" -- and only a new search let you
+-- buy again. The list you tick from and the page the client holds can
+-- disagree, and the batch gave up on the first look.
+local linen = function() return listing("Linen Cloth", 20, 1000, 1) end
+local silk  = function() return listing("Silk Cloth",   5, 3000, 2) end
+local wool  = function() return listing("Wool Cloth",  10, 2000, 1) end
+
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+local done = nil
+putPage({ wool() })              -- the client's page moved on without us
+local sok, swhy = buy.StartBatch({ silk() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+H.eq("a ticked auction missing from the page is not bought blind",
+     table.getn(W.bids), 0)
+H.check("...and is not yet called gone", sok and done == nil,
+        tostring(swhy))
+H.eq("...the batch is still running", buy.batch.active, true)
+H.eq("...while the page is asked for again", queriesAfterTicking(), 1)
+
+-- The fresh page has it, one row further down than it was.
+putPage({ wool(), listing("Silk Cloth", 5, 3000, 2) })
+buy.ReadPage()
+H.eq("the fresh page's auction was bought", table.getn(W.bids), 1)
+H.eq("...at the index the FRESH page gives it", W.bids[1] and W.bids[1].index, 2)
+H.eq("...at the ticked price", W.bids[1] and W.bids[1].amount, 3000)
+
+-- Still missing after the fresh read: somebody else has it. Stop, as ever.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+done = nil
+putPage({ wool() })
+buy.StartBatch({ silk() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+answer({ wool() })
+H.eq("gone after a fresh read too: nothing bought", table.getn(W.bids), 0)
+H.check("...the batch stopped and said why", done ~= nil and done[2] ~= nil,
+        done and tostring(done[2]) or "not finished")
+H.eq("...it is no longer running", buy.batch.active, false)
+-- ONCE, not until it turns up. The check that matters: a second look that
+-- found nothing must not ask a third time. The page after the stop is the
+-- one confirming read the end of ReadPage owes nobody here -- nothing was
+-- bought -- so the driver stays quiet.
+H.eq("...and it did not keep asking", queriesAfterTicking(), 0)
+
+-- EACH PURCHASE earns its own re-read. The first missing auction uses the
+-- one it has; a later one, after something has been bought, gets another.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+done = nil
+putPage({ wool() })              -- neither ticked auction on the page
+buy.StartBatch({ linen(), silk() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+answer({ linen(), silk() })      -- the re-read: both there, Linen bought
+H.eq("the re-read page gave the first purchase", table.getn(W.bids), 1)
+putPage({ wool() })              -- the purchase's read: Silk not on it (yet)
+buy.ReadPage()
+H.eq("a later miss is not stopped on the spot", buy.batch.active, true)
+answer({ wool(), silk() })       -- its own re-read: Silk is there
+H.eq("...its own re-read found and bought it", table.getn(W.bids), 2)
+H.eq("...Silk, at Silk's price", W.bids[2] and W.bids[2].amount, 3000)
+putPage({ wool() })              -- the read after the last purchase
+buy.ReadPage()
+H.check("...and the batch finished clean", done ~= nil and done[1] == 2
+        and done[2] == nil,
+        done and (tostring(done[1]) .. " " .. tostring(done[2])) or "running")
+
+-- ---------------------------------------------------------------------------
+H.section("A batch never buys from a page that is about to be replaced")
+-- ---------------------------------------------------------------------------
+
+-- A read already on its way is the page to buy from. Picking an index out of
+-- the old one would be buying against a page we know is going.
+resetBatch()
+search("Cloth")
+answer({ silk(), linen() })
+buy.Refresh()
+W.queryOpen = true
+W.TickUntil(buy.driver, function() return buy.state.phase == "wait_results" end, 50)
+local wok, wwhy = buy.StartBatch({ silk() })
+H.eq("nothing is bought while the page is in flight", table.getn(W.bids), 0)
+H.check("...and the batch waits rather than failing", wok and buy.batch.active,
+        tostring(wwhy))
+putPage({ linen(), wool(), listing("Silk Cloth", 5, 3000, 3) })
+buy.ReadPage()
+H.eq("bought once the page landed", table.getn(W.bids), 1)
+H.eq("...at the index the NEW page gives it", W.bids[1] and W.bids[1].index, 3)
+
+-- ---------------------------------------------------------------------------
+H.section("The page a purchase leaves behind is ASKED for")
+-- ---------------------------------------------------------------------------
+
+-- A purchase is not a query, so the read after it is just the first list
+-- update to arrive -- which can be the page from before it. Once the buying
+-- is over the engine asks for the page, so the list stops showing the
+-- auction you just bought.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+done = nil
+buy.StartBatch({ linen() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+putPage({ linen(), silk() })     -- an early read: the bought one still there
+buy.ReadPage()
+H.check("the batch finished", done ~= nil and done[1] == 1,
+        done and tostring(done[1]) or "running")
+H.eq("...and the page was asked for, once", queriesAfterTicking(), 1)
+putPage({ silk() })
+buy.ReadPage()
+local shown = buy.state.rows
+H.eq("the confirmed page no longer shows the bought auction",
+     table.getn(shown), 1)
+H.eq("...only what is left", shown[1] and shown[1].name, "Silk Cloth")
+H.eq("...and ONE confirming read is all -- no loop", queriesAfterTicking(), 0)
+
+-- The single Buyout button leaves the same page behind.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+local rowL = buy.state.rows[1]
+local bok = buy.Buyout(rowL)
+H.check("a single buyout went through", bok, tostring(bok))
+putPage({ linen(), silk() })
+buy.ReadPage()
+H.eq("...and its page is asked for too", queriesAfterTicking(), 1)
+
+-- So does a bid: it changes the auction's bid, and an early read shows the
+-- old one -- the figure the next Bid would be built on.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+local bidOk = buy.Bid(buy.state.rows[1], 1)
+H.check("a bid went through", bidOk, tostring(bidOk))
+putPage({ linen(), silk() })
+buy.ReadPage()
+H.eq("...and its page is asked for too", queriesAfterTicking(), 1)
+
+-- A new search is its own fresh read: nothing more is owed after one.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+buy.Buyout(buy.state.rows[1])
+search("Silk")
+answer({ silk() })
+H.eq("a search after a purchase is the confirming read", queriesAfterTicking(), 0)
+
+-- NEITHER while a scan is querying. A scan takes the next list update as the
+-- reply to its own query, so a page of ours landing in between would be
+-- recorded as one of the scan's.
+local realRunning = A.scan.IsRunning
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+A.scan.IsRunning = function() return true end
+buy.Buyout(buy.state.rows[1])
+putPage({ linen(), silk() })
+buy.ReadPage()
+H.eq("no confirming read while a scan holds the channel",
+     queriesAfterTicking(), 0)
+
+-- The search runs BEFORE the scan starts: buy.Search refuses while one is
+-- querying, and a batch with no search behind it never gets a re-read anyway
+-- -- which would pass this check for the wrong reason.
+A.scan.IsRunning = realRunning
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+H.check("(the search ran)", buy.state.searched, "no search")
+A.scan.IsRunning = function() return true end
+done = nil
+putPage({ wool() })
+buy.StartBatch({ silk() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+H.eq("...and no re-read either: the batch stops as it always did",
+     buy.batch.active, false)
+H.eq("...having asked nothing", queriesAfterTicking(), 0)
+A.scan.IsRunning = realRunning
+
+-- ---------------------------------------------------------------------------
+H.section("Closing the auction house ends a batch")
+-- ---------------------------------------------------------------------------
+
+-- It waits on a page that will never come. Left active, it refuses every
+-- later batch ("A buyout is already running") until a reload.
+resetBatch()
+search("Cloth")
+answer({ linen(), silk() })
+done = nil
+buy.StartBatch({ linen(), silk() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+W.FireEvent(A.frame, "AUCTION_HOUSE_CLOSED")
+H.eq("the batch is no longer running", buy.batch.active, false)
+H.check("...and it reported what it bought, and why it stopped",
+        done ~= nil and done[1] == 1 and done[2] ~= nil,
+        done and (tostring(done[1]) .. " " .. tostring(done[2])) or "running")
+putPage({ linen(), silk() })
+local rok = buy.StartBatch({ silk() })
+H.check("...so the next batch can start", rok, tostring(rok))
 
 -- ---------------------------------------------------------------------------
 H.section("Single Buyout guards")

@@ -18133,7 +18133,8 @@ function ui.TrySellFromBag(bag, slot)
     end
     ui.SelectBagEntry({
         bag = bag, slot = slot, itemId = itemId,
-        name = iname or link, texture = texture, count = count or 1,
+        name = iname or link, texture = texture,
+        count = util.ItemUnits(itemId, count or 1),   -- charges are not items
     })
     return true
 end

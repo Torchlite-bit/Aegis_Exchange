@@ -487,6 +487,9 @@ local function HookOn(frame, name, source, store)
     frame[name] = function(self, a1, a2)
         local id, count = resolvers[name](a1, a2)
         if id then
+            -- In ITEMS, for every surface at once: a Wizard Oil's count is
+            -- its charges, and "x5" beside one oil prices five of them.
+            count = util.ItemUnits(id, count)
             tooltip.current = { id = id, count = count, source = source }
         else
             tooltip.current = nil

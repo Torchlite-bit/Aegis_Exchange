@@ -18,6 +18,50 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.21]
+
+### Fixed
+- **Items with charges count as one item, not one per charge.** A Wizard Oil
+  is one oil with five charges, but the game reports the charges where a stack
+  size goes — so Aegis read one oil as five. It priced oils per charge (a fifth
+  of what one costs), offered a "stack" of up to five, and could not post a
+  single oil because it tried to split something that cannot be split. Now
+  every oil, mana oil and charged gnomish/goblin device counts as one, in the
+  bags, the Sell tab, search results, your auctions and bids, the Receipt and
+  tooltips — and posting takes each one whole.
+- **Old oil prices are cleared once.** Prices Aegis had already recorded for
+  these items were per charge and would have kept their market value low for
+  weeks; they are dropped on first load and relearned from your next scan.
+
+  *The list of charge items comes from the server's own item data — 83 items,
+  none of which stack. If the game ever says one of them does stack, Aegis
+  believes the game.*
+
+---
+
+## [1.54.20]
+
+### Fixed
+- **You can buy again after a buyout without searching again.** Buying one
+  auction, then ticking another and pressing Buyout, could say *"bought 0 of 2
+  — A selected auction is no longer available"*, and only a new search let you
+  buy. The list could go on showing the auction you had just bought: the page
+  Aegis read after a purchase could be the one from *before* it, so ticking the
+  top row again ticked something already gone. Now:
+  - once the buying is done, Aegis asks the auction house for the page again,
+    so what you bought leaves the list;
+  - a ticked auction that isn't on the page gets one fresh look before Aegis
+    calls it gone, and the list repaints from that look;
+  - pressing Buyout while a page is still loading waits for that page instead
+    of buying from the one it is about to replace.
+
+  *What may be bought has not changed: every purchase still has to match an
+  auction you ticked, at the price and stack size you ticked it at.*
+- **Closing the auction house in the middle of a multi-buyout** no longer
+  leaves it "already running" — refusing every later one — until `/reload`.
+
+---
+
 ## [1.54.19]
 
 ### Fixed
@@ -6284,6 +6328,8 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.19]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.18]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.17]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
