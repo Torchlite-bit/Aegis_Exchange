@@ -1,0 +1,112 @@
+name: Release
+
+# Publishes a GitHub release for every new version that reaches main, so
+# addon launchers (which compare an install with the latest release) offer
+# updates correctly.
+#
+#   push to main  -> read the version from Aegis_Exchange.toc; if tag vX.Y.Z
+#                    does not exist yet, create it, push it, and dispatch this
+#                    workflow ON THE TAG. A merge that leaves the version alone
+#                    (docs, tests, tools) releases nothing.
+#   run on a tag  -> write this version's CHANGELOG.md entry to
+#                    RELEASE_NOTES.md, then package and release with
+#                    BigWigsMods/packager.
+#
+# THREE TRAPS, all hit in Aegis: Pathfinder first. Do not "simplify" them away:
+#   1. A tag pushed with GITHUB_TOKEN does NOT start a new workflow run, so an
+#      `on: push: tags` trigger never fires for it. A workflow_dispatch made
+#      with the same token DOES -- hence `gh workflow run` on the tag below.
+#   2. The packager refuses a BRANCH push whose commit is tagged ("Found future
+#      tag vX.Y.Z, not packaging.") and exits green having published nothing.
+#      So it only ever runs on a tag ref.
+#   3. With no manual changelog the packager uses the commit log since the
+#      previous tag -- before the first release, the whole history -- and
+#      GitHub refuses the body: "body is too long (maximum is 125000
+#      characters)". So the tag run writes this version's entry to
+#      RELEASE_NOTES.md, which .pkgmeta names as the manual changelog.
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The version is written in five places (see CLAUDE.md), and the in-game
+      # title bar reads one of them. Refuse to tag a release whose sites
+      # disagree, rather than publish vX.Y.Z of an addon that calls itself
+      # something else.
+      - name: Version sites agree
+        if: github.ref_type == 'branch'
+        run: python3 tests/lint/version.py
+
+      - name: Tag the version, if it is new
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^## Version:[[:space:]]*\([^[:space:]]*\).*/\1/p' Aegis_Exchange.toc | tr -d '\r')
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::No MAJOR.MINOR.PATCH version in Aegis_Exchange.toc (got '$version')"
+            exit 1
+          fi
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag is released already; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Aegis: Exchange $version"
+          git push origin "$tag"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"
+          echo "Tagged $tag; it is packaged in the run started on the tag."
+
+      # CHANGELOG.md headings are "## [X.Y.Z]", sometimes with a suffix
+      # ("## [1.2.0] — restart"). An entry runs until the next "## " heading
+      # of any kind, or the link references at the bottom; the "---" rule that
+      # separates entries is trimmed off the end.
+      - name: Release notes from CHANGELOG.md
+        if: github.ref_type == 'tag'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v head="## [$version]" '
+            index($0, head) == 1 { on = 1; print; next }
+            on && (/^## / || /^\[[^]]*\]: /) { exit }
+            on { print }
+          ' CHANGELOG.md | awk '
+            { line[NR] = $0 }
+            END {
+              n = NR
+              while (n > 0 && (line[n] ~ /^[[:space:]]*$/ || line[n] ~ /^---[[:space:]]*$/)) n--
+              for (i = 1; i <= n; i++) print line[i]
+            }
+          ' > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Aegis: Exchange $version" > RELEASE_NOTES.md
+          fi
+          cat RELEASE_NOTES.md
+
+      - name: Package and release to GitHub
+        if: github.ref_type == 'tag'
+        uses: BigWigsMods/packager@v2
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,17 @@
+package-as: Aegis_Exchange
+
+manual-changelog:
+    filename: RELEASE_NOTES.md
+    markup-type: markdown
+
+# What does NOT ship. The addon is the .toc plus core/ and ui/, the textures
+# in art/ and media/, and pfui/ (a drop-in skin players copy into
+# pfUI-addonskinner -- see the README). Everything below is for developers.
+ignore:
+    - tests
+    - tools
+    - design
+    - CLAUDE.md
+    - ROADMAP.md
+    - DISCORD.md
+    - CHANGELOG.md

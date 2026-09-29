@@ -344,11 +344,16 @@ That file just calls Aegis's own skinning, so both paths stay identical.
 
 ## Install
 
-1. Download this repo (**Code → Download ZIP**, or clone it).
+1. Download the newest zip from
+   [**Releases**](https://github.com/Torchlite-bit/Aegis_Exchange/releases)
+   — the folder inside is already named `Aegis_Exchange`. Addon launchers that
+   read GitHub releases pick up new versions the same way.
 2. Put the folder in `World of Warcraft/Interface/AddOns/`.
-3. **Name it exactly `Aegis_Exchange`** — GitHub's ZIP unpacks as
-   `Aegis_Exchange-main`, and the addon won't load under that name.
-4. Restart the client and visit an auctioneer.
+3. Restart the client and visit an auctioneer.
+
+Downloading the repo instead (**Code → Download ZIP**, or a clone) works too,
+but **rename the folder to exactly `Aegis_Exchange`** — GitHub's ZIP unpacks as
+`Aegis_Exchange-main`, and the addon won't load under that name.
 
 ---
 
