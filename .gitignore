@@ -43,3 +43,6 @@ luac.out
 # Python bytecode caches (tests/lint and tools are both importable)
 __pycache__/
 *.pyc
+
+# Written by the release workflow on a tag run (.github/workflows/release.yml)
+/RELEASE_NOTES.md

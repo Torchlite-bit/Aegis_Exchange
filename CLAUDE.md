@@ -293,6 +293,10 @@ Aegis_Exchange/
   tools/                 -- build-time generators. NOTHING here ships and
                          -- nothing is in the .toc; adding a file is never a
                          -- restart release and never a version bump
+  .github/workflows/release.yml -- tags + publishes a GitHub release for each
+                         -- new version on main (see "Releases are AUTOMATIC")
+  .pkgmeta               -- packager config: folder name, release notes file,
+                         -- and the ignore list that decides what ships
   CLAUDE.md              -- this file
   ROADMAP.md             -- phased, dependency-ordered plan; check before
                          -- starting a large feature
@@ -388,6 +392,23 @@ are done in practice — **imitate the approach, do not copy code blindly**:
 
   The window title bar and the load message both read `A.version`, so they
   follow automatically.
+- **Releases are AUTOMATIC — never push a `v*` tag by hand.**
+  `.github/workflows/release.yml` runs on every push to `main`: if the `.toc`
+  version has no `vX.Y.Z` tag yet, it tags it and dispatches itself on the tag,
+  and that run packages the addon (`BigWigsMods/packager`, driven by
+  `.pkgmeta`) and publishes the GitHub release. A merge that leaves the version
+  alone releases nothing. Launchers compare installs with the latest release,
+  so a version that reaches `main` IS a release.
+  - It refuses to tag when `tests/lint/version.py` fails — the five sites
+    above must agree before anything ships.
+  - **The release notes are the version's `CHANGELOG.md` entry**, cut from its
+    `## [X.Y.Z]` heading to the next `## ` heading. Keep that heading form.
+  - **`.pkgmeta`'s `ignore:` list decides what ships.** A new top-level folder
+    or file for developers goes on it, or it lands in every player's AddOns
+    folder.
+  - The workflow's comments name three traps (a tag pushed with
+    `GITHUB_TOKEN` starts no run; the packager skips a tagged branch push;
+    an unbounded commit-log body is refused). Do not "simplify" them away.
 
 ### WHICH number to bump
 
@@ -450,7 +471,8 @@ start of a new body rather than a continuation, say so and wait — the call is
 theirs, and staying on the current MINOR is always the safe default.
 
 **Not a release at all**, and therefore not a bump: anything under `tests/`,
-`tools/` or `design/`, and edits to `CLAUDE.md` / `ROADMAP.md`. None of it ships.
+`tools/`, `design/` or `.github/`, `.pkgmeta`, and edits to `CLAUDE.md` /
+`ROADMAP.md`. None of it ships.
 
 
 ---
