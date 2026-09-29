@@ -11184,6 +11184,10 @@ function ui.DoCraftSearch()
             ui.UpdateCraftMoney()   -- the search fed the price DB
         end,
         onState = function() ui.RefreshCraftStatus() end,
+        -- One page at a time, with its own pager: the Crafting tab's middle
+        -- panel does not speak the Buy tab's gathered list. See
+        -- buy.ShouldGather.
+        onePage = true,
     })
     if not ok then
         ui.craftStatus:SetText(err or "Could not search.")
@@ -11270,6 +11274,9 @@ function ui.RunCraftQueue()
             ui.RunCraftQueue()
         end,
         onState = function() ui.RefreshCraftStatus() end,
+        -- ONE PAGE: this queue moves to the next reagent on each result, and a
+        -- gathered search reports a result per page. See buy.ShouldGather.
+        onePage = true,
     })
     if not ok then
         ui.craftQueue = nil

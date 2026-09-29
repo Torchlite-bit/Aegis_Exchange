@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.25)
+# Aegis: Exchange (v1.54.26)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -72,11 +72,11 @@ It opens looking like the auction house you know: Name, Level Range, Min
 Quality, Usable items, **Display on Character** (try gear on as you click it),
 categories down the left, Bid / Buyout along the bottom.
 
-**Browsing a category reads every page.** Pick *Projectile → Bullet* and you get
-every kind of ammo on sale in one grouped list, not just whatever landed on page
-1 — it fills in as pages arrive, 20 pages at a time (**▶** for the next 20).
-Buy or bid on any row; Aegis fetches that auction's page first. Name searches
-still come a page at a time.
+**Every search reads every page.** Search *Wizard Oil*, or pick
+*Projectile → Bullet*, and you get every match on sale in one grouped list, not
+just whatever landed on page 1 — it fills in as pages arrive, 20 pages at a time
+(**▶** for the next 20). Buy or bid on any row; Aegis fetches that auction's
+page first. (The Crafting tab still reads a page at a time.)
 
 - **Advanced** swaps in a full query box and three views: **Results**,
   **Saved** (every search you've run, plus favourites you order yourself) and
@@ -424,7 +424,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.25`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.26`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

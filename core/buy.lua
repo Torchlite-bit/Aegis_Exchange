@@ -1643,7 +1643,8 @@ function buy.Search(text, callbacks)
     st.page      = 0
     st.callbacks = callbacks or st.callbacks
     st.searched  = true
-    st.gather    = buy.ShouldGather(st.terms)
+    st.gather    = buy.ShouldGather(st.terms,
+                       st.callbacks and st.callbacks.onePage)
     st.gatherFrom, st.gatherTo = 0, nil
     st.pageRows, st.pageStats = {}, {}
     -- A buyout still hunting for its auction was hunting in the old results.
@@ -2127,17 +2128,33 @@ end
 --     auction, and the page a purchase leaves behind all take the query
 --     channel before the next gathered page does (the end of buy.ReadPage).
 --
--- Only a CATEGORY browse gathers: one term, with a class. A name search keeps
--- one page at a time -- it is usually one item, the Crafting tab's searches
--- are exactly that, and an OR search already rolls across its terms page by
--- page.
+-- WHAT GATHERS: any one-term Buy-tab search that narrows the auction house at
+-- all -- a category, a name, a quality, a level range, usable-only. v1.54.25
+-- gathered categories only, and the next report was the same bug by name:
+-- "search can't find regular Wizard Oil, only Minor and the Minor formula".
+-- "Wizard Oil" matches Minor, Lesser and Brilliant too, and page 1 was all
+-- Minor. A name search is a browse as much as a category is.
+--
+-- WHAT DOES NOT: an OR search, which already rolls across its terms page by
+-- page; a search that narrows nothing, where the first 20 pages of the whole
+-- auction house answer no question; and the Crafting tab, whose reagent queue
+-- moves to the next reagent on each result and asks for one page
+-- (`onePage` on the callbacks it hands buy.Search).
 -- ---------------------------------------------------------------------------
 
 -- PURE. Does this compiled query gather?
-function buy.ShouldGather(terms)
+function buy.ShouldGather(terms, onePage)
+    if onePage then return false end
     if not terms or table.getn(terms) ~= 1 then return false end
     local b = terms[1] and terms[1].blizz
-    return (b and b.class ~= nil) and true or false
+    if not b then return false end
+    if b.class ~= nil then return true end
+    if b.name and b.name ~= "" then return true end
+    if b.quality or b.isUsable then return true end
+    if (b.minLevel and b.minLevel ~= "") or (b.maxLevel and b.maxLevel ~= "") then
+        return true
+    end
+    return false
 end
 
 -- Fold the page just read into the gathered list, and rebuild the list and

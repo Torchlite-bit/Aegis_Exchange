@@ -60,7 +60,8 @@ local function names(rows)
     return out
 end
 
-local function search(text)
+-- `onePage` searches the way the Crafting tab does: one page, no gather.
+local function search(text, onePage)
     buy.batch = { active = false }
     buy.find = nil
     buy.state.phase = "idle"
@@ -68,7 +69,7 @@ local function search(text)
     W.bids = {}
     W.money = 10000000
     W.queryOpen = true
-    buy.Search(text)
+    buy.Search(text, { onePage = onePage })
 end
 
 -- Three pages of a category, two lots on each (a total of 150 auctions is
@@ -80,16 +81,26 @@ local P = {
 }
 
 -- ---------------------------------------------------------------------------
-H.section("Only a CATEGORY browse gathers")
+H.section("What gathers")
 -- ---------------------------------------------------------------------------
 
 H.eq("a class browse gathers", buy.ShouldGather(buy.CompileQuery("weapon")), true)
-H.eq("a name search does not", buy.ShouldGather(buy.CompileQuery("Linen Cloth")),
-     false)
-H.eq("an exact item does not (the Crafting tab's searches)",
-     buy.ShouldGather(buy.CompileQuery("[Silk Cloth]")), false)
+-- THE SECOND REPORT: "search can't find regular Wizard Oil, only Minor and the
+-- Minor formula". "Wizard Oil" matches every grade of it, and page 1 was all
+-- Minor. A name search is a browse too.
+H.eq("a name search gathers", buy.ShouldGather(buy.CompileQuery("Wizard Oil")),
+     true)
+H.eq("...so does one exact item (right-click a row: all of it)",
+     buy.ShouldGather(buy.CompileQuery("[Silk Cloth]")), true)
+H.eq("...and a quality with no name", buy.ShouldGather(buy.CompileQuery("epic")),
+     true)
+H.eq("the Crafting tab asks for one page, and gets it",
+     buy.ShouldGather(buy.CompileQuery("[Silk Cloth]"), true), false)
 H.eq("an OR search does not -- it already rolls term by term",
      buy.ShouldGather(buy.CompileQuery("weapon;armor")), false)
+-- The first 20 pages of the WHOLE auction house answer no question.
+H.eq("a search that narrows nothing does not",
+     buy.ShouldGather(buy.CompileQuery("")), false)
 H.eq("nothing does not", buy.ShouldGather(nil), false)
 
 -- ---------------------------------------------------------------------------
@@ -140,13 +151,27 @@ H.check("...what is still there stayed", all["Jagged Arrow"] ~= nil)
 H.eq("...and nothing was counted twice", table.getn(buy.state.rows), 5)
 
 -- ---------------------------------------------------------------------------
-H.section("A name search keeps one page at a time")
+H.section("A name search gathers; the Crafting tab's does not")
 -- ---------------------------------------------------------------------------
 
-search("Arrow")
+-- The report, replayed: page 1 of "Wizard Oil" is all Minor.
+local WO = {
+    [0] = { lot("Minor Wizard Oil", 100), lot("Formula: Minor Wizard Oil", 90) },
+    [1] = { lot("Wizard Oil", 3000), lot("Brilliant Wizard Oil", 9000) },
+}
+search("Wizard Oil")
+answer(WO[0], 100)
+answer(WO[1], 100)
+local oils = names(buy.state.rows)
+H.check("regular Wizard Oil is found -- it was on page 2",
+        oils["Wizard Oil"] ~= nil)
+H.check("...Brilliant too", oils["Brilliant Wizard Oil"] ~= nil)
+H.check("...and Minor is still there", oils["Minor Wizard Oil"] ~= nil)
+
+search("Arrow", true)
 answer(P[0], 150)
-H.isNil("no gather state", buy.GatherState())
-H.eq("...and no second page is fetched on its own", queriesAfterTicking(), 0)
+H.isNil("a one-page search keeps no gather state", buy.GatherState())
+H.eq("...and fetches no second page on its own", queriesAfterTicking(), 0)
 
 -- ---------------------------------------------------------------------------
 H.section("Bounded: a window of pages, moved by the pager")
@@ -256,7 +281,7 @@ H.eq("...at its index there", W.bids[1] and W.bids[1].index, 2)
 -- THE PAGE IN HAND IS READ AGAIN before it is allowed to say "not here". The
 -- list can be ahead of the client's copy of a page (the 1.54.20 report), so a
 -- row missing from the copy in hand is looked for on a FRESH read of it.
-search("Arrow")
+search("Arrow", true)
 answer(P[0], 150)
 local roughHere = names(buy.state.rows)["Rough Arrow"]
 W.SetPage({ lot("Sharp Arrow", 20) })   -- the client's copy has lost it
@@ -269,7 +294,7 @@ H.eq("a fresh read of the same page finds it", table.getn(W.bids), 1)
 H.eq("...at its index there", W.bids[1] and W.bids[1].index, 2)
 
 -- On the page in hand, with nothing in flight: immediate, no query.
-search("Arrow")
+search("Arrow", true)
 answer(P[0], 150)
 local sharp = names(buy.state.rows)["Sharp Arrow"]
 local sent = table.getn(W.queries)
@@ -478,6 +503,14 @@ do
     H.check("Buyout goes through BuyoutAnywhere",
             string.find(bodyOf("function ui.DoBuyout("),
                         "A.buy.BuyoutAnywhere(row,", 1, true) ~= nil)
+    -- The Crafting tab asks for one page: its queue moves on at each result,
+    -- and its panel has its own pager that does not speak a gathered list.
+    H.check("the Crafting tab's reagent queue asks for one page",
+            string.find(bodyOf("function ui.RunCraftQueue("),
+                        "onePage = true", 1, true) ~= nil)
+    H.check("...and so does its search box",
+            string.find(bodyOf("function ui.DoCraftSearch("),
+                        "onePage = true", 1, true) ~= nil)
 end
 
 os.exit(H.report("gather"))

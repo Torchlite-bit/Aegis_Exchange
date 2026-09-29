@@ -123,15 +123,53 @@ SABOTAGES = [
     # ---- a category browse gathers every page -----------------------------
     # The report: "Projectile > Bullet doesn't list all the ammo types".
     ("gather-never", "core/buy.lua",
-     "    return (b and b.class ~= nil) and true or false",
-     "    return false",
+     "    if b.class ~= nil then return true end\n",
+     "    do return false end\n",
      "gather"),
 
-    # A name search gathers too -- every page of "cloth", and every Crafting
-    # tab reagent lookup, at five seconds a page without the DLL.
-    ("gather-any-search", "core/buy.lua",
-     "    return (b and b.class ~= nil) and true or false",
-     "    return b ~= nil",
+    # A name search is one page again -- the Wizard Oil report: page 1 of
+    # "Wizard Oil" was all Minor, and regular Wizard Oil was on page 2.
+    ("gather-ignores-a-name", "core/buy.lua",
+     "    if b.name and b.name ~= \"\" then return true end\n",
+     "",
+     "gather"),
+
+    # The Crafting tab's reagent queue gathers too: it moves to the next
+    # reagent on each page's result and abandons the gather it started.
+    ("gather-ignores-one-page", "core/buy.lua",
+     "    if onePage then return false end\n",
+     "",
+     "gather"),
+
+    # The whole auction house, twenty pages of it, for a search that asked
+    # for nothing in particular.
+    ("gather-an-empty-search", "core/buy.lua",
+     """    if (b.minLevel and b.minLevel ~= "") or (b.maxLevel and b.maxLevel ~= "") then
+        return true
+    end
+    return false""",
+     """    return true""",
+     "gather"),
+
+    ("craft-queue-gathers", "ui/frame.lua",
+     """        -- ONE PAGE: this queue moves to the next reagent on each result, and a
+        -- gathered search reports a result per page. See buy.ShouldGather.
+        onePage = true,""",
+     "",
+     "gather"),
+
+    ("craft-search-gathers", "ui/frame.lua",
+     """        -- buy.ShouldGather.
+        onePage = true,
+    })""",
+     """        -- buy.ShouldGather.
+    })""",
+     "gather"),
+
+    ("search-drops-one-page", "core/buy.lua",
+     """    st.gather    = buy.ShouldGather(st.terms,
+                       st.callbacks and st.callbacks.onePage)""",
+     """    st.gather    = buy.ShouldGather(st.terms)""",
      "gather"),
 
     ("gather-or-terms", "core/buy.lua",
