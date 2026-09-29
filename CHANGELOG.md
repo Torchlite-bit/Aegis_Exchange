@@ -18,6 +18,53 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.25]
+
+### Added
+- **Browsing a category reads every page into one list.** Pick
+  *Projectile → Bullet* and you see every kind of ammo on sale, grouped one row
+  per item — not only the five that happened to land on page 1. Pages fill in
+  as they arrive (*"reading page 4 of 6…"*), 20 pages at a time; **▶** reads the
+  next 20 for the really big categories like Trade Goods. Name searches still
+  come a page at a time.
+- **Buy, bid or multi-buy any row, whatever page it came from.** Aegis asks for
+  that auction's page, finds it there (or on the page before, if something
+  ahead of it sold) and only then buys — never whatever happens to sit at that
+  spot on the page in hand.
+
+### Changed
+- A scan that starts while a category is still loading now pauses the loading
+  instead of stopping it, and it carries on when the scan does. Likewise, a
+  purchase made while a scan is running now refreshes the list once the scan
+  finishes, rather than leaving the bought auction listed.
+
+---
+
+## [1.54.24]
+
+### Changed
+- **Browse says when later pages hold more items.** Search results come one page
+  (50 auctions) at a time, and grouped, one page can be only a handful of rows —
+  page 1 of *Projectile → Bullet* held five kinds of ammo, with the rest on
+  pages 2 to 6, and nothing said so. The line under the results now reads
+  *"50 match(es) (of 261) • page 1 of 6 — more items on later pages"* until
+  you reach the last page.
+
+---
+
+## [1.54.23]
+
+### Fixed
+- **Posting no longer splits stacks into your ammo pouch or quiver.** To post a
+  stack smaller than the one in your bags, Aegis splits it into a free slot —
+  and it picked the first free slot it found, even one in a quiver, ammo pouch,
+  soul bag or herb bag, which only takes its own kind of item. The split
+  bounced and the post gave up. It now uses only regular bags (and your
+  backpack). If those are full, the post says *"no free slot in a regular bag"*
+  instead of trying the pouch.
+
+---
+
 ## [1.54.22]
 
 ### Fixed
@@ -6342,6 +6389,9 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -5169,6 +5169,72 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Gathering every page of a category browse — ✅ **DONE** (v1.54.25)
+
+**The owner reversed the 1.54.24 call** (below): a category browse now gathers.
+
+- **What gathers:** `buy.ShouldGather` — one term, with a class. Name searches,
+  exact `[Item]` searches (the Crafting tab's) and OR searches keep one page at
+  a time.
+- **How:** rows carry `page`. `buy.GatherMerge` keeps `st.pageRows[page]` and
+  rebuilds `st.rows` and merged stats from the window each read; a page read
+  again REPLACES its slice, so a bought auction leaves the list. The window is
+  `buy.GATHER_MAX` (20) pages; the pager moves windows (`buy.GatherWindow`).
+- **Order at the end of `buy.ReadPage`:** batch step, else a hunt
+  (`buy.FindStep`), then the page a purchase leaves behind, then the next
+  gathered page. Everything else gets the query channel first.
+- **Every page through the gate.** `buy.GatherAdvance` queues; `buy.OnUpdate`
+  sends only when `CanSendAuctionQuery()` and no scan or post holds the channel
+  (`buy.IsBusy`), so a scan starting mid-gather pauses it rather than killing
+  it or having our page read as one of the scan's.
+- **Buying off-page.** `buy.FindRow` (behind `buy.BuyoutAnywhere` /
+  `buy.BidAnywhere`) fetches the row's page and the one before it
+  (`buy.CandidatePages` — auctions only ever move EARLIER), finds the auction by
+  fingerprint and acts on the index it found. Only a page it asked for may say
+  "not here". The batch does the same over every page its ticked rows came
+  from, per page per purchase (`b.read`), replacing the one-page
+  `buy.RereadPage` from 1.54.20.
+- **Tick identity includes the page** (`ui.SameListing`): index 3 of page 1 and
+  index 3 of page 4 can share a name and a price.
+
+Status: `ui.GatherNote` ("reading page 4 of 6…", "pages 1–20 of 294 — ▶ for the
+next 20", "all 6 pages"), `ui.GatherPageText` for the pager.
+
+### "Browse doesn't list all the ammo types" — superseded by v1.54.25
+
+It lists one page. `buy.Search` fetches the 50 auctions the server hands back
+first; page 1 of *Projectile → Bullet* held five kinds of ammo and grouped into
+five rows, with Thorium Shells and the rest on pages 2–6. The stock UI shows
+one page too; in the report's screenshot it appears to sort rarity-first,
+which puts the blue and green ammo on page 1.
+
+**Owner's call (asked 1.54.23): keep one page at a time** — later reversed; see
+v1.54.25 above. Gathering every page into one grouped list was offered — bounded at 20 pages, rows filling in as
+pages land, a row from another page re-found before it is bought — and turned
+down. So the fix is to say it: **`ui.MorePagesNote`** appends *"page 1 of 6 —
+more items on later pages"* to the match count until the last page, and points
+at the next OR term when that is where the rest is. If gathering is ever
+revived, the design above is the starting point; the hard part is buying from
+a page the client is not holding (aux's `scan_util.find` re-queries the
+record's page, then the one before it).
+
+### Carving into an ammo pouch — ✅ **FIXED** (v1.54.23)
+
+Reported as "whenever I post and have slots free in my ammo bag, Aegis tries to
+split into the ammo bag". The post assembler carves a smaller stack by
+`SplitContainerItem` into an empty slot, and `FindEmptySlot` took the first
+empty slot in bags 1–4 then the backpack — including quivers, ammo pouches and
+soul/herb/enchanting bags, which refuse anything but their own kind.
+
+**`sell.IsGeneralBag(bag)`** answers from the client's own class list, the way
+aux's `bag_type` does: a bag is ordinary when its subtype equals the FIRST
+Container subclass from `GetAuctionItemSubClasses(3)` ("Bag" in English,
+whatever it is elsewhere). A quiver is not a Container at all, so it never
+matches. Nothing is compared to an English string. Anything unreadable — no
+link, a cold cache, no class list — answers yes, which is what every bag was
+before. `FindEmptySlot` skips the rest; no room left gives `"nospace"`, whose
+message now says "regular bag".
+
 ### Items with charges — ✅ **FIXED** (v1.54.21)
 
 Reported as "Wizard Oil selling is buggy, it considers one charge one item".

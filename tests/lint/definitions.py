@@ -43,6 +43,12 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.54.25. A batch buyout re-read ONE page -- the one the client held --
+    # before calling a ticked auction gone. A gathered browse spans pages, so
+    # the batch now reads the pages its ticked rows came from (and the page
+    # before each) through buy.FetchPage, tracked per page in b.read.
+    "buy.RereadPage": "v1.54.25 -- generalised to buy.FetchPage(p) and "
+                      "buy.CandidatePages, per page rather than once",
     # v1.54.11. Demo mode used to invent the History tab's FIGURES directly
     # while everything that reads the LEDGER read the real store, which in
     # demo mode is empty -- so the Ledger window opened blank and the numbers

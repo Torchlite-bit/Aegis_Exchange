@@ -279,11 +279,13 @@ do
     H.check("the bid handler exists", dobid ~= "")
     -- THE AMOUNT THE DIALOG QUOTED, not a figure recomputed afterwards.
     -- Recomputing is how the number on screen and the number sent come apart.
+    -- Through BidAnywhere since v1.54.25 -- a gathered list holds rows from
+    -- pages the client is not holding -- with the amount unchanged.
     H.check("it sends the amount the dialog quoted",
-            says(dobid, "A.buy.Bid(row, amount)"))
+            says(dobid, "A.buy.BidAnywhere(row, amount,"))
     H.check("...cleared once used", says(dobid, "ui.pendingBid, ui.pendingBidAmount = nil, nil"))
     H.check("...and it does not recompute from the row",
-            not says(dobid, "A.buy.Bid(row, row.nextBid)"))
+            not says(dobid, "(row, row.nextBid"))
 
     -- The ledger write moved into the engine. Left in the UI handler it covers
     -- one of the two ways a purchase happens.

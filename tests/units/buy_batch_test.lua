@@ -402,6 +402,18 @@ H.check("...and the batch finished clean", done ~= nil and done[1] == 2
         and done[2] == nil,
         done and (tostring(done[1]) .. " " .. tostring(done[2])) or "running")
 
+-- With NO search behind it there is no page to ask for, so a missing auction
+-- stops the batch at once rather than sending a query for nothing.
+resetBatch()
+putPage({ wool() })
+done = nil
+buy.StartBatch({ silk() },
+    function(bought, want, spent, reason) done = { bought, reason } end)
+H.check("no search: a missing auction stops the batch at once",
+        done ~= nil and done[2] ~= nil and not buy.batch.active,
+        done and tostring(done[2]) or "still running")
+H.eq("...having asked nothing", queriesAfterTicking(), 0)
+
 -- ---------------------------------------------------------------------------
 H.section("A batch never buys from a page that is about to be replaced")
 -- ---------------------------------------------------------------------------
@@ -481,7 +493,7 @@ search("Silk")
 answer({ silk() })
 H.eq("a search after a purchase is the confirming read", queriesAfterTicking(), 0)
 
--- NEITHER while a scan is querying. A scan takes the next list update as the
+-- NOT SENT while a scan is querying. A scan takes the next list update as the
 -- reply to its own query, so a page of ours landing in between would be
 -- recorded as one of the scan's.
 local realRunning = A.scan.IsRunning
@@ -494,6 +506,10 @@ putPage({ linen(), silk() })
 buy.ReadPage()
 H.eq("no confirming read while a scan holds the channel",
      queriesAfterTicking(), 0)
+-- ...but it is QUEUED, not dropped: dropping it left the bought auction on
+-- the list for good.
+A.scan.IsRunning = realRunning
+H.eq("...it goes out once the scan lets go", queriesAfterTicking(), 1)
 
 -- The search runs BEFORE the scan starts: buy.Search refuses while one is
 -- querying, and a batch with no search behind it never gets a re-read anyway

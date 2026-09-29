@@ -27,6 +27,9 @@ buy.TIMEOUT     = 8      -- seconds to wait for a page reply before retrying
 -- How many pages ONE search may skip past on its own when a post-filter
 -- empties them. See the sweep block above buy.SweepDecision.
 buy.SWEEP_MAX   = 25
+-- How many pages ONE category browse reads into one list before it stops and
+-- lets the pager move on. See the gather block below buy.ReadPage.
+buy.GATHER_MAX  = 20
 
 buy.state = {
     phase      = "idle",   -- idle | wait_query | wait_results
@@ -47,6 +50,13 @@ buy.state = {
     searched   = false,    -- a search has run, so there is a page to re-read
     confirm    = false,    -- a purchase changed the page since we last ASKED
                            -- for it (see the end of buy.ReadPage)
+    -- Gathering every page of a category browse into one list. See the gather
+    -- block below buy.ReadPage.
+    gather     = false,    -- this search gathers
+    gatherFrom = 0,        -- first page of the window being gathered
+    gatherTo   = nil,      -- last page of it, once the first reply says how many
+    pageRows   = {},       -- [page] = that page's rows, each tagged .page
+    pageStats  = {},       -- [page] = that page's post-filter stats
 }
 
 buy.driver = CreateFrame("Frame", "AegisExchangeBuyDriver")
@@ -1633,6 +1643,11 @@ function buy.Search(text, callbacks)
     st.page      = 0
     st.callbacks = callbacks or st.callbacks
     st.searched  = true
+    st.gather    = buy.ShouldGather(st.terms)
+    st.gatherFrom, st.gatherTo = 0, nil
+    st.pageRows, st.pageStats = {}, {}
+    -- A buyout still hunting for its auction was hunting in the old results.
+    buy.CancelFind("A new search replaced the results.")
     st.phase     = "wait_query"
     st.cooldown  = 0
     st.timeout   = 0
@@ -1735,6 +1750,9 @@ end
 function buy.SweepDecision(s)
     if not s.enabled then return "off" end
     if s.batch then return "off" end
+    -- A gathering browse reads every page anyway; a sweep on top would move
+    -- the page out from under it.
+    if s.gather then return "off" end
     if (s.matched or 0) > 0 then return "matched" end
     if (s.rawTotal or 0) <= 0 then return "empty" end
     -- "end" is tested BEFORE "limit" on purpose: when the budget runs out on
@@ -1773,6 +1791,15 @@ end
 
 function buy.NextPage()
     buy.ResetSweep()
+    -- Gathering: the next WINDOW of pages, not the next page -- the one after
+    -- this is already in the list.
+    local st = buy.state
+    if st.gather then
+        if st.gatherTo and st.gatherTo + 1 < st.totalPages then
+            return buy.GatherWindow(st.gatherTo + 1)
+        end
+        return false
+    end
     return buy.Advance()
 end
 
@@ -1792,6 +1819,7 @@ function buy.SweepStep()
         limit      = buy.SWEEP_MAX,
         enabled    = buy.SweepEnabled(),
         batch      = (buy.batch and buy.batch.active) and true or false,
+        gather     = st.gather and true or false,
     })
     st.sweepStop = d
     if d == "advance" then
@@ -1820,6 +1848,14 @@ end
 function buy.PrevPage()
     local st = buy.state
     buy.ResetSweep()
+    if st.gather then
+        if st.gatherFrom > 0 then
+            local from = st.gatherFrom - buy.GATHER_MAX
+            if from < 0 then from = 0 end
+            return buy.GatherWindow(from)
+        end
+        return false
+    end
     if st.page > 0 then
         buy.GotoPage(st.page - 1)
     elseif st.termIndex > 1 then
@@ -1848,7 +1884,11 @@ function buy.OnUpdate(dt)
     local st = buy.state
     if st.phase == "wait_query" then
         st.cooldown = st.cooldown - dt
-        if st.cooldown <= 0 and CanSendAuctionQuery() then
+        -- ...and NOT WHILE A SCAN OR A POST HOLDS THE CHANNEL. A scan reads
+        -- the next list update as the reply to its own query; ours landing in
+        -- between would be recorded as a page of the scan. A query queued
+        -- before the scan started waits for it (see buy.GatherAdvance).
+        if st.cooldown <= 0 and CanSendAuctionQuery() and not buy.IsBusy() then
             SendQuery()
         end
     elseif st.phase == "wait_results" then
@@ -1860,6 +1900,16 @@ function buy.OnUpdate(dt)
     end
 end
 buy.driver:SetScript("OnUpdate", function() buy.OnUpdate(arg1) end)
+
+-- Cheapest unit buyout first; bid-only auctions (unit = nil) sink to the
+-- bottom. One comparator for one page and for a gathered list of many, so the
+-- two cannot order the same rows differently.
+local function ByUnit(a, b)
+    if not a.unit and not b.unit then return false end
+    if not a.unit then return false end   -- a is bid-only -> after b
+    if not b.unit then return true end    -- b is bid-only -> a before
+    return a.unit < b.unit
+end
 
 -- Read the currently visible "list" page into sorted rows. Each row keeps its
 -- real `index` so a later bid/buyout targets the right auction.
@@ -1916,6 +1966,9 @@ function buy.ReadPage()
                 canUse  = canUse,
                 level   = level,
                 timeLeft = timeLeft,
+                -- The page this auction was read from. A gathered list holds
+                -- many pages, and buying one means asking for its page again.
+                page    = st.page,
                 buyout  = buyout or 0,
                 unit    = (buyout and buyout > 0) and math.floor(buyout / units)
                           or nil,
@@ -1977,17 +2030,16 @@ function buy.ReadPage()
     end
     st.stats = stats
 
-    -- Cheapest unit buyout first (bid-only auctions, unit = nil, sink to the
-    -- bottom); the real `index` is preserved so buying still hits the right
-    -- listing.
-    table.sort(rows, function(a, b)
-        if not a.unit and not b.unit then return false end
-        if not a.unit then return false end   -- a is bid-only -> after b
-        if not b.unit then return true end    -- b is bid-only -> a before
-        return a.unit < b.unit
-    end)
+    -- Cheapest unit buyout first; the real `index` is preserved so buying
+    -- still hits the right listing.
+    table.sort(rows, ByUnit)
 
-    st.rows  = rows
+    -- One page, or this page folded into everything gathered so far.
+    if st.gather then
+        buy.GatherMerge(rows, stats)
+    else
+        st.rows = rows
+    end
     st.phase = "idle"
     buy.driver:Hide()
 
@@ -2003,7 +2055,7 @@ function buy.ReadPage()
     buy.SweepStep()
 
     if st.callbacks and st.callbacks.onResults then
-        st.callbacks.onResults(rows)
+        st.callbacks.onResults(st.rows)
     end
     Notify()
 
@@ -2013,6 +2065,10 @@ function buy.ReadPage()
     -- the whole bug the batch exists to avoid.
     if buy.batch and buy.batch.active then
         buy.BatchStep()
+    elseif buy.find then
+        -- ...and so does a single Bid or Buyout hunting for its auction on
+        -- a page the client was not holding. See buy.FindRow.
+        buy.FindStep()
     end
 
     -- THE PAGE A PURCHASE LEAVES BEHIND IS ASKED FOR, NOT ASSUMED.
@@ -2028,13 +2084,323 @@ function buy.ReadPage()
     -- So once the purchases are over, ask for the page. SendQuery clears the
     -- flag, which bounds this at one query per round of buying.
     --
-    -- NOT WHILE A SCAN IS ON THE WIRE. A scan reads the next list update as
-    -- the reply to ITS query; a page of ours landing in between would be
-    -- recorded as a page of the scan.
+    -- QUEUED even while a scan is on the wire: the driver holds it until the
+    -- scan lets go of the channel (buy.OnUpdate), because a page of ours
+    -- landing between a scan's query and its reply would be recorded as a
+    -- page of the scan. Dropping it instead left the bought auction listed.
     if st.confirm and st.phase == "idle"
-       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then
+       and not (buy.batch and buy.batch.active) then
         buy.Refresh()
     end
+
+    -- LAST, the next page of a gathering browse -- only once nothing above
+    -- wanted the query channel. A purchase, a hunt for an auction and the
+    -- page a purchase leaves behind all come first, and the gather picks up
+    -- where it left off when they are done.
+    if st.gather and st.phase == "idle" and not buy.find
+       and not (buy.batch and buy.batch.active) then
+        buy.GatherAdvance()
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Gathering every page of a category browse
+--
+-- REPORTED as "browsing Projectile > Bullet doesn't list all the ammo types".
+-- It listed ONE page: the 50 auctions the server hands back first. Page 1 of
+-- Bullet held five kinds of ammo, and grouped, five rows -- with Thorium
+-- Shells and the rest on pages 2 to 6, where nobody browsing a category
+-- thinks to look. Browsing a category is asking "what is there?", and one
+-- page is not an answer to that.
+--
+-- So a category browse reads its pages one after another and folds them into
+-- one list, which the grouped view turns into one row per item. Three rules:
+--
+--   * EVERY PAGE GOES THROUGH THE GATE. Each one is an ordinary query from
+--     buy.FetchPage, paced by CanSendAuctionQuery() (HARD RULE 10) and read
+--     by the same state-gated handler (HARD RULE 16). Nothing about it is a
+--     bulk pull; it is the pager, clicked for you.
+--   * BOUNDED. buy.GATHER_MAX pages at a time. Trade Goods runs to hundreds,
+--     and without the throttle DLL each page is ~5 seconds. The pager moves
+--     a WINDOW of pages; the list fills in as each one lands.
+--   * EVERYTHING ELSE COMES FIRST. A purchase, a buyout hunting for its
+--     auction, and the page a purchase leaves behind all take the query
+--     channel before the next gathered page does (the end of buy.ReadPage).
+--
+-- Only a CATEGORY browse gathers: one term, with a class. A name search keeps
+-- one page at a time -- it is usually one item, the Crafting tab's searches
+-- are exactly that, and an OR search already rolls across its terms page by
+-- page.
+-- ---------------------------------------------------------------------------
+
+-- PURE. Does this compiled query gather?
+function buy.ShouldGather(terms)
+    if not terms or table.getn(terms) ~= 1 then return false end
+    local b = terms[1] and terms[1].blizz
+    return (b and b.class ~= nil) and true or false
+end
+
+-- Fold the page just read into the gathered list, and rebuild the list and
+-- its stats from every page in the window.
+--
+-- A page read AGAIN -- after a purchase, or while a buyout hunts for its
+-- auction -- REPLACES what that page held, rather than adding to it. That is
+-- what keeps a bought auction from lingering in the list.
+function buy.GatherMerge(rows, stats)
+    local st = buy.state
+    if not st.gatherTo then
+        st.gatherTo = st.gatherFrom + buy.GATHER_MAX - 1
+    end
+    -- The count can shrink while we read (auctions sell and expire); a window
+    -- reaching past the last page would wait forever for a page that is gone.
+    if st.gatherTo > st.totalPages - 1 then st.gatherTo = st.totalPages - 1 end
+    if st.gatherTo < st.gatherFrom then st.gatherTo = st.gatherFrom end
+    if st.page >= st.gatherFrom and st.page <= st.gatherTo then
+        st.pageRows[st.page]  = rows
+        st.pageStats[st.page] = stats
+    end
+    local all = {}
+    local merged = { unknownStack = 0 }
+    local p = st.gatherFrom
+    while p <= st.gatherTo do
+        local pr = st.pageRows[p]
+        if pr then
+            local i = 1
+            while i <= table.getn(pr) do
+                table.insert(all, pr[i])
+                i = i + 1
+            end
+        end
+        local ps = st.pageStats[p]
+        if ps then
+            merged.unknownStack = merged.unknownStack + (ps.unknownStack or 0)
+            if ps.usedPageMax then merged.usedPageMax = true end
+            if ps.unanswered then
+                merged.unanswered = merged.unanswered or {}
+                for kind, n in pairs(ps.unanswered) do
+                    merged.unanswered[kind] = (merged.unanswered[kind] or 0) + n
+                end
+            end
+        end
+        p = p + 1
+    end
+    table.sort(all, ByUnit)
+    st.rows  = all
+    st.stats = merged
+end
+
+-- The first page of the window not read yet, or nil when it is complete.
+function buy.GatherNextPage()
+    local st = buy.state
+    if not st.gather or not st.gatherTo then return nil end
+    local p = st.gatherFrom
+    while p <= st.gatherTo do
+        if not st.pageRows[p] then return p end
+        p = p + 1
+    end
+    return nil
+end
+
+-- QUEUED, not refused, when a scan or a post holds the query channel: the
+-- driver sends it once the channel is free (buy.OnUpdate). buy.FetchPage
+-- refuses instead, which is right for a buyout hunting an auction -- it stops
+-- and says so -- and wrong here, where refusing would leave the list at
+-- "reading page 4 of 6" for good.
+function buy.GatherAdvance()
+    local p = buy.GatherNextPage()
+    if not p then return false end
+    local st = buy.state
+    if not st.searched or st.phase ~= "idle" then return false end
+    st.page     = p
+    st.phase    = "wait_query"
+    st.cooldown = buy.QUERY_DELAY
+    buy.driver:Show()
+    Notify()
+    return true
+end
+
+-- Start a new window at `from`. The pager's move while gathering.
+function buy.GatherWindow(from)
+    if buy.IsBusy() then return false end
+    local st = buy.state
+    st.gatherFrom, st.gatherTo = from, nil
+    st.pageRows, st.pageStats = {}, {}
+    st.page     = from
+    st.phase    = "wait_query"
+    st.cooldown = buy.QUERY_DELAY
+    buy.driver:Show()
+    Notify()
+    return true
+end
+
+-- Where a gathering browse has got to, for the status line and the pager, or
+-- nil when this search does not gather.
+function buy.GatherState()
+    local st = buy.state
+    if not st.gather then return nil end
+    local read, span = 0, 0
+    if st.gatherTo then
+        span = st.gatherTo - st.gatherFrom + 1
+        local p = st.gatherFrom
+        while p <= st.gatherTo do
+            if st.pageRows[p] then read = read + 1 end
+            p = p + 1
+        end
+    end
+    return {
+        from = st.gatherFrom, to = st.gatherTo, read = read, span = span,
+        totalPages = st.totalPages, max = buy.GATHER_MAX,
+        done = (st.gatherTo ~= nil) and read >= span,
+    }
+end
+
+-- ---------------------------------------------------------------------------
+-- Asking for a page, and finding an auction on one
+-- ---------------------------------------------------------------------------
+
+-- Query page `p` of the current search. True when it went out (or will, once
+-- the gate opens); false when there is no search to repeat, a scan holds the
+-- channel, or a read is already in flight.
+function buy.FetchPage(p)
+    local st = buy.state
+    if not st.searched or buy.IsBusy() then return false end
+    if st.phase ~= "idle" then return false end
+    if not p or p < 0 then return false end
+    st.page     = p
+    st.phase    = "wait_query"
+    st.cooldown = buy.QUERY_DELAY
+    buy.driver:Show()
+    Notify()
+    return true
+end
+
+-- PURE. The pages worth reading to find auctions last seen on `pages`: each
+-- page, then the one before it -- an auction moves to an EARLIER page when
+-- something ahead of it sells, never a later one. In ascending order, no
+-- repeats.
+function buy.CandidatePages(pages)
+    local set, out = {}, {}
+    local i = 1
+    while i <= table.getn(pages or {}) do
+        local p = pages[i]
+        if p and p >= 0 then
+            set[p] = true
+            if p > 0 then set[p - 1] = true end
+        end
+        i = i + 1
+    end
+    for q in pairs(set) do table.insert(out, q) end
+    table.sort(out)
+    return out
+end
+
+-- Is `row` on the page the client is holding right now?
+function buy.OnClientPage(row)
+    if not row then return false end
+    return row.page == nil or row.page == buy.state.page
+end
+
+-- ONE AUCTION, FOUND BEFORE IT IS BOUGHT OR BID ON.
+--
+-- A gathered list holds rows from many pages, and PlaceAuctionBid only reaches
+-- the page the client is holding. So a Buyout or Bid on a row from page 4
+-- asks for page 4 first, finds the auction there by its fingerprint -- the
+-- same (name, count, buyout) the batch matches on -- and only then acts on
+-- the index it found. If page 4 no longer has it, page 3 is tried: auctions
+-- move to earlier pages as others sell. After that it is gone.
+--
+-- On the page in hand, with the client idle and the row still where it was
+-- drawn, this is immediate -- which is every single-page search.
+--
+-- `onFound(row)` gets the row with its index and page brought up to date;
+-- `onGone(reason)` is told why when it cannot be found.
+buy.find = nil
+
+function buy.FindRow(row, onFound, onGone)
+    if not row then return false, "No auction selected." end
+    if buy.batch and buy.batch.active then
+        return false, "A buyout is already running."
+    end
+    if buy.find then return false, "Still finding the last auction." end
+    local st = buy.state
+    if st.phase == "idle" and buy.OnClientPage(row) and buy.Verify(row) then
+        onFound(row)
+        return true
+    end
+    buy.find = {
+        row = row, fp = buy.Fingerprint(row),
+        pages = buy.CandidatePages({ row.page or st.page }),
+        read = {}, onFound = onFound, onGone = onGone,
+    }
+    buy.FindStep()
+    return true
+end
+
+-- One step of the hunt. Called by FindRow and again whenever a page lands.
+function buy.FindStep()
+    local f = buy.find
+    if not f then return false end
+    local st = buy.state
+    -- A read in flight is not ours to interrupt; this runs again when it
+    -- lands (the end of buy.ReadPage).
+    if st.phase ~= "idle" then return true, "waiting" end
+    if f.fetching and st.page == f.fetching then
+        f.read[f.fetching] = true
+        f.fetching = nil
+    end
+    -- Only a page WE just asked for is trusted to say "not here".
+    if f.read[st.page] then
+        local at = buy.FindByFingerprint(f.fp)
+        if at then
+            buy.find = nil
+            f.row.index, f.row.page = at, st.page
+            f.onFound(f.row)
+            return true
+        end
+    end
+    local i = 1
+    while i <= table.getn(f.pages) do
+        local p = f.pages[i]
+        if not f.read[p] then
+            if buy.FetchPage(p) then
+                f.fetching = p
+                return true, "finding"
+            end
+            break
+        end
+        i = i + 1
+    end
+    buy.find = nil
+    if f.onGone then f.onGone("That auction is no longer available.") end
+    return false, "gone"
+end
+
+-- Stop a hunt, telling whoever asked.
+function buy.CancelFind(reason)
+    local f = buy.find
+    if not f then return end
+    buy.find = nil
+    if f.onGone then f.onGone(reason) end
+end
+
+-- Buyout / Bid on a row from ANY gathered page. `done(ok, why)` is called
+-- once, when the purchase or bid has been placed or refused. Returns false
+-- (and does not call `done`) only when the request was refused outright.
+function buy.BuyoutAnywhere(row, done)
+    if not row then return false, "No auction selected." end
+    if row.mine then return false, "That's your own auction." end
+    if not row.buyout or row.buyout <= 0 then return false, "No buyout price." end
+    return buy.FindRow(row,
+        function(r) local ok, why = buy.Buyout(r); done(ok, why) end,
+        function(why) done(false, why) end)
+end
+
+function buy.BidAnywhere(row, amount, done)
+    if not row then return false, "No auction selected." end
+    if row.mine then return false, "That's your own auction." end
+    return buy.FindRow(row,
+        function(r) local ok, why = buy.Bid(r, amount); done(ok, why) end,
+        function(why) done(false, why) end)
 end
 
 -- The listing at `row.index` still matches what we displayed (guards against
@@ -2387,17 +2753,24 @@ function buy.StartBatch(rows, onDone, onStep)
                 -- keys on name, stack size and price, so everything collapsed
                 -- into one bucket is the same item at the same stack size.
                 owed[fp] = { count = 0, price = r.buyout, name = r.name,
-                             itemId = r.itemId, stack = r.count or 1 }
+                             itemId = r.itemId, stack = r.count or 1,
+                             pages = {} }
                 table.insert(order, fp)
             end
             owed[fp].count = owed[fp].count + 1
+            -- WHERE it was seen, so a gathered list can be bought from pages
+            -- the client is not holding. A row with no page came from the
+            -- page in hand.
+            table.insert(owed[fp].pages, r.page or buy.state.page)
         end
         i = i + 1
     end
+    if buy.find then return false, "Still finding the last auction." end
     buy.batch = {
         active = true, owed = owed, order = order,
         bought = 0, spent = 0, want = n, total = total,
         onDone = onDone, onStep = onStep,
+        read = {},        -- pages read AT OUR REQUEST since the last purchase
     }
     -- A PAGE ALREADY ON ITS WAY is the one to buy from. Buying now would
     -- pick an index out of the page that read is about to replace -- and a
@@ -2408,18 +2781,6 @@ function buy.StartBatch(rows, onDone, onStep)
     return buy.BatchStep()
 end
 
--- Ask for the current page again. True when a fresh read is on its way --
--- already pending, or asked for here; false when there is no search to
--- repeat, and so nothing a second look could find.
-function buy.RereadPage()
-    local st = buy.state
-    if not st.searched then return false end
-    -- The same query channel a running scan is using -- see the end of
-    -- buy.ReadPage. No second look, so the batch stops as it always did.
-    if buy.IsBusy() then return false end
-    if st.phase == "idle" then buy.Refresh() end
-    return true
-end
 
 function buy.AbortBatch(reason)
     local b = buy.batch
@@ -2433,47 +2794,74 @@ end
 function buy.BatchStep()
     local b = buy.batch
     if not b.active then return false, "No batch running." end
+    local st = buy.state
+    -- The page we asked for has landed: from here it is trusted to say what
+    -- is NOT on it.
+    if b.fetching and st.page == b.fetching and st.phase == "idle" then
+        b.read[b.fetching] = true
+        b.fetching = nil
+    end
 
-    -- Find the next fingerprint still owed that is actually ON the page now.
+    -- Anything still owed that is ON the page the client holds? Any of them,
+    -- not only the first: a gathered basket spans pages, and what is here is
+    -- bought before we go looking for the rest.
     local fp, info, index
+    local owedPages, anyOwed = {}, false
     local oi = 1
     while oi <= table.getn(b.order) do
         local f = b.order[oi]
         local rec = b.owed[f]
         if rec and rec.count > 0 then
+            anyOwed = true
             local at = buy.FindByFingerprint(f)
             if at then fp, info, index = f, rec, at; break end
-            -- NOT ON THE PAGE THE CLIENT IS HOLDING -- which is not yet the
-            -- same thing as gone. Read that page from the server ONCE more
-            -- before saying so; the step runs again when it lands.
-            --
-            -- THE REPORT: buy one, then tick the next one and press Buyout,
-            -- and it says "no longer available" until you search again. The
-            -- list you tick from and the page the client holds can disagree
-            -- -- see the end of buy.ReadPage for how -- and this gave up on
-            -- the first look. A new search "fixed" it because a search is a
-            -- fresh read. So is this, and the list repaints from it, so
-            -- whatever does turn out to be gone leaves the list with it.
-            --
-            -- ONCE PER PURCHASE, not forever: if a fresh read still has not
-            -- got it, somebody else bought it, and the answer is the same
-            -- stop it always was. Nothing about WHAT may be bought changes --
-            -- the fingerprint still has to match a ticked row.
-            if not b.reread and buy.RereadPage() then
-                b.reread = true
-                return true, "rereading"
+            local pi = 1
+            while pi <= table.getn(rec.pages or {}) do
+                table.insert(owedPages, rec.pages[pi])
+                pi = pi + 1
             end
-            -- Owed but gone: someone else took it, or the page moved under
-            -- us. Stop -- do NOT fall through to a different auction.
-            buy.AbortBatch("A selected auction is no longer available.")
-            return false, "gone"
         end
         oi = oi + 1
     end
-    if not fp then
+    if not anyOwed then
         b.active = false
         if b.onDone then b.onDone(b.bought, b.want, b.spent, nil) end
         return true
+    end
+    if not fp then
+        -- NOT ON THE PAGE THE CLIENT IS HOLDING -- which is not yet the same
+        -- thing as gone. Read the pages it was seen on, and the page before
+        -- each (auctions move to earlier pages as others sell), before saying
+        -- so; the step runs again when each one lands.
+        --
+        -- THE REPORT this began with: buy one, tick the next and press
+        -- Buyout, and it said "no longer available" until you searched again.
+        -- The list you tick from and the page the client holds can disagree
+        -- -- see the end of buy.ReadPage -- and this gave up on the first
+        -- look. With a gathered list, the auction can be pages away.
+        --
+        -- ONCE PER PAGE PER PURCHASE, not forever: a page read at our request
+        -- that still lacks it is not read again until something is bought, so
+        -- an auction somebody else took ends the batch the way it always did.
+        -- Nothing about WHAT may be bought changes -- the fingerprint still has
+        -- to match a ticked row.
+        local cands = buy.CandidatePages(owedPages)
+        local ci = 1
+        while ci <= table.getn(cands) do
+            local p = cands[ci]
+            if not b.read[p] then
+                if buy.FetchPage(p) then
+                    b.fetching = p
+                    return true, "rereading"
+                end
+                break
+            end
+            ci = ci + 1
+        end
+        -- Owed but gone: someone else took it, or the page moved under
+        -- us. Stop -- do NOT fall through to a different auction.
+        buy.AbortBatch("A selected auction is no longer available.")
+        return false, "gone"
     end
 
     -- Gold is re-checked before EVERY purchase, not just at the start. The
@@ -2487,10 +2875,11 @@ function buy.BatchStep()
     info.count = info.count - 1
     b.bought = b.bought + 1
     b.spent = b.spent + info.price
-    -- A fresh purchase earns the next missing auction its own re-read.
-    b.reread = false
+    -- A purchase moves auctions between pages, so every page is worth one
+    -- more look for whatever is still owed.
+    b.read = {}
+    b.fetching = nil
 
-    local st = buy.state
     st.phase   = "wait_results"
     st.timeout = buy.TIMEOUT
     st.confirm = true
@@ -2620,6 +3009,8 @@ A.RegisterEvent("AUCTION_HOUSE_CLOSED", function()
     -- now, and a batch left active refuses every later one ("A buyout is
     -- already running") until the UI is reloaded.
     buy.AbortBatch("The auction house closed.")
+    -- ...and a single one still hunting for its auction.
+    buy.CancelFind("The auction house closed.")
     -- The category names came from the session that just ended; drop them so
     -- the next one rebuilds (they are only readable while the AH is open).
     buy.ResetCategories()

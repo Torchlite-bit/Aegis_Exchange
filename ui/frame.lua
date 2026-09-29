@@ -4357,10 +4357,14 @@ function ui.ShowListingTooltip(owner, r)
     if not r then return end
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     local shown = false
-    if r.index and GameTooltip.SetAuctionItem and A.buy.Verify(r) then
+    -- ...and ONLY on the page it came from: a gathered list holds rows from
+    -- pages the client is not holding, and the same index on this page is a
+    -- different auction.
+    local here = A.buy.OnClientPage(r)
+    if here and r.index and GameTooltip.SetAuctionItem and A.buy.Verify(r) then
         shown = pcall(function() GameTooltip:SetAuctionItem("list", r.index) end)
     end
-    if not shown then
+    if not shown and here then
         local link = r.index and GetAuctionItemLink
             and GetAuctionItemLink("list", r.index) or nil
         if link and GameTooltip.SetHyperlink then
@@ -8117,6 +8121,7 @@ function ui.IsBuySelected(entry)
     local s = ui.buySel
     if not s or not entry then return false end
     return s.index == entry.index and s.name == entry.name
+        and s.page == entry.page
 end
 
 -- ---------------------------------------------------------------------------
@@ -8126,19 +8131,27 @@ end
 -- only meaningful against the page the client is holding right now, and this
 -- selection has to survive a re-query, a sort and a page turn -- the same
 -- reason buy.StartBatch works from fingerprints instead of indices.
+--
+-- THE PAGE IS PART OF WHO A ROW IS. A gathered category browse lists many
+-- pages at once, and index 7 of page 1 and index 7 of page 3 are different
+-- auctions that can share a name and a price. Without the page, ticking one
+-- ticked both.
 -- ---------------------------------------------------------------------------
 
 ui.buyChecked = {}
+
+-- Same listing? PURE, so the rule is one function a suite can run.
+function ui.SameListing(a, b)
+    if not a or not b then return false end
+    return a.index == b.index and a.name == b.name
+        and a.buyout == b.buyout and a.page == b.page
+end
 
 function ui.IsBuyChecked(entry)
     if not entry then return false end
     local i = 1
     while i <= table.getn(ui.buyChecked) do
-        local c = ui.buyChecked[i]
-        if c.index == entry.index and c.name == entry.name
-           and c.buyout == entry.buyout then
-            return true
-        end
+        if ui.SameListing(ui.buyChecked[i], entry) then return true end
         i = i + 1
     end
     return false
@@ -8149,8 +8162,7 @@ function ui.ToggleBuyCheck(entry)
     local i = 1
     while i <= table.getn(ui.buyChecked) do
         local c = ui.buyChecked[i]
-        if c.index == entry.index and c.name == entry.name
-           and c.buyout == entry.buyout then
+        if ui.SameListing(c, entry) then
             table.remove(ui.buyChecked, i)
             ui.UpdateBuyList()
             ui.RefreshBuyActionBar()
@@ -8220,6 +8232,67 @@ function ui.SkippedNote(steps)
     if not steps or steps < 1 then return "" end
     local word = (steps == 1) and " page skipped" or " pages skipped"
     return " \226\128\162 " .. steps .. word
+end
+
+-- " -- page 1 of 6 -- more items on later pages", or "" on the last page.
+--
+-- REPORTED as "browsing Projectile -> Bullet doesn't list all the ammo types".
+-- It lists one PAGE: the 50 auctions the server hands back first, which for
+-- Bullet held five kinds of ammo, with Thorium Shells and the rest on pages 2
+-- to 6. Grouped, those 50 auctions are five rows and nothing about them says
+-- there is more -- the pager in the corner is the only hint, and it is easy
+-- to read five rows as the whole answer. So the status line says it, next to
+-- the count it qualifies.
+--
+-- A later OR TERM counts as more too: NextPage rolls into it (buy.NextPage).
+function ui.MorePagesNote(page, totalPages, termIndex, totalTerms)
+    page, totalPages = page or 0, totalPages or 1
+    if page + 1 < totalPages then
+        return " \226\128\162 page " .. (page + 1) .. " of " .. totalPages
+            .. " \226\128\148 more items on later pages"
+    end
+    if termIndex and totalTerms and termIndex < totalTerms then
+        return " \226\128\162 more items under the next search term"
+    end
+    return ""
+end
+
+-- How far a gathering category browse has got, for the line under the list.
+-- "" when this search does not gather (see buy.GatherState).
+--
+--   still reading:        " -- reading page 4 of 6..."
+--   done, more beyond:    " -- pages 1-20 of 294 -- > for the next 20"
+--   done, all of it:      " -- all 6 pages"          (nothing for one page)
+--
+-- The list fills in as pages land, and "reading" is what tells somebody the
+-- five rows they see now are not the answer yet.
+function ui.GatherNote(g)
+    if not g or not g.to then return "" end
+    if not g.done then
+        return " \226\128\162 reading page " .. (g.read + 1) .. " of "
+            .. g.span .. "\226\128\166"
+    end
+    if g.to + 1 < (g.totalPages or 0) then
+        return " \226\128\162 pages " .. (g.from + 1) .. "\226\128\147"
+            .. (g.to + 1) .. " of " .. g.totalPages
+            .. " \226\128\148 \226\150\182 for the next "
+            .. math.min(g.max or 20, g.totalPages - g.to - 1)
+    end
+    if g.span > 1 then
+        return " \226\128\162 all " .. g.span .. " pages"
+    end
+    return ""
+end
+
+-- The pager's text while gathering: "Pages 1-6 / 6". nil when not gathering,
+-- so the caller keeps its ordinary "Page 1 / 6".
+function ui.GatherPageText(g)
+    if not g or not g.to then return nil end
+    if g.from == g.to then
+        return "Page " .. (g.from + 1) .. " / " .. (g.totalPages or 1)
+    end
+    return "Pages " .. (g.from + 1) .. "\226\128\147" .. (g.to + 1) .. " / "
+        .. (g.totalPages or 1)
 end
 
 -- The count mirrors "Buyout (3)" beside it on purpose: the pair reads as two
@@ -8831,6 +8904,11 @@ function ui.RefreshBuyStatus()
     if ui.buyView == "saved" or ui.buyView == "builder" then return end
     local phase = A.buy.state.phase
     if phase == "wait_query" or phase == "wait_results" then
+        -- A gathering browse that already has pages in hand keeps its line:
+        -- "reading page 4 of 6" says more than "Searching...", and flicking
+        -- between the two on every page is noise.
+        local g = A.buy.GatherState()
+        if g and g.read > 0 then return end
         ui.buyStatus:SetText("Searching...")
     end
 end
@@ -8950,6 +9028,16 @@ function ui.UpdateBuyList()
                     -- may still hold matches.
                     local t = "0 match(es) (of " .. totalAuctions .. ") \226\128\162 "
                         .. "filters removed this page's rows"
+                    -- A GATHERING browse has looked at more than "this page",
+                    -- and may not be finished looking. Say which.
+                    local g = A.buy.GatherState()
+                    if g then
+                        t = "0 match(es) (of " .. totalAuctions .. ")"
+                            .. ui.GatherNote(g)
+                        if g.done then
+                            t = t .. " \226\128\162 filters removed every row"
+                        end
+                    end
                     -- WHICH filter, when it was one that could not answer.
                     -- "filters removed this page's rows" is true but useless
                     -- if the real reason is that no owner name had arrived
@@ -8965,7 +9053,7 @@ function ui.UpdateBuyList()
                     if swept then
                         ui.buyStatus:SetText(swept .. blindNote)
                     else
-                        if totalPages and totalPages > 1 then
+                        if totalPages and totalPages > 1 and not g then
                             t = t .. " \226\128\162 try the next page"
                         end
                         ui.buyStatus:SetText(t)
@@ -8987,6 +9075,16 @@ function ui.UpdateBuyList()
                 local headline = table.getn(all) .. " match(es)"
                 if table.getn(all) ~= totalAuctions then
                     headline = headline .. " (of " .. totalAuctions .. ")"
+                end
+                -- ...and whether this page is all there is. See
+                -- ui.MorePagesNote -- or, for a category browse that gathers
+                -- every page, how far the gathering has got.
+                local gather = A.buy.GatherState()
+                if gather then
+                    headline = headline .. ui.GatherNote(gather)
+                else
+                    headline = headline .. ui.MorePagesNote(page, totalPages,
+                        termIndex, totalTerms)
                 end
                 if usedPageMax then
                     -- Say which rule produced these rows: "biggest on this
@@ -9017,7 +9115,8 @@ function ui.UpdateBuyList()
                 ui.buyStatus:SetText(headline .. " \226\128\162 "
                     .. sortKey .. " " .. order .. shown)
             end
-            local pageTxt = "Page " .. (page + 1) .. " / " .. totalPages
+            local pageTxt = ui.GatherPageText(A.buy.GatherState())
+                or ("Page " .. (page + 1) .. " / " .. totalPages)
             -- Multiple semicolon-separated OR terms browse as one combined
             -- search (NextPage/PrevPage roll across term boundaries), so the
             -- pager names which term you're currently on -- but only when
@@ -9176,17 +9275,23 @@ function ui.DoBuyout()
     local row = ui.pendingBuy
     ui.pendingBuy = nil
     if not row or not A.buy then return end
-    local ok, err = A.buy.Buyout(row)
-    if not ok then
-        ChatMsg("Aegis: " .. (err or "buyout failed."))
-    else
+    -- ANYWHERE, because a gathered browse lists rows from pages the client is
+    -- not holding: the engine fetches the row's page and finds the auction
+    -- before it buys (buy.FindRow). On the page in hand this is immediate.
+    -- So the answer arrives in `done`, not as a return value.
+    local ok, err = A.buy.BuyoutAnywhere(row, function(bought, why)
+        if not bought then
+            ChatMsg("Aegis: " .. (why or "buyout failed."))
+            return
+        end
         -- The ledger entry is booked inside buy.Buyout now, beside the session
         -- tally it has to agree with. It used to be written HERE, which is why
         -- the other way into that function -- a bid the server treats as a
         -- purchase -- spent the gold and never reached History.
         ChatMsg("Aegis: bought " .. row.name .. " x" .. row.count .. ".")
         if ui.selectedSubTab == "History" then ui.RefreshHistory() end
-    end
+    end)
+    if not ok then ChatMsg("Aegis: " .. (err or "buyout failed.")) end
 end
 
 -- What a Bid press should actually send.
@@ -9245,13 +9350,17 @@ function ui.DoBid()
     if not row or not A.buy then return end
     -- THE AMOUNT THE DIALOG QUOTED, not a figure recomputed here. Recomputing
     -- is how the number on screen and the number sent come apart.
-    local ok, err = A.buy.Bid(row, amount)
-    if not ok then
-        ChatMsg("Aegis: " .. (err or "bid failed."))
-    else
+    --
+    -- Anywhere, for the same reason as ui.DoBuyout.
+    local ok, err = A.buy.BidAnywhere(row, amount, function(placed, why)
+        if not placed then
+            ChatMsg("Aegis: " .. (why or "bid failed."))
+            return
+        end
         ChatMsg("Aegis: bid " .. util.FormatMoney(amount) .. " on "
             .. row.name .. ".")
-    end
+    end)
+    if not ok then ChatMsg("Aegis: " .. (err or "bid failed.")) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -17527,7 +17636,10 @@ function ui.DoPost()
                 elseif reason == "cancelled" then
                     msg = "Posting cancelled after " .. done .. "."
                 elseif reason == "nospace" then
-                    msg = msg .. " (no free bag slot to split into)"
+                    -- "REGULAR": free slots in a quiver, ammo pouch or soul
+                    -- bag do not count (sell.IsGeneralBag), and a player
+                    -- looking at an empty pouch deserves to know why.
+                    msg = msg .. " (no free slot in a regular bag to split into)"
                 elseif reason == "stuck" then
                     msg = msg .. " (couldn't assemble a stack \226\128\148"
                         .. " /aex debug shows why)"

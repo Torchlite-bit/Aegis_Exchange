@@ -60,6 +60,7 @@ ui = {}
 for _, sig in ipairs({
     "function ui.SweepStatus(",
     "function ui.SkippedNote(",
+    "function ui.MorePagesNote(",
 }) do
     local fn, err = loadstring(extract(sig), sig)
     if not fn then error(sig .. " will not compile: " .. tostring(err)) end
@@ -372,5 +373,37 @@ H.eq("nothing skipped adds nothing", ui.SkippedNote(0), "")
 H.eq("...nor does nil", ui.SkippedNote(nil), "")
 H.eq("one page is singular", ui.SkippedNote(1), " \226\128\162 1 page skipped")
 H.eq("two are plural", ui.SkippedNote(2), " \226\128\162 2 pages skipped")
+
+-- ---------------------------------------------------------------------------
+H.section("the status line says when later pages hold more")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED as "Projectile -> Bullet doesn't list all the ammo types". Page 1 of
+-- 6 held five kinds of ammo; grouped, that is five rows, and nothing on the
+-- line under them said there was more.
+H.eq("page 1 of 6 says there is more",
+     ui.MorePagesNote(0, 6, 1, 1),
+     " \226\128\162 page 1 of 6 \226\128\148 more items on later pages")
+H.eq("...so does page 5 of 6",
+     ui.MorePagesNote(4, 6, 1, 1),
+     " \226\128\162 page 5 of 6 \226\128\148 more items on later pages")
+H.eq("the last page says nothing", ui.MorePagesNote(5, 6, 1, 1), "")
+H.eq("a one-page search says nothing", ui.MorePagesNote(0, 1, 1, 1), "")
+H.eq("nothing known says nothing", ui.MorePagesNote(nil, nil), "")
+-- The next page button rolls into the next OR term, so a later term is more.
+H.eq("the last page of term 1 of 2 points at the next term",
+     ui.MorePagesNote(2, 3, 1, 2),
+     " \226\128\162 more items under the next search term")
+H.eq("...and the last page of the last term says nothing",
+     ui.MorePagesNote(2, 3, 2, 2), "")
+
+-- ...and the line that shows a count actually carries it. The function is
+-- only half the fix; the other half is being called where the count is drawn.
+do
+    local body = extract("function ui.UpdateBuyList(")
+    H.check("ui.UpdateBuyList appends the note to the match count",
+            string.find(body, "headline = headline .. ui.MorePagesNote(page, "
+                .. "totalPages,", 1, true) ~= nil)
+end
 
 os.exit(H.report("sweep"))
