@@ -55,6 +55,7 @@ end
 ui = {}
 for _, sig in ipairs({
     "function ui.ClearButtonState(",
+    "function ui.SameListing(",
     "function ui.IsBuyChecked(",
     "function ui.ToggleBuyCheck(",
     "function ui.ClearBuyChecks(",
@@ -138,6 +139,21 @@ do
     mine.mine = true
     ui.ToggleBuyCheck(mine)
     H.eq("your own auction does not tick", table.getn(ui.buyChecked), 0)
+end
+
+-- THE PAGE IS PART OF WHO A ROW IS. A gathered category browse lists many
+-- pages at once, and index 3 of page 1 and index 3 of page 4 can share a name
+-- and a price while being two different auctions. Ticking one must not tick
+-- the other.
+do
+    ui.buyChecked = {}
+    local p1 = row(3, "Thorium Shells", 7999); p1.page = 0
+    local p4 = row(3, "Thorium Shells", 7999); p4.page = 3
+    ui.ToggleBuyCheck(p1)
+    H.check("the same slot on another page is a different auction",
+            not ui.IsBuyChecked(p4))
+    ui.ToggleBuyCheck(p4)
+    H.eq("...and ticks on its own", table.getn(ui.buyChecked), 2)
 end
 
 H.survives("no entry at all is not a crash", function()

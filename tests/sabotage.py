@@ -92,9 +92,9 @@ SABOTAGES = [
     # THE bug the batch exists to prevent: fall through to whatever auction
     # now sits at that index instead of stopping.
     ("batch-falls-through-when-gone", "core/buy.lua",
-     """            buy.AbortBatch("A selected auction is no longer available.")
-            return false, "gone\"""",
-     """            fp, info, index = f, rec, 1""",
+     """        buy.AbortBatch("A selected auction is no longer available.")
+        return false, "gone\"""",
+     """        fp, info, index = b.order[1], b.owed[b.order[1]], 1""",
      "buy.batch"),
 
     # Gold checked once at the start, not before every purchase.
@@ -120,12 +120,170 @@ SABOTAGES = [
      "",
      "buy.batch"),
 
+    # ---- a category browse gathers every page -----------------------------
+    # The report: "Projectile > Bullet doesn't list all the ammo types".
+    ("gather-never", "core/buy.lua",
+     "    return (b and b.class ~= nil) and true or false",
+     "    return false",
+     "gather"),
+
+    # A name search gathers too -- every page of "cloth", and every Crafting
+    # tab reagent lookup, at five seconds a page without the DLL.
+    ("gather-any-search", "core/buy.lua",
+     "    return (b and b.class ~= nil) and true or false",
+     "    return b ~= nil",
+     "gather"),
+
+    ("gather-or-terms", "core/buy.lua",
+     "    if not terms or table.getn(terms) ~= 1 then return false end",
+     "    if not terms or table.getn(terms) < 1 then return false end",
+     "gather"),
+
+    # Unbounded: Trade Goods is hundreds of pages.
+    ("gather-unbounded", "core/buy.lua",
+     "        st.gatherTo = st.gatherFrom + buy.GATHER_MAX - 1",
+     "        st.gatherTo = st.totalPages - 1",
+     "gather"),
+
+    # The window reaches past the last page and waits forever for it.
+    ("gather-window-not-clamped", "core/buy.lua",
+     "    if st.gatherTo > st.totalPages - 1 then st.gatherTo = st.totalPages - 1 end\n",
+     "",
+     "gather"),
+
+    # A page read again ADDS to what it held: a bought auction lingers, and
+    # everything else on the page is listed twice.
+    ("gather-reread-appends", "core/buy.lua",
+     "        st.pageRows[st.page]  = rows\n",
+     """        local had = st.pageRows[st.page] or {}
+        local k = 1
+        while k <= table.getn(rows) do table.insert(had, rows[k]); k = k + 1 end
+        st.pageRows[st.page] = had
+""",
+     "gather"),
+
+    # The gather never moves past page 1.
+    ("gather-does-not-advance", "core/buy.lua",
+     """    if st.gather and st.phase == "idle" and not buy.find
+       and not (buy.batch and buy.batch.active) then
+        buy.GatherAdvance()
+    end""",
+     "",
+     "gather"),
+
+    ("gather-sweep-still-on", "core/buy.lua",
+     "    if s.gather then return \"off\" end\n",
+     "",
+     "gather"),
+
+    ("gather-pager-moves-a-page", "core/buy.lua",
+     """        if st.gatherTo and st.gatherTo + 1 < st.totalPages then
+            return buy.GatherWindow(st.gatherTo + 1)
+        end
+        return false""",
+     "        return buy.Advance()",
+     "gather"),
+
+    ("gather-rows-lose-their-page", "core/buy.lua",
+     "                page    = st.page,\n",
+     "",
+     "gather"),
+
+    # A single Buyout on another page's row goes straight at the page in hand.
+    ("buyout-anywhere-buys-blind", "core/buy.lua",
+     """    return buy.FindRow(row,
+        function(r) local ok, why = buy.Buyout(r); done(ok, why) end,
+        function(why) done(false, why) end)""",
+     """    local ok, why = buy.Buyout(row)
+    done(ok, why)
+    return true""",
+     "gather"),
+
+    # Only the page the auction was read from: one that moved down a page
+    # (something ahead of it sold) is reported gone.
+    ("find-ignores-the-page-before", "core/buy.lua",
+     "            if p > 0 then set[p - 1] = true end\n",
+     "",
+     "gather"),
+
+    # A page ALREADY in hand is trusted to say "not here" -- so a row from
+    # another page is judged by the wrong page and reported gone unasked.
+    ("find-trusts-the-page-in-hand", "core/buy.lua",
+     """    if f.fetching and st.page == f.fetching then
+        f.read[f.fetching] = true
+        f.fetching = nil
+    end""",
+     """    f.read[st.page] = true
+    f.fetching = nil""",
+     "gather"),
+
+    # A batch that only ever looks at the page in hand: a gathered basket
+    # cannot be bought past its first page.
+    ("batch-only-the-page-in-hand", "core/buy.lua",
+     "        local cands = buy.CandidatePages(owedPages)",
+     "        local cands = { st.page }",
+     "gather"),
+
+    ("new-search-leaves-the-hunt-running", "core/buy.lua",
+     """    buy.CancelFind("A new search replaced the results.")""",
+     "",
+     "gather"),
+
+    ("ah-close-leaves-the-hunt-running", "core/buy.lua",
+     """    buy.CancelFind("The auction house closed.")""",
+     "",
+     "gather"),
+
+    # A gather that meets a scan simply stops, and the list sits at "reading
+    # page 2 of 3" until the next search.
+    ("gather-dies-at-a-scan", "core/buy.lua",
+     """    if not st.searched or st.phase ~= "idle" then return false end
+    st.page     = p""",
+     """    if not st.searched or st.phase ~= "idle" then return false end
+    if buy.IsBusy() then return false end
+    st.page     = p""",
+     "gather"),
+
+    # A queued query goes out on top of a running scan, which records our
+    # page as one of its own.
+    ("queued-query-ignores-a-scan", "core/buy.lua",
+     "        if st.cooldown <= 0 and CanSendAuctionQuery() and not buy.IsBusy() then",
+     "        if st.cooldown <= 0 and CanSendAuctionQuery() then",
+     "gather"),
+
+    ("gather-note-not-drawn", "ui/frame.lua",
+     "                    headline = headline .. ui.GatherNote(gather)",
+     "                    headline = headline",
+     "gather"),
+
+    ("gather-note-says-done-too-early", "ui/frame.lua",
+     "    if not g.done then",
+     "    if false then",
+     "gather"),
+
+    ("gather-pager-text-ignored", "ui/frame.lua",
+     "            local pageTxt = ui.GatherPageText(A.buy.GatherState())\n                or",
+     "            local pageTxt = nil\n                or",
+     "gather"),
+
+    ("buyout-button-bypasses-anywhere", "ui/frame.lua",
+     "    local ok, err = A.buy.BuyoutAnywhere(row, function(bought, why)",
+     "    local ok, err = A.buy.BuyoutAnywhere(nil, function(bought, why)",
+     "gather"),
+
+    # The page left out of a row's identity: index 3 of page 1 and index 3 of
+    # page 4 tick together.
+    ("tick-identity-ignores-the-page", "ui/frame.lua",
+     "        and a.buyout == b.buyout and a.page == b.page",
+     "        and a.buyout == b.buyout",
+     "buychecks"),
+
     # ---- one page at a time, and saying so ---------------------------------
     # The report: "Projectile -> Bullet doesn't list all the ammo types". The
     # line under five grouped rows never said that pages 2-6 held the rest.
     ("more-pages-note-not-drawn", "ui/frame.lua",
-     """                headline = headline .. ui.MorePagesNote(page, totalPages,
-                    termIndex, totalTerms)""",
+     """                    headline = headline .. ui.MorePagesNote(page, totalPages,
+                        termIndex, totalTerms)""",
      "",
      "sweep"),
 
@@ -301,9 +459,12 @@ SABOTAGES = [
     # available" until a new search. A missing auction is called gone on the
     # first look instead of after a fresh read.
     ("batch-no-reread", "core/buy.lua",
-     """            if not b.reread and buy.RereadPage() then
-                b.reread = true
-                return true, "rereading"
+     """            if not b.read[p] then
+                if buy.FetchPage(p) then
+                    b.fetching = p
+                    return true, "rereading"
+                end
+                break
             end""",
      "",
      "buy.batch"),
@@ -311,24 +472,25 @@ SABOTAGES = [
     # The re-read is never earned back by a purchase: the first miss of the
     # batch uses it up, and every later miss stops on the spot.
     ("batch-reread-never-reset", "core/buy.lua",
-     """    -- A fresh purchase earns the next missing auction its own re-read.
-    b.reread = false
+     """    -- more look for whatever is still owed.
+    b.read = {}
 """,
-     "",
+     "    -- more look for whatever is still owed.\n",
      "buy.batch"),
 
-    # Re-reads until the auction turns up -- which, for one somebody else
-    # bought, is forever.
+    # A page read at the batch's request is never marked read, so it is asked
+    # for again, and again -- forever, for an auction somebody else bought.
     ("batch-rereads-forever", "core/buy.lua",
-     "            if not b.reread and buy.RereadPage() then",
-     "            if buy.RereadPage() then",
+     """        b.read[b.fetching] = true
+        b.fetching = nil""",
+     "        b.fetching = nil",
      "buy.batch"),
 
-    # A page nobody searched for is re-read anyway: a batch with nothing to
-    # repeat hangs instead of stopping.
+    # A page nobody searched for is asked for anyway: a batch with nothing to
+    # repeat sends a query for nothing instead of stopping.
     ("reread-without-a-search", "core/buy.lua",
-     "    if not st.searched then return false end\n",
-     "",
+     "    if not st.searched or buy.IsBusy() then return false end",
+     "    if buy.IsBusy() then return false end",
      "buy.batch"),
 
     # Search stops saying a search ran, so no batch ever gets its re-read.
@@ -348,7 +510,7 @@ SABOTAGES = [
     # goes on showing the auction you just bought.
     ("purchase-page-never-confirmed", "core/buy.lua",
      """    if st.confirm and st.phase == "idle"
-       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then
+       and not (buy.batch and buy.batch.active) then
         buy.Refresh()
     end""",
      "",
@@ -393,14 +555,20 @@ SABOTAGES = [
     # The confirming read goes out while a scan is querying, and the scan
     # records our page as one of its own.
     ("confirm-read-during-a-scan", "core/buy.lua",
-     "       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then",
-     "       and not (buy.batch and buy.batch.active) then",
+     "        if st.cooldown <= 0 and CanSendAuctionQuery() and not buy.IsBusy() then",
+     "        if st.cooldown <= 0 and CanSendAuctionQuery() then",
+     "buy.batch"),
+
+    # The page a purchase leaves behind is dropped when a scan is running,
+    # instead of queued behind it -- the bought auction stays on the list.
+    ("confirm-read-dropped-during-a-scan", "core/buy.lua",
+     "       and not (buy.batch and buy.batch.active) then\n        buy.Refresh()",
+     "       and not (buy.batch and buy.batch.active) and not buy.IsBusy() then\n        buy.Refresh()",
      "buy.batch"),
 
     ("reread-during-a-scan", "core/buy.lua",
-     """    -- buy.ReadPage. No second look, so the batch stops as it always did.
-    if buy.IsBusy() then return false end""",
-     "    -- buy.ReadPage. No second look, so the batch stops as it always did.",
+     "    if not st.searched or buy.IsBusy() then return false end",
+     "    if not st.searched then return false end",
      "buy.batch"),
 
     # Closing the AH leaves the batch running, and every later one is refused
@@ -4196,8 +4364,8 @@ end
     # The quoted amount recomputed after the dialog instead of sent as shown,
     # which is how the number on screen and the number sent come apart.
     ('bid-sends-a-different-amount-than-it-quoted', 'ui/frame.lua',
-     '    local ok, err = A.buy.Bid(row, amount)',
-     '    local ok, err = A.buy.Bid(row, row.nextBid)',
+     '    local ok, err = A.buy.BidAnywhere(row, amount, function(placed, why)',
+     '    local ok, err = A.buy.BidAnywhere(row, row.nextBid, function(placed, why)',
      'bidpath'),
 
     # The ledger write for a purchase back in the UI handler, so the other
@@ -4211,8 +4379,10 @@ end
     # ...or booked for a purchase that was REFUSED, which is a number the
     # player cannot reconcile against their own bag.
     ('buyout-books-a-refused-purchase', 'core/buy.lua',
-     '    if not row.buyout or row.buyout <= 0 then return false, "No buyout price." end',
-     '    if false then return false end',
+     '    if not row.buyout or row.buyout <= 0 then return false, "No buyout price." end\n'
+     '    if not buy.Verify(row) then',
+     '    if false then return false end\n'
+     '    if not buy.Verify(row) then',
      'bidpath'),
 
     # ---- the History graph (v1.53.5) -------------------------------------
@@ -5482,8 +5652,8 @@ end
     # The owed bucket loses the stack size, so every batch purchase books one
     # item however big the stack was.
     ("session-batch-loses-stack", "core/buy.lua",
-     "                             itemId = r.itemId, stack = r.count or 1 }",
-     "                             itemId = r.itemId }",
+     "                             itemId = r.itemId, stack = r.count or 1,",
+     "                             itemId = r.itemId,",
      "session.buys"),
 
     # SoleItemId answers for a mixed result set, so the line names one item
@@ -6436,11 +6606,9 @@ end""",
     # The tick identity keyed on name alone, so every listing of one item
     # ticks together -- and a batch then buys stacks nobody chose.
     ("tick-identity-ignores-the-price", "ui/frame.lua",
-     """        if c.index == entry.index and c.name == entry.name
-           and c.buyout == entry.buyout then
-            table.remove(ui.buyChecked, i)""",
-     """        if c.name == entry.name then
-            table.remove(ui.buyChecked, i)""",
+     """    return a.index == b.index and a.name == b.name
+        and a.buyout == b.buyout and a.page == b.page""",
+     """    return a.name == b.name""",
      "buychecks"),
 
     # THE BUG THAT MADE MULTI-SELECT LOOK DELETED, from v1.53.2 to v1.53.18.
@@ -6575,12 +6743,8 @@ end""",
     # the player to press when the budget runs out.
     ("nextpage-keeps-the-spent-budget", "core/buy.lua",
      """function buy.NextPage()
-    buy.ResetSweep()
-    return buy.Advance()
-end""",
-     """function buy.NextPage()
-    return buy.Advance()
-end""",
+    buy.ResetSweep()""",
+     """function buy.NextPage()""",
      "sweep"),
 
     # A new search carrying the last one's count reports pages it never looked
@@ -7538,6 +7702,7 @@ SUITES = {
     "ledgeritems": "tests/units/ledgeritems_test.lua",
     "histstats": "tests/units/histstats_test.lua",
     "charges": "tests/units/charges_test.lua",
+    "gather": "tests/units/gather_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
