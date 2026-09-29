@@ -18,6 +18,19 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.23]
+
+### Fixed
+- **Posting no longer splits stacks into your ammo pouch or quiver.** To post a
+  stack smaller than the one in your bags, Aegis splits it into a free slot —
+  and it picked the first free slot it found, even one in a quiver, ammo pouch,
+  soul bag or herb bag, which only takes its own kind of item. The split
+  bounced and the post gave up. It now uses only regular bags (and your
+  backpack). If those are full, the post says *"no free slot in a regular bag"*
+  instead of trying the pouch.
+
+---
+
 ## [1.54.22]
 
 ### Fixed
@@ -6342,6 +6355,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.20]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.54.22
+# ⚔️ Aegis: Exchange v1.54.23
 
 ## ✨ New
 - **History is a dashboard** — the gold chart gets the whole tab, with High · Low · Sold · Bought · Top Sale · Top Buy underneath, and **Sales · Expenses · Profit** blocks (total, per day, top item — hover it)
@@ -16,6 +16,7 @@
 - **Sell tab showed no listings** for items your client hadn't seen yet
 - **Buying again after a buyout** said *no longer available* until you searched again
 - **Wizard Oil & other charge items** couldn't be posted (showed a negative total)
+- Posting split stacks into your **ammo pouch** and gave up
 - **Deposit crept** while you clicked Undercut / Price match
 - **Bags stuck behind the window** — click a bag, profession or panel and it comes to the front
 - Sales weren't logged on **non-English clients**

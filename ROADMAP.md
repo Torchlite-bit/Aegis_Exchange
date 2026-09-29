@@ -5169,6 +5169,23 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Carving into an ammo pouch — ✅ **FIXED** (v1.54.23)
+
+Reported as "whenever I post and have slots free in my ammo bag, Aegis tries to
+split into the ammo bag". The post assembler carves a smaller stack by
+`SplitContainerItem` into an empty slot, and `FindEmptySlot` took the first
+empty slot in bags 1–4 then the backpack — including quivers, ammo pouches and
+soul/herb/enchanting bags, which refuse anything but their own kind.
+
+**`sell.IsGeneralBag(bag)`** answers from the client's own class list, the way
+aux's `bag_type` does: a bag is ordinary when its subtype equals the FIRST
+Container subclass from `GetAuctionItemSubClasses(3)` ("Bag" in English,
+whatever it is elsewhere). A quiver is not a Container at all, so it never
+matches. Nothing is compared to an English string. Anything unreadable — no
+link, a cold cache, no class list — answers yes, which is what every bag was
+before. `FindEmptySlot` skips the rest; no room left gives `"nospace"`, whose
+message now says "regular bag".
+
 ### Items with charges — ✅ **FIXED** (v1.54.21)
 
 Reported as "Wizard Oil selling is buggy, it considers one charge one item".

@@ -1978,14 +1978,49 @@ local function SlotLocked(bag, slot)
     return locked and true or false
 end
 
+-- Can a free slot in `bag` hold ANY item?
+--
+-- REPORTED: "whenever I post and have slots free in my ammo bag, Aegis tries to
+-- split into the ammo bag". A quiver or ammo pouch takes only ammo, a soul bag
+-- only shards, a herb bag only herbs -- so a split dropped there bounces, the
+-- carve times out, and the post gives up with free space sitting in an
+-- ordinary bag.
+--
+-- THE CLIENT'S OWN WORD, NOT OURS. An ordinary bag is one whose subclass is the
+-- first Container subclass in the auction house's own list -- "Bag" on an
+-- English client, whatever it is on any other -- which is how aux tells them
+-- apart. A quiver is not a Container at all, so it never matches. Comparing
+-- against English strings would have been wrong on every other locale.
+--
+-- Anything that cannot be read -- no bag link, a cold cache, no class list --
+-- answers yes, which is what every bag was treated as before.
+function sell.IsGeneralBag(bag)
+    if bag == 0 then return true end        -- the backpack takes anything
+    if not (GetInventoryItemLink and ContainerIDToInventoryID
+            and GetAuctionItemSubClasses) then
+        return true
+    end
+    local link = GetInventoryItemLink("player", ContainerIDToInventoryID(bag))
+    if not link then return true end
+    local info = util.ItemInfo(link)
+    if not info or not info.subType then return true end
+    local ordinary = GetAuctionItemSubClasses(3)   -- 3 = Container
+    if not ordinary then return true end
+    return info.subType == ordinary
+end
+
 -- First empty bag slot, for carving a split stack into. Backpack (0) last so we
--- prefer real bags and leave the backpack free for loot.
+-- prefer real bags and leave the backpack free for loot. Only a bag that can
+-- hold anything -- see sell.IsGeneralBag.
 local function FindEmptySlot()
     local order = { 1, 2, 3, 4, 0 }
     local i = 1
     while i <= table.getn(order) do
         local bag = order[i]
-        local slots = GetContainerNumSlots(bag) or 0
+        local slots = 0
+        if sell.IsGeneralBag(bag) then
+            slots = GetContainerNumSlots(bag) or 0
+        end
         local slot = 1
         while slot <= slots do
             if not GetContainerItemLink(bag, slot) then return bag, slot end

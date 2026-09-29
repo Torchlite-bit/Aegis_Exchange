@@ -120,6 +120,29 @@ SABOTAGES = [
      "",
      "buy.batch"),
 
+    # ---- carving a split into a bag that will take it ----------------------
+    # The report: "Aegis attempts to split into the ammo bag". A split dropped
+    # into a quiver, ammo pouch or soul bag bounces, and the post gives up.
+    ("carve-into-any-bag", "core/sell.lua",
+     """        local slots = 0
+        if sell.IsGeneralBag(bag) then
+            slots = GetContainerNumSlots(bag) or 0
+        end""",
+     "        local slots = GetContainerNumSlots(bag) or 0",
+     "bags"),
+
+    ("every-bag-is-general", "core/sell.lua",
+     "    return info.subType == ordinary",
+     "    return true",
+     "bags"),
+
+    # A bag the client has not described yet is refused, where it used to be
+    # used -- on a cold cache every bag but the backpack goes unusable.
+    ("unknown-bag-refused", "core/sell.lua",
+     "    if not info or not info.subType then return true end",
+     "    if not info or not info.subType then return false end",
+     "bags"),
+
     # ---- items with charges ------------------------------------------------
     # The report: "Wizard Oil selling is buggy, it considers one charge one
     # item". 1.12 reports an oil's five charges where a stack count goes.

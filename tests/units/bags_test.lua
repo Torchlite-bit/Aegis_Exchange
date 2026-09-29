@@ -191,4 +191,93 @@ H.eq("...and lands in Other until the cache warms",
 H.eq("...but the NAME survives, read from the link",
      cold.name, "Small Pearlstone Staff")
 
+-- ---------------------------------------------------------------------------
+H.section("A split is never carved into an ammo pouch")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED: "whenever I post and have slots available in my ammo bag, Aegis
+-- attempts to split into the ammo bag". A quiver, ammo pouch, soul bag or herb
+-- bag only takes its own kind of item, so the split bounces and the post gives
+-- up -- with room sitting in an ordinary bag the whole time.
+--
+-- 1.12's bag slots: bag 1..4 is inventory slot 20..23.
+function ContainerIDToInventoryID(bag) return 19 + bag end
+-- The client's own Container subclasses, "Bag" first. sell.IsGeneralBag reads
+-- this list rather than an English string.
+local realSubClasses = GetAuctionItemSubClasses
+function GetAuctionItemSubClasses(class)
+    if class == 3 then return "Bag", "Soul Bag", "Herb Bag", "Enchanting Bag" end
+    return realSubClasses(class)
+end
+W.AddItem(2102, { name = "Small Ammo Pouch", type = "Quiver",
+                  subType = "Ammo Pouch", stackCount = 1 })
+W.AddItem(2101, { name = "Light Quiver", type = "Quiver",
+                  subType = "Quiver", stackCount = 1 })
+W.AddItem(22243, { name = "Small Soul Pouch", type = "Container",
+                   subType = "Soul Bag", stackCount = 1 })
+W.AddItem(4496, { name = "Small Brown Pouch", type = "Container",
+                  subType = "Bag", stackCount = 1 })
+W.AddItem(2589, { name = "Linen Cloth", quality = 1, stackCount = 20 })
+local LINEN = W.items[2589].link
+
+W.equipped = {
+    [20] = { link = W.items[2102].link },    -- bag 1: an ammo pouch
+    [21] = { link = W.items[4496].link },    -- bag 2: an ordinary bag
+    [22] = { link = W.items[22243].link },   -- bag 3: a soul bag
+    [23] = { link = W.items[2101].link },    -- bag 4: a quiver
+}
+H.eq("the backpack takes anything", sell.IsGeneralBag(0), true)
+H.eq("an ammo pouch does not", sell.IsGeneralBag(1), false)
+H.eq("an ordinary bag does", sell.IsGeneralBag(2), true)
+H.eq("a soul bag does not", sell.IsGeneralBag(3), false)
+H.eq("a quiver does not", sell.IsGeneralBag(4), false)
+W.equipped[21] = { link = "|Hitem:99999:0:0:0|h[Unseen Bag]|h" }
+H.eq("a bag the client cannot describe yet is treated as it always was",
+     sell.IsGeneralBag(2), true)
+W.equipped[21] = { link = W.items[4496].link }
+
+-- The whole post, through the carve. The split is modelled the way the client
+-- does it: the amount leaves the slot and lands on the cursor.
+local splits = {}
+function SplitContainerItem(bag, slot, n)
+    local cell = W.bags[bag][slot]
+    cell.count = cell.count - n
+    W.cursor = { link = cell.link, count = n, bag = bag, slot = slot }
+    table.insert(splits, { bag = bag, slot = slot, n = n })
+end
+
+W.SetBags({
+    [0] = { { link = LINEN, count = 20 } },
+    [1] = { {}, {}, {} },                  -- the ammo pouch: three free slots
+    [2] = { {} },                          -- the ordinary bag: one free slot
+})
+W.posted = {}
+local ok, why = sell.StartPosting(2589, "Linen Cloth", 5, 1, 100, 100, 480, {})
+H.check("a post of 5 off a stack of 20 starts", ok, tostring(why))
+W.TickUntil(sell._postDriver,
+    function() return (sell.job and sell.job.carveBag) or not sell.job end, 100)
+H.eq("the split is carved into the ORDINARY bag, not the ammo pouch",
+     sell.job and sell.job.carveBag, 2)
+W.TickUntil(sell._postDriver, function() return not sell.job end, 300)
+H.eq("...and the stack is posted", table.getn(W.posted), 1)
+H.check("...the ammo pouch was never touched",
+        not W.bags[1][1].link and not W.bags[1][2].link
+        and not W.bags[1][3].link)
+
+-- Room ONLY in the ammo pouch: there is nowhere to carve, and the post says
+-- so rather than splitting into a bag that will not take it.
+W.SetBags({
+    [0] = { { link = LINEN, count = 20 } },
+    [1] = { {}, {}, {} },
+})
+W.posted = {}
+splits = {}
+sell.StartPosting(2589, "Linen Cloth", 5, 1, 100, 100, 480, {})
+W.TickUntil(sell._postDriver, function() return not sell.job end, 300)
+H.eq("with room only in the ammo pouch, nothing is split", table.getn(splits), 0)
+H.eq("...and nothing is posted", table.getn(W.posted), 0)
+
+GetAuctionItemSubClasses = realSubClasses
+W.equipped = {}
+
 os.exit(H.report("bags"))

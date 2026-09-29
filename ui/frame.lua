@@ -17527,7 +17527,10 @@ function ui.DoPost()
                 elseif reason == "cancelled" then
                     msg = "Posting cancelled after " .. done .. "."
                 elseif reason == "nospace" then
-                    msg = msg .. " (no free bag slot to split into)"
+                    -- "REGULAR": free slots in a quiver, ammo pouch or soul
+                    -- bag do not count (sell.IsGeneralBag), and a player
+                    -- looking at an empty pouch deserves to know why.
+                    msg = msg .. " (no free slot in a regular bag to split into)"
                 elseif reason == "stuck" then
                     msg = msg .. " (couldn't assemble a stack \226\128\148"
                         .. " /aex debug shows why)"
