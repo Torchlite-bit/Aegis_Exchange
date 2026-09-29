@@ -176,6 +176,12 @@ local function junkPage(n)
     return rows
 end
 
+-- The sweep is for searches that read ONE page at a time -- the Crafting
+-- tab's, and OR searches. A Buy-tab search gathers every page instead (see
+-- buy.ShouldGather), which switches the sweep off; these ask for one page the
+-- way the Crafting tab does.
+local ONE_PAGE = { onePage = true }
+
 -- Tick the driver until it sends the next query, then answer it with `rows`.
 -- The gate is reopened first, the way a client reopens it once the reply
 -- lands -- the engine must WAIT on it either way (HARD RULE 10).
@@ -191,7 +197,7 @@ end
 do
     W.queries = {}
     W.queryOpen = true
-    buy.Search("[Silk Cloth]")
+    buy.Search("[Silk Cloth]", ONE_PAGE)
 
     -- 150 auctions -> 3 pages. Silk Cloth is only on the third.
     answer(junkPage(50), 150)
@@ -240,7 +246,7 @@ do
     -- must see that and stand down; page 0 of 3 with nothing matched is
     -- otherwise a textbook "advance".
     W.queryOpen = true
-    buy.Search("[Silk Cloth]")
+    buy.Search("[Silk Cloth]", ONE_PAGE)
     answer(junkPage(50), 150)
     H.eq("no batch: the sweep moves", buy.state.sweepStop, "advance")
 
@@ -261,7 +267,7 @@ do
     -- thinks a page is on its way sits there saying "checking the next one"
     -- about a query that was never sent.
     W.queryOpen = true
-    buy.Search("[Silk Cloth]")
+    buy.Search("[Silk Cloth]", ONE_PAGE)
     answer(junkPage(50), 150)
     buy.ResetSweep()
 
@@ -283,7 +289,7 @@ do
     buy.SWEEP_MAX = 3      -- shorter than 25 so the suite is not 26 pages long
     W.queries = {}
     W.queryOpen = true
-    buy.Search("[Silk Cloth]")
+    buy.Search("[Silk Cloth]", ONE_PAGE)
 
     -- 50 pages of nothing. The sweep must give up after SWEEP_MAX of them.
     local i = 0
@@ -317,13 +323,13 @@ H.section("a new search forgets the last one's sweep")
 do
     W.queries = {}
     W.queryOpen = true
-    buy.Search("[Silk Cloth]")
+    buy.Search("[Silk Cloth]", ONE_PAGE)
     answer(junkPage(50), 150)
     local _, steps = buy.SweepState()
     H.eq("one page skipped", steps, 1)
 
     W.queryOpen = true
-    buy.Search("cloth")
+    buy.Search("cloth", ONE_PAGE)
     local sweeping, steps2, stop2 = buy.SweepState()
     H.eq("a new search starts the count over", steps2, 0)
     H.check("...and is not mid-sweep", not sweeping)

@@ -18,6 +18,19 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.26]
+
+### Fixed
+- **Searching "Wizard Oil" finds regular Wizard Oil.** Only Minor Wizard Oil and
+  its formula showed up: the name matches every grade of the oil, page 1 of the
+  results was all Minor, and 1.54.25 only read every page for category
+  browses. Name searches — and anything else that narrows the auction house:
+  a quality, a level range, usable items — now read every page too, the same
+  way. A search that narrows nothing (All Categories, no name) and the Crafting
+  tab still read one page at a time.
+
+---
+
 ## [1.54.25]
 
 ### Added
@@ -6389,6 +6402,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

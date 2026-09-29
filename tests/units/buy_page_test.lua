@@ -34,10 +34,13 @@ end
 
 -- Run a search all the way to a read page, ticking the client the way the real
 -- one does: arm -> gate opens -> query -> reply -> read.
+--
+-- ONE PAGE, as the Crafting tab asks: this suite is about reading a page. A
+-- Buy-tab search would go on to gather the next one (tests/units/gather_test).
 local function searchAndRead(term, page, total)
     W.queries = {}
     W.queryOpen = true
-    buy.Search(term)
+    buy.Search(term, { onePage = true })
     W.TickUntil(buy.driver, function() return table.getn(W.queries) > 0 end, 50)
     W.SetPage(page, total)
     buy.ReadPage()

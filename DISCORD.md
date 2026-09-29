@@ -1,7 +1,7 @@
-# ⚔️ Aegis: Exchange v1.54.25
+# ⚔️ Aegis: Exchange v1.54.26
 
 ## ✨ New
-- **Browse a category, get every page** — Projectile → Bullet lists every ammo type in one grouped list, not just page 1
+- **Searches read every page** — *Wizard Oil* finds every grade, Projectile → Bullet lists every ammo type, not just page 1
 - **History is a dashboard** — the gold chart gets the whole tab, with High · Low · Sold · Bought · Top Sale · Top Buy underneath, and **Sales · Expenses · Profit** blocks (total, per day, top item)
 - **Ledger window** — an **Items** view (sold, avg sell, bought, avg buy, avg profit per item) and a **Transactions** view, with its own period buttons
 - **Stack sizes are recorded** for sales and purchases

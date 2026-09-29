@@ -5169,6 +5169,19 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Gathering name searches too — ✅ **FIXED** (v1.54.26)
+
+Reported straight after 1.54.25: "search can't find regular Wizard Oil, only
+Minor and the Minor formula". The query was fine (`name="Wizard Oil"`, no
+filters); the name matches every grade, page 1 was all Minor, and name
+searches were one page. **`buy.ShouldGather` now gathers any one-term search
+that narrows the auction house at all** — class, name, quality, level range,
+usable. It does not gather an OR search (rolls term by term already), a search
+that narrows nothing, or a caller that asks for one page: the **Crafting tab
+passes `onePage` on its callbacks**, because its reagent queue moves on at each
+result and its pager does not speak a gathered list. The sweep therefore only
+runs for those one-page searches now.
+
 ### Gathering every page of a category browse — ✅ **DONE** (v1.54.25)
 
 **The owner reversed the 1.54.24 call** (below): a category browse now gathers.
