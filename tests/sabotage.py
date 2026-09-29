@@ -120,6 +120,26 @@ SABOTAGES = [
      "",
      "buy.batch"),
 
+    # ---- one page at a time, and saying so ---------------------------------
+    # The report: "Projectile -> Bullet doesn't list all the ammo types". The
+    # line under five grouped rows never said that pages 2-6 held the rest.
+    ("more-pages-note-not-drawn", "ui/frame.lua",
+     """                headline = headline .. ui.MorePagesNote(page, totalPages,
+                    termIndex, totalTerms)""",
+     "",
+     "sweep"),
+
+    # Off by one: the last page claims there is more.
+    ("more-pages-on-the-last-page", "ui/frame.lua",
+     "    if page + 1 < totalPages then",
+     "    if page < totalPages then",
+     "sweep"),
+
+    ("more-pages-ignores-or-terms", "ui/frame.lua",
+     "    if termIndex and totalTerms and termIndex < totalTerms then",
+     "    if false then",
+     "sweep"),
+
     # ---- carving a split into a bag that will take it ----------------------
     # The report: "Aegis attempts to split into the ammo bag". A split dropped
     # into a quiver, ammo pouch or soul bag bounces, and the post gives up.

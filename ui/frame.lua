@@ -8222,6 +8222,29 @@ function ui.SkippedNote(steps)
     return " \226\128\162 " .. steps .. word
 end
 
+-- " -- page 1 of 6 -- more items on later pages", or "" on the last page.
+--
+-- REPORTED as "browsing Projectile -> Bullet doesn't list all the ammo types".
+-- It lists one PAGE: the 50 auctions the server hands back first, which for
+-- Bullet held five kinds of ammo, with Thorium Shells and the rest on pages 2
+-- to 6. Grouped, those 50 auctions are five rows and nothing about them says
+-- there is more -- the pager in the corner is the only hint, and it is easy
+-- to read five rows as the whole answer. So the status line says it, next to
+-- the count it qualifies.
+--
+-- A later OR TERM counts as more too: NextPage rolls into it (buy.NextPage).
+function ui.MorePagesNote(page, totalPages, termIndex, totalTerms)
+    page, totalPages = page or 0, totalPages or 1
+    if page + 1 < totalPages then
+        return " \226\128\162 page " .. (page + 1) .. " of " .. totalPages
+            .. " \226\128\148 more items on later pages"
+    end
+    if termIndex and totalTerms and termIndex < totalTerms then
+        return " \226\128\162 more items under the next search term"
+    end
+    return ""
+end
+
 -- The count mirrors "Buyout (3)" beside it on purpose: the pair reads as two
 -- things you can do to ONE selection rather than two adjacent buttons.
 function ui.ClearButtonState(nChecked)
@@ -8988,6 +9011,10 @@ function ui.UpdateBuyList()
                 if table.getn(all) ~= totalAuctions then
                     headline = headline .. " (of " .. totalAuctions .. ")"
                 end
+                -- ...and whether this page is all there is. See
+                -- ui.MorePagesNote.
+                headline = headline .. ui.MorePagesNote(page, totalPages,
+                    termIndex, totalTerms)
                 if usedPageMax then
                     -- Say which rule produced these rows: "biggest on this
                     -- page" is not the same promise as "a full stack", and

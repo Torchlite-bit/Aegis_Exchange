@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.54.23
+# ⚔️ Aegis: Exchange v1.54.24
 
 ## ✨ New
 - **History is a dashboard** — the gold chart gets the whole tab, with High · Low · Sold · Bought · Top Sale · Top Buy underneath, and **Sales · Expenses · Profit** blocks (total, per day, top item — hover it)

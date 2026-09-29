@@ -5169,6 +5169,24 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### "Browse doesn't list all the ammo types" — ✅ **ANSWERED** (v1.54.24)
+
+It lists one page. `buy.Search` fetches the 50 auctions the server hands back
+first; page 1 of *Projectile → Bullet* held five kinds of ammo and grouped into
+five rows, with Thorium Shells and the rest on pages 2–6. The stock UI shows
+one page too; in the report's screenshot it appears to sort rarity-first,
+which puts the blue and green ammo on page 1.
+
+**Owner's call (asked 1.54.23): keep one page at a time.** Gathering every page
+into one grouped list was offered — bounded at 20 pages, rows filling in as
+pages land, a row from another page re-found before it is bought — and turned
+down. So the fix is to say it: **`ui.MorePagesNote`** appends *"page 1 of 6 —
+more items on later pages"* to the match count until the last page, and points
+at the next OR term when that is where the rest is. If gathering is ever
+revived, the design above is the starting point; the hard part is buying from
+a page the client is not holding (aux's `scan_util.find` re-queries the
+record's page, then the one before it).
+
 ### Carving into an ammo pouch — ✅ **FIXED** (v1.54.23)
 
 Reported as "whenever I post and have slots free in my ammo bag, Aegis tries to

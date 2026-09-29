@@ -18,6 +18,18 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.24]
+
+### Changed
+- **Browse says when later pages hold more items.** Search results come one page
+  (50 auctions) at a time, and grouped, one page can be only a handful of rows —
+  page 1 of *Projectile → Bullet* held five kinds of ammo, with the rest on
+  pages 2 to 6, and nothing said so. The line under the results now reads
+  *"50 match(es) (of 261) • page 1 of 6 — more items on later pages"* until
+  you reach the last page.
+
+---
+
 ## [1.54.23]
 
 ### Fixed
@@ -6355,6 +6367,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.23]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.22]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.21]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
