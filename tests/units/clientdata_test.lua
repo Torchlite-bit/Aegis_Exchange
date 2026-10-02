@@ -421,6 +421,30 @@ db.account.realms = {}
 db.Init()
 H.isNil("unpriced materials mean no advice either",
         de.ShouldDisenchant(7101, 1, de.MarketPrice))
+
+-- ...unless the ones that ARE priced already clear the margin. They are a
+-- floor under the value (de.ValueFloor): if the floor beats selling, so does
+-- the value, whatever the missing shard fetches.
+db.RecordAuction(11176, 500000, "Dream Dust")
+db.RecordAuction(11175, 500000, "Greater Nether Essence")
+local fv, fsrc, partial = de.ShouldDisenchant(7101, 1, de.MarketPrice)
+H.check("a floor that clears the margin still advises", fv ~= nil)
+H.eq("...flagged as a floor, for the 'at least'", partial, true)
+H.eq("...and only from the exact level", fsrc, "client")
+H.isNil("a floor that does NOT clear it advises nothing",
+        de.ShouldDisenchant(7101, fv, de.MarketPrice))
 W.SetClientItemData(false)
+
+-- ...and the Sell tab says "at least" when it is a floor. ui/frame.lua is not
+-- loaded by any suite, so this reads the source.
+do
+    local f = assert(io.open("ui/frame.lua", "r"))
+    local src = f:read("*a")
+    f:close()
+    H.check("the Sell tab reads the floor flag",
+            string.find(src, "deWorth, _, deFloorOnly =", 1, true) ~= nil)
+    H.check("...and says 'at least' for it",
+            string.find(src, '(deFloorOnly and "at least " or "")', 1, true) ~= nil)
+end
 
 os.exit(H.report("clientdata"))

@@ -5169,6 +5169,27 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### A disenchant floor from the priced materials — ✅ **FIXED** (v1.54.27)
+
+Reported on Discord: *"why does the disenchant/vendor check give up on both
+parts upon seeing a possible output without price data?"* — a gauntlet whose
+75% Vision Dust alone beat its vendor price showed "?" because the 5% shard had
+never been listed.
+
+`de.Value` stays all-or-nothing: a partial sum quoted AS the value understates
+it. But no price is negative, so the priced materials are a **floor**
+(`de.ValueFloor`, rounded down), and a floor proves "at least" answers outright:
+
+- `de.ValueOf` returns it as a fifth value on failure.
+- **Tooltip:** "at least X" instead of "?", and `tooltip.DisenchantVerdict(...,
+  partial)` lets a floor say *worth more than vendor / the AH* but never *sells
+  for more than it breaks for* — that one needs an upper bound we don't have.
+- **`de.ShouldDisenchant`** advises from a floor that clears the 25% margin,
+  flagged `partial`; the Sell tab says "at least".
+- **`disenchant-profit` / `disenchant-percent`** return YES when the floor
+  proves it and stay *unanswered* (never no) when it doesn't.
+- `/aex de` prints the floor.
+
 ### Gathering name searches too — ✅ **FIXED** (v1.54.26)
 
 Reported straight after 1.54.25: "search can't find regular Wizard Oil, only

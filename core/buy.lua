@@ -1417,12 +1417,17 @@ local function CompileOperand(e)
         local floorV = e.value
         return function(row, stats)
             if not row.unit then return false end       -- bid-only
-            local value = row.itemId
-                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
-            if not value then
-                return Unanswered(stats, "disenchant-profit")
+            local value, floor
+            if row.itemId and A.de then
+                local v, _, _, _, f = A.de.ValueOf(row.itemId, A.de.MarketPrice)
+                value, floor = v, f
             end
-            return (value - row.unit) >= floorV
+            if value then return (value - row.unit) >= floorV end
+            -- One material unpriced: what the priced ones are worth is a
+            -- FLOOR (de.ValueFloor). If the floor alone clears the bar, so does
+            -- the real value. If it does not, nothing is known either way.
+            if floor and (floor - row.unit) >= floorV then return true end
+            return Unanswered(stats, "disenchant-profit")
         end
     elseif e.kind == "disenchant-percent" then
         -- AT MOST this percentage of what it disenchants for, mirroring
@@ -1431,12 +1436,21 @@ local function CompileOperand(e)
         local cap = e.value
         return function(row, stats)
             if not row.unit then return false end       -- bid-only
-            local value = row.itemId
-                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
-            if not value or value <= 0 then
-                return Unanswered(stats, "disenchant-percent")
+            local value, floor
+            if row.itemId and A.de then
+                local v, _, _, _, f = A.de.ValueOf(row.itemId, A.de.MarketPrice)
+                value, floor = v, f
             end
-            return (row.unit / value) * 100 <= cap
+            if value and value > 0 then
+                return (row.unit / value) * 100 <= cap
+            end
+            -- The same floor: the real value is at least `floor`, so a price
+            -- within `cap` percent of the floor is within it of the value too.
+            if not value and floor and floor > 0
+               and (row.unit / floor) * 100 <= cap then
+                return true
+            end
+            return Unanswered(stats, "disenchant-percent")
         end
     elseif e.kind == "left" then
         -- AT MOST this much time left: `left/short` is what is about to

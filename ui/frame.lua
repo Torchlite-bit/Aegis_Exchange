@@ -16897,8 +16897,12 @@ function ui.RefreshSell()
         bestSale = vendorUnit
     end
 
-    local deWorth = A.de and A.de.ShouldDisenchant
-        and A.de.ShouldDisenchant(it.itemId, bestSale, A.de.MarketPrice) or nil
+    local deWorth, deFloorOnly
+    if A.de and A.de.ShouldDisenchant then
+        local _
+        deWorth, _, deFloorOnly =
+            A.de.ShouldDisenchant(it.itemId, bestSale, A.de.MarketPrice)
+    end
 
     -- AGAINST THE NET, not the gross. `netPerItem` is what you actually keep
     -- once the consignment cut is taken, and it is already computed two lines
@@ -16912,7 +16916,10 @@ function ui.RefreshSell()
     -- the auction is up rather than a cost of selling.
     local vc = A.sell.VendorCompare(it.itemId, netPerItem)
     if deWorth then
+        -- "AT LEAST" when a material has no price and the figure is the floor
+        -- the priced ones prove (de.ShouldDisenchant's third return).
         ui.sellVendor:SetText("Worth more disenchanted: "
+            .. (deFloorOnly and "at least " or "")
             .. util.FormatMoney(deWorth, true))
     elseif vc and not vc.above then
         -- NAMED as what it compares. "Below vendor price" over a gross figure
@@ -18601,7 +18608,13 @@ local function DisenchantReport(rest)
     if value then
         ChatMsg("  expected: " .. util.FormatMoney(value, true))
     else
-        ChatMsg("  expected: unknown \226\128\148 no price for at least one"
+        -- What the priced materials prove anyway -- see de.ValueFloor.
+        local floor = A.de.ValueFloor(ilvl, info.quality, info.equipLoc,
+            itemId, A.de.MarketPrice)
+        local atLeast = (floor and floor > 0)
+            and ("at least " .. util.FormatMoney(floor, true) .. " \226\128\148 ")
+            or "unknown \226\128\148 "
+        ChatMsg("  expected: " .. atLeast .. "no price for at least one"
             .. " material. Scan, or buy one, to learn it.")
     end
 end

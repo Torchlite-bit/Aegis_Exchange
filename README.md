@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.26)
+# Aegis: Exchange (v1.54.27)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -286,6 +286,10 @@ Inventory                            39 total
   total reads low, and low loses money.
 - **The verdict** (*worth more than vendor / the AH / breaking it*) stays quiet
   when the two are within 10%.
+- **One material never seen on the AH?** The line shows **at least** what the
+  priced ones are worth, names the missing one, and still says *worth more than
+  vendor / the AH* when that alone proves it. It never says *sells for more* —
+  the missing material could be worth anything.
 - **Inventory is account-wide and per realm** — bags, bank, auctions and mail
   for every character, names in class colour. Alts appear once you've logged in
   on them.
@@ -429,7 +433,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.26`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.27`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.
