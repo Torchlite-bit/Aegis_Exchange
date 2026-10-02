@@ -145,6 +145,9 @@ local function DefaultAccountDB()
         -- Items you've marked to sell at a vendor (Sell tab -> Vendor list).
         -- The merchant window then offers to sell them all in one click.
         vendorMarks = {},  -- itemId -> true
+        -- Named item sets (ROADMAP 4.1), account-wide. The first and so far
+        -- only one is the Post All blacklist, db.GROUP_NO_POST.
+        groups = {},       -- key -> { [itemId] = { n = name, t = texture } }
     }
 end
 
@@ -2403,6 +2406,93 @@ end
 function db.ClearVendorMarks()
     if not db.account then return end
     db.account.vendorMarks = {}
+end
+
+-- ---- item groups (ROADMAP 4.1) -----------------------------------------
+--
+-- A group is a named SET OF ITEMS and nothing else: not a price, not a rule.
+-- The moment one carries behaviour it has become an operation (ROADMAP 4.2),
+-- and that lives elsewhere.
+--
+-- THE FIRST ONE IS THE POST ALL BLACKLIST, and it is built as a group on
+-- purpose. A bespoke blacklist store followed by groups would be two item-set
+-- implementations that disagree about what "in the set" means. So the store is
+-- general and the blacklist is one key in it.
+--
+-- EACH ENTRY KEEPS THE NAME AND ICON it had when added. 1.12 answers
+-- GetItemInfo only for items in the client's cache, and an item you sold your
+-- last one of drops out of it -- a list of bare ids would show blank rows for
+-- exactly the items you decided never to post.
+
+-- The Post All blacklist: never offered by Post All (Sell tab Scan, then the
+-- Post / Skip walk). Still postable by hand.
+db.GROUP_NO_POST = "noPost"
+
+-- The set for `key`, created on demand. nil before ADDON_LOADED.
+local function GroupSet(key)
+    if not db.account or not key then return nil end
+    if not db.account.groups then db.account.groups = {} end
+    if not db.account.groups[key] then db.account.groups[key] = {} end
+    return db.account.groups[key]
+end
+
+function db.GroupHas(key, itemId)
+    if not itemId then return false end
+    local g = db.account and db.account.groups and db.account.groups[key]
+    return (g and g[itemId]) and true or false
+end
+
+-- Add `itemId`. Returns true when it was NOT already there.
+function db.GroupAdd(key, itemId, name, texture)
+    local g = GroupSet(key)
+    if not g or not itemId then return false end
+    local had = g[itemId]
+    -- A later add refreshes what is shown, so an entry made from a cold cache
+    -- picks up its name once the item is seen again.
+    g[itemId] = { n = name or (had and had.n), t = texture or (had and had.t) }
+    return not had
+end
+
+-- Remove `itemId`. Returns true when it WAS there.
+function db.GroupRemove(key, itemId)
+    local g = GroupSet(key)
+    if not g or not itemId or not g[itemId] then return false end
+    g[itemId] = nil
+    return true
+end
+
+function db.GroupClear(key)
+    if not db.account or not key then return end
+    if not db.account.groups then db.account.groups = {} end
+    db.account.groups[key] = {}
+end
+
+function db.GroupCount(key)
+    local g = db.account and db.account.groups and db.account.groups[key]
+    local n = 0
+    if g then for _ in pairs(g) do n = n + 1 end end
+    return n
+end
+
+-- The group as rows { itemId, name, texture }, by name. An entry whose name was
+-- never known sorts last, by id, rather than first as an empty string.
+function db.GroupList(key)
+    local out = {}
+    local g = db.account and db.account.groups and db.account.groups[key]
+    if not g then return out end
+    for id, e in pairs(g) do
+        table.insert(out, { itemId = id, name = e.n, texture = e.t })
+    end
+    table.sort(out, function(a, b)
+        if a.name and b.name then
+            if a.name ~= b.name then return a.name < b.name end
+            return a.itemId < b.itemId
+        end
+        if a.name then return true end
+        if b.name then return false end
+        return a.itemId < b.itemId
+    end)
+    return out
 end
 
 -- What this item has actually SOLD for (from the mailbox ledger, matched by

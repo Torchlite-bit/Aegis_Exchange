@@ -18,6 +18,25 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.28]
+
+### Added
+- **Post All blacklist.** Items you never want Post All to offer — the bag
+  scan skips them and so does the Post / Skip walk after it, and the walk's
+  status line says how many it left out.
+  - **Right-click an item in Your Bags** on the Sell tab to put it on the list,
+    and again to take it off. Listed items are greyed out there.
+  - **The list itself** opens from the icon next to **Vendor**: your bags on
+    the left (click one to add it), the blacklist on the right with each item's
+    icon and name, a **Remove** on every row and a **Clear all**. Drag an item
+    from your bags onto the list, or right-click it in your bags while the list
+    is open.
+  - It is **not a lock** — a listed item can still be posted by hand.
+  - Soulbound, quest and conjured items are refused with a message: Post All
+    never offers those anyway.
+
+---
+
 ## [1.54.27]
 
 ### Fixed
@@ -6423,6 +6442,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

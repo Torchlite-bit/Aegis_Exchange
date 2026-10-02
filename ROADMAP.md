@@ -5026,15 +5026,35 @@ checkboxes on the Sell tab is how the tab ends up with fourteen controls and no
 way to save any of them. Leftover re-slotting already landed in v1.53.28 and is
 not part of this.
 
-### 5.5 Post All blacklist
+### 5.5 Post All blacklist — ✅ **DONE** (v1.54.28)
 
-Nothing exists — no blacklist, no blocklist, nothing under either name in
-`core/` or `ui/`. Wanted: add from bags, drag-and-drop, icon and name in the
-list, easy remove and clear.
+Wanted: add from bags, drag-and-drop, icon and name in the list, easy remove
+and clear. Shipped as the first **group** (4.1), not a store of its own:
 
-**This is a group.** Building a bespoke blacklist store and then building 4.1
-means two item-set implementations that will disagree. Ship it as a
-built-in group the posting queue skips, or wait for 4.1.
+- **`db.account.groups[key][itemId] = { n = name, t = texture }`**, with
+  `db.GroupAdd/Remove/Has/Clear/Count/List`. The blacklist is the key
+  `db.GROUP_NO_POST`; 4.1 adds more keys to the same table, it does not build a
+  second one. The name and icon are KEPT because 1.12 forgets an item you no
+  longer hold, and a list of bare ids would go blank for exactly the items you
+  chose never to post.
+- **`sell.PostAllItems()` is the one list both halves of Post All walk** — the
+  Scan (`sell.ScanAllBags`) and the Post / Skip walk (`ui.StartSellQueue`).
+  They each built their own flat copy of `sell.ScanBags` before, so any rule
+  added to one would have been missing from the other. 5.4's ordering and gate
+  belong in this function too.
+- **Not a lock.** A listed item can still be slotted and posted by hand; the
+  list is about what Post All puts in front of you.
+- **Refuses what Post All never offers** (soulbound, quest, conjured) and says
+  so, rather than listing it and doing nothing.
+- **Drop detection without a hook.** 1.12 has no `GetCursorInfo`, but a bag
+  slot whose item is on the cursor reads LOCKED, so `sell.CursorBagItem` finds
+  the source slot with one bounded walk on the drop click.
+- Ways in: the manager panel (icon button left of *Vendor* on the Sell tab;
+  click an item in its bags column, drag one onto the list, or right-click one
+  in your bags while it is open) and right-click on a Your Bags row, which
+  toggles without opening anything. Listed rows are dimmed in Your Bags.
+- The panel's bags column follows BAG_UPDATE through a dirty flag flushed by
+  its own OnUpdate (HARD RULE 16), never inline.
 
 ### 5.6 Richer sale records — in the ledger, not in chat
 

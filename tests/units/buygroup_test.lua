@@ -354,16 +354,6 @@ do
     -- buttons, so a search that only asks "does this line exist anywhere"
     -- passes with the results table's own registration deleted -- which is
     -- what happened the first time this was written.
-    local function occurrences(needle)
-        local n, at = 0, 1
-        while true do
-            local found = string.find(src, needle, at, true)
-            if not found then break end
-            n = n + 1
-            at = found + 1
-        end
-        return n
-    end
     -- SCOPED TO THE FUNCTION, not counted across the file.
     --
     -- This was a count -- "exactly two `row:RegisterForClicks` lines" -- which
@@ -393,8 +383,20 @@ do
     -- BOTH branches read it, and both are counted for the same reason: a
     -- group's right-click and a child's are separate tests, and fixing one
     -- while breaking the other is a right-click that works until you expand.
-    H.eq("both branches read the button from the arg1 global",
-         occurrences('if arg1 == "RightButton" then'), 2)
+    --
+    -- Counted inside ui.OnBuyRowClick only. Counting the whole file meant
+    -- the Sell tab's bag rows learning a right-click (the Post All blacklist,
+    -- v1.54.28) moved this number -- exactly the "unrelated table" trap the
+    -- note above warns about.
+    local handler = bodyOf("function ui.OnBuyRowClick(")
+    local inHandler, at = 0, 1
+    while true do
+        local found = string.find(handler, 'if arg1 == "RightButton" then', at, true)
+        if not found then break end
+        inHandler = inHandler + 1
+        at = found + 1
+    end
+    H.eq("both branches read the button from the arg1 global", inHandler, 2)
 
     -- Expanding must not re-query: the listings under a parent are already in
     -- hand, which is what grouping them means.

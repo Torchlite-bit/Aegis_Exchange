@@ -16159,6 +16159,30 @@ function ui.BuildSellTab()
     vendListBtn:SetText("Vendor")
     vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
     ui.sellVendorListBtn = vendListBtn
+
+    -- The Post All blacklist. An ICON, not a word: this band also carries your
+    -- gold on the left, and a third labelled button would run into a
+    -- five-figure purse on a narrow window. The tooltip says what it is.
+    local blBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBlacklistButton")
+    blBtn:SetWidth(22)
+    blBtn:SetHeight(18)
+    blBtn:SetPoint("RIGHT", vendListBtn, "LEFT", -6, 0)
+    local blIcon = blBtn:CreateTexture(nil, "OVERLAY")
+    blIcon:SetWidth(14); blIcon:SetHeight(14)
+    blIcon:SetPoint("CENTER", blBtn, "CENTER", 0, 0)
+    blIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+    blBtn:SetScript("OnClick", function() ui.ToggleBlacklist() end)
+    blBtn:SetScript("OnEnter", function()
+        GameTooltip:SetOwner(blBtn, "ANCHOR_TOP")
+        GameTooltip:SetText("Post All blacklist")
+        GameTooltip:AddLine(A.db.GroupCount(A.db.GROUP_NO_POST)
+            .. " item(s) Post All never offers.", 1, 1, 1)
+        GameTooltip:AddLine("Right-click a row in Your Bags to add or remove"
+            .. " one.", 0.7, 0.7, 0.7)
+        GameTooltip:Show()
+    end)
+    blBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    ui.sellBlacklistBtn = blBtn
     scanAllBtn:SetScript("OnClick", function()
         if A.sell.batchActive then
             A.sell.StopBatchScan()
@@ -16265,15 +16289,28 @@ ui.GrowBagRows = function(n)
             dot:SetText("*")
             dot:Hide()
             row.cacheDot = dot
+            -- Left-click slots the item; RIGHT-click puts it on (or takes it
+            -- off) the Post All blacklist -- "select items directly from your
+            -- bags", without opening anything.
+            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             row:SetScript("OnClick", function()
                 local e = row.entry
-                if e and e.kind == "item" then ui.SelectBagEntry(e.item) end
+                if not (e and e.kind == "item") then return end
+                if arg1 == "RightButton" then
+                    ui.ToggleBlacklistEntry(e.item)
+                    return
+                end
+                ui.SelectBagEntry(e.item)
             end)
             row:SetScript("OnEnter", function()
                 local e = row.entry
                 if e and e.kind == "item" and e.item and GameTooltip.SetBagItem then
                     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
                     GameTooltip:SetBagItem(e.item.bag, e.item.slot)
+                    if A.sell.IsBlacklisted(e.item.itemId) then
+                        GameTooltip:AddLine("Post All skips this \226\128\148"
+                            .. " right-click to put it back.", 0.7, 0.7, 0.7)
+                    end
                     GameTooltip:Show()
                 end
             end)
@@ -16529,6 +16566,16 @@ function ui.UpdateBagList()
                 -- it falls back to plain text rather than painting it white.
                 local q = it.quality
                 row.label:SetTextColor(ui.QualityColor(q))
+                -- ON THE BLACKLIST: greyed, icon dimmed, still clickable --
+                -- the list is about what Post All offers, not a lock. Every
+                -- row RESETS the icon, because rows are pooled and the one
+                -- above may have been listed.
+                if A.sell.IsBlacklisted(it.itemId) then
+                    row.label:SetTextColor(0.5, 0.5, 0.5)
+                    row.icon:SetVertexColor(0.45, 0.45, 0.45)
+                else
+                    row.icon:SetVertexColor(1, 1, 1)
+                end
             end
             row:Show()
         else
@@ -17241,6 +17288,343 @@ function ui.ToggleVendorList()
     else ui.ShowVendorList() end
 end
 
+-- ---- Post All blacklist manager -----------------------------------------
+--
+-- Items Post All never offers (A.sell.IsBlacklisted). Asked for as: select
+-- items directly from your bags, drag and drop them in, see the icon and name,
+-- remove and clear easily. So, over the tab like the Vendor list:
+--
+--   LEFT   what Post All would offer right now (A.sell.PostAllItems) -- your
+--          bags, minus what is already listed. Click one to add it.
+--   RIGHT  the blacklist: icon, name, and a remove button on every row. Drop
+--          an item from your bags anywhere on it to add that.
+--
+-- And two ways in that need no panel: right-click an item in your bags while
+-- the panel is open, or right-click a row in the Sell tab's Your Bags list.
+--
+-- One table for the layout numbers: every file-scope local a builder reads is
+-- an upvalue, and this file lives near Lua 5.0's ceiling of 32 (CLAUDE.md
+-- 12a).
+local BLL = { rows = 12, row_h = 20, top = 76, bottom = 34, gap = 6 }
+
+function ui.BuildBlacklist()
+    if ui.blFrame then return end
+    local f = CreateFrame("Frame", "AegisExchangeBlacklist", ui.frame)
+    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
+    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)
+    f:EnableMouse(true)
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    f:Hide()
+    ui.blFrame = f
+    -- The left column is your bags, so it follows them -- but BAG_UPDATE
+    -- storms, so the handler only sets ui.blDirty and this repaints once a
+    -- frame (HARD RULE 16). OnUpdate runs only while the panel is shown.
+    f:SetScript("OnUpdate", function()
+        if ui.blDirty then
+            ui.blDirty = false
+            ui.RefreshBlacklist()
+        end
+    end)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+    title:SetText("Post All blacklist")
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+
+    local closeBtn = ui.MakeButton(f, "quiet")
+    closeBtn:SetWidth(60); closeBtn:SetHeight(20)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -8)
+    closeBtn:SetText("Close")
+    closeBtn:SetScript("OnClick", function() ui.HideBlacklist() end)
+
+    local clearBtn = ui.MakeButton(f, "quiet", "AegisExchangeBlacklistClear")
+    clearBtn:SetWidth(74); clearBtn:SetHeight(20)
+    clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+    clearBtn:SetText("Clear all")
+    clearBtn:SetScript("OnClick", function() ui.ConfirmBlacklistClear() end)
+    ui.blClearBtn = clearBtn
+
+    local note = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    note:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -30)
+    note:SetPoint("RIGHT", f, "RIGHT", -12, 0)
+    note:SetJustifyH("LEFT")
+    note:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    note:SetText("Post All never offers these. You can still post one by hand."
+        .. "  Add: click an item on the left, right-click it in your bags,"
+        .. " or drag it onto the list.")
+
+    local pickHdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    pickHdr:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -(BLL.top - 16))
+    pickHdr:SetText("In your bags \226\128\148 click to add")
+    local listHdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    listHdr:SetPoint("TOPLEFT", f, "TOP", BLL.gap + 6, -(BLL.top - 16))
+    ui.blListHdr = listHdr
+
+    -- LEFT: what Post All would offer. Half the panel, split at its centre.
+    local pick = CreateFrame("ScrollFrame", "AegisExchangeBlPickScroll", f,
+        "FauxScrollFrameTemplate")
+    pick:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -BLL.top)
+    pick:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -(BLL.gap + 22), BLL.bottom)
+    pick:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(BLL.row_h, ui.UpdateBlacklist)
+    end)
+    ui.blPickScroll = pick
+
+    -- RIGHT: the blacklist, and the drop target. A frame under the rows
+    -- catches a drop on the empty part of the list; each row catches its own.
+    local list = CreateFrame("ScrollFrame", "AegisExchangeBlListScroll", f,
+        "FauxScrollFrameTemplate")
+    list:SetPoint("TOPLEFT", f, "TOP", BLL.gap, -BLL.top)
+    list:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, BLL.bottom)
+    list:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(BLL.row_h, ui.UpdateBlacklist)
+    end)
+    ui.blListScroll = list
+    local drop = CreateFrame("Button", "AegisExchangeBlacklistDrop", f)
+    drop:SetAllPoints(list)
+    drop:SetFrameLevel(f:GetFrameLevel() + 1)
+    drop:SetScript("OnReceiveDrag", function() ui.BlacklistDrop() end)
+    drop:SetScript("OnClick", function() ui.BlacklistDrop() end)
+    local empty = drop:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    empty:SetPoint("CENTER", drop, "CENTER", 0, 0)
+    empty:SetText("Nothing listed yet \226\128\148 drag an item here")
+    ui.blEmpty = empty
+
+    ui.blPickRows, ui.blListRows = {}, {}
+    local i = 1
+    while i <= BLL.rows do
+        -- A bag item: click to add it.
+        local pr = CreateFrame("Button", nil, f)
+        pr:SetHeight(BLL.row_h)
+        pr.aegisNoSkin = true          -- a list row: see tests/lint/rowskin.py
+        ui.PlaceRow(pr, pick, i, BLL.row_h, 0, 0)
+        ui.AddRowChrome(pr, i)
+        pr:SetFrameLevel(f:GetFrameLevel() + 2)
+        local pic = pr:CreateTexture(nil, "ARTWORK")
+        pic:SetWidth(16); pic:SetHeight(16)
+        pic:SetPoint("LEFT", pr, "LEFT", 4, 0)
+        pr.icon = pic
+        local pname = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pname:SetPoint("LEFT", pr, "LEFT", 24, 0)
+        pname:SetPoint("RIGHT", pr, "RIGHT", -34, 0)
+        pname:SetJustifyH("LEFT")
+        pr.name = pname
+        local pqty = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        pqty:SetPoint("RIGHT", pr, "RIGHT", -4, 0)
+        pqty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        pr.qty = pqty
+        pr:SetScript("OnClick", function()
+            if pr.entry then ui.BlacklistAddEntry(pr.entry) end
+        end)
+        pr:SetScript("OnEnter", function()
+            local e = pr.entry
+            if e and e.bag and GameTooltip.SetBagItem then
+                GameTooltip:SetOwner(pr, "ANCHOR_RIGHT")
+                GameTooltip:SetBagItem(e.bag, e.slot)
+                GameTooltip:Show()
+            end
+        end)
+        pr:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        pr:Hide()
+        ui.blPickRows[i] = pr
+
+        -- A listed item: icon, name, and its own remove button.
+        local lr = CreateFrame("Button", nil, f)
+        lr:SetHeight(BLL.row_h)
+        lr.aegisNoSkin = true
+        ui.PlaceRow(lr, list, i, BLL.row_h, 0, 0)
+        ui.AddRowChrome(lr, i)
+        lr:SetFrameLevel(f:GetFrameLevel() + 2)
+        local lic = lr:CreateTexture(nil, "ARTWORK")
+        lic:SetWidth(16); lic:SetHeight(16)
+        lic:SetPoint("LEFT", lr, "LEFT", 4, 0)
+        lr.icon = lic
+        local lname = lr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lname:SetPoint("LEFT", lr, "LEFT", 24, 0)
+        lname:SetPoint("RIGHT", lr, "RIGHT", -64, 0)
+        lname:SetJustifyH("LEFT")
+        lr.name = lname
+        local rm = ui.MakeButton(lr, "quiet")
+        rm:SetWidth(58); rm:SetHeight(16)
+        rm:SetPoint("RIGHT", lr, "RIGHT", -2, 0)
+        rm:SetText("Remove")
+        rm:SetScript("OnClick", function()
+            if lr.entry then ui.BlacklistRemoveEntry(lr.entry) end
+        end)
+        lr.remove = rm
+        -- A drop on a row is a drop on the list.
+        lr:SetScript("OnReceiveDrag", function() ui.BlacklistDrop() end)
+        lr:SetScript("OnClick", function() ui.BlacklistDrop() end)
+        lr:Hide()
+        ui.blListRows[i] = lr
+        i = i + 1
+    end
+end
+
+-- " (3 blacklisted left out)", or "" -- for the Post / Skip walk's status line,
+-- so a shorter walk than expected says why. PURE.
+function ui.BlacklistSkippedNote(n)
+    if not n or n < 1 then return "" end
+    return " (" .. n .. " blacklisted left out)"
+end
+
+function ui.RefreshBlacklist()
+    if not ui.blFrame then return end
+    ui.blPick = A.sell.PostAllItems()
+    ui.blList = A.sell.Blacklist()
+    ui.UpdateBlacklist()
+end
+
+function ui.UpdateBlacklist()
+    if not ui.blPickScroll then return end
+    local pick, list = ui.blPick or {}, ui.blList or {}
+    ui.blListHdr:SetText("Blacklisted (" .. table.getn(list) .. ")")
+    if table.getn(list) == 0 then ui.blEmpty:Show() else ui.blEmpty:Hide() end
+    if table.getn(list) == 0 then ui.blClearBtn:Disable()
+    else ui.blClearBtn:Enable() end
+
+    FauxScrollFrame_Update(ui.blPickScroll, table.getn(pick), BLL.rows, BLL.row_h)
+    local po = FauxScrollFrame_GetOffset(ui.blPickScroll)
+    FauxScrollFrame_Update(ui.blListScroll, table.getn(list), BLL.rows, BLL.row_h)
+    local lo = FauxScrollFrame_GetOffset(ui.blListScroll)
+    local i = 1
+    while i <= BLL.rows do
+        local pr, e = ui.blPickRows[i], pick[i + po]
+        if e then
+            pr.entry = e
+            if e.texture then pr.icon:SetTexture(e.texture); pr.icon:Show()
+            else pr.icon:Hide() end
+            pr.name:SetText(e.name or "")
+            pr.name:SetTextColor(ui.QualityColor(e.quality))
+            pr.qty:SetText((e.count and e.count > 1) and e.count or "")
+            pr:Show()
+        else
+            pr.entry = nil
+            pr:Hide()
+        end
+        local lr, l = ui.blListRows[i], list[i + lo]
+        if l then
+            lr.entry = l
+            if l.texture then lr.icon:SetTexture(l.texture); lr.icon:Show()
+            else lr.icon:Hide() end
+            -- The name it had when listed; an id only if it never had one.
+            lr.name:SetText(l.name or ("item " .. l.itemId))
+            lr.name:SetTextColor(C.text[1], C.text[2], C.text[3])
+            lr:Show()
+        else
+            lr.entry = nil
+            lr:Hide()
+        end
+        i = i + 1
+    end
+end
+
+-- Everything that changes the list repaints both the panel and the Sell tab's
+-- bag list, which dims what is listed.
+local function BlacklistChanged()
+    ui.RefreshBlacklist()
+    if ui.UpdateBagList then ui.UpdateBagList() end
+end
+
+function ui.BlacklistAddEntry(e)
+    if not e or not e.itemId then return end
+    A.sell.BlacklistAdd(e.itemId, e.name, e.texture)
+    BlacklistChanged()
+end
+
+function ui.BlacklistRemoveEntry(e)
+    if not e or not e.itemId then return end
+    A.sell.BlacklistRemove(e.itemId)
+    BlacklistChanged()
+end
+
+-- An item dropped on the list. Whatever happens, the cursor is emptied, so the
+-- item goes back to its bag rather than staying in hand.
+function ui.BlacklistDrop()
+    if not (CursorHasItem and CursorHasItem()) then return end
+    local bag, slot = A.sell.CursorBagItem()
+    if not bag then
+        ChatMsg("Aegis: drag items onto the blacklist from your bags.")
+        ClearCursor()
+        return
+    end
+    local ok, why = A.sell.BlacklistAddFromBag(bag, slot)
+    ClearCursor()
+    if not ok then ChatMsg("Aegis: " .. why) end
+    BlacklistChanged()
+end
+
+-- Right-click in your bags while the panel is open.
+function ui.BlacklistPickActive()
+    return ui.blFrame and ui.blFrame:IsVisible() and true or false
+end
+
+-- HANDLED whenever the slot holds an item, even when it is refused: with this
+-- panel open a right-click means "list this", and falling through would USE
+-- the item instead -- drink the potion, equip the gear.
+function ui.TryBlacklistFromBag(bag, slot)
+    if not bag or not slot then return false end
+    if CursorHasItem and CursorHasItem() then return false end
+    if not GetContainerItemLink(bag, slot) then return false end
+    local ok, why = A.sell.BlacklistAddFromBag(bag, slot)
+    if not ok then ChatMsg("Aegis: " .. why) end
+    BlacklistChanged()
+    return true
+end
+
+-- Right-click a row in the Sell tab's Your Bags list: on or off the list.
+function ui.ToggleBlacklistEntry(item)
+    if not item or not item.itemId then return end
+    if A.sell.IsBlacklisted(item.itemId) then
+        A.sell.BlacklistRemove(item.itemId)
+        ChatMsg("Aegis: " .. (item.name or "item")
+            .. " is back in Post All.")
+    else
+        A.sell.BlacklistAdd(item.itemId, item.name, item.texture)
+        ChatMsg("Aegis: Post All will skip " .. (item.name or "that item")
+            .. ". Right-click it again to undo.")
+    end
+    BlacklistChanged()
+end
+
+StaticPopupDialogs["AEGIS_EXCHANGE_BLACKLIST_CLEAR"] = {
+    text = "Remove all %s item(s) from the Post All blacklist?",
+    button1 = "Remove all", button2 = "Cancel",
+    OnAccept = function() A.sell.BlacklistClear(); BlacklistChanged() end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.ConfirmBlacklistClear()
+    local n = table.getn(A.sell.Blacklist())
+    if n == 0 then return end
+    StaticPopup_Show("AEGIS_EXCHANGE_BLACKLIST_CLEAR", n)
+end
+
+function ui.ShowBlacklist()
+    ui.BuildBlacklist()
+    if A.skin then A.skin.ApplyOverlay(ui.blFrame) end
+    ui.RefreshBlacklist()
+    ui.blFrame:Show()
+end
+
+function ui.HideBlacklist()
+    if ui.blFrame then ui.blFrame:Hide() end
+end
+
+function ui.ToggleBlacklist()
+    ui.BuildBlacklist()
+    if ui.blFrame:IsVisible() then ui.HideBlacklist()
+    else ui.ShowBlacklist() end
+end
+
 -- ---- merchant window: sell everything you marked ------------------------
 
 StaticPopupDialogs["AEGIS_EXCHANGE_VENDORSELL"] = {
@@ -17488,18 +17872,11 @@ end
 
 -- Build the queue from the current bag contents and slot the first item.
 function ui.StartSellQueue()
-    local cats = A.sell.ScanBags()
-    local q = {}
-    local ci = 1
-    while ci <= table.getn(cats) do
-        local items = cats[ci].items
-        local ii = 1
-        while ii <= table.getn(items) do
-            table.insert(q, items[ii])
-            ii = ii + 1
-        end
-        ci = ci + 1
-    end
+    -- What Post All offers: the bags minus the blacklist. The same list the
+    -- Scan before it walked (A.sell.PostAllItems), so the two halves of Post
+    -- All cannot disagree about what is in it.
+    local q, skipped = A.sell.PostAllItems()
+    ui.sellQueueSkipped = skipped
     ui.sellQueue = q
     ui.sellQueueIndex = 0
     if table.getn(q) == 0 then
@@ -17525,7 +17902,8 @@ function ui.AdvanceSellQueue()
             ui.RefreshSell()
             if ui.sellStatus then
                 ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
-                    .. " \226\128\148 Post or Skip.")
+                    .. " \226\128\148 Post or Skip."
+                    .. ui.BlacklistSkippedNote(ui.sellQueueSkipped))
             end
             return true
         end
@@ -18050,8 +18428,10 @@ function ui.SelectSubTab(name)
         ui.HidePicker()
     end
     -- The vendor list belongs to the Sell tab; don't leave it over another.
+    -- Nor the blacklist, on the same terms.
     if name ~= "Sell" then
         ui.HideVendorList()
+        ui.HideBlacklist()
     end
     -- ...and the ledger belongs to History. It covers the whole content area,
     -- so left open it would sit over whichever tab you switched to -- the same
@@ -18311,6 +18691,11 @@ function ui.HookBagRightClick()
     ui.bagClickHooked = true
 
     local function tryHandle(bag, slot)
+        -- FIRST: with the blacklist panel open, a right-click lists the item.
+        -- See ui.TryBlacklistFromBag for why a refusal still counts as handled.
+        if ui.BlacklistPickActive() and ui.TryBlacklistFromBag(bag, slot) then
+            return true
+        end
         if ui.SellRightClickActive() and ui.TrySellFromBag(bag, slot) then
             return true
         end
@@ -18535,6 +18920,8 @@ A.RegisterEvent("BAG_UPDATE", function()
     if ui.selectedSubTab == "Sell" then
         ui.RefreshBags()
     end
+    -- A flag, not a repaint: the blacklist panel flushes it once a frame.
+    if ui.blFrame then ui.blDirty = true end
 end)
 
 -- Print the disenchant breakdown for one item link.

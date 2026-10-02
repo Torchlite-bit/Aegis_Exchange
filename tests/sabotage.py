@@ -7746,6 +7746,179 @@ end""",
      '    if last == "s" or last == "g" then',
      "util"),
 
+    # ---- the Post All blacklist (ROADMAP 5.5) -------------------------------
+    # The whole feature: a listed item still offered by Post All.
+    ("postall-offers-a-blacklisted-item", "core/sell.lua",
+     "            if it.itemId and sell.IsBlacklisted(it.itemId) then",
+     "            if false then",
+     "blacklist"),
+
+    ("postall-does-not-count-what-it-left-out", "core/sell.lua",
+     "                skipped = skipped + 1\n",
+     "",
+     "blacklist"),
+
+    # The Scan building its own flat copy again: half of Post All forgets the
+    # list, and every listed item costs a query.
+    ("scan-walks-its-own-copy-of-the-bags", "core/sell.lua",
+     "    local queue = sell.PostAllItems()",
+     "    local queue = {}\n"
+     "    local cats = sell.ScanBags()\n"
+     "    for ci = 1, table.getn(cats) do\n"
+     "        for ii = 1, table.getn(cats[ci].items) do\n"
+     "            table.insert(queue, cats[ci].items[ii])\n"
+     "        end\n"
+     "    end",
+     "blacklist"),
+
+    ("postskip-walk-builds-its-own-list", "ui/frame.lua",
+     "    local q, skipped = A.sell.PostAllItems()",
+     "    local q, skipped = A.sell.ScanBags(), 0",
+     "blacklist"),
+
+    # A cold cache forgets the name; a later bare add must not erase it.
+    ("groupadd-forgets-the-name", "core/db.lua",
+     "    g[itemId] = { n = name or (had and had.n), t = texture or (had and had.t) }",
+     "    g[itemId] = { n = name, t = texture }",
+     "blacklist"),
+
+    ("groupadd-says-a-repeat-is-news", "core/db.lua",
+     "    local had = g[itemId]\n",
+     "    local had = nil\n",
+     "blacklist"),
+
+    ("grouplist-puts-nameless-first", "core/db.lua",
+     "        if a.name then return true end\n        if b.name then return false end",
+     "        if a.name then return false end\n        if b.name then return true end",
+     "blacklist"),
+
+    ("groupremove-always-says-it-was-there", "core/db.lua",
+     "    if not g or not itemId or not g[itemId] then return false end\n"
+     "    g[itemId] = nil",
+     "    if not g or not itemId then return false end\n"
+     "    g[itemId] = nil",
+     "blacklist"),
+
+    ("older-save-gets-no-groups-table", "core/db.lua",
+     "        groups = {},       -- key -> { [itemId] = { n = name, t = texture } }\n",
+     "",
+     "blacklist"),
+
+    # Listing an item Post All never offers looks like it worked and does
+    # nothing.
+    ("blacklist-takes-an-unauctionable-item", "core/sell.lua",
+     "    if not sell.IsAuctionable(bag, slot) then\n"
+     "        return false, (name or \"That item\")",
+     "    if false then\n"
+     "        return false, (name or \"That item\")",
+     "blacklist"),
+
+    ("blacklist-drops-the-icon", "core/sell.lua",
+     "    sell.BlacklistAdd(itemId, name, texture or (info and info.texture))",
+     "    sell.BlacklistAdd(itemId, name)",
+     "blacklist"),
+
+    # Any item on the cursor guessed into the first bag slot.
+    ("cursor-item-ignores-the-lock", "core/sell.lua",
+     "                if locked then return bag, slot end",
+     "                return bag, slot",
+     "blacklist"),
+
+    ("cursor-item-found-with-empty-hand", "core/sell.lua",
+     "    if not (CursorHasItem and CursorHasItem()) then return nil end\n"
+     "    local bag = 0",
+     "    local bag = 0",
+     "blacklist"),
+
+    # The blacklist turned into a lock: Post refuses a listed item.
+    ("blacklist-blocks-a-hand-post", "core/sell.lua",
+     "function sell.Post(",
+     "function sell.Post(...)\n"
+     "    local it = sell.GetItem and sell.GetItem()\n"
+     "    if it and it.itemId and sell.IsBlacklisted(it.itemId) then return end\n"
+     "    return sell.PostReal(unpack(arg))\nend\n"
+     "function sell.PostReal(",
+     "blacklist"),
+
+    # Slotting first: with the panel open a right-click puts the item in the
+    # sell slot instead of listing it.
+    ("bag-right-click-sells-before-listing", "ui/frame.lua",
+     "        if ui.BlacklistPickActive() and ui.TryBlacklistFromBag(bag, slot) then",
+     "        if false then",
+     "blacklist"),
+
+    # A refusal falling through USES the item -- drinks the potion.
+    ("refused-right-click-uses-the-item", "ui/frame.lua",
+     "    BlacklistChanged()\n    return true\nend\n\n-- Right-click a row",
+     "    BlacklistChanged()\n    return ok\nend\n\n-- Right-click a row",
+     "blacklist"),
+
+    ("bag-rows-ignore-right-click", "ui/frame.lua",
+     '            -- off) the Post All blacklist -- "select items directly from your\n'
+     '            -- bags", without opening anything.\n'
+     '            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")\n',
+     '            -- off) the Post All blacklist -- "select items directly from your\n'
+     '            -- bags", without opening anything.\n',
+     "blacklist"),
+
+    ("bag-rows-never-dim-listed", "ui/frame.lua",
+     "                if A.sell.IsBlacklisted(it.itemId) then\n"
+     "                    row.label:SetTextColor(0.5, 0.5, 0.5)",
+     "                if false then\n"
+     "                    row.label:SetTextColor(0.5, 0.5, 0.5)",
+     "blacklist"),
+
+    # Pooled rows: one dimmed icon scrolls down the list on every row after it.
+    ("bag-rows-keep-a-dimmed-icon", "ui/frame.lua",
+     "                else\n                    row.icon:SetVertexColor(1, 1, 1)\n",
+     "                else\n",
+     "blacklist"),
+
+    ("blacklist-drop-takes-no-drag", "ui/frame.lua",
+     '    drop:SetScript("OnReceiveDrag", function() ui.BlacklistDrop() end)',
+     "",
+     "blacklist"),
+
+    # The item stays in hand after a drop.
+    ("blacklist-drop-leaves-the-cursor-full", "ui/frame.lua",
+     "    local ok, why = A.sell.BlacklistAddFromBag(bag, slot)\n    ClearCursor()",
+     "    local ok, why = A.sell.BlacklistAddFromBag(bag, slot)",
+     "blacklist"),
+
+    ("clear-all-without-asking", "ui/frame.lua",
+     '    StaticPopup_Show("AEGIS_EXCHANGE_BLACKLIST_CLEAR", n)',
+     "    A.sell.BlacklistClear(); BlacklistChanged()",
+     "blacklist"),
+
+    ("blacklist-left-over-another-tab", "ui/frame.lua",
+     "        ui.HideVendorList()\n        ui.HideBlacklist()\n",
+     "        ui.HideVendorList()\n",
+     "blacklist"),
+
+    # HARD RULE 16: a full bag walk inline in a BAG_UPDATE handler.
+    ("blacklist-rescans-inline-on-bag-update", "ui/frame.lua",
+     "    if ui.blFrame then ui.blDirty = true end",
+     "    if ui.blFrame then ui.RefreshBlacklist() end",
+     "blacklist"),
+
+    ("blacklist-never-flushes-the-flag", "ui/frame.lua",
+     "        if ui.blDirty then\n            ui.blDirty = false\n"
+     "            ui.RefreshBlacklist()",
+     "        if ui.blDirty then\n            ui.blDirty = false\n",
+     "blacklist"),
+
+    ("skipped-note-says-nothing", "ui/frame.lua",
+     '    return " (" .. n .. " blacklisted left out)"',
+     '    return ""',
+     "blacklist"),
+
+    ("skipped-note-speaks-for-zero", "ui/frame.lua",
+     "    if not n or n < 1 then return \"\" end\n"
+     "    return \" (\" .. n",
+     "    if not n then return \"\" end\n"
+     "    return \" (\" .. n",
+     "blacklist"),
+
 ]
 
 # A "suite" here is anything that returns non-zero when the code is wrong.
@@ -7799,6 +7972,7 @@ SUITES = {
     "histstats": "tests/units/histstats_test.lua",
     "charges": "tests/units/charges_test.lua",
     "gather": "tests/units/gather_test.lua",
+    "blacklist": "tests/units/blacklist_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
