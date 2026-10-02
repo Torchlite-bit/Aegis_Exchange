@@ -5010,7 +5010,7 @@ cannot return.
 The lesson is the same one this file keeps recording: **the entry was written
 from a plausible reading and not checked.** One search settled it.
 
-### 5.4 Post All: a policy, not just a walk — 🟡 **IN PROGRESS** (v1.54.29)
+### 5.4 Post All: a policy, not just a walk — ✅ **DONE** (v1.54.29–v1.54.31)
 
 **Shipped in v1.54.29: the stack modes and the remainder.** Built as the first
 **operation** (4.2), the way the blacklist was built as the first group:
@@ -5049,10 +5049,27 @@ cannot disagree.
   deposit and auction cut", and 5.3 below records why that is wrong: a
   deposit is refunded when the auction sells.
 
-**Still to do:** "smart" stacks -- the profit comparison between stack sizes.
-Its definition is the owner's call: every measurable version from a single
-snapshot of listings either favours singles (highest unit price, floods the
-market and the 120 cap) or needs a per-item auction limit to be meaningful.
+**Shipped in v1.54.31: Smart stacks.** The definition was the owner's call:
+from one snapshot of listings, picking the best unit price always picks
+singles, which floods the market and the 120 cap. Chosen: **best total within
+a per-item auction limit.**
+
+- `sell.SmartStacks(itemId, rows, held, maxStack, limit)` -- candidates are
+  the stack sizes other sellers list that you can make, plus your full stack.
+  Each is priced against listings OF ITS OWN SIZE through
+  `sell.UndercutFrom` (your full stack, unlisted, against any size). The
+  winner nets the most if all sold: net unit x size x stacks, stacks capped at
+  `limit` minus YOUR auctions already up. A tie goes to the larger stack.
+- `db.PostOp("postCap")`, default 5. Smart always moves on after posting
+  (`ui.LeftoverSetting`): re-slotting the rest would post past the limit.
+- The price box takes Smart's per-size price while walking (`ui.WalkUnit`),
+  and the status line shows the comparison (`ui.SmartNote`).
+- `sell.HeldStacks` + `sell.StacksAt`: one bag walk per plan, however many
+  sizes it asks about. `sell.ForgetListings` after a post, so the next Scan
+  counts the auctions just posted against the limit.
+- **Known edge:** the vendor gate and value ordering price an item with the
+  general undercut, not Smart's per-size price, because pricing every size of
+  every item when the walk starts would walk the bags once per item and size.
 
 The original entry:
 

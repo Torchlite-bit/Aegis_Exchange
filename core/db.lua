@@ -2523,6 +2523,7 @@ db.POST_OP_DEFAULTS = {
     -- "max"     as many full stacks as can be made
     -- "singles" one item per auction
     -- "fixed"   stacks of `stackSize`
+    -- "smart"   the stack size that nets the most, within `postCap`
     stackMode = "bags",
     stackSize = 5,       -- the "fixed" size
     -- After the planned stacks, offer what is left as one more (true), or
@@ -2534,6 +2535,9 @@ db.POST_OP_DEFAULTS = {
     vendorGate = true,
     -- Most valuable holding first, rather than bag order.
     byValue = false,
+    -- "smart": at most this many auctions of one item on the auction house
+    -- at once, yours already there included (sell.SmartStacks).
+    postCap = 5,
 }
 
 -- The stored fields for (kind, name), created on demand. nil before

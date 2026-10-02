@@ -33,6 +33,7 @@ H.eq("...a fixed size to start from", db.PostOp("stackSize"), 5)
 H.eq("...and leftovers go up too, as before", db.PostOp("remainder"), true)
 H.eq("...what nets below vendor is left out", db.PostOp("vendorGate"), true)
 H.eq("...in bag order", db.PostOp("byValue"), false)
+H.eq("...and Smart's limit is five auctions", db.PostOp("postCap"), 5)
 
 db.SetPostOp("stackMode", "max")
 H.eq("a change is read back", db.PostOp("stackMode"), "max")
@@ -228,6 +229,95 @@ H.check("the Scan still covers the below-vendor item", scanned[4306])
 sell.StopBatchScan()
 
 -- ---------------------------------------------------------------------------
+H.section("Held stacks, and the listings known for an item")
+-- ---------------------------------------------------------------------------
+
+W.SetBags({ [0] = {
+    { link = W.items[2589].link, count = 20 },
+    { link = W.items[4306].link, count = 7 },
+    { link = W.items[2589].link, count = 5 },
+} })
+local heldLinen = sell.HeldStacks(2589)
+H.eq("held stacks: one bag walk, one entry a stack", table.getn(heldLinen), 2)
+H.eq("...in units", heldLinen[1] + heldLinen[2], 25)
+H.eq("stacks of 10 from 20 + 5: two, the five makes none",
+     sell.StacksAt({ 20, 5 }, 10), 2)
+H.eq("stacks of 5: five", sell.StacksAt({ 20, 5 }, 5), 5)
+H.eq("a size of nothing makes nothing", sell.StacksAt({ 20 }, 0), 0)
+
+cached(2589, { { count = 20, unit = 100 } })
+H.eq("listings for an item: its cached scan", sell.ListingsFor(2589)[1].unit, 100)
+sell.ForgetListings(2589)
+H.isNil("posted: the cached scan is forgotten", sell.cache[2589])
+sell.scanItemId, sell.listings = 2589, { { count = 1, unit = 7 } }
+H.eq("...the live scan answers while it is this item's",
+     sell.ListingsFor(2589)[1].unit, 7)
+sell.scanItemId = 4306
+H.isNil("...and not another item's", sell.ListingsFor(2589))
+cached(2589, { { count = 20, unit = 100 } }, sell.CACHE_TTL + 1)
+H.isNil("a stale cached scan is not listings", sell.ListingsFor(2589))
+sell.cache[2589] = nil
+sell.scanItemId, sell.listings = nil, nil
+
+-- ---------------------------------------------------------------------------
+H.section("Smart: the stack size that nets the most, within a limit")
+-- ---------------------------------------------------------------------------
+
+local function other(count, unit) return { count = count, unit = unit } end
+local function mine(count, unit) return { count = count, unit = unit, isMine = true } end
+local MARKET = { other(1, 150), other(1, 160), other(20, 100) }
+
+-- 45 Linen as 20 + 20 + 5, at most 5 auctions. Singles undercut to 149 and
+-- net 141 each, five of them: 705. Stacks of 20 undercut to 99, net 94 each,
+-- two of them: 3760.
+local best, opts, why = sell.SmartStacks(2589, MARKET, { 20, 20, 5 }, 20, 5)
+H.eq("full stacks beat five singles", best and best.size, 20)
+H.eq("...two of them -- all that can be made", best and best.count, 2)
+H.eq("...priced under the cheapest stack of 20", best and best.unit, 99)
+H.eq("...netting what two stacks of 20 net", best and best.total, 3760)
+H.eq("every candidate is shown, smallest first", opts[1] and opts[1].size, 1)
+H.eq("...singles priced against singles", opts[1] and opts[1].unit, 149)
+H.eq("...capped at the limit", opts[1] and opts[1].count, 5)
+H.eq("...and its total", opts[1] and opts[1].total, 705)
+
+-- Three held. A stack of 20 cannot be made, so it is no candidate; your full
+-- stack of 3 has no listings of its own and is priced against the cheapest
+-- of any size (100 -> 99, nets 94: 282). Three singles net 423.
+best, opts = sell.SmartStacks(2589, MARKET, { 3 }, 20, 5)
+H.eq("holding 3: singles win", best and best.size, 1)
+H.eq("...all three", best and best.count, 3)
+H.eq("a stack you cannot make is not a candidate", table.getn(opts), 2)
+H.eq("...your full stack, priced against any size", opts[2] and opts[2].unit, 99)
+
+-- YOUR OWN AUCTIONS COUNT against the limit.
+local withMine = { other(1, 150), other(20, 100), mine(20, 99), mine(20, 99),
+                   mine(1, 149), mine(1, 149) }
+best = sell.SmartStacks(2589, withMine, { 20, 20, 5 }, 20, 5)
+H.eq("four of yours up: one more auction", best and best.count, 1)
+H.eq("...of the size that nets most", best and best.size, 20)
+local full = { mine(20, 99), mine(20, 99), mine(20, 99), mine(20, 99),
+               mine(20, 99) }
+best, opts, why = sell.SmartStacks(2589, full, { 20 }, 20, 5)
+H.isNil("five of yours up: nothing", best)
+H.eq("...because of the limit", why, "limit")
+
+-- Your own listing the cheapest of its size: matched, not undercut.
+best, opts = sell.SmartStacks(2589, { other(20, 100), mine(20, 90) }, { 20 }, 20, 5)
+H.eq("your own cheapest stack is matched", best and best.unit, 90)
+
+-- A tie goes to the bigger stack: fewer auctions, same money.
+best = sell.SmartStacks(2589, { other(1, 101), other(2, 101) }, { 2 }, 20, 5)
+H.eq("a tie goes to the larger stack", best and best.size, 2)
+
+-- Nothing known at any size.
+best, opts, why = sell.SmartStacks(99999, {}, { 20 }, 20, 5)
+H.isNil("no price anywhere: no choice", best)
+H.isNil("...and not for the limit", why)
+H.eq("...and nothing to compare", table.getn(opts), 0)
+best, opts = sell.SmartStacks(2589, MARKET, {}, 20, 5)
+H.isNil("nothing held: nothing", best)
+
+-- ---------------------------------------------------------------------------
 H.section("The walk: ui/frame.lua")
 -- ---------------------------------------------------------------------------
 
@@ -256,6 +346,9 @@ assert(loadstring(wholeOf("function ui.WalkPlan(")))()
 assert(loadstring(wholeOf("function ui.DefaultStacks(")))()
 assert(loadstring(wholeOf("function ui.LeftoverSetting(")))()
 assert(loadstring(wholeOf("function ui.WalkLeftOutNote(")))()
+assert(loadstring(wholeOf("function ui.SmartNote(")))()
+assert(loadstring(wholeOf("function ui.WalkUnit(")))()
+util = A.util
 
 W.AddItem(2589, { name = "Linen Cloth", quality = 1, stackCount = 20 })
 local LINEN = W.items[2589].link
@@ -286,19 +379,77 @@ H.eq("the walk sees that a plan has nothing to post", wn, 0)
 s, n = ui.DefaultStacks(small)
 H.eq("...but the boxes never read zero stacks", n, 1)
 
+local _, _, wwhy = ui.WalkPlan(small)
+H.eq("...and says it was too few", wwhy, "few")
+
 H.eq("walking: Post All's remainder switch", ui.LeftoverSetting(true), false)
 db.SetSetting("keepLeftovers", true)
 H.eq("by hand: the Aegis tab's", ui.LeftoverSetting(false), true)
 
-H.eq("nothing left out says nothing", ui.WalkLeftOutNote(0, 0, 10), "")
-H.eq("...nor do nils", ui.WalkLeftOutNote(nil, nil, nil), "")
-H.eq("blacklisted only", ui.WalkLeftOutNote(3, 0, 10), " (left out: 3 blacklisted)")
-H.eq("too few only", ui.WalkLeftOutNote(0, 2, 10), " (left out: 2 fewer than 10)")
-H.eq("both", ui.WalkLeftOutNote(3, 2, 10),
-     " (left out: 3 blacklisted, 2 fewer than 10)")
-H.eq("below vendor", ui.WalkLeftOutNote(0, 0, 10, 1), " (left out: 1 below vendor)")
-H.eq("all three", ui.WalkLeftOutNote(3, 2, 10, 1),
-     " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10)")
+-- Smart, walking.
+db.SetPostOp("stackMode", "smart")
+db.SetPostOp("remainder", true)
+H.eq("Smart always moves on, whatever the remainder says",
+     ui.LeftoverSetting(true), false)
+W.SetBags({ [0] = {
+    { link = LINEN, count = 20 }, { link = LINEN, count = 20 },
+    { link = LINEN, count = 5 },
+} })
+cached(2589, MARKET)
+local ws, wc, _, wbest, wopts = ui.WalkPlan(it)
+H.eq("the walk plans Smart from the Scan's listings", ws, 20)
+H.eq("...and its count", wc, 2)
+H.check("...handing over the comparison", wbest and table.getn(wopts) == 2)
+H.eq("walking in Smart, the price is the one its size was chosen for",
+     ui.WalkUnit(it), 99)
+ui.sellQueue = nil
+H.isNil("...but not by hand", ui.WalkUnit(it))
+ui.sellQueue = { {} }
+db.SetPostOp("stackMode", "max")
+-- And without walking the bags to find that out: it runs whenever a walked
+-- item's listings land.
+local realHeld, walks = sell.HeldStacks, 0
+sell.HeldStacks = function(id) walks = walks + 1; return realHeld(id) end
+H.isNil("...nor in another mode", ui.WalkUnit(it))
+H.eq("...which it knows without a bag walk", walks, 0)
+sell.HeldStacks = realHeld
+db.SetPostOp("stackMode", "smart")
+cached(2589, { mine(20, 99), mine(20, 99), mine(20, 99), mine(20, 99),
+               mine(20, 99) })
+local _, lc, lwhy = ui.WalkPlan(it)
+H.eq("your own auctions fill the limit: nothing to post", lc, 0)
+H.eq("...and the walk is told why", lwhy, "limit")
+-- No price at any size: full stacks within the limit, priced by hand.
+sell.cache[2589] = nil
+db.SetPostOp("postCap", 1)
+local ns, nc, nwhy = ui.WalkPlan(it)
+H.eq("no price anywhere: full stacks", ns, 20)
+H.eq("...no more than the limit", nc, 1)
+H.isNil("...and nothing left out", nwhy)
+db.SetPostOp("postCap", 5)
+
+-- `best` is one of the options -- the same table, as sell.SmartStacks hands
+-- it over -- and is not listed again among what it beat.
+local pick = { size = 20, count = 2, total = 3760 }
+H.eq("Smart's note names the choice and what it beat",
+     ui.SmartNote(pick, { { size = 1, total = 705 }, pick }),
+     " Smart: 2 x 20 nets 37s 60c (1: 7s 5c)")
+H.eq("...and is silent when Smart did not choose", ui.SmartNote(nil, {}), "")
+
+H.eq("nothing left out says nothing", ui.WalkLeftOutNote({}, 10, 5), "")
+H.eq("...nor does nil", ui.WalkLeftOutNote(nil, nil, nil), "")
+H.eq("blacklisted only", ui.WalkLeftOutNote({ blacklisted = 3 }, 10, 5),
+     " (left out: 3 blacklisted)")
+H.eq("too few only", ui.WalkLeftOutNote({ tooFew = 2 }, 10, 5),
+     " (left out: 2 fewer than 10)")
+H.eq("below vendor", ui.WalkLeftOutNote({ below = 1 }, 10, 5),
+     " (left out: 1 below vendor)")
+H.eq("at the limit", ui.WalkLeftOutNote({ atLimit = 4 }, 10, 5),
+     " (left out: 4 at your limit of 5)")
+H.eq("all four", ui.WalkLeftOutNote({ blacklisted = 3, below = 1, tooFew = 2,
+                                      atLimit = 4 }, 10, 5),
+     " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10, 4 at your"
+     .. " limit of 5)")
 _G.A = realA
 
 H.check("a freshly slotted item starts from ui.DefaultStacks",
@@ -306,23 +457,38 @@ H.check("a freshly slotted item starts from ui.DefaultStacks",
             "local defSize, defCount = ui.DefaultStacks(it)"))
 local adv = bodyOf("function ui.AdvanceSellQueue(")
 H.check("the walk skips an item its plan cannot post",
-        has(adv, "local _, n = ui.WalkPlan(A.sell.GetItem())\n"
+        has(adv, "local _, n, why, best, opts = ui.WalkPlan(A.sell.GetItem())\n"
             .. "            if n < 1 then\n                A.sell.ClearSlot()"))
-H.check("...and counts it", has(adv, "ui.sellQueueTooFew = (ui.sellQueueTooFew or 0) + 1"))
+H.check("...and counts it under its reason",
+        has(adv, 'if why == "limit" then lo.atLimit = lo.atLimit + 1\n'
+            .. "                else lo.tooFew = lo.tooFew + 1 end"))
+H.check("the status line shows Smart's comparison",
+        has(adv, "ui.SmartNote(best, opts)"))
 H.check("each walked item re-derives its stacks", has(adv, "ui.sellDefaultsFor = nil\n"
     .. "                ui.RefreshSell()"))
-H.check("the count starts at zero for each walk",
-        has(bodyOf("function ui.StartSellQueue("), "ui.sellQueueTooFew = 0"))
+H.check("the counts start fresh for each walk",
+        has(bodyOf("function ui.StartSellQueue("),
+            "ui.sellLeftOut = { blacklisted = skipped, below = below, tooFew = 0,\n"
+            .. "                       atLimit = 0 }"))
 H.check("leftovers after a post ask the right switch",
         has(src, "ui.KeepLeftovers(ui.LeftoverSetting(ui.sellQueue ~= nil),"))
 H.check("the walk is built by Post All's queue, with its own switches",
         has(bodyOf("function ui.StartSellQueue("),
             'A.sell.PostAllQueue(A.db.PostOp("vendorGate"),\n'
             .. '        A.db.PostOp("byValue"), A.db.Setting("sellDefault"))'))
-H.check("...and remembers what the gate left out",
-        has(bodyOf("function ui.StartSellQueue("), "ui.sellQueueBelow = below"))
-H.check("the status line reports it",
-        has(adv, "A.db.PostOp(\"stackSize\"), ui.sellQueueBelow))"))
+H.check("the status line reports what was left out",
+        has(adv, "ui.WalkLeftOutNote(ui.sellLeftOut,\n"
+            .. '                            A.db.PostOp("stackSize"), A.db.PostOp("postCap")))'))
+H.check("a walked item is priced by Smart first",
+        has(src, "local u = ui.WalkUnit(it) or ui.DefaultSellUnit(it.itemId)"))
+H.check("a post forgets the item's cached scan",
+        has(src, "if done > 0 then A.sell.ForgetListings(p.itemId) end"))
+H.check("the limit box saves",
+        has(bodyOf("function ui.BuildPostAllOptions("),
+            'if n then A.db.SetPostOp("postCap", n) end'))
+H.check("...and paints from the operation",
+        has(bodyOf("function ui.RefreshPostAllOptions("),
+            'ui.paCapBox:SetText(tostring(A.db.PostOp("postCap")))'))
 H.check("the gate's box paints from the operation",
         has(bodyOf("function ui.RefreshPostAllOptions("),
             'ui.paVendorGate:SetChecked(A.db.PostOp("vendorGate") and 1 or nil)'))

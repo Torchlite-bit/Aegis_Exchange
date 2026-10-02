@@ -16683,7 +16683,7 @@ function ui.OnItemListings(rows)
     -- clearing the price and re-scanning re-prices it.
     if ui.sellPrefilledFor ~= it.itemId
         or util.Trim(ui.sellBuyout:GetText() or "") == "" then
-        local u = ui.DefaultSellUnit(it.itemId)
+        local u = ui.WalkUnit(it) or ui.DefaultSellUnit(it.itemId)
         if u then
             SetMoneyBox(ui.sellBuyout, u)
             ui.SyncSellPrices("unit")   -- keep the stack price in step
@@ -17030,14 +17030,47 @@ function ui.RefreshSell()
     ui.MaybeScanSlotItem()
 end
 
--- How Post All would post the slotted item: (size, count), count 0 meaning
--- nothing under the current plan. Post All's own settings (the Post All panel)
--- through A.sell.PlanStacks.
+-- How Post All would post the slotted item: (size, count, why, best, opts).
+-- Count 0 means nothing under the current plan, and `why` says which: "few"
+-- (not one stack of the fixed size) or "limit" (Smart's limit is already
+-- filled by your own auctions). `best` / `opts` are Smart's choice and the
+-- comparison, for the status line. Post All's own settings (the Post All
+-- panel) through A.sell.PlanStacks or A.sell.SmartStacks.
+--
+-- ONE BAG WALK (A.sell.HeldStacks), however many sizes the plan asks about.
 function ui.WalkPlan(it)
-    if not it or not it.itemId then return 1, 0 end
-    return A.sell.PlanStacks(A.db.PostOp("stackMode"), A.db.PostOp("stackSize"),
-        it.count, it.maxStack, A.db.PostOp("remainder"),
-        function(size) return A.sell.MaxStacks(it.itemId, size) end)
+    if not it or not it.itemId then return 1, 0, "few" end
+    local held = A.sell.HeldStacks(it.itemId)
+    local function stacksAt(size) return A.sell.StacksAt(held, size) end
+    local mode = A.db.PostOp("stackMode")
+    if mode == "smart" then
+        local limit = A.db.PostOp("postCap") or 0
+        local best, opts, why = A.sell.SmartStacks(it.itemId,
+            A.sell.ListingsFor(it.itemId), held, it.maxStack, limit)
+        if best then return best.size, best.count, nil, best, opts end
+        if why == "limit" then return 1, 0, "limit" end
+        -- No price at any size: full stacks, within the limit, and the price
+        -- is yours to type.
+        local size, n = A.sell.PlanStacks("max", nil, it.count, it.maxStack,
+            false, stacksAt)
+        if n > limit then n = limit end
+        return size, n, (n < 1) and "limit" or nil
+    end
+    local size, n = A.sell.PlanStacks(mode, A.db.PostOp("stackSize"),
+        it.count, it.maxStack, A.db.PostOp("remainder"), stacksAt)
+    return size, n, (n < 1) and "few" or nil
+end
+
+-- The price for the slotted item while Post All walks in Smart mode: the one
+-- Smart chose its size for, priced against listings OF THAT SIZE. nil
+-- otherwise, and the "Default sell price" setting decides as always.
+--
+-- The mode is checked FIRST, before any planning: this runs every time a
+-- walked item's listings land, and planning walks the bags.
+function ui.WalkUnit(it)
+    if not ui.sellQueue or A.db.PostOp("stackMode") ~= "smart" then return nil end
+    local _, _, _, best = ui.WalkPlan(it)
+    return best and best.unit
 end
 
 -- The size and count a freshly slotted item starts at. WHILE POST ALL IS
@@ -17351,8 +17384,11 @@ function ui.BuildPostAllOptions(f)
     stLbl:SetText("Stacks:")
     stLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
+    -- Each number box follows the mode it belongs to: the fixed size after
+    -- "Fixed size", the auction limit after "Smart".
     local modes = { { "As in bags", "bags" }, { "Full stacks", "max" },
-                    { "Singles", "singles" }, { "Fixed size", "fixed" } }
+                    { "Singles", "singles" }, { "Fixed size", "fixed" },
+                    { "Smart", "smart" } }
     ui.paModeBtns = {}
     local prev
     local mi = 1
@@ -17369,18 +17405,38 @@ function ui.BuildPostAllOptions(f)
         end)
         ui.paModeBtns[mi] = b
         prev = b
+        if b.mode == "fixed" then
+            -- The fixed size. Read on every change, so there is nothing to
+            -- confirm; a blank or zero box keeps the size it had.
+            local size = MakeNumBox(f, 34, function()
+                local n = NumVal(this, nil)
+                if n then A.db.SetPostOp("stackSize", n) end
+            end, 20)
+            size:SetPoint("LEFT", b, "RIGHT", 6, 0)
+            ui.InputText(size, "Post All: fixed stack size")
+            ui.paSizeBox = size
+            prev = size
+        end
         mi = mi + 1
     end
 
-    -- The fixed size. Read on every change, so there is nothing to confirm;
-    -- a blank or zero box keeps the size it had.
-    local size = MakeNumBox(f, 34, function()
+    -- Smart's limit: auctions of one item on the house at once, yours already
+    -- there included. Without one, singles win every comparison.
+    local capLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    capLbl:SetPoint("LEFT", prev, "RIGHT", 6, 0)
+    capLbl:SetText("at most")
+    capLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    local cap = MakeNumBox(f, 30, function()
         local n = NumVal(this, nil)
-        if n then A.db.SetPostOp("stackSize", n) end
+        if n then A.db.SetPostOp("postCap", n) end
     end, 20)
-    size:SetPoint("LEFT", prev, "RIGHT", 6, 0)
-    ui.InputText(size, "Post All: fixed stack size")
-    ui.paSizeBox = size
+    cap:SetPoint("LEFT", capLbl, "RIGHT", 4, 0)
+    ui.InputText(cap, "Post All: smart auction limit")
+    ui.paCapBox = cap
+    local capTail = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    capTail:SetPoint("LEFT", cap, "RIGHT", 4, 0)
+    capTail:SetText("auctions each")
+    capTail:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
 
     local rem = ui.MakeCheckBox(f, 18, "AegisExchangePostAllRemainder")
     rem:SetPoint("TOPLEFT", stLbl, "BOTTOMLEFT", 0, -10)
@@ -17413,8 +17469,8 @@ function ui.BuildPostAllOptions(f)
     hint:SetPoint("RIGHT", f, "RIGHT", -12, 0)
     hint:SetJustifyH("LEFT")
     hint:SetText("Left over: the rest goes up as one more stack \226\128\148"
-        .. " off moves on.  Value: what the whole holding nets.  Both use"
-        .. " the Scan's prices.")
+        .. " off moves on; Smart always moves on.  Smart: the stack size that"
+        .. " nets the most.  All use the Scan's prices.")
 
     local rule = f:CreateTexture(nil, "ARTWORK")
     rule:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -BLL.rule_y)
@@ -17433,7 +17489,13 @@ function ui.RefreshPostAllOptions()
     ui.paSizeBox:SetText(tostring(A.db.PostOp("stackSize")))
     if mode == "fixed" then ui.paSizeBox:SetAlpha(1)
     else ui.paSizeBox:SetAlpha(0.5) end
+    ui.paCapBox:SetText(tostring(A.db.PostOp("postCap")))
+    if mode == "smart" then ui.paCapBox:SetAlpha(1)
+    else ui.paCapBox:SetAlpha(0.5) end
     ui.paRemainder:SetChecked(A.db.PostOp("remainder") and 1 or nil)
+    -- Smart always moves on (ui.LeftoverSetting), so the box is dimmed there.
+    if mode == "smart" then ui.paRemainder:SetAlpha(0.5)
+    else ui.paRemainder:SetAlpha(1) end
     ui.paVendorGate:SetChecked(A.db.PostOp("vendorGate") and 1 or nil)
     ui.paByValue:SetChecked(A.db.PostOp("byValue") and 1 or nil)
 end
@@ -17608,23 +17670,50 @@ function ui.BuildBlacklist()
     end
 end
 
--- " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10)", or "" --
--- for the Post / Skip walk's status line, so a shorter walk than expected says
--- why. `size` is the fixed stack size, the only plan that can find too few.
+-- " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10, 1 at your
+-- limit of 5)", or "" -- for the Post / Skip walk's status line, so a shorter
+-- walk than expected says why. `t` is ui.sellLeftOut; `size` is the fixed
+-- stack size and `limit` Smart's, the only plans that can leave an item out.
 -- PURE.
-function ui.WalkLeftOutNote(blacklisted, tooFew, size, below)
+function ui.WalkLeftOutNote(t, size, limit)
+    t = t or {}
     local parts = {}
-    if blacklisted and blacklisted > 0 then
-        table.insert(parts, blacklisted .. " blacklisted")
+    if t.blacklisted and t.blacklisted > 0 then
+        table.insert(parts, t.blacklisted .. " blacklisted")
     end
-    if below and below > 0 then
-        table.insert(parts, below .. " below vendor")
+    if t.below and t.below > 0 then
+        table.insert(parts, t.below .. " below vendor")
     end
-    if tooFew and tooFew > 0 then
-        table.insert(parts, tooFew .. " fewer than " .. (size or "a stack"))
+    if t.tooFew and t.tooFew > 0 then
+        table.insert(parts, t.tooFew .. " fewer than " .. (size or "a stack"))
+    end
+    if t.atLimit and t.atLimit > 0 then
+        table.insert(parts, t.atLimit .. " at your limit of " .. (limit or "?"))
     end
     if table.getn(parts) == 0 then return "" end
     return " (left out: " .. table.concat(parts, ", ") .. ")"
+end
+
+-- " Smart: 2 x 20 nets 37s 60c (1: 7s 5c, 5: 9s 40c)" -- what Smart chose and
+-- what it beat, so the choice can be checked rather than trusted. "" when
+-- Smart is not deciding. Totals are what each would net if it all sold. PURE.
+function ui.SmartNote(best, opts)
+    if not best then return "" end
+    local others = {}
+    local i = 1
+    while i <= table.getn(opts or {}) do
+        local o = opts[i]
+        if o ~= best then
+            table.insert(others, o.size .. ": " .. util.FormatMoney(o.total))
+        end
+        i = i + 1
+    end
+    local note = " Smart: " .. best.count .. " x " .. best.size .. " nets "
+        .. util.FormatMoney(best.total)
+    if table.getn(others) > 0 then
+        note = note .. " (" .. table.concat(others, ", ") .. ")"
+    end
+    return note
 end
 
 function ui.RefreshBlacklist()
@@ -17997,8 +18086,14 @@ end
 -- leftovers ready to post" otherwise. A function rather than
 -- `walking and op or setting`, because that idiom returns the SETTING when
 -- the op says false.
+--
+-- SMART ALWAYS MOVES ON. Its limit decided how many went up; what is left
+-- waits for the next Post All, which counts the auctions now on the house.
 function ui.LeftoverSetting(walking)
-    if walking then return A.db.PostOp("remainder") end
+    if walking then
+        if A.db.PostOp("stackMode") == "smart" then return false end
+        return A.db.PostOp("remainder")
+    end
     return A.db.Setting("keepLeftovers")
 end
 
@@ -18040,9 +18135,10 @@ function ui.StartSellQueue()
     -- rules on top: the vendor gate and the order (A.sell.PostAllQueue).
     local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp("vendorGate"),
         A.db.PostOp("byValue"), A.db.Setting("sellDefault"))
-    ui.sellQueueSkipped = skipped
-    ui.sellQueueBelow = below
-    ui.sellQueueTooFew = 0
+    -- What this walk leaves out, and why -- the status line reads it. A fresh
+    -- table each walk, so one walk's counts never carry into the next.
+    ui.sellLeftOut = { blacklisted = skipped, below = below, tooFew = 0,
+                       atLimit = 0 }
     ui.sellQueue = q
     ui.sellQueueIndex = 0
     if table.getn(q) == 0 then
@@ -18065,12 +18161,15 @@ function ui.AdvanceSellQueue()
         -- sometimes slotted the wrong item (or nothing) instead of the next one.
         if item.itemId and A.sell.PlaceItemById(item.itemId) then
             -- NOTHING TO POST under the plan -- a fixed size of 10 with the
-            -- remainder off, and only 3 held: put it back and move on,
-            -- rather than stop on an item whose Post button cannot work.
-            local _, n = ui.WalkPlan(A.sell.GetItem())
+            -- remainder off and only 3 held, or Smart's limit already filled
+            -- by your own auctions: put it back and move on, rather than stop
+            -- on an item whose Post button cannot work.
+            local _, n, why, best, opts = ui.WalkPlan(A.sell.GetItem())
             if n < 1 then
                 A.sell.ClearSlot()
-                ui.sellQueueTooFew = (ui.sellQueueTooFew or 0) + 1
+                local lo = ui.sellLeftOut
+                if why == "limit" then lo.atLimit = lo.atLimit + 1
+                else lo.tooFew = lo.tooFew + 1 end
             else
                 ui.sellQueueIndex = i
                 -- Re-derive the stacks even when this item was in the slot
@@ -18079,9 +18178,10 @@ function ui.AdvanceSellQueue()
                 ui.RefreshSell()
                 if ui.sellStatus then
                     ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
-                        .. " \226\128\148 Post or Skip." .. ui.WalkLeftOutNote(
-                            ui.sellQueueSkipped, ui.sellQueueTooFew,
-                            A.db.PostOp("stackSize"), ui.sellQueueBelow))
+                        .. " \226\128\148 Post or Skip."
+                        .. ui.SmartNote(best, opts)
+                        .. ui.WalkLeftOutNote(ui.sellLeftOut,
+                            A.db.PostOp("stackSize"), A.db.PostOp("postCap")))
                 end
                 return true
             end
@@ -18093,8 +18193,7 @@ function ui.AdvanceSellQueue()
     ui.sellDefaultsFor = nil
     if ui.sellStatus then
         ui.sellStatus:SetText("Bag list finished." .. ui.WalkLeftOutNote(
-            ui.sellQueueSkipped, ui.sellQueueTooFew, A.db.PostOp("stackSize"),
-            ui.sellQueueBelow))
+            ui.sellLeftOut, A.db.PostOp("stackSize"), A.db.PostOp("postCap")))
     end
     return false
 end
@@ -18204,6 +18303,9 @@ function ui.DoPost()
                     .. "...")
             end,
             onDone = function(done, total, reason)
+                -- Its cached scan no longer shows your own auctions: forget
+                -- it, so the next Scan reads them (A.sell.ForgetListings).
+                if done > 0 then A.sell.ForgetListings(p.itemId) end
                 local msg = "Posted " .. done .. " of " .. total .. "."
                 if reason == "out" then
                     msg = msg .. " (ran out of items)"

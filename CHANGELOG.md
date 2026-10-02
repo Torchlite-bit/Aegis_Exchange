@@ -18,6 +18,31 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.31]
+
+### Added
+- **Smart stacks for Post All.** Pick **Smart** in the Post All panel and the
+  walk compares the stack sizes people are actually selling in — plus your own
+  full stack — and posts the one that would **net the most if it all sold**:
+  - each size is priced just under the cheapest listing **of that size**
+    (singles against singles, 20s against 20s);
+  - it posts **at most N auctions of an item** (5 by default, set it next to
+    the button), **counting the ones you already have up** — so it can't flood
+    the market or fill your 120-auction cap with singles;
+  - a tie goes to the bigger stack: fewer auctions, same money.
+  - The status line shows the choice and what it beat:
+    *Smart: 2 x 20 nets 37s 60c (1: 7s 5c)*.
+  - An item you already have N auctions of is left out (*left out: 1 at your
+    limit of 5*). Smart always moves on after posting: what's left waits for
+    the next Post All.
+
+### Fixed
+- After posting an item, the next bag scan in the same visit reads its
+  listings again instead of reusing ones that didn't include what you just
+  posted.
+
+---
+
 ## [1.54.30]
 
 ### Added
@@ -6486,6 +6511,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -7928,8 +7928,8 @@ end""",
      "blacklist"),
 
     ("skipped-note-speaks-for-zero", "ui/frame.lua",
-     "    if blacklisted and blacklisted > 0 then",
-     "    if blacklisted then",
+     "    if t.blacklisted and t.blacklisted > 0 then",
+     "    if t.blacklisted then",
      "blacklist"),
 
     # ---- how Post All posts (ROADMAP 5.4) -----------------------------------
@@ -8017,8 +8017,15 @@ end""",
      "postall"),
 
     ("walk-does-not-count-what-it-skipped", "ui/frame.lua",
-     "                ui.sellQueueTooFew = (ui.sellQueueTooFew or 0) + 1\n",
-     "",
+     "                else lo.tooFew = lo.tooFew + 1 end",
+     "                end",
+     "postall"),
+
+    # Left out at the limit, but reported as too few for a stack of 10.
+    ("walk-counts-the-limit-as-too-few", "ui/frame.lua",
+     "                if why == \"limit\" then lo.atLimit = lo.atLimit + 1\n"
+     "                else lo.tooFew = lo.tooFew + 1 end",
+     "                lo.tooFew = lo.tooFew + 1",
      "postall"),
 
     # An item slotted by hand before the walk keeps its hand-made stacks.
@@ -8028,8 +8035,10 @@ end""",
      "postall"),
 
     ("walk-skipped-count-carries-over", "ui/frame.lua",
-     "    ui.sellQueueTooFew = 0\n",
-     "",
+     "    ui.sellLeftOut = { blacklisted = skipped, below = below, tooFew = 0,\n"
+     "                       atLimit = 0 }",
+     "    ui.sellLeftOut = ui.sellLeftOut or { blacklisted = skipped,\n"
+     "        below = below, tooFew = 0, atLimit = 0 }",
      "postall"),
 
     ("walk-leftovers-ask-the-aegis-tab", "ui/frame.lua",
@@ -8038,15 +8047,27 @@ end""",
      "postall"),
 
     ("leftover-setting-and-or-trap", "ui/frame.lua",
-     "    if walking then return A.db.PostOp(\"remainder\") end\n"
+     "        return A.db.PostOp(\"remainder\")\n    end\n"
      "    return A.db.Setting(\"keepLeftovers\")",
-     "    return walking and A.db.PostOp(\"remainder\")\n"
-     "        or A.db.Setting(\"keepLeftovers\")",
+     "        return A.db.PostOp(\"remainder\") or A.db.Setting(\"keepLeftovers\")\n"
+     "    end\n    return A.db.Setting(\"keepLeftovers\")",
+     "postall"),
+
+    # Smart re-slotting its leftovers posts past its own limit.
+    ("smart-keeps-leftovers", "ui/frame.lua",
+     "        if A.db.PostOp(\"stackMode\") == \"smart\" then return false end\n"
+     "        return A.db.PostOp(\"remainder\")",
+     "        return A.db.PostOp(\"remainder\")",
      "postall"),
 
     ("walk-note-silent-about-too-few", "ui/frame.lua",
-     "        table.insert(parts, tooFew .. \" fewer than \" .. (size or \"a stack\"))",
-     "        local _ = tooFew",
+     "        table.insert(parts, t.tooFew .. \" fewer than \" .. (size or \"a stack\"))",
+     "        local _ = t.tooFew",
+     "postall"),
+
+    ("walk-note-silent-about-the-limit", "ui/frame.lua",
+     "        table.insert(parts, t.atLimit .. \" at your limit of \" .. (limit or \"?\"))",
+     "        local _ = t.atLimit",
      "postall"),
 
     ("options-show-the-remainder-always-on", "ui/frame.lua",
@@ -8148,8 +8169,121 @@ end""",
      "postall"),
 
     ("walk-note-silent-about-below-vendor", "ui/frame.lua",
-     "        table.insert(parts, below .. \" below vendor\")",
-     "        local _ = below",
+     "        table.insert(parts, t.below .. \" below vendor\")",
+     "        local _ = t.below",
+     "postall"),
+
+    # ---- smart stacks ------------------------------------------------------
+    ("smart-ignores-your-own-auctions", "core/sell.lua",
+     "        if r.isMine then\n            mine = mine + 1\n        elseif",
+     "        if r.isMine then\n        elseif",
+     "postall"),
+
+    ("smart-without-a-limit", "core/sell.lua",
+     "        if n > left then n = left end\n        if unit and n >= 1 then",
+     "        if unit and n >= 1 then",
+     "postall"),
+
+    ("smart-at-the-limit-posts-anyway", "core/sell.lua",
+     "    if left < 1 then return nil, {}, \"limit\" end",
+     "    if left < 1 then left = 1 end",
+     "postall"),
+
+    # Every size priced against the cheapest of ANY size: singles stop
+    # fetching what singles sell for, and the comparison means nothing.
+    ("smart-prices-every-size-alike", "core/sell.lua",
+     "            unit = sell.UndercutFrom(same, itemId)",
+     "            unit = general",
+     "postall"),
+
+    ("smart-forgets-your-full-stack", "core/sell.lua",
+     "    if not seen[full] then table.insert(sizes, full) end",
+     "",
+     "postall"),
+
+    ("smart-by-unit-price-not-total", "core/sell.lua",
+     "                        total = sell.NetUnit(unit) * size * n }",
+     "                        total = sell.NetUnit(unit) }",
+     "postall"),
+
+    ("smart-ties-go-small", "core/sell.lua",
+     "                or (o.total == best.total and o.size > best.size) then",
+     "                or (o.total == best.total and o.size < best.size) then",
+     "postall"),
+
+    ("smart-picks-the-worst", "core/sell.lua",
+     "            if not best or o.total > best.total",
+     "            if not best or o.total < best.total",
+     "postall"),
+
+    ("stacks-at-merges-stacks", "core/sell.lua",
+     "        n = n + math.floor((held[i] or 0) / size)",
+     "        n = n + (held[i] or 0) / size",
+     "postall"),
+
+    ("listings-for-trusts-a-stale-cache", "core/sell.lua",
+     "    if entry and time() - entry.when < sell.CACHE_TTL then return entry.listings end",
+     "    if entry then return entry.listings end",
+     "postall"),
+
+    ("listings-for-takes-another-items-scan", "core/sell.lua",
+     "    if sell.scanItemId == itemId then return sell.listings end",
+     "    return sell.listings",
+     "postall"),
+
+    ("post-keeps-a-stale-cache", "core/sell.lua",
+     "    if itemId then sell.cache[itemId] = nil end",
+     "    local _ = itemId",
+     "postall"),
+
+    ("walk-plan-ignores-smart", "ui/frame.lua",
+     "    if mode == \"smart\" then\n        local limit = A.db.PostOp(\"postCap\") or 0",
+     "    if false then\n        local limit = A.db.PostOp(\"postCap\") or 0",
+     "postall"),
+
+    ("walk-plan-no-price-ignores-the-limit", "ui/frame.lua",
+     "        if n > limit then n = limit end\n        return size, n, (n < 1) and \"limit\" or nil",
+     "        return size, n, (n < 1) and \"limit\" or nil",
+     "postall"),
+
+    ("walk-unit-outside-smart", "ui/frame.lua",
+     "    if not ui.sellQueue or A.db.PostOp(\"stackMode\") ~= \"smart\" then return nil end",
+     "    if not ui.sellQueue then return nil end",
+     "postall"),
+
+    ("walk-unit-by-hand", "ui/frame.lua",
+     "    if not ui.sellQueue or A.db.PostOp(\"stackMode\") ~= \"smart\" then return nil end",
+     "    if A.db.PostOp(\"stackMode\") ~= \"smart\" then return nil end",
+     "postall"),
+
+    ("smart-price-never-reaches-the-box", "ui/frame.lua",
+     "        local u = ui.WalkUnit(it) or ui.DefaultSellUnit(it.itemId)",
+     "        local u = ui.DefaultSellUnit(it.itemId)",
+     "postall"),
+
+    ("post-never-forgets-the-scan", "ui/frame.lua",
+     "                if done > 0 then A.sell.ForgetListings(p.itemId) end\n",
+     "",
+     "postall"),
+
+    ("smart-note-lists-the-winner-twice", "ui/frame.lua",
+     "        if o ~= best then\n            table.insert(others,",
+     "        if true then\n            table.insert(others,",
+     "postall"),
+
+    ("smart-note-missing", "ui/frame.lua",
+     "                        .. ui.SmartNote(best, opts)\n",
+     "",
+     "postall"),
+
+    ("limit-box-saves-nothing", "ui/frame.lua",
+     "        if n then A.db.SetPostOp(\"postCap\", n) end",
+     "        local _ = n",
+     "postall"),
+
+    ("smart-limit-defaults-off", "core/db.lua",
+     "    postCap = 5,",
+     "    postCap = 0,",
      "postall"),
 
     ("gate-box-shows-always-on", "ui/frame.lua",
