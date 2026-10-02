@@ -18,6 +18,27 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.27]
+
+### Fixed
+- **The disenchant line no longer gives up when one material has no price.**
+  A Heavy Mithril Gauntlet sells to a vendor for 24s 76c and breaks 75% of the
+  time into Vision Dust ×3.5 — at 9s 76c a dust that alone is worth more than
+  the vendor pays — yet the tooltip said *"Disenchant: ?"* because the 5% Small
+  Radiant Shard had never been listed. Now it shows **at least** what the priced
+  materials are worth, still names the missing one, and gives the verdict when
+  that floor alone proves it: *worth more than vendor*, or *worth more than the
+  AH*. It never says *sells for more than it breaks for* from a floor — the
+  missing material could be worth anything.
+- The same goes for the **Sell tab's "Worth more disenchanted"** advice
+  (*at least* …), **`/aex de`**, and the **`disenchant-profit` /
+  `disenchant-percent`** search filters, which now keep an item the priced
+  materials already prove profitable instead of setting it aside as unknown.
+
+*Thanks to Sukie for the report and the arithmetic.*
+
+---
+
 ## [1.54.26]
 
 ### Fixed
@@ -6402,6 +6423,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.25]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.24]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

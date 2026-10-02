@@ -60,6 +60,32 @@ local function Want(key)
     return A.db.Setting(key) ~= false
 end
 
+-- What the Disenchant line says about its figure. Returns verdict, good -- or
+-- nil when there is nothing worth saying. PURE.
+--
+-- 10% either way before anything is said: a disenchant value is an EXPECTATION
+-- over a probability table, and a thinner edge than that is noise.
+--
+-- `partial` means the figure is a FLOOR (de.ValueFloor) -- one material has no
+-- price, so the real value is at least this and possibly more. A floor can say
+-- "worth more than vendor" or "worth more than the AH" and be right whatever
+-- the missing material fetches. It can NEVER say "sells for more than it
+-- breaks for": the real value could be far higher, and that verdict tells
+-- somebody to sell the thing.
+function tooltip.DisenchantVerdict(value, vendor, ah, partial)
+    if not value then return nil end
+    local verdict, good
+    if vendor and vendor > 0 and value > vendor * 1.1 then
+        verdict, good = "worth more than vendor", true
+    end
+    if ah and ah > 0 and value > ah * 1.1 then
+        verdict, good = "worth more than the AH", true
+    elseif ah and ah > 0 and value * 1.1 < ah and not partial then
+        verdict, good = "sells for more than it breaks for", false
+    end
+    return verdict, good
+end
+
 function tooltip.Extend(gtt, itemId, count)
     -- Honour the Aegis-tab toggle for tooltip price lines.
     if A.db.Setting and A.db.Setting("tooltip") == false then return end
@@ -100,7 +126,7 @@ function tooltip.Extend(gtt, itemId, count)
         and A.craft.CostForItem(itemId) or nil
 
     local disenchant, disenchantRows, disenchantSource
-    local deUnpriced, deMissingId, deInfo
+    local deUnpriced, deMissingId, deInfo, deFloor
     if Want("tipDisenchant") and A.de then
         -- The item's CLASS, for the line that frames the split: armour and
         -- weapons break into different things. One lookup, taken only when
@@ -108,7 +134,7 @@ function tooltip.Extend(gtt, itemId, count)
         deInfo = util.ItemInfo(itemId)
         -- One resolve, not two: de.ValueOf hands back WHY it failed alongside
         -- the failure, so the diagnosis below costs nothing extra.
-        disenchant, disenchantSource, deUnpriced, deMissingId =
+        disenchant, disenchantSource, deUnpriced, deMissingId, deFloor =
             A.de.ValueOf(itemId, A.de.MarketPrice, deInfo)
         -- The rows are a fact about the ITEM, not about the market, so they do
         -- not depend on the value resolving. Shown when the setting asks for
@@ -230,16 +256,8 @@ function tooltip.Extend(gtt, itemId, count)
             -- THE VERDICT LIVES IN THE LABEL. On its own line it read as a
             -- footnote to a number the reader had already moved past; beside
             -- the figure it is the answer to why they hovered.
-            local verdict, good
-            local ah = minBuy or market
-            if vendor and vendor > 0 and disenchant > vendor * 1.1 then
-                verdict, good = "worth more than vendor", true
-            end
-            if ah and ah > 0 and disenchant > ah * 1.1 then
-                verdict, good = "worth more than the AH", true
-            elseif ah and ah > 0 and disenchant * 1.1 < ah then
-                verdict, good = "sells for more than it breaks for", false
-            end
+            local verdict, good = tooltip.DisenchantVerdict(disenchant, vendor,
+                minBuy or market, false)
             local clause = ""
             if verdict then
                 clause = " " .. (good and VERDICT_GOOD or VERDICT_BAD)
@@ -256,8 +274,27 @@ function tooltip.Extend(gtt, itemId, count)
             -- The rule answered; the market did not. Naming the material turns
             -- "this item has never worked" into "scan for that shard".
             if disenchantRows then blank() end
-            pair("Disenchant" .. ((not disenchantRows) and approx or "") .. ":",
-                "|cff9d8b5a?|r")
+            if deFloor and deFloor > 0 then
+                -- ...but what IS priced still proves something. REPORTED: a
+                -- gauntlet whose 75% Vision Dust alone beat the vendor price
+                -- said "?" because the 5% shard had never been listed. The
+                -- priced materials are a floor (de.ValueFloor): shown as
+                -- "at least", and allowed to call only the verdicts a floor
+                -- can prove.
+                local verdict, good = tooltip.DisenchantVerdict(deFloor, vendor,
+                    minBuy or market, true)
+                local clause = ""
+                if verdict then
+                    clause = " " .. (good and VERDICT_GOOD or VERDICT_BAD)
+                        .. "(" .. verdict .. ")|r"
+                end
+                pair("Disenchant" .. clause
+                        .. ((not disenchantRows) and approx or "") .. ":",
+                    "at least " .. util.FormatMoney(deFloor, true))
+            else
+                pair("Disenchant" .. ((not disenchantRows) and approx or "") .. ":",
+                    "|cff9d8b5a?|r")
+            end
             local matName = deMissingId and util.ItemName(deMissingId)
             if matName then
                 gtt:AddLine("    no price yet for " .. matName, 0.6, 0.6, 0.6)

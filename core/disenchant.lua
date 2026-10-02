@@ -571,6 +571,36 @@ function de.Value(ilvl, quality, equipLoc, itemId, priceOf)
     return math.floor(total + 0.5)
 end
 
+-- What the PRICED materials alone are worth: a FLOOR under the expected value,
+-- never an estimate of it. nil when there is no rule or no pricer; 0 when
+-- nothing is priced.
+--
+-- REPORTED (Discord): "why does the disenchant/vendor check give up on both
+-- parts upon seeing a possible output without price data?" A Heavy Mithril
+-- Gauntlet's 75% Vision Dust alone was worth more than the 24s 76c a vendor
+-- pays, and the tooltip said "?" because the 5% shard had never been listed.
+--
+-- de.Value is still all-or-nothing, and it is still right to be: a partial sum
+-- quoted AS the value understates it. But no price is ever negative, so the
+-- partial sum is a floor, and a floor PROVES some answers outright -- "worth
+-- more than vendor", "at least 50s profit", "worth breaking" -- whatever the
+-- missing material turns out to fetch. It can never prove the reverse ("sells
+-- for more than it breaks for"); every caller that reads it reads it as "at
+-- least", and only to say yes.
+function de.ValueFloor(ilvl, quality, equipLoc, itemId, priceOf)
+    local rows = RowsFor(ilvl, quality, equipLoc, itemId)
+    if not rows or not priceOf then return nil end
+    local total, i, n = 0, 1, table.getn(rows)
+    while i <= n do
+        local r = rows[i]
+        local price = priceOf(r[1])
+        if price and price > 0 then total = total + r[2] * r[3] * price end
+        i = i + 1
+    end
+    -- DOWN, not to nearest: a floor rounded up is no longer a floor.
+    return math.floor(total)
+end
+
 -- WHY the value came back nil, when it did.
 --
 -- de.Value is all-or-nothing: one unpriced material and the whole answer
@@ -732,8 +762,10 @@ function de.YieldOf(itemId, info)
 end
 
 -- What this item is worth disenchanted, by id. Returns copper, source, or nil.
--- Returns value, source -- and on failure, additionally why it failed:
--- value(nil), source, unpricedCount, firstUnpricedMaterialId.
+-- Returns value, source -- and on failure, additionally why it failed and what
+-- the priced materials prove anyway:
+-- value(nil), source, unpricedCount, firstUnpricedMaterialId, floor.
+-- `floor` is de.ValueFloor: "at least", never "about" -- see there.
 --
 -- The extra returns are additive; every existing caller reads the first two and
 -- is unaffected. They exist so a caller can explain the silence WITHOUT paying
@@ -750,7 +782,8 @@ function de.ValueOf(itemId, priceOf, info)
     if not value then
         local unpriced, _, first =
             de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
-        return nil, source, unpriced, first
+        local floor = de.ValueFloor(ilvl, quality, equipLoc, itemId, priceOf)
+        return nil, source, unpriced, first, floor
     end
     return value, source
 end
@@ -794,17 +827,26 @@ de.ADVICE_MARGIN = 1.25
 -- Returns value, source when disenchanting clearly beats selling, and nil
 -- otherwise -- including when we are simply not certain enough to say.
 --
+-- A third return, `partial`, is true when one material has no price and the
+-- figure is the FLOOR (de.ValueFloor): the priced materials alone clear the
+-- margin, so the advice holds whatever the missing one fetches. The caller
+-- says "at least" when it is set.
+--
 -- `bestSale` is what the caller would actually KEEP from selling: the auction
 -- price after the consignment cut, or the vendor price, whichever is larger.
 -- Computing it here would mean this function knowing about cuts and vendors,
 -- which is the Sell tab's business, not the rule's.
 function de.ShouldDisenchant(itemId, bestSale, priceOf, info)
     if not itemId or not bestSale or bestSale <= 0 then return nil end
-    local value, source = de.ValueOf(itemId, priceOf, info)
-    if not value then return nil end
+    local value, source, _, _, floor = de.ValueOf(itemId, priceOf, info)
+    local partial = false
+    if not value then
+        if not floor or floor <= 0 then return nil end
+        value, partial = floor, true
+    end
     if source ~= "observed" and source ~= "client" then return nil end
     if value <= bestSale * de.ADVICE_MARGIN then return nil end
-    return value, source
+    return value, source, partial
 end
 
 -- The default pricer: what one of a material is worth, best source first.

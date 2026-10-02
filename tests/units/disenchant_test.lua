@@ -658,4 +658,48 @@ H.isNil("prose gives nothing", de.ParseReportArgs("what breaks into what"))
 
 W.SetClientItemData(false)
 
+-- ---------------------------------------------------------------------------
+H.section("A floor from the priced materials (de.ValueFloor)")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED (Discord): "why does the disenchant/vendor check give up on both
+-- parts upon seeing a possible output without price data?" de.Value is still
+-- all-or-nothing -- a partial sum quoted AS the value understates it -- but no
+-- price is negative, so the partial sum is a FLOOR, and a floor proves "worth
+-- more than X" whatever the missing material fetches.
+local fRows = de.Yield(45, GREEN, ARMOUR)
+local missing = fRows[table.getn(fRows)].itemId        -- the shard, last row
+local function allBut(skip, p)
+    return function(id) if id == skip then return nil end return p end
+end
+local wantFloor = 0
+for i = 1, table.getn(fRows) do
+    local r = fRows[i]
+    if r.itemId ~= missing then wantFloor = wantFloor + r.chance * r.mean * 10000 end
+end
+wantFloor = math.floor(wantFloor)
+
+H.isNil("one unpriced material: still no VALUE",
+        de.Value(45, GREEN, ARMOUR, nil, allBut(missing, 10000)))
+local f45 = de.ValueFloor(45, GREEN, ARMOUR, nil, allBut(missing, 10000))
+H.eq("...but a floor: what the priced materials are worth", f45, wantFloor)
+local whole45 = de.Value(45, GREEN, ARMOUR, nil, flat(10000))
+H.check("the floor sits under the whole value", f45 < whole45,
+        f45 .. " vs " .. whole45)
+local fAll = de.ValueFloor(45, GREEN, ARMOUR, nil, flat(10000))
+H.check("everything priced: the floor IS the value, give or take rounding",
+        fAll <= whole45 and whole45 - fAll <= 1, fAll .. " vs " .. whole45)
+H.eq("nothing priced: a floor of zero",
+     de.ValueFloor(45, GREEN, ARMOUR, nil, function() return nil end), 0)
+H.isNil("no pricer: no floor", de.ValueFloor(45, GREEN, ARMOUR, nil, nil))
+H.isNil("nothing to disenchant: no floor",
+        de.ValueFloor(45, 1, ARMOUR, nil, flat(10000)))
+-- DOWN, never up: a floor rounded up is no longer a floor.
+local thinWant = 0
+for i = 1, table.getn(fRows) do
+    thinWant = thinWant + fRows[i].chance * fRows[i].mean * 1
+end
+H.eq("rounded down, never up", de.ValueFloor(45, GREEN, ARMOUR, nil, flat(1)),
+     math.floor(thinWant))
+
 os.exit(H.report("disenchant"))

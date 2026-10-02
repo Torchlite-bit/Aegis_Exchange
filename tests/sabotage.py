@@ -120,6 +120,72 @@ SABOTAGES = [
      "",
      "buy.batch"),
 
+    # ---- a disenchant floor from the priced materials ----------------------
+    # The report (Discord): "why does the disenchant/vendor check give up on
+    # both parts upon seeing a possible output without price data?"
+    ("de-floor-rounds-up", "core/disenchant.lua",
+     "    return math.floor(total)\nend\n\n-- WHY the value came back nil",
+     "    return math.floor(total + 0.5)\nend\n\n-- WHY the value came back nil",
+     "disenchant"),
+
+    ("de-floor-counts-unpriced", "core/disenchant.lua",
+     "        if price and price > 0 then total = total + r[2] * r[3] * price end",
+     "        total = total + r[2] * r[3] * (price or 10000)",
+     "disenchant"),
+
+    ("de-valueof-drops-the-floor", "core/disenchant.lua",
+     "        return nil, source, unpriced, first, floor",
+     "        return nil, source, unpriced, first",
+     "tooltip"),
+
+    # A floor that says "sell it instead" -- the real value could be far
+    # higher, and that verdict tells somebody to sell the thing.
+    ("de-floor-says-sell-it", "ui/tooltip.lua",
+     "    elseif ah and ah > 0 and value * 1.1 < ah and not partial then",
+     "    elseif ah and ah > 0 and value * 1.1 < ah then",
+     "tooltip"),
+
+    ("de-floor-shown-as-question-mark", "ui/tooltip.lua",
+     "            if deFloor and deFloor > 0 then",
+     "            if false then",
+     "tooltip"),
+
+    ("de-profit-filter-ignores-floor", "core/buy.lua",
+     "            if floor and (floor - row.unit) >= floorV then return true end\n",
+     "",
+     "post_filter"),
+
+    # A floor that answers NO: the real value might clear the bar, and the
+    # row silently vanishes as if judged.
+    ("de-profit-filter-floor-says-no", "core/buy.lua",
+     "            if floor and (floor - row.unit) >= floorV then return true end",
+     "            if floor then return (floor - row.unit) >= floorV end",
+     "post_filter"),
+
+    ("de-percent-filter-ignores-floor", "core/buy.lua",
+     """            if not value and floor and floor > 0
+               and (row.unit / floor) * 100 <= cap then
+                return true
+            end""",
+     "",
+     "post_filter"),
+
+    ("de-advice-ignores-floor", "core/disenchant.lua",
+     """        if not floor or floor <= 0 then return nil end
+        value, partial = floor, true""",
+     "        return nil",
+     "clientdata"),
+
+    ("de-advice-floor-unflagged", "core/disenchant.lua",
+     "        value, partial = floor, true",
+     "        value, partial = floor, false",
+     "clientdata"),
+
+    ("sell-tab-drops-at-least", "ui/frame.lua",
+     '            .. (deFloorOnly and "at least " or "")\n',
+     "",
+     "clientdata"),
+
     # ---- a category browse gathers every page -----------------------------
     # The report: "Projectile > Bullet doesn't list all the ammo types".
     ("gather-never", "core/buy.lua",
@@ -1731,10 +1797,10 @@ end
     # The source is how a caller knows whether it may ADVISE on the number or
     # merely show it. Dropping it silently promotes a guess to a fact.
     ("de-valueof-drops-source", "core/disenchant.lua",
-     """        return nil, source, unpriced, first
+     """        return nil, source, unpriced, first, floor
     end
     return value, source""",
-     """        return nil, source, unpriced, first
+     """        return nil, source, unpriced, first, floor
     end
     return value""",
      "disenchant"),
@@ -2233,8 +2299,8 @@ end
     # including "sells for more than it breaks for", which then advises
     # destroying an item in the colour that means "do it".
     ("tip-verdict-always-green", "ui/tooltip.lua",
-     '                verdict, good = "sells for more than it breaks for", false',
-     '                verdict, good = "sells for more than it breaks for", true',
+     '        verdict, good = "sells for more than it breaks for", false',
+     '        verdict, good = "sells for more than it breaks for", true',
      "tooltip"),
 
     # The sighting count removed. A median resting on one auction and one
@@ -2388,15 +2454,14 @@ end
     # rejects every item Aegis has not learned yet, which reads as "nothing
     # here is profitable" -- indistinguishable from a working filter.
     ("de-filter-unknown-counts-as-zero", "core/buy.lua",
-     """            if not value then
-                return Unanswered(stats, "disenchant-profit")
-            end""",
-     """            value = value or 0""",
+     """            if value then return (value - row.unit) >= floorV end""",
+     """            value = value or 0
+            if value then return (value - row.unit) >= floorV end""",
      "post_filter"),
 
     ("de-profit-inverted", "core/buy.lua",
-     "            return (value - row.unit) >= floorV",
-     "            return (row.unit - value) >= floorV",
+     "            if value then return (value - row.unit) >= floorV end",
+     "            if value then return (row.unit - value) >= floorV end",
      "post_filter"),
 
     ("de-percent-inverted", "core/buy.lua",
@@ -2409,19 +2474,11 @@ end
     # the note on nearly every search until it stopped meaning anything.
     ("de-filter-confesses-bid-only", "core/buy.lua",
      """            if not row.unit then return false end       -- bid-only
-            local value = row.itemId
-                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
-            if not value then
-                return Unanswered(stats, "disenchant-profit")
-            end""",
+            local value, floor""",
      """            if not row.unit then
                 return Unanswered(stats, "disenchant-profit")
             end
-            local value = row.itemId
-                and A.de and A.de.ValueOf(row.itemId, A.de.MarketPrice)
-            if not value then
-                return Unanswered(stats, "disenchant-profit")
-            end""",
+            local value, floor""",
      "post_filter"),
 
     # The two disenchant components must offer the SAME remedy. Different
@@ -2897,8 +2954,8 @@ end
     # A one-sided verdict: only ever says "break it", never "sell it". Half
     # the advice, and the half that costs gold.
     ("tip-verdict-only-ever-positive", "ui/tooltip.lua",
-     "        elseif ah and ah > 0 and disenchant * 1.1 < ah then",
-     "        elseif false then",
+     "    elseif ah and ah > 0 and value * 1.1 < ah and not partial then",
+     "    elseif false then",
      "tooltip"),
 
     # THE DEVOUT BELT CASE, back. An unresolvable value goes silent again
@@ -2989,7 +3046,8 @@ end
     ("tip-diagnosis-resolves-twice", "core/disenchant.lua",
      """        local unpriced, _, first =
             de.MissingPrice(ilvl, quality, equipLoc, itemId, priceOf)
-        return nil, source, unpriced, first""",
+        local floor = de.ValueFloor(ilvl, quality, equipLoc, itemId, priceOf)
+        return nil, source, unpriced, first, floor""",
      "        return nil, source",
      "tooltip"),
 

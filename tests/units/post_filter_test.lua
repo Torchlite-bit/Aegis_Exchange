@@ -606,4 +606,32 @@ for i = 1, table.getn(live) do
             "an implemented component is drawn dim and labelled ignored")
 end
 
+-- ---------------------------------------------------------------------------
+H.section("...but the priced materials can still prove a yes")
+-- ---------------------------------------------------------------------------
+
+-- One material with no price used to make the whole answer "don't know". The
+-- priced ones are a FLOOR under the value (de.ValueFloor): enough to say YES
+-- to an "at least" question, never enough to say no.
+A.db.account.realms = {}
+A.db.Init()
+A.db.RecordAuction(11176, 10000, "Dream Dust")
+A.db.RecordAuction(11175, 10000, "Greater Nether Essence")
+-- Large Radiant Shard: never seen.
+local fv, _, _, _, fl = A.de.ValueOf(DE_ITEM, A.de.MarketPrice)
+H.isNil("(the value is unknown)", fv)
+H.check("(the floor is not)", fl and fl > 0, tostring(fl))
+
+H.check("the floor alone clears disenchant-profit/1c",
+        kept("silk/disenchant-profit/1c", deRow(fl - 1)), "")
+local pk, pblind = keeps("silk/disenchant-profit/1c", deRow(fl))
+H.check("a price the floor does not beat is not answered no...", not pk, "")
+H.eq("...it is counted as one the filter could not judge", pblind, 1)
+
+H.check("disenchant-percent/100 at the floor's own price is proven",
+        kept("silk/disenchant-percent/100", deRow(fl)), "")
+local qk, qblind = keeps("silk/disenchant-percent/50", deRow(fl))
+H.check("...more than half the floor is not proven", not qk, "")
+H.eq("...and counted, not rejected", qblind, 1)
+
 os.exit(H.report("post_filter"))

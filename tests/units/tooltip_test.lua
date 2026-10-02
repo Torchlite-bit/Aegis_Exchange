@@ -668,4 +668,94 @@ A.tooltip.Extend(offInv, 930, 1)
 H.isNil("switched off, the block is gone", lineFor(offInv, "Inventory"))
 A.db.SetSetting("tipInventory", true)
 
+-- ---------------------------------------------------------------------------
+H.section("one unpriced material: the priced ones still prove a verdict")
+-- ---------------------------------------------------------------------------
+
+-- REPORTED (Discord), with a screenshot: a Heavy Mithril Gauntlet sells to a
+-- vendor for 24s 76c and disenchants 75% into Vision Dust x3.5, at 9s 76c a
+-- dust -- 25s 62c from the dust alone -- yet the line said "?" and "no price
+-- yet for Small Radiant Shard". The priced materials are a floor under the
+-- value; the line shows it as "at least", and lets it call the verdicts a
+-- floor can prove.
+local T = A.tooltip
+H.eq("a floor can say worth more than vendor",
+     T.DisenchantVerdict(3000, 2000, nil, true), "worth more than vendor")
+H.eq("...or worth more than the AH",
+     T.DisenchantVerdict(3000, 100, 2000, true), "worth more than the AH")
+-- Listed far above the floor: whether the AH beats breaking it is UNKNOWN --
+-- the missing material could be worth anything -- so nothing is said about
+-- the AH. What the floor does prove still stands.
+H.isNil("...but NEVER that it sells for more: the real value may be far higher",
+        T.DisenchantVerdict(1000, nil, 5000, true))
+H.eq("...though what it does prove still stands",
+     T.DisenchantVerdict(1000, 100, 5000, true), "worth more than vendor")
+H.eq("a whole value still can",
+     T.DisenchantVerdict(1000, 100, 5000, false), "sells for more than it breaks for")
+H.isNil("a 3% edge is no verdict, floor or not",
+        T.DisenchantVerdict(2562, 2476, nil, true))
+
+W.AddItem(11137, { name = "Vision Dust", quality = 1 })
+W.AddItem(11174, { name = "Lesser Nether Essence", quality = 2 })
+W.AddItem(11177, { name = "Small Radiant Shard", quality = 3 })
+-- Item level 41 (Classic-DB item 7919), the 41-45 band -- which is why it
+-- yields Vision Dust x3.5 and not the 36-40 band's x1.5.
+W.AddItem(930, { name = "Heavy Mithril Gauntlet", quality = GREEN,
+                 equipLoc = "INVTYPE_HAND", itemLevel = 41,
+                 type = "Armor", subType = "Plate", sellPrice = 2476 })
+A.db.SetVendor(930, 2476)
+A.db.account.realms = {}
+A.db.Init()
+A.db.RecordAuction(11137, 976, "Vision Dust")
+
+local gRows = A.de.Yield(41, GREEN, "INVTYPE_HAND")
+local gIds = {}
+for i = 1, table.getn(gRows) do gIds[gRows[i].itemId] = gRows[i] end
+H.check("(the band is the report's: Vision Dust, Lesser Nether Essence, "
+        .. "Small Radiant Shard)", gIds[11137] and gIds[11174] and gIds[11177])
+local function floorFrom(prices)
+    local f = 0
+    for id, p in pairs(prices) do
+        f = f + gIds[id].chance * gIds[id].mean * p
+    end
+    return math.floor(f)
+end
+
+local g1 = Capture()
+A.tooltip.Extend(g1, 930, 1)
+local l1 = valueLinePrefixed(g1, "Disenchant")
+H.eq("the line gives the floor instead of '?'", l1 and l1.right,
+     "at least " .. A.util.FormatMoney(floorFrom({ [11137] = 976 }), true))
+H.check("...and still names what is missing",
+        anyLineWith(g1, "no price yet for") ~= nil)
+-- 25s 62c against 24s 76c is 3% -- inside the 10% the tooltip wants before it
+-- calls anything, floor or not.
+H.check("dust alone is only 3% over vendor: no verdict yet",
+        l1 and not string.find(l1.left, "worth more", 1, true),
+        l1 and l1.left)
+
+-- As in the screenshot: the essence priced too, only the shard unknown.
+A.db.RecordAuction(11174, 5000, "Lesser Nether Essence")
+local g2 = Capture()
+A.tooltip.Extend(g2, 930, 1)
+local l2 = valueLinePrefixed(g2, "Disenchant")
+H.check("with the essence priced, the floor proves it",
+        l2 and string.find(l2.left, "worth more than vendor", 1, true) ~= nil,
+        l2 and l2.left)
+H.check("...in green", l2 and string.find(l2.left, "|cff4cd94c", 1, true) ~= nil)
+H.eq("...quoted as a floor", l2 and l2.right, "at least "
+     .. A.util.FormatMoney(floorFrom({ [11137] = 976, [11174] = 5000 }), true))
+H.check("...and the shard is named",
+        anyLineWith(g2, "no price yet for Small Radiant Shard") ~= nil)
+
+-- Listed far above the floor: a floor can never say "sell it instead".
+A.db.RecordAuction(930, 99999999, "Heavy Mithril Gauntlet")
+local g3 = Capture()
+A.tooltip.Extend(g3, 930, 1)
+local l3 = valueLinePrefixed(g3, "Disenchant")
+H.check("a floor never says it sells for more than it breaks for",
+        l3 and not string.find(l3.left, "sells for more", 1, true), l3 and l3.left)
+H.check("...and is never red", l3 and not string.find(l3.left, "|cffe6663d", 1, true),
+        l3 and l3.left)
+
 os.exit(H.report("tooltip"))
