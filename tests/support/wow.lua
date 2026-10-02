@@ -410,11 +410,13 @@ function GetContainerItemLink(bag, slot)
     return s and s.link or nil
 end
 
+-- texture, count, LOCKED. A slot is locked while the item it holds is on the
+-- cursor (or mid-move on the server); a cell sets `locked = true` to say so.
 function GetContainerItemInfo(bag, slot)
     local b = W.bags[bag]
     local s = b and b[slot]
     if not s or not s.link then return nil end
-    return s.texture or "icon", s.count or 1
+    return s.texture or "icon", s.count or 1, s.locked and 1 or nil
 end
 
 -- ---------------------------------------------------------------------------

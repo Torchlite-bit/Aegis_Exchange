@@ -1228,19 +1228,9 @@ sell.batchIndex         = 1
 -- is processed (cache hit or scan complete); onAllDone() fires when the queue
 -- is exhausted or the batch is stopped.
 function sell.ScanAllBags(onItemDone, onAllDone)
-    -- Build a flat queue from the bag categories.
-    local cats = sell.ScanBags()
-    local queue = {}
-    local ci = 1
-    while ci <= table.getn(cats) do
-        local items = cats[ci].items
-        local ii = 1
-        while ii <= table.getn(items) do
-            table.insert(queue, items[ii])
-            ii = ii + 1
-        end
-        ci = ci + 1
-    end
+    -- What Post All offers -- the blacklist left out, so a listed item costs
+    -- no query either.
+    local queue = sell.PostAllItems()
     sell.batchQueue  = queue
     sell.batchIndex  = 1
     sell.batchActive = true
@@ -1649,6 +1639,117 @@ function sell.ScanBags()
         bag = bag + 1
     end
     return order
+end
+
+-- ---------------------------------------------------------------------------
+-- The Post All blacklist
+-- ---------------------------------------------------------------------------
+--
+-- Items Post All never offers -- the Sell tab's Scan, and the Post / Skip walk
+-- that follows it. Asked for as "items you don't want, or never want, to
+-- sell", with a manager: add from bags, drag and drop, icon and name, easy
+-- remove and clear.
+--
+-- STORED AS A GROUP (db.GROUP_NO_POST), not a list of its own: groups are the
+-- next thing on the roadmap, and two item-set stores would disagree.
+--
+-- NOT A LOCK. A blacklisted item can still be slotted and posted by hand; the
+-- list is about what Post All puts in front of you, and an item you decide to
+-- sell after all should not need taking off a list first.
+
+function sell.IsBlacklisted(itemId)
+    return A.db and A.db.GroupHas
+        and A.db.GroupHas(A.db.GROUP_NO_POST, itemId) or false
+end
+
+function sell.Blacklist()
+    return A.db.GroupList(A.db.GROUP_NO_POST)
+end
+
+function sell.BlacklistAdd(itemId, name, texture)
+    return A.db.GroupAdd(A.db.GROUP_NO_POST, itemId, name, texture)
+end
+
+function sell.BlacklistRemove(itemId)
+    return A.db.GroupRemove(A.db.GROUP_NO_POST, itemId)
+end
+
+function sell.BlacklistClear()
+    A.db.GroupClear(A.db.GROUP_NO_POST)
+end
+
+-- Add whatever is in bag (bag, slot). Returns true, name -- or false, reason.
+--
+-- AN ITEM POST ALL WOULD NEVER OFFER IS REFUSED, and says so. Soulbound, quest
+-- and conjured items are left out of Post All already; listing one would look
+-- like it did something and do nothing.
+function sell.BlacklistAddFromBag(bag, slot)
+    local link = bag and slot and GetContainerItemLink(bag, slot)
+    if not link then return false, "That bag slot is empty." end
+    local itemId = util.ItemIdFromLink(link)
+    if not itemId then return false, "Aegis cannot read that item." end
+    local info = util.ItemInfo(link)
+    local name = (info and info.name) or util.ItemNameFromLink(link)
+    if not sell.IsAuctionable(bag, slot) then
+        return false, (name or "That item")
+            .. " cannot be auctioned, so Post All never offers it anyway."
+    end
+    local texture = GetContainerItemInfo(bag, slot)
+    sell.BlacklistAdd(itemId, name, texture or (info and info.texture))
+    return true, name
+end
+
+-- The bag slot whose item is ON THE CURSOR, or nil -- for a drop onto the
+-- blacklist.
+--
+-- NO HOOK NEEDED. 1.12 has no GetCursorInfo, but an item picked up out of a bag
+-- leaves its slot LOCKED (GetContainerItemInfo's third return) until it is put
+-- down, so the slot that is locked is where it came from. Read only on a drop
+-- -- one bounded walk of five bags on a click, never from an event.
+function sell.CursorBagItem()
+    if not (CursorHasItem and CursorHasItem()) then return nil end
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            if GetContainerItemLink(bag, slot) then
+                local _, _, locked = GetContainerItemInfo(bag, slot)
+                if locked then return bag, slot end
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return nil
+end
+
+-- Everything Post All will offer, in bag-list order: every postable item in
+-- the bags, minus the blacklist. Returns the list and how many were left out.
+--
+-- ONE LIST FOR BOTH HALVES. The Scan and the Post / Skip walk after it each
+-- built their own flat copy of sell.ScanBags, so a rule added to one was
+-- missing from the other. The blacklist manager's "in your bags" column is
+-- this list too: what you could still add is what Post All would offer.
+function sell.PostAllItems()
+    local cats = sell.ScanBags()
+    local out, skipped = {}, 0
+    local ci = 1
+    while ci <= table.getn(cats) do
+        local items = cats[ci].items
+        local ii = 1
+        while ii <= table.getn(items) do
+            local it = items[ii]
+            if it.itemId and sell.IsBlacklisted(it.itemId) then
+                skipped = skipped + 1
+            else
+                table.insert(out, it)
+            end
+            ii = ii + 1
+        end
+        ci = ci + 1
+    end
+    return out, skipped
 end
 
 -- Put the item at (bag, slot) into the auction sell slot.
