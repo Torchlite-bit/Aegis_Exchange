@@ -239,10 +239,10 @@ H.check("Clear all asks first",
 
 -- The walk's status line says when the blacklist shortened it.
 ui = {}
-assert(loadstring(wholeOf("function ui.BlacklistSkippedNote(")))()
-H.eq("nothing left out says nothing", ui.BlacklistSkippedNote(0), "")
-H.eq("...nor does nil", ui.BlacklistSkippedNote(nil), "")
-H.eq("three left out says so", ui.BlacklistSkippedNote(3),
-     " (3 blacklisted left out)")
+assert(loadstring(wholeOf("function ui.WalkLeftOutNote(")))()
+H.eq("nothing left out says nothing", ui.WalkLeftOutNote(0), "")
+H.eq("...nor does nil", ui.WalkLeftOutNote(nil), "")
+H.eq("three left out says so", ui.WalkLeftOutNote(3),
+     " (left out: 3 blacklisted)")
 
 os.exit(H.report("blacklist"))

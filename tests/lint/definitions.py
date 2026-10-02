@@ -43,6 +43,11 @@ def defs(text):
 # Entries can be deleted once the removal is in the baseline ref, because from
 # then on the name is not in `was` either.
 REMOVED_ON_PURPOSE = {
+    # v1.54.29. The Post / Skip walk's status line learned a second reason an
+    # item was left out -- fewer than one stack of a fixed size -- so the
+    # blacklist-only note became one note for both.
+    "ui.BlacklistSkippedNote": "v1.54.29 -- became ui.WalkLeftOutNote(blacklisted, "
+                               "tooFew, size), which covers both reasons",
     # v1.54.25. A batch buyout re-read ONE page -- the one the client held --
     # before calling a ticked auction gone. A gathered browse spans pages, so
     # the batch now reads the pages its ticked rows came from (and the page

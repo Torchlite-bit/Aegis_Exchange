@@ -5010,7 +5010,34 @@ cannot return.
 The lesson is the same one this file keeps recording: **the entry was written
 from a plausible reading and not checked.** One search settled it.
 
-### 5.4 Post All: a policy, not just a walk
+### 5.4 Post All: a policy, not just a walk — 🟡 **IN PROGRESS** (v1.54.29)
+
+**Shipped in v1.54.29: the stack modes and the remainder.** Built as the first
+**operation** (4.2), the way the blacklist was built as the first group:
+`db.account.operations.post.postAll`, read through `db.PostOp(field)` over
+`db.POST_OP_DEFAULTS` and written by `db.SetPostOp`. Only changed fields are
+stored, so an untouched field follows its default if that ever moves.
+
+- `sell.PlanStacks(mode, fixed, slotted, maxStack, remainder, stacksAt)` is the
+  whole decision and is pure: "bags" (the old behaviour, one stack of the
+  slotted size), "max", "singles", "fixed". No mode asks for a size above the
+  largest stack held -- 1.12 has no merge -- except "fixed", which falls to the
+  remainder when there is not one stack of it.
+- **The plan applies only while the walk runs** (`ui.DefaultStacks`). An item
+  placed by hand keeps one stack of what is in the slot.
+- **The remainder is the walk's own switch** (`ui.LeftoverSetting`): Post All's
+  "Post what's left over" while walking, the Aegis tab's "Keep leftovers" by
+  hand. An item the plan cannot post at all is put back and counted in the
+  status line rather than stopping the walk on a dead Post button.
+- The settings live at the top of the **Post All panel** -- the one the
+  blacklist already had -- not as loose controls on the tab.
+
+**Still to do, in this order:** the below-vendor gate and value ordering (both
+need a price per item before it is slotted, from the pre-scan's cache), then
+"smart" stacks, whose definition is the owner's call.
+
+The original entry:
+
 
 `ui.StartSellQueue` walks bags item by item and puts each in the slot for a
 manual Post or Skip. `ui.sellStackSize` / `ui.sellNumStacks` set stack shape

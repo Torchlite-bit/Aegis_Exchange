@@ -7908,16 +7908,146 @@ end""",
      "blacklist"),
 
     ("skipped-note-says-nothing", "ui/frame.lua",
-     '    return " (" .. n .. " blacklisted left out)"',
+     '    return " (left out: " .. table.concat(parts, ", ") .. ")"',
      '    return ""',
      "blacklist"),
 
     ("skipped-note-speaks-for-zero", "ui/frame.lua",
-     "    if not n or n < 1 then return \"\" end\n"
-     "    return \" (\" .. n",
-     "    if not n then return \"\" end\n"
-     "    return \" (\" .. n",
+     "    if blacklisted and blacklisted > 0 then",
+     "    if blacklisted then",
      "blacklist"),
+
+    # ---- how Post All posts (ROADMAP 5.4) -----------------------------------
+    # "As in bags" is the old behaviour exactly: one stack.
+    ("planstacks-as-in-bags-posts-every-stack", "core/sell.lua",
+     "        return size, 1\n    end\n    local n = stacksAt(size) or 0",
+     "        return size, stacksAt(size) or 1\n    end\n"
+     "    local n = stacksAt(size) or 0",
+     "postall"),
+
+    # 1.12 cannot merge: a size bigger than any stack held makes nothing.
+    ("planstacks-full-stacks-bigger-than-held", "core/sell.lua",
+     "        if size > slotted then size = slotted end\n"
+     "    elseif mode == \"fixed\" then",
+     "    elseif mode == \"fixed\" then",
+     "postall"),
+
+    ("planstacks-fixed-above-the-limit", "core/sell.lua",
+     "        if size > cap then size = cap end\n    else\n",
+     "    else\n",
+     "postall"),
+
+    ("planstacks-singles-are-not-singles", "core/sell.lua",
+     "        size = 1\n    elseif mode == \"max\" then",
+     "        size = slotted\n    elseif mode == \"max\" then",
+     "postall"),
+
+    ("planstacks-remainder-ignored", "core/sell.lua",
+     "    if n < 1 and remainder then",
+     "    if false then",
+     "postall"),
+
+    ("planstacks-remainder-always-on", "core/sell.lua",
+     "    if n < 1 and remainder then",
+     "    if n < 1 then",
+     "postall"),
+
+    ("planstacks-remainder-only-ever-one-stack", "core/sell.lua",
+     "        n = stacksAt(size) or 0\n        if n < 1 then n = 1 end",
+     "        n = 1",
+     "postall"),
+
+    ("planstacks-nothing-held-still-posts", "core/sell.lua",
+     "    if slotted < 1 then return 1, 0 end",
+     "    if slotted < 1 then return 1, 1 end",
+     "postall"),
+
+    # The and/or trap: a stored false reads as the default.
+    ("postop-false-reads-as-default", "core/db.lua",
+     "    if v == nil then return db.POST_OP_DEFAULTS[field] end\n    return v",
+     "    return v or db.POST_OP_DEFAULTS[field]",
+     "postall"),
+
+    # Defaults written into the save stop following the code.
+    ("postop-stores-the-defaults", "core/db.lua",
+     "    if not k[name] then k[name] = {} end",
+     "    if not k[name] then k[name] = { stackSize = 5 } end",
+     "postall"),
+
+    ("older-save-gets-no-operations-table", "core/db.lua",
+     "        operations = {},   -- kind -> name -> { field = value }\n",
+     "",
+     "postall"),
+
+    ("walk-ignores-the-plan", "ui/frame.lua",
+     "    if ui.sellQueue then\n        local size, n = ui.WalkPlan(it)",
+     "    if false then\n        local size, n = ui.WalkPlan(it)",
+     "postall"),
+
+    # The plan is Post All's; an item placed by hand keeps the old default.
+    ("hand-placed-item-follows-post-all", "ui/frame.lua",
+     "    if ui.sellQueue then\n        local size, n = ui.WalkPlan(it)",
+     "    if true then\n        local size, n = ui.WalkPlan(it)",
+     "postall"),
+
+    ("stack-count-box-reads-zero", "ui/frame.lua",
+     "        if n < 1 then n = 1 end\n        return size, n",
+     "        return size, n",
+     "postall"),
+
+    # Stopping on an item whose Post button cannot work.
+    ("walk-stops-on-an-unpostable-item", "ui/frame.lua",
+     "            if n < 1 then\n                A.sell.ClearSlot()",
+     "            if false then\n                A.sell.ClearSlot()",
+     "postall"),
+
+    ("walk-does-not-count-what-it-skipped", "ui/frame.lua",
+     "                ui.sellQueueTooFew = (ui.sellQueueTooFew or 0) + 1\n",
+     "",
+     "postall"),
+
+    # An item slotted by hand before the walk keeps its hand-made stacks.
+    ("walk-keeps-stale-stack-boxes", "ui/frame.lua",
+     "                ui.sellDefaultsFor = nil\n                ui.RefreshSell()",
+     "                ui.RefreshSell()",
+     "postall"),
+
+    ("walk-skipped-count-carries-over", "ui/frame.lua",
+     "    ui.sellQueueTooFew = 0\n",
+     "",
+     "postall"),
+
+    ("walk-leftovers-ask-the-aegis-tab", "ui/frame.lua",
+     "ui.KeepLeftovers(ui.LeftoverSetting(ui.sellQueue ~= nil),",
+     "ui.KeepLeftovers(ui.LeftoverSetting(false),",
+     "postall"),
+
+    ("leftover-setting-and-or-trap", "ui/frame.lua",
+     "    if walking then return A.db.PostOp(\"remainder\") end\n"
+     "    return A.db.Setting(\"keepLeftovers\")",
+     "    return walking and A.db.PostOp(\"remainder\")\n"
+     "        or A.db.Setting(\"keepLeftovers\")",
+     "postall"),
+
+    ("walk-note-silent-about-too-few", "ui/frame.lua",
+     "        table.insert(parts, tooFew .. \" fewer than \" .. (size or \"a stack\"))",
+     "        local _ = tooFew",
+     "postall"),
+
+    ("options-show-the-remainder-always-on", "ui/frame.lua",
+     "    ui.paRemainder:SetChecked(A.db.PostOp(\"remainder\") and 1 or nil)",
+     "    ui.paRemainder:SetChecked(1)",
+     "postall"),
+
+    ("mode-button-saves-nothing", "ui/frame.lua",
+     "            A.db.SetPostOp(\"stackMode\", b.mode)",
+     "            local _ = b.mode",
+     "postall"),
+
+    ("panel-opens-with-stale-options", "ui/frame.lua",
+     "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
+     "    if not ui.blFrame then return end\n",
+     "postall"),
 
 ]
 
@@ -7973,6 +8103,7 @@ SUITES = {
     "charges": "tests/units/charges_test.lua",
     "gather": "tests/units/gather_test.lua",
     "blacklist": "tests/units/blacklist_test.lua",
+    "postall": "tests/units/postall_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

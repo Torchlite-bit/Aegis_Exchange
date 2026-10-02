@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.29]
+
+### Added
+- **Post All stacks the way you choose.** The Post / Skip walk after a bag scan
+  can now set up each item as:
+  - **As in bags** — one stack, the size it is in your bags. This is what it
+    always did, and stays the default.
+  - **Full stacks** — as many full stacks as you can make. 1.12 can't merge
+    stacks, so thirty held as three tens posts three tens.
+  - **Singles** — one item per auction.
+  - **Fixed size** — stacks of the size you type.
+- **Post what's left over** — after those stacks, whatever is left comes back
+  into the slot as one more, ready to post. Turn it off and the walk moves on
+  to the next item instead; with a fixed size, items you hold fewer than one
+  stack of are then left out, and the status line says how many.
+
+### Changed
+- The blacklist button (now a gear) opens the **Post All** panel: how it posts
+  at the top, the never-posted list below.
+- Placing an item by hand still starts at one stack of what's in the slot —
+  the stack setting is Post All's, not the tab's.
+
+---
+
 ## [1.54.28]
 
 ### Added
@@ -6442,6 +6466,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -1752,6 +1752,56 @@ function sell.PostAllItems()
     return out, skipped
 end
 
+-- How Post All posts ONE item: returns (size, count). PURE -- the bag reads
+-- come in through `stacksAt(size)`, which answers how many stacks of that size
+-- can be made (sell.MaxStacks).
+--
+--   mode       db.PostOp("stackMode"): "bags" | "max" | "singles" | "fixed"
+--   fixed      the "fixed" stack size
+--   slotted    units in the slot -- the walk slots the LARGEST stack held
+--   maxStack   the item's own limit; nil when the client did not say
+--   remainder  db.PostOp("remainder")
+--
+-- COUNT 0 MEANS NOTHING TO POST under this plan, and the walk moves on: a
+-- fixed size of 10 with the remainder off, and only 3 held.
+--
+-- NO SIZE ABOVE THE LARGEST STACK HELD, except "fixed", which says what it
+-- wants. 1.12 has no merge: thirty held as three tens makes no stack of 20,
+-- so "full stacks" there means stacks of ten -- the biggest that exist.
+function sell.PlanStacks(mode, fixed, slotted, maxStack, remainder, stacksAt)
+    slotted = slotted or 0
+    if slotted < 1 then return 1, 0 end
+    local cap = maxStack
+    if not cap or cap < 1 then cap = slotted end
+    local size
+    if mode == "singles" then
+        size = 1
+    elseif mode == "max" then
+        size = cap
+        if size > slotted then size = slotted end
+    elseif mode == "fixed" then
+        size = math.floor(fixed or 0)
+        if size < 1 then size = 1 end
+        if size > cap then size = cap end
+    else
+        -- "bags", and anything unrecognised: exactly what Post All did before
+        -- it had a choice -- one stack, the size it is in the slot.
+        size = slotted
+        if size > cap then size = cap end
+        return size, 1
+    end
+    local n = stacksAt(size) or 0
+    if n < 1 and remainder then
+        -- Not one stack of the size asked for. With the remainder on, what
+        -- there is goes up as it is.
+        size = slotted
+        if size > cap then size = cap end
+        n = stacksAt(size) or 0
+        if n < 1 then n = 1 end
+    end
+    return size, n
+end
+
 -- Put the item at (bag, slot) into the auction sell slot.
 --
 -- EMPTY THE SLOT FIRST, and that is the whole function.

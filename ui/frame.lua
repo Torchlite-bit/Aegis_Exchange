@@ -16160,9 +16160,10 @@ function ui.BuildSellTab()
     vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
     ui.sellVendorListBtn = vendListBtn
 
-    -- The Post All blacklist. An ICON, not a word: this band also carries your
-    -- gold on the left, and a third labelled button would run into a
-    -- five-figure purse on a narrow window. The tooltip says what it is.
+    -- The Post All panel: how it posts, and the blacklist. An ICON, not a
+    -- word: this band also carries your gold on the left, and a third labelled
+    -- button would run into a five-figure purse on a narrow window. The
+    -- tooltip says what it is.
     local blBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBlacklistButton")
     blBtn:SetWidth(22)
     blBtn:SetHeight(18)
@@ -16170,15 +16171,17 @@ function ui.BuildSellTab()
     local blIcon = blBtn:CreateTexture(nil, "OVERLAY")
     blIcon:SetWidth(14); blIcon:SetHeight(14)
     blIcon:SetPoint("CENTER", blBtn, "CENTER", 0, 0)
-    blIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+    blIcon:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+    blIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     blBtn:SetScript("OnClick", function() ui.ToggleBlacklist() end)
     blBtn:SetScript("OnEnter", function()
         GameTooltip:SetOwner(blBtn, "ANCHOR_TOP")
-        GameTooltip:SetText("Post All blacklist")
+        GameTooltip:SetText("Post All")
+        GameTooltip:AddLine("How Scan, then Post / Skip, posts your bags --"
+            .. " and what it never offers.", 1, 1, 1)
         GameTooltip:AddLine(A.db.GroupCount(A.db.GROUP_NO_POST)
-            .. " item(s) Post All never offers.", 1, 1, 1)
-        GameTooltip:AddLine("Right-click a row in Your Bags to add or remove"
-            .. " one.", 0.7, 0.7, 0.7)
+            .. " item(s) on the never-posted list. Right-click a row in Your"
+            .. " Bags to add or remove one.", 0.7, 0.7, 0.7, 1)
         GameTooltip:Show()
     end)
     blBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -16845,11 +16848,9 @@ function ui.RefreshSell()
     local totalHave = A.sell.CountInBags(it.itemId)
     if it.itemId ~= ui.sellDefaultsFor then
         ui.sellDefaultsFor = it.itemId
-        local defSize = it.count
-        if it.maxStack and defSize > it.maxStack then defSize = it.maxStack end
-        if defSize < 1 then defSize = 1 end
+        local defSize, defCount = ui.DefaultStacks(it)
         ui.sellStackSize:SetText(tostring(defSize))
-        ui.sellNumStacks:SetText("1")
+        ui.sellNumStacks:SetText(tostring(defCount))
     end
     ui.sellName:SetText(it.name .. "  (" .. totalHave .. " total)")
 
@@ -17027,6 +17028,31 @@ function ui.RefreshSell()
     end
 
     ui.MaybeScanSlotItem()
+end
+
+-- How Post All would post the slotted item: (size, count), count 0 meaning
+-- nothing under the current plan. Post All's own settings (the Post All panel)
+-- through A.sell.PlanStacks.
+function ui.WalkPlan(it)
+    if not it or not it.itemId then return 1, 0 end
+    return A.sell.PlanStacks(A.db.PostOp("stackMode"), A.db.PostOp("stackSize"),
+        it.count, it.maxStack, A.db.PostOp("remainder"),
+        function(size) return A.sell.MaxStacks(it.itemId, size) end)
+end
+
+-- The size and count a freshly slotted item starts at. WHILE POST ALL IS
+-- WALKING, its plan; otherwise one stack of what is in the slot, which is what
+-- the Sell tab has always done and what a single item placed by hand wants.
+function ui.DefaultStacks(it)
+    if ui.sellQueue then
+        local size, n = ui.WalkPlan(it)
+        if n < 1 then n = 1 end
+        return size, n
+    end
+    local defSize = it.count
+    if it.maxStack and defSize > it.maxStack then defSize = it.maxStack end
+    if defSize < 1 then defSize = 1 end
+    return defSize, 1
 end
 
 -- Current stack-size / stack-count entry values (with sensible fallbacks).
@@ -17288,11 +17314,19 @@ function ui.ToggleVendorList()
     else ui.ShowVendorList() end
 end
 
--- ---- Post All blacklist manager -----------------------------------------
+-- ---- The Post All panel: how it posts, and what it never offers ---------
 --
--- Items Post All never offers (A.sell.IsBlacklisted). Asked for as: select
--- items directly from your bags, drag and drop them in, see the icon and name,
--- remove and clear easily. So, over the tab like the Vendor list:
+-- Over the tab like the Vendor list, opened from the icon beside it. ONE
+-- panel for everything about Post All, so the tab's button row -- which also
+-- carries your gold -- gains nothing, and the settings are not loose
+-- checkboxes on the tab (ROADMAP 5.4).
+--
+-- TOP: how it posts -- Post All's operation (A.db.PostOp): stack mode, the
+-- fixed size, and whether what is left over goes up too.
+--
+-- BELOW: the blacklist, items Post All never offers (A.sell.IsBlacklisted).
+-- Asked for as: select items directly from your bags, drag and drop them in,
+-- see the icon and name, remove and clear easily.
 --
 --   LEFT   what Post All would offer right now (A.sell.PostAllItems) -- your
 --          bags, minus what is already listed. Click one to add it.
@@ -17304,8 +17338,83 @@ end
 --
 -- One table for the layout numbers: every file-scope local a builder reads is
 -- an upvalue, and this file lives near Lua 5.0's ceiling of 32 (CLAUDE.md
--- 12a).
-local BLL = { rows = 12, row_h = 20, top = 76, bottom = 34, gap = 6 }
+-- 12a). `top` is where the two lists start, under the options band; the
+-- content well is 364px at the smallest window, and 152 + 10 rows of 20 + 14
+-- stays inside it.
+local BLL = { rows = 10, row_h = 20, top = 152, bottom = 14, gap = 6,
+              opt_top = 34, mode_w = 78, rule_y = 84 }
+
+-- The options band at the top of the Post All panel.
+function ui.BuildPostAllOptions(f)
+    local stLbl = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    stLbl:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -(BLL.opt_top + 4))
+    stLbl:SetText("Stacks:")
+    stLbl:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+
+    local modes = { { "As in bags", "bags" }, { "Full stacks", "max" },
+                    { "Singles", "singles" }, { "Fixed size", "fixed" } }
+    ui.paModeBtns = {}
+    local prev
+    local mi = 1
+    while mi <= table.getn(modes) do
+        local b = ui.MakeButton(f, "quiet")
+        b:SetWidth(BLL.mode_w); b:SetHeight(20)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else b:SetPoint("LEFT", stLbl, "RIGHT", 10, 0) end
+        b:SetText(modes[mi][1])
+        b.mode = modes[mi][2]
+        b:SetScript("OnClick", function()
+            A.db.SetPostOp("stackMode", b.mode)
+            ui.RefreshPostAllOptions()
+        end)
+        ui.paModeBtns[mi] = b
+        prev = b
+        mi = mi + 1
+    end
+
+    -- The fixed size. Read on every change, so there is nothing to confirm;
+    -- a blank or zero box keeps the size it had.
+    local size = MakeNumBox(f, 34, function()
+        local n = NumVal(this, nil)
+        if n then A.db.SetPostOp("stackSize", n) end
+    end, 20)
+    size:SetPoint("LEFT", prev, "RIGHT", 6, 0)
+    ui.InputText(size, "Post All: fixed stack size")
+    ui.paSizeBox = size
+
+    local rem = ui.MakeCheckBox(f, 18, "AegisExchangePostAllRemainder")
+    rem:SetPoint("TOPLEFT", stLbl, "BOTTOMLEFT", 0, -10)
+    rem:SetLabel("Post what's left over", C.text)
+    rem:SetScript("OnClick", function()
+        A.db.SetPostOp("remainder", rem:GetChecked() and true or false)
+    end)
+    ui.paRemainder = rem
+    local remHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    remHint:SetPoint("LEFT", rem, "RIGHT", 150, 0)
+    remHint:SetPoint("RIGHT", f, "RIGHT", -12, 0)
+    remHint:SetJustifyH("LEFT")
+    remHint:SetText("after the stacks, as one more \226\128\148 off moves on"
+        .. " to the next item")
+
+    local rule = f:CreateTexture(nil, "ARTWORK")
+    rule:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -BLL.rule_y)
+    rule:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -BLL.rule_y)
+    rule:SetHeight(1)
+    rule:SetTexture(0.45, 0.38, 0.22, 0.85)
+end
+
+-- Paint the options from the saved operation.
+function ui.RefreshPostAllOptions()
+    if not ui.paModeBtns then return end
+    local mode = A.db.PostOp("stackMode")
+    ui.MarkChosen(ui.paModeBtns, function(b) return b.mode == mode end)
+    -- Repainted on show and on a mode click, never from the box's own
+    -- typing, so this cannot fight the keyboard.
+    ui.paSizeBox:SetText(tostring(A.db.PostOp("stackSize")))
+    if mode == "fixed" then ui.paSizeBox:SetAlpha(1)
+    else ui.paSizeBox:SetAlpha(0.5) end
+    ui.paRemainder:SetChecked(A.db.PostOp("remainder") and 1 or nil)
+end
 
 function ui.BuildBlacklist()
     if ui.blFrame then return end
@@ -17336,7 +17445,7 @@ function ui.BuildBlacklist()
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
-    title:SetText("Post All blacklist")
+    title:SetText("Post All")
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     local closeBtn = ui.MakeButton(f, "quiet")
@@ -17345,21 +17454,29 @@ function ui.BuildBlacklist()
     closeBtn:SetText("Close")
     closeBtn:SetScript("OnClick", function() ui.HideBlacklist() end)
 
-    local clearBtn = ui.MakeButton(f, "quiet", "AegisExchangeBlacklistClear")
-    clearBtn:SetWidth(74); clearBtn:SetHeight(20)
-    clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
-    clearBtn:SetText("Clear all")
-    clearBtn:SetScript("OnClick", function() ui.ConfirmBlacklistClear() end)
-    ui.blClearBtn = clearBtn
+    ui.BuildPostAllOptions(f)
+
+    local blTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    blTitle:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -(BLL.rule_y + 8))
+    blTitle:SetText("Never posted")
+    blTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
 
     local note = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -30)
+    note:SetPoint("TOPLEFT", blTitle, "BOTTOMLEFT", 0, -4)
     note:SetPoint("RIGHT", f, "RIGHT", -12, 0)
     note:SetJustifyH("LEFT")
     note:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    note:SetText("Post All never offers these. You can still post one by hand."
+    note:SetText("Post All never offers these; you can still post one by hand."
         .. "  Add: click an item on the left, right-click it in your bags,"
         .. " or drag it onto the list.")
+
+    -- Clear all belongs to the list, so it sits on the list's header row.
+    local clearBtn = ui.MakeButton(f, "quiet", "AegisExchangeBlacklistClear")
+    clearBtn:SetWidth(74); clearBtn:SetHeight(18)
+    clearBtn:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", -28, -(BLL.top - 2))
+    clearBtn:SetText("Clear all")
+    clearBtn:SetScript("OnClick", function() ui.ConfirmBlacklistClear() end)
+    ui.blClearBtn = clearBtn
 
     local pickHdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     pickHdr:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -(BLL.top - 16))
@@ -17469,15 +17586,24 @@ function ui.BuildBlacklist()
     end
 end
 
--- " (3 blacklisted left out)", or "" -- for the Post / Skip walk's status line,
--- so a shorter walk than expected says why. PURE.
-function ui.BlacklistSkippedNote(n)
-    if not n or n < 1 then return "" end
-    return " (" .. n .. " blacklisted left out)"
+-- " (left out: 3 blacklisted, 2 fewer than 10)", or "" -- for the Post / Skip
+-- walk's status line, so a shorter walk than expected says why. `size` is the
+-- fixed stack size, the only plan that can find too few. PURE.
+function ui.WalkLeftOutNote(blacklisted, tooFew, size)
+    local parts = {}
+    if blacklisted and blacklisted > 0 then
+        table.insert(parts, blacklisted .. " blacklisted")
+    end
+    if tooFew and tooFew > 0 then
+        table.insert(parts, tooFew .. " fewer than " .. (size or "a stack"))
+    end
+    if table.getn(parts) == 0 then return "" end
+    return " (left out: " .. table.concat(parts, ", ") .. ")"
 end
 
 function ui.RefreshBlacklist()
     if not ui.blFrame then return end
+    ui.RefreshPostAllOptions()
     ui.blPick = A.sell.PostAllItems()
     ui.blList = A.sell.Blacklist()
     ui.UpdateBlacklist()
@@ -17840,6 +17966,16 @@ end
 --
 -- NOT AFTER A CANCEL: the user asked to stop, and re-slotting the same item
 -- is the opposite of stopping.
+-- Which switch decides whether leftovers come back into the slot: Post All's
+-- own "Post what's left over" while it is walking, the Aegis tab's "Keep
+-- leftovers ready to post" otherwise. A function rather than
+-- `walking and op or setting`, because that idiom returns the SETTING when
+-- the op says false.
+function ui.LeftoverSetting(walking)
+    if walking then return A.db.PostOp("remainder") end
+    return A.db.Setting("keepLeftovers")
+end
+
 function ui.KeepLeftovers(setting, reason, left)
     if setting == false then return false end
     if reason == "cancelled" then return false end
@@ -17877,6 +18013,7 @@ function ui.StartSellQueue()
     -- All cannot disagree about what is in it.
     local q, skipped = A.sell.PostAllItems()
     ui.sellQueueSkipped = skipped
+    ui.sellQueueTooFew = 0
     ui.sellQueue = q
     ui.sellQueueIndex = 0
     if table.getn(q) == 0 then
@@ -17898,20 +18035,37 @@ function ui.AdvanceSellQueue()
         -- goes stale as posting shifts bags around, which is why the walk
         -- sometimes slotted the wrong item (or nothing) instead of the next one.
         if item.itemId and A.sell.PlaceItemById(item.itemId) then
-            ui.sellQueueIndex = i
-            ui.RefreshSell()
-            if ui.sellStatus then
-                ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
-                    .. " \226\128\148 Post or Skip."
-                    .. ui.BlacklistSkippedNote(ui.sellQueueSkipped))
+            -- NOTHING TO POST under the plan -- a fixed size of 10 with the
+            -- remainder off, and only 3 held: put it back and move on,
+            -- rather than stop on an item whose Post button cannot work.
+            local _, n = ui.WalkPlan(A.sell.GetItem())
+            if n < 1 then
+                A.sell.ClearSlot()
+                ui.sellQueueTooFew = (ui.sellQueueTooFew or 0) + 1
+            else
+                ui.sellQueueIndex = i
+                -- Re-derive the stacks even when this item was in the slot
+                -- already, by hand: the walk's plan is not the hand default.
+                ui.sellDefaultsFor = nil
+                ui.RefreshSell()
+                if ui.sellStatus then
+                    ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
+                        .. " \226\128\148 Post or Skip." .. ui.WalkLeftOutNote(
+                            ui.sellQueueSkipped, ui.sellQueueTooFew,
+                            A.db.PostOp("stackSize")))
+                end
+                return true
             end
-            return true
         end
         i = i + 1
     end
     ui.sellQueue = nil
     ui.sellQueueIndex = nil
-    if ui.sellStatus then ui.sellStatus:SetText("Bag list finished.") end
+    ui.sellDefaultsFor = nil
+    if ui.sellStatus then
+        ui.sellStatus:SetText("Bag list finished." .. ui.WalkLeftOutNote(
+            ui.sellQueueSkipped, ui.sellQueueTooFew, A.db.PostOp("stackSize")))
+    end
     return false
 end
 
@@ -18056,7 +18210,8 @@ function ui.DoPost()
                 -- See ui.AdvanceAfterPost.
                 local left = p.itemId and A.sell.CountInBags(p.itemId) or 0
                 local kept = false
-                if ui.KeepLeftovers(A.db.Setting("keepLeftovers"), reason, left)
+                if ui.KeepLeftovers(ui.LeftoverSetting(ui.sellQueue ~= nil),
+                        reason, left)
                     and A.sell.PlaceItemById(p.itemId) then
                     kept = true
                     -- The holding is smaller now, so the stack controls

@@ -148,6 +148,9 @@ local function DefaultAccountDB()
         -- Named item sets (ROADMAP 4.1), account-wide. The first and so far
         -- only one is the Post All blacklist, db.GROUP_NO_POST.
         groups = {},       -- key -> { [itemId] = { n = name, t = texture } }
+        -- Named posting/buying policies (ROADMAP 4.2), account-wide. The first
+        -- and so far only one is how Post All posts, db.OP_POST_ALL.
+        operations = {},   -- kind -> name -> { field = value }
     }
 end
 
@@ -2493,6 +2496,66 @@ function db.GroupList(key)
         return a.itemId < b.itemId
     end)
     return out
+end
+
+-- ---- operations (ROADMAP 4.2) -------------------------------------------
+--
+-- An operation is a named POLICY: how to post, or how to buy. Where a group
+-- (above) says WHICH items, an operation says WHAT TO DO with them.
+--
+-- THE FIRST ONE IS HOW POST ALL POSTS, built as an operation for the same
+-- reason the blacklist was built as a group: "stack mode" and "post the
+-- remainder" as loose settings would be a second store for exactly the fields
+-- 4.2 is about, and the two would disagree. So the store is general and Post
+-- All is one entry in it -- `operations.post.postAll`.
+--
+-- ONLY WHAT WAS CHANGED IS STORED. A read lays the stored fields over
+-- db.POST_OP_DEFAULTS, so a default can change in a later version and every
+-- player who never touched that field follows it.
+
+db.OP_POST_ALL = "postAll"
+
+-- How Post All posts, out of the box: exactly what it did before it had a
+-- choice. One stack per item, the size it is in your bags; whatever is left
+-- comes back into the slot.
+db.POST_OP_DEFAULTS = {
+    -- "bags"    one stack, the size it is in your bags (unchanged behaviour)
+    -- "max"     as many full stacks as can be made
+    -- "singles" one item per auction
+    -- "fixed"   stacks of `stackSize`
+    stackMode = "bags",
+    stackSize = 5,       -- the "fixed" size
+    -- After the planned stacks, offer what is left as one more (true), or
+    -- move on to the next item (false).
+    remainder = true,
+}
+
+-- The stored fields for (kind, name), created on demand. nil before
+-- ADDON_LOADED.
+local function OpStore(kind, name)
+    if not db.account or not kind or not name then return nil end
+    if not db.account.operations then db.account.operations = {} end
+    local k = db.account.operations[kind]
+    if not k then
+        k = {}
+        db.account.operations[kind] = k
+    end
+    if not k[name] then k[name] = {} end
+    return k[name]
+end
+
+-- One field of a posting operation: what was stored, else the default.
+function db.PostOp(field, name)
+    local ops = db.account and db.account.operations
+    local o = ops and ops.post and ops.post[name or db.OP_POST_ALL]
+    local v = o and o[field]
+    if v == nil then return db.POST_OP_DEFAULTS[field] end
+    return v
+end
+
+function db.SetPostOp(field, value, name)
+    local o = OpStore("post", name or db.OP_POST_ALL)
+    if o then o[field] = value end
 end
 
 -- What this item has actually SOLD for (from the mailbox ledger, matched by
