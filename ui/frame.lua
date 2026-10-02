@@ -17339,10 +17339,10 @@ end
 -- One table for the layout numbers: every file-scope local a builder reads is
 -- an upvalue, and this file lives near Lua 5.0's ceiling of 32 (CLAUDE.md
 -- 12a). `top` is where the two lists start, under the options band; the
--- content well is 364px at the smallest window, and 152 + 10 rows of 20 + 14
+-- content well is 364px at the smallest window, and 168 + 9 rows of 20 + 14
 -- stays inside it.
-local BLL = { rows = 10, row_h = 20, top = 152, bottom = 14, gap = 6,
-              opt_top = 34, mode_w = 78, rule_y = 84 }
+local BLL = { rows = 9, row_h = 20, top = 168, bottom = 14, gap = 6,
+              opt_top = 34, mode_w = 78, rule_y = 100, opt_col = 220 }
 
 -- The options band at the top of the Post All panel.
 function ui.BuildPostAllOptions(f)
@@ -17389,12 +17389,32 @@ function ui.BuildPostAllOptions(f)
         A.db.SetPostOp("remainder", rem:GetChecked() and true or false)
     end)
     ui.paRemainder = rem
-    local remHint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    remHint:SetPoint("LEFT", rem, "RIGHT", 150, 0)
-    remHint:SetPoint("RIGHT", f, "RIGHT", -12, 0)
-    remHint:SetJustifyH("LEFT")
-    remHint:SetText("after the stacks, as one more \226\128\148 off moves on"
-        .. " to the next item")
+
+    -- Leave out what nets below vendor. Judged when the walk starts, from the
+    -- Scan's prices, and only where both prices are known.
+    local gate = ui.MakeCheckBox(f, 18, "AegisExchangePostAllVendorGate")
+    gate:SetPoint("LEFT", rem, "LEFT", BLL.opt_col, 0)
+    gate:SetLabel("Skip what nets below vendor", C.text)
+    gate:SetScript("OnClick", function()
+        A.db.SetPostOp("vendorGate", gate:GetChecked() and true or false)
+    end)
+    ui.paVendorGate = gate
+
+    local byValue = ui.MakeCheckBox(f, 18, "AegisExchangePostAllByValue")
+    byValue:SetPoint("LEFT", gate, "LEFT", BLL.opt_col, 0)
+    byValue:SetLabel("Most valuable first", C.text)
+    byValue:SetScript("OnClick", function()
+        A.db.SetPostOp("byValue", byValue:GetChecked() and true or false)
+    end)
+    ui.paByValue = byValue
+
+    local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", rem, "BOTTOMLEFT", 0, -4)
+    hint:SetPoint("RIGHT", f, "RIGHT", -12, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("Left over: the rest goes up as one more stack \226\128\148"
+        .. " off moves on.  Value: what the whole holding nets.  Both use"
+        .. " the Scan's prices.")
 
     local rule = f:CreateTexture(nil, "ARTWORK")
     rule:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -BLL.rule_y)
@@ -17414,6 +17434,8 @@ function ui.RefreshPostAllOptions()
     if mode == "fixed" then ui.paSizeBox:SetAlpha(1)
     else ui.paSizeBox:SetAlpha(0.5) end
     ui.paRemainder:SetChecked(A.db.PostOp("remainder") and 1 or nil)
+    ui.paVendorGate:SetChecked(A.db.PostOp("vendorGate") and 1 or nil)
+    ui.paByValue:SetChecked(A.db.PostOp("byValue") and 1 or nil)
 end
 
 function ui.BuildBlacklist()
@@ -17586,13 +17608,17 @@ function ui.BuildBlacklist()
     end
 end
 
--- " (left out: 3 blacklisted, 2 fewer than 10)", or "" -- for the Post / Skip
--- walk's status line, so a shorter walk than expected says why. `size` is the
--- fixed stack size, the only plan that can find too few. PURE.
-function ui.WalkLeftOutNote(blacklisted, tooFew, size)
+-- " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10)", or "" --
+-- for the Post / Skip walk's status line, so a shorter walk than expected says
+-- why. `size` is the fixed stack size, the only plan that can find too few.
+-- PURE.
+function ui.WalkLeftOutNote(blacklisted, tooFew, size, below)
     local parts = {}
     if blacklisted and blacklisted > 0 then
         table.insert(parts, blacklisted .. " blacklisted")
+    end
+    if below and below > 0 then
+        table.insert(parts, below .. " below vendor")
     end
     if tooFew and tooFew > 0 then
         table.insert(parts, tooFew .. " fewer than " .. (size or "a stack"))
@@ -18008,11 +18034,14 @@ end
 
 -- Build the queue from the current bag contents and slot the first item.
 function ui.StartSellQueue()
-    -- What Post All offers: the bags minus the blacklist. The same list the
+    -- What Post All offers: the bags minus the blacklist -- the same list the
     -- Scan before it walked (A.sell.PostAllItems), so the two halves of Post
-    -- All cannot disagree about what is in it.
-    local q, skipped = A.sell.PostAllItems()
+    -- All cannot disagree about what is in it -- and then Post All's own
+    -- rules on top: the vendor gate and the order (A.sell.PostAllQueue).
+    local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp("vendorGate"),
+        A.db.PostOp("byValue"), A.db.Setting("sellDefault"))
     ui.sellQueueSkipped = skipped
+    ui.sellQueueBelow = below
     ui.sellQueueTooFew = 0
     ui.sellQueue = q
     ui.sellQueueIndex = 0
@@ -18052,7 +18081,7 @@ function ui.AdvanceSellQueue()
                     ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
                         .. " \226\128\148 Post or Skip." .. ui.WalkLeftOutNote(
                             ui.sellQueueSkipped, ui.sellQueueTooFew,
-                            A.db.PostOp("stackSize")))
+                            A.db.PostOp("stackSize"), ui.sellQueueBelow))
                 end
                 return true
             end
@@ -18064,7 +18093,8 @@ function ui.AdvanceSellQueue()
     ui.sellDefaultsFor = nil
     if ui.sellStatus then
         ui.sellStatus:SetText("Bag list finished." .. ui.WalkLeftOutNote(
-            ui.sellQueueSkipped, ui.sellQueueTooFew, A.db.PostOp("stackSize")))
+            ui.sellQueueSkipped, ui.sellQueueTooFew, A.db.PostOp("stackSize"),
+            ui.sellQueueBelow))
     end
     return false
 end

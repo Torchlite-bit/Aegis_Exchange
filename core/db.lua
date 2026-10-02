@@ -2528,6 +2528,12 @@ db.POST_OP_DEFAULTS = {
     -- After the planned stacks, offer what is left as one more (true), or
     -- move on to the next item (false).
     remainder = true,
+    -- Leave out items that would net less than a merchant pays. ON: nobody
+    -- means to post below vendor, and an item is only left out when both
+    -- prices are known (sell.NetsBelowVendor) -- it says so on the status line.
+    vendorGate = true,
+    -- Most valuable holding first, rather than bag order.
+    byValue = false,
 }
 
 -- The stored fields for (kind, name), created on demand. nil before

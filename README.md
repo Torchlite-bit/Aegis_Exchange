@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.29)
+# Aegis: Exchange (v1.54.30)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -147,7 +147,9 @@ mailbox after the 5% cut) and **Listings** against the 120-auction cap.
 - After a bag scan, **Post / Skip walks your whole inventory**.
 - **The Post All panel** (the gear next to **Vendor**) sets how that walk
   stacks each item — **as in your bags**, **full stacks**, **singles**, or a
-  **fixed size** — and whether what's left over goes up too.
+  **fixed size** — and whether what's left over goes up too. It also **skips
+  anything that would net less than a merchant pays** (on by default), and can
+  put your **most valuable items first**.
 - **Post All blacklist**, in the same panel — items you never want Post All to
   offer. Right-click one in Your Bags to list it (again to undo), or add from
   your bags or by dragging items onto the list. Each entry shows its icon and
@@ -441,7 +443,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.29`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.30`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

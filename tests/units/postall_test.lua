@@ -31,6 +31,8 @@ H.check("the save has an operations table", type(db.account.operations) == "tabl
 H.eq("out of the box: as in bags", db.PostOp("stackMode"), "bags")
 H.eq("...a fixed size to start from", db.PostOp("stackSize"), 5)
 H.eq("...and leftovers go up too, as before", db.PostOp("remainder"), true)
+H.eq("...what nets below vendor is left out", db.PostOp("vendorGate"), true)
+H.eq("...in bag order", db.PostOp("byValue"), false)
 
 db.SetPostOp("stackMode", "max")
 H.eq("a change is read back", db.PostOp("stackMode"), "max")
@@ -124,6 +126,108 @@ H.eq("full stacks, the five left over: a stack of five", s, 5)
 H.eq("...one", n, 1)
 
 -- ---------------------------------------------------------------------------
+H.section("The price Post All expects, before an item is slotted")
+-- ---------------------------------------------------------------------------
+
+W.AddItem(4306, { name = "Silk Cloth", quality = 1, stackCount = 20 })
+W.AddItem(2592, { name = "Wool Cloth", quality = 1, stackCount = 20 })
+W.AddItem(4338, { name = "Mageweave Cloth", quality = 1, stackCount = 20 })
+W.AddItem(2589, { name = "Linen Cloth", quality = 1, stackCount = 20 })
+local function cached(itemId, rows, age)
+    sell.cache[itemId] = { listings = rows, when = time() - (age or 0) }
+end
+-- The Aegis tab's default undercut: one copper.
+cached(2589, { { count = 20, unit = 100 }, { count = 5, unit = 120 } })
+H.eq("from the Scan's cache: the cheapest, undercut", sell.PlannedUnit(2589), 99)
+cached(2589, { { count = 20, unit = 90, isMine = true },
+               { count = 20, unit = 100 } })
+H.eq("...matching your own when yours is cheapest", sell.PlannedUnit(2589), 90)
+cached(2589, { { count = 20, unit = 100 } }, sell.CACHE_TTL + 1)
+H.isNil("a stale cache is not a price", sell.PlannedUnit(2589))
+cached(2589, { { count = 20, unit = 100 } })
+local realMarket = db.MarketValue
+db.MarketValue = function() return 777 end
+H.eq("\"Market\" default: the market value", sell.PlannedUnit(2589, "market"), 777)
+db.MarketValue = function() return nil end
+H.eq("...or the undercut when there is none", sell.PlannedUnit(2589, "market"), 99)
+db.MarketValue = realMarket
+H.eq("\"None\" is planned as an undercut", sell.PlannedUnit(2589, "none"), 99)
+-- The slotted item still prices through the same rule.
+sell.listings = { { count = 20, unit = 100 } }
+H.eq("the slot's undercut is the same rule", sell.UndercutUnit(2589), 99)
+sell.listings = nil
+
+-- ---------------------------------------------------------------------------
+H.section("Below vendor: only when it is proven")
+-- ---------------------------------------------------------------------------
+
+db.SetVendor(4306, 60)
+H.check("49c nets 46c, under a 60c vendor price", sell.NetsBelowVendor(4306, 49))
+H.check("...105c nets 99c, which is not", not sell.NetsBelowVendor(4306, 105))
+-- THE CUT IS THE POINT: listed above the merchant, kept below it.
+H.check("62c lists above a 60c merchant but nets 58c: below",
+        sell.NetsBelowVendor(4306, 62))
+-- 64 nets floor(60.8) = 60: level with the merchant is not below it.
+H.check("netting exactly the vendor price is not below it",
+        not sell.NetsBelowVendor(4306, 64))
+H.check("no vendor price: not proven", not sell.NetsBelowVendor(2592, 1))
+H.check("no price at all: not proven", not sell.NetsBelowVendor(4306, nil))
+
+-- ---------------------------------------------------------------------------
+H.section("The walk's queue: the gate and the order")
+-- ---------------------------------------------------------------------------
+
+-- Bag order: Mageweave (no price), Wool (5 at 299 = nets 284 each), Silk
+-- (below vendor), Linen (45 at 99, nets 94 each).
+W.SetBags({ [0] = {
+    { link = W.items[4338].link, count = 10 },
+    { link = W.items[2592].link, count = 5 },
+    { link = W.items[4306].link, count = 20 },
+    { link = W.items[2589].link, count = 20 },
+    { link = W.items[2589].link, count = 20 },
+    { link = W.items[2589].link, count = 5 },
+} })
+sell.cache[4338] = nil
+cached(2592, { { count = 5, unit = 300 } })
+cached(4306, { { count = 20, unit = 50 } })
+cached(2589, { { count = 20, unit = 100 } })
+db.SetVendor(2589, 10)
+
+local function order(q)
+    local out = {}
+    for i = 1, table.getn(q) do out[i] = q[i].itemId end
+    return table.concat(out, ",")
+end
+local q, bl, below = sell.PostAllQueue(true, false)
+H.eq("gated: the below-vendor item is left out, bag order kept",
+     order(q), "4338,2592,2589")
+H.eq("...counted", below, 1)
+H.eq("...apart from the blacklist", bl, 0)
+q, bl, below = sell.PostAllQueue(false, false)
+H.eq("ungated: everything", order(q), "4338,2592,4306,2589")
+H.eq("...nothing counted", below, 0)
+q = sell.PostAllQueue(true, true)
+-- Linen 94 x 45 = 4230 before Wool 284 x 5 = 1420; Mageweave has no price.
+H.eq("most valuable first, unpriced last", order(q), "2589,2592,4338")
+
+local function row(value, i) return { value = value, i = i } end
+H.check("higher value first", sell.ValueFirst(row(10, 2), row(5, 1)))
+H.check("a tie keeps bag order", sell.ValueFirst(row(5, 1), row(5, 2))
+        and not sell.ValueFirst(row(5, 2), row(5, 1)))
+H.check("a value before none", sell.ValueFirst(row(1, 9), row(nil, 1))
+        and not sell.ValueFirst(row(nil, 1), row(1, 9)))
+H.check("two unknowns keep bag order", sell.ValueFirst(row(nil, 1), row(nil, 2)))
+
+-- The Scan is what fetches the prices, so it is never gated.
+sell.ScanAllBags(nil, nil)
+local scanned = {}
+for i = 1, table.getn(sell.batchQueue or {}) do
+    scanned[sell.batchQueue[i].itemId] = true
+end
+H.check("the Scan still covers the below-vendor item", scanned[4306])
+sell.StopBatchScan()
+
+-- ---------------------------------------------------------------------------
 H.section("The walk: ui/frame.lua")
 -- ---------------------------------------------------------------------------
 
@@ -192,6 +296,9 @@ H.eq("blacklisted only", ui.WalkLeftOutNote(3, 0, 10), " (left out: 3 blackliste
 H.eq("too few only", ui.WalkLeftOutNote(0, 2, 10), " (left out: 2 fewer than 10)")
 H.eq("both", ui.WalkLeftOutNote(3, 2, 10),
      " (left out: 3 blacklisted, 2 fewer than 10)")
+H.eq("below vendor", ui.WalkLeftOutNote(0, 0, 10, 1), " (left out: 1 below vendor)")
+H.eq("all three", ui.WalkLeftOutNote(3, 2, 10, 1),
+     " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10)")
 _G.A = realA
 
 H.check("a freshly slotted item starts from ui.DefaultStacks",
@@ -208,6 +315,26 @@ H.check("the count starts at zero for each walk",
         has(bodyOf("function ui.StartSellQueue("), "ui.sellQueueTooFew = 0"))
 H.check("leftovers after a post ask the right switch",
         has(src, "ui.KeepLeftovers(ui.LeftoverSetting(ui.sellQueue ~= nil),"))
+H.check("the walk is built by Post All's queue, with its own switches",
+        has(bodyOf("function ui.StartSellQueue("),
+            'A.sell.PostAllQueue(A.db.PostOp("vendorGate"),\n'
+            .. '        A.db.PostOp("byValue"), A.db.Setting("sellDefault"))'))
+H.check("...and remembers what the gate left out",
+        has(bodyOf("function ui.StartSellQueue("), "ui.sellQueueBelow = below"))
+H.check("the status line reports it",
+        has(adv, "A.db.PostOp(\"stackSize\"), ui.sellQueueBelow))"))
+H.check("the gate's box paints from the operation",
+        has(bodyOf("function ui.RefreshPostAllOptions("),
+            'ui.paVendorGate:SetChecked(A.db.PostOp("vendorGate") and 1 or nil)'))
+H.check("...and the order's",
+        has(bodyOf("function ui.RefreshPostAllOptions("),
+            'ui.paByValue:SetChecked(A.db.PostOp("byValue") and 1 or nil)'))
+H.check("the gate's box saves",
+        has(bodyOf("function ui.BuildPostAllOptions("),
+            'A.db.SetPostOp("vendorGate", gate:GetChecked() and true or false)'))
+H.check("...and the order's",
+        has(bodyOf("function ui.BuildPostAllOptions("),
+            'A.db.SetPostOp("byValue", byValue:GetChecked() and true or false)'))
 H.check("the options paint from the operation",
         has(bodyOf("function ui.RefreshPostAllOptions("),
             'ui.paRemainder:SetChecked(A.db.PostOp("remainder") and 1 or nil)'))

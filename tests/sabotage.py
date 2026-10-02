@@ -7772,8 +7772,23 @@ end""",
      "blacklist"),
 
     ("postskip-walk-builds-its-own-list", "ui/frame.lua",
-     "    local q, skipped = A.sell.PostAllItems()",
-     "    local q, skipped = A.sell.ScanBags(), 0",
+     "    local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp(\"vendorGate\"),\n"
+     "        A.db.PostOp(\"byValue\"), A.db.Setting(\"sellDefault\"))",
+     "    local q, skipped, below = A.sell.ScanBags(), 0, 0",
+     "blacklist"),
+
+    # The walk's queue flattening the bags itself again.
+    ("walk-queue-forgets-the-blacklist", "core/sell.lua",
+     "    local items, blacklisted = sell.PostAllItems()\n"
+     "    local rows, below = {}, 0",
+     "    local items, blacklisted = {}, 0\n"
+     "    local cats = sell.ScanBags()\n"
+     "    for ci = 1, table.getn(cats) do\n"
+     "        for ii = 1, table.getn(cats[ci].items) do\n"
+     "            table.insert(items, cats[ci].items[ii])\n"
+     "        end\n"
+     "    end\n"
+     "    local rows, below = {}, 0",
      "blacklist"),
 
     # A cold cache forgets the name; a later bare add must not erase it.
@@ -8042,6 +8057,109 @@ end""",
     ("mode-button-saves-nothing", "ui/frame.lua",
      "            A.db.SetPostOp(\"stackMode\", b.mode)",
      "            local _ = b.mode",
+     "postall"),
+
+    # ---- the vendor gate and value order -----------------------------------
+    # A second copy of the undercut rule is how the walk's estimate and the
+    # price in the box came to disagree.
+    ("planned-price-ignores-your-own-listing", "core/sell.lua",
+     "    local ref, under = sell.PriceReference(sell.LowestUnitIn(rows, true),\n"
+     "                                           sell.LowestOwnUnitIn(rows))",
+     "    local ref, under = sell.PriceReference(sell.LowestUnitIn(rows, true),\n"
+     "                                           nil)",
+     "postall"),
+
+    ("planned-price-trusts-a-stale-cache", "core/sell.lua",
+     "    if entry and time() - entry.when < sell.CACHE_TTL then rows = entry.listings end",
+     "    if entry then rows = entry.listings end",
+     "postall"),
+
+    ("planned-price-ignores-market-default", "core/sell.lua",
+     "    if priceMode == \"market\" then\n        local m = A.db.MarketValue(itemId)",
+     "    if false then\n        local m = A.db.MarketValue(itemId)",
+     "postall"),
+
+    # A gross comparison: what you would keep is 95% of it.
+    ("vendor-gate-compares-the-gross", "core/sell.lua",
+     "    local vc = sell.VendorCompare(itemId, sell.NetUnit(unit))",
+     "    local vc = sell.VendorCompare(itemId, unit)",
+     "postall"),
+
+    ("vendor-gate-without-a-price-leaves-out", "core/sell.lua",
+     "    return (vc and not vc.above) and true or false",
+     "    return (not vc or not vc.above) and true or false",
+     "postall"),
+
+    ("vendor-gate-ignores-its-switch", "core/sell.lua",
+     "        if gate and unit and sell.NetsBelowVendor(it.itemId, unit) then",
+     "        if unit and sell.NetsBelowVendor(it.itemId, unit) then",
+     "postall"),
+
+    ("vendor-gate-never-closes", "core/sell.lua",
+     "        if gate and unit and sell.NetsBelowVendor(it.itemId, unit) then",
+     "        if false then",
+     "postall"),
+
+    ("vendor-gate-uncounted", "core/sell.lua",
+     "            below = below + 1\n",
+     "",
+     "postall"),
+
+    ("value-order-ignores-its-switch", "core/sell.lua",
+     "    if byValue then table.sort(rows, sell.ValueFirst) end",
+     "    table.sort(rows, sell.ValueFirst)",
+     "postall"),
+
+    ("value-order-never-sorts", "core/sell.lua",
+     "    if byValue then table.sort(rows, sell.ValueFirst) end",
+     "",
+     "postall"),
+
+    ("value-order-by-unit-not-holding", "core/sell.lua",
+     "                                 value = net and net * (it.count or 1) })",
+     "                                 value = net })",
+     "postall"),
+
+    ("value-order-lowest-first", "core/sell.lua",
+     "        if a.value ~= b.value then return a.value > b.value end",
+     "        if a.value ~= b.value then return a.value < b.value end",
+     "postall"),
+
+    ("value-order-unpriced-first", "core/sell.lua",
+     "    if a.value then return true end\n    if b.value then return false end",
+     "    if a.value then return false end\n    if b.value then return true end",
+     "postall"),
+
+    ("value-order-ties-unstable", "core/sell.lua",
+     "        if a.value ~= b.value then return a.value > b.value end\n"
+     "        return a.i < b.i",
+     "        if a.value ~= b.value then return a.value > b.value end\n"
+     "        return a.i > b.i",
+     "postall"),
+
+    ("vendor-gate-defaults-off", "core/db.lua",
+     "    vendorGate = true,",
+     "    vendorGate = false,",
+     "postall"),
+
+    ("walk-ignores-the-gate-switch", "ui/frame.lua",
+     "    local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp(\"vendorGate\"),",
+     "    local q, skipped, below = A.sell.PostAllQueue(true,",
+     "postall"),
+
+    ("walk-note-silent-about-below-vendor", "ui/frame.lua",
+     "        table.insert(parts, below .. \" below vendor\")",
+     "        local _ = below",
+     "postall"),
+
+    ("gate-box-shows-always-on", "ui/frame.lua",
+     "    ui.paVendorGate:SetChecked(A.db.PostOp(\"vendorGate\") and 1 or nil)",
+     "    ui.paVendorGate:SetChecked(1)",
+     "postall"),
+
+    ("order-box-saves-nothing", "ui/frame.lua",
+     "        A.db.SetPostOp(\"byValue\", byValue:GetChecked() and true or false)",
+     "        local _ = byValue",
      "postall"),
 
     ("panel-opens-with-stale-options", "ui/frame.lua",

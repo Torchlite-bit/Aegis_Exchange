@@ -1186,8 +1186,16 @@ end
 -- when yours is the cheapest. Falls back to the price DB, then market value.
 -- Returns copper, or nil if we have no data for the item.
 function sell.UndercutUnit(itemId)
-    local ref, under = sell.PriceReference(sell.LowestListingUnit(true),
-                                           sell.LowestOwnUnit())
+    return sell.UndercutFrom(sell.listings, itemId)
+end
+
+-- The same rule over any set of listing rows -- the slotted item's live scan
+-- (above), or an item's CACHED scan, which is how Post All prices an item it
+-- has not slotted yet (sell.PlannedUnit). One rule, so the walk's plan and
+-- the price that lands in the box cannot disagree.
+function sell.UndercutFrom(rows, itemId)
+    local ref, under = sell.PriceReference(sell.LowestUnitIn(rows, true),
+                                           sell.LowestOwnUnitIn(rows))
     if ref then
         if not under then return ref end
         return ApplyUndercut(ref)
@@ -1312,11 +1320,15 @@ end
 -- Lowest per-unit buyout among the last scan's listings. `excludeMine` skips
 -- your own auctions (so undercut targets other sellers). Returns nil if none.
 function sell.LowestListingUnit(excludeMine)
-    if not sell.listings then return nil end
+    return sell.LowestUnitIn(sell.listings, excludeMine)
+end
+
+function sell.LowestUnitIn(rows, excludeMine)
+    if not rows then return nil end
     local best = nil
     local i = 1
-    while i <= table.getn(sell.listings) do
-        local r = sell.listings[i]
+    while i <= table.getn(rows) do
+        local r = rows[i]
         if r.unit and r.unit > 0 and not (excludeMine and r.isMine) then
             if not best or r.unit < best then best = r.unit end
         end
@@ -1332,11 +1344,15 @@ end
 -- list is YOURS, there is no competition to undercut and the honest answer is
 -- to match what you already have. See sell.PriceReference.
 function sell.LowestOwnUnit()
-    if not sell.listings then return nil end
+    return sell.LowestOwnUnitIn(sell.listings)
+end
+
+function sell.LowestOwnUnitIn(rows)
+    if not rows then return nil end
     local best = nil
     local i = 1
-    while i <= table.getn(sell.listings) do
-        local r = sell.listings[i]
+    while i <= table.getn(rows) do
+        local r = rows[i]
         if r.unit and r.unit > 0 and r.isMine then
             if not best or r.unit < best then best = r.unit end
         end
@@ -1800,6 +1816,87 @@ function sell.PlanStacks(mode, fixed, slotted, maxStack, remainder, stacksAt)
         if n < 1 then n = 1 end
     end
     return size, n
+end
+
+-- The per-item price Post All expects to post `itemId` at, BEFORE it is
+-- slotted: what the price box will be filled with when the walk reaches it.
+-- nil when nothing is known.
+--
+-- FROM THE PRE-SCAN'S CACHE. Scan fills sell.cache for every bag item before
+-- the walk starts, and slotting reads that same cache, so a price computed here
+-- is the price that lands in the box -- through the same rule
+-- (sell.UndercutFrom) and the same "Default sell price" setting
+-- (`priceMode`, ui.DefaultSellUnit's). "none" leaves the box empty, but the
+-- walk still needs an estimate, so it is planned as "undercut".
+function sell.PlannedUnit(itemId, priceMode)
+    if not itemId then return nil end
+    if priceMode == "market" then
+        local m = A.db.MarketValue(itemId)
+        if m then return m end
+    end
+    local entry = sell.cache[itemId]
+    local rows = nil
+    if entry and time() - entry.when < sell.CACHE_TTL then rows = entry.listings end
+    return sell.UndercutFrom(rows, itemId)
+end
+
+-- Would posting at `unit` keep less than a merchant pays? Only TRUE WHEN BOTH
+-- ARE KNOWN: an item with no vendor price, or no price at all, is not proven
+-- to be below anything, and Post All does not leave out what it cannot prove.
+--
+-- AGAINST THE NET, the same comparison as the Sell tab's "Nets below vendor
+-- price" line. The deposit stays out: it is refunded when the auction sells
+-- (ROADMAP 5.3).
+function sell.NetsBelowVendor(itemId, unit)
+    local vc = sell.VendorCompare(itemId, sell.NetUnit(unit))
+    return (vc and not vc.above) and true or false
+end
+
+-- Comparator for "most valuable first": by `value` (what the whole holding
+-- nets), highest first; anything without a value after everything with one;
+-- ties and unknowns keep bag order (`i`), since table.sort is not stable.
+function sell.ValueFirst(a, b)
+    if a.value and b.value then
+        if a.value ~= b.value then return a.value > b.value end
+        return a.i < b.i
+    end
+    if a.value then return true end
+    if b.value then return false end
+    return a.i < b.i
+end
+
+-- The Post / Skip walk's queue: sell.PostAllItems, then Post All's own rules.
+--   gate      leave out what nets below vendor (sell.NetsBelowVendor)
+--   byValue   most valuable holding first, rather than bag order
+-- Returns the queue, how many the blacklist left out, and how many the gate
+-- did.
+--
+-- NOT the Scan's list. The Scan is what FETCHES the prices this needs, so it
+-- walks sell.PostAllItems unfiltered; only the walk after it is gated.
+function sell.PostAllQueue(gate, byValue, priceMode)
+    local items, blacklisted = sell.PostAllItems()
+    local rows, below = {}, 0
+    local i = 1
+    while i <= table.getn(items) do
+        local it = items[i]
+        local unit = sell.PlannedUnit(it.itemId, priceMode)
+        if gate and unit and sell.NetsBelowVendor(it.itemId, unit) then
+            below = below + 1
+        else
+            local net = sell.NetUnit(unit)
+            table.insert(rows, { item = it, i = i,
+                                 value = net and net * (it.count or 1) })
+        end
+        i = i + 1
+    end
+    if byValue then table.sort(rows, sell.ValueFirst) end
+    local out = {}
+    i = 1
+    while i <= table.getn(rows) do
+        out[i] = rows[i].item
+        i = i + 1
+    end
+    return out, blacklisted, below
 end
 
 -- Put the item at (bag, slot) into the auction sell slot.

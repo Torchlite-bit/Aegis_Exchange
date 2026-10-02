@@ -1,7 +1,7 @@
-# ⚔️ Aegis: Exchange v1.54.29
+# ⚔️ Aegis: Exchange v1.54.30
 
 ## ✨ New
-- **Post All, your way** — full stacks, singles or a fixed size, plus a **blacklist** of items it skips (right-click in Your Bags, or drag onto the list)
+- **Post All, your way** — full stacks, singles or a fixed size; skips anything worth more at a vendor; most valuable first; and a **blacklist** (right-click in Your Bags, or drag onto the list)
 - **Searches read every page** — *Wizard Oil* finds every grade, Projectile → Bullet lists every ammo type, not just page 1
 - **History is a dashboard** — full-tab gold chart, High · Low · Sold · Bought · Top Sale · Top Buy, and **Sales · Expenses · Profit** blocks
 - **Ledger window** — **Items** (sold, bought, avg prices & profit) and **Transactions**

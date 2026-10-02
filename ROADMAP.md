@@ -5032,9 +5032,27 @@ stored, so an untouched field follows its default if that ever moves.
 - The settings live at the top of the **Post All panel** -- the one the
   blacklist already had -- not as loose controls on the tab.
 
-**Still to do, in this order:** the below-vendor gate and value ordering (both
-need a price per item before it is slotted, from the pre-scan's cache), then
-"smart" stacks, whose definition is the owner's call.
+**Shipped in v1.54.30: the below-vendor gate and value ordering.** Both need
+a price for an item BEFORE it is slotted. `sell.PlannedUnit(itemId, mode)`
+reads the pre-scan's cache through `sell.UndercutFrom(rows, itemId)` -- the
+undercut rule, now taking its listing rows as an argument, so the slot
+(`sell.UndercutUnit`, over `sell.listings`) and the plan run ONE rule and
+cannot disagree.
+
+- `sell.PostAllQueue(gate, byValue, priceMode)` builds the walk's queue on top
+  of `sell.PostAllItems`. The Scan stays on the unfiltered list: it is what
+  fetches the prices the gate reads.
+- `sell.NetsBelowVendor` is the Sell tab's "Nets below vendor price" test,
+  and is only true when BOTH prices are known -- nothing is left out on a
+  guess. The vendor gate defaults ON; ordering defaults OFF (bag order).
+- **The deposit is still not subtracted** -- the original request said "after
+  deposit and auction cut", and 5.3 below records why that is wrong: a
+  deposit is refunded when the auction sells.
+
+**Still to do:** "smart" stacks -- the profit comparison between stack sizes.
+Its definition is the owner's call: every measurable version from a single
+snapshot of listings either favours singles (highest unit price, floods the
+market and the 120 cap) or needs a per-item auction limit to be meaningful.
 
 The original entry:
 

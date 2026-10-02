@@ -18,6 +18,26 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.30]
+
+### Added
+- **Post All skips what would sell for less than a vendor pays.** After the
+  bag scan, any item whose price — after the 5% cut — is below what a merchant
+  gives you is left out of the Post / Skip walk, and the status line says how
+  many (*left out: 2 below vendor*). It only leaves an item out when it knows
+  both prices; anything unpriced is still offered. On by default; untick
+  **Skip what nets below vendor** in the Post All panel to turn it off.
+- **Most valuable first.** Tick it in the Post All panel and the walk starts
+  with the items worth the most — the price it would post at, after the cut,
+  times how many you hold — instead of going down your bags. Items with no
+  price come last.
+
+Both use the prices the bag scan just fetched, through the same undercut rule
+that fills the price box, so the walk's estimate and the price you see agree.
+The deposit is not counted: you get it back when the auction sells.
+
+---
+
 ## [1.54.29]
 
 ### Added
@@ -6466,6 +6486,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

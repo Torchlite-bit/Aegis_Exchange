@@ -105,6 +105,13 @@ H.check("the Scan leaves the listed item out too", not scanned[4306])
 H.check("...and keeps the rest", scanned[2589] and scanned[2592])
 if sell.StopBatchScan then sell.StopBatchScan() end
 
+-- ...and so does the walk after it, whatever its own switches say.
+H.check("the walk's queue leaves it out",
+        not ids(sell.PostAllQueue(false, false))[4306])
+H.check("...gated and ordered too", not ids(sell.PostAllQueue(true, true))[4306])
+local _, blq = sell.PostAllQueue(false, false)
+H.eq("...and counts it", blq, 1)
+
 sell.BlacklistRemove(4306)
 H.check("taken off the list, it is offered again", ids(sell.PostAllItems())[4306])
 
@@ -188,8 +195,8 @@ local function wholeOf(head)
     return body .. "\nend\n"
 end
 
-H.check("the Post / Skip walk uses the shared list",
-        has(bodyOf("function ui.StartSellQueue("), "A.sell.PostAllItems()"))
+H.check("the Post / Skip walk is built by Post All's queue",
+        has(bodyOf("function ui.StartSellQueue("), "A.sell.PostAllQueue("))
 local hook = bodyOf("function ui.HookBagRightClick(")
 local blAt = string.find(hook, "ui.BlacklistPickActive()", 1, true)
 local sellAt = string.find(hook, "ui.SellRightClickActive()", 1, true)
