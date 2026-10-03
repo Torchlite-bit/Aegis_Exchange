@@ -8296,6 +8296,143 @@ end""",
      "        local _ = byValue",
      "postall"),
 
+    # ---- the Post All panel: opaque, and built like the Ledger -------------
+    # Reported from a live client: the Sell tab's buttons and labels drew
+    # through the panel. +5 is where both Sell-tab overlays started.
+    ("overlay-sits-at-plus-5", "ui/frame.lua",
+     "    f:SetPoint(\"BOTTOMRIGHT\", ui.content, \"BOTTOMRIGHT\", 0, 0)\n"
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)\n"
+     "    f:EnableMouse(true)   -- swallow clicks so they don't fall through\n"
+     "    f:SetBackdrop({\n"
+     "        bgFile = \"Interface\\\\Tooltips\\\\UI-Tooltip-Background\",\n"
+     "        edgeFile = \"Interface\\\\Tooltips\\\\UI-Tooltip-Border\",\n"
+     "        tile = true, tileSize = 16, edgeSize = 14,\n"
+     "        insets = { left = 4, right = 4, top = 4, bottom = 4 },\n"
+     "    })\n"
+     "    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)\n"
+     "    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])\n"
+     "    local fill = f:CreateTexture(nil, \"BACKGROUND\")\n"
+     "    fill:SetPoint(\"TOPLEFT\", f, \"TOPLEFT\", 3, -3)\n"
+     "    fill:SetPoint(\"BOTTOMRIGHT\", f, \"BOTTOMRIGHT\", -3, 3)\n"
+     "    fill:SetTexture(C.well[1], C.well[2], C.well[3])\n"
+     "    f:Hide()\n    return f",
+     "    f:SetPoint(\"BOTTOMRIGHT\", ui.content, \"BOTTOMRIGHT\", 0, 0)\n"
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)\n"
+     "    f:EnableMouse(true)\n"
+     "    local fill = f:CreateTexture(nil, \"BACKGROUND\")\n"
+     "    fill:SetTexture(C.well[1], C.well[2], C.well[3])\n"
+     "    f:Hide()\n    return f",
+     "postall"),
+
+    ("overlay-without-a-fill", "ui/frame.lua",
+     "    fill:SetTexture(C.well[1], C.well[2], C.well[3])\n    f:Hide()\n    return f",
+     "    f:Hide()\n    return f",
+     "postall"),
+
+    ("vendor-list-back-at-plus-5", "ui/frame.lua",
+     "    local f = ui.MakeContentOverlay(\"AegisExchangeVendorList\")",
+     "    local f = CreateFrame(\"Frame\", \"AegisExchangeVendorList\", ui.frame)\n"
+     "    f:SetPoint(\"TOPLEFT\", ui.content, \"TOPLEFT\", 0, 0)\n"
+     "    f:SetPoint(\"BOTTOMRIGHT\", ui.content, \"BOTTOMRIGHT\", 0, 0)\n"
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)\n"
+     "    f:Hide()",
+     "postall"),
+
+    # SetScript replaces: a tooltip that forgets the plate's own hover leaves
+    # every mode button dead to the mouse.
+    ("tooltip-replaces-the-hover", "ui/frame.lua",
+     "        if enter then enter() end\n        GameTooltip:SetOwner(frame, \"ANCHOR_TOP\")",
+     "        GameTooltip:SetOwner(frame, \"ANCHOR_TOP\")",
+     "postall"),
+
+    ("tooltip-stays-up", "ui/frame.lua",
+     "        if leave then leave() end\n        GameTooltip:Hide()",
+     "        if leave then leave() end",
+     "postall"),
+
+    ("row-click-removes-while-holding-an-item", "ui/frame.lua",
+     "    if CursorHasItem and CursorHasItem() then\n        ui.BlacklistDrop()\n"
+     "        return\n    end\n    if entry then ui.BlacklistRemoveEntry(entry) end",
+     "    if entry then ui.BlacklistRemoveEntry(entry) end",
+     "postall"),
+
+    ("row-click-removes-nothing", "ui/frame.lua",
+     "    if entry then ui.BlacklistRemoveEntry(entry) end",
+     "    local _ = entry",
+     "postall"),
+
+    ("listed-rows-not-clickable", "ui/frame.lua",
+     "        lr:SetScript(\"OnClick\", function() ui.BlacklistRowClick(lr.entry) end)",
+     "        lr:SetScript(\"OnClick\", function() ui.BlacklistDrop() end)",
+     "postall"),
+
+    ("names-run-into-the-qty-column", "ui/frame.lua",
+     "    local left = (half - PAL.mid - PAL.edge) - inner\n"
+     "        - (6 + 2 + PAL.qty_w + PAL.qty_gap)",
+     "    local left = (half - PAL.mid - PAL.edge) - inner",
+     "postall"),
+
+    ("names-no-floor", "ui/frame.lua",
+     "    if left < 40 then left = 40 end\n    if right < 40 then right = 40 end",
+     "",
+     "postall"),
+
+    ("card-runs-into-the-lists", "ui/frame.lua",
+     "    box_top  = 102,",
+     "    box_top  = 94,",
+     "postall"),
+
+    ("lists-run-into-the-footer", "ui/frame.lua",
+     "    bot      = 66,    -- ...and ends this far from the bottom",
+     "    bot      = 56,    -- ...and ends this far from the bottom",
+     "postall"),
+
+    ("left-scrollbar-in-the-right-box", "ui/frame.lua",
+     "    mid_r    = 12,",
+     "    mid_r    = 0,",
+     "postall"),
+
+    ("rows-never-finish-growing", "ui/frame.lua",
+     "    if n < want then ui.blDirty = true end\n",
+     "",
+     "postall"),
+
+    ("resize-forgets-the-panel", "ui/frame.lua",
+     "        if ui.blFrame and ui.blFrame:IsVisible() then ui.blDirty = true end\n",
+     "",
+     "postall"),
+
+    ("lists-fixed-row-count", "ui/frame.lua",
+     "    local vis = ui.ListRowsAt(ui.WindowH(), PAL, PAL.row_h, PAL.rows_max)",
+     "    local vis = 9",
+     "postall"),
+
+    ("list-heading-without-count", "ui/frame.lua",
+     "    ui.blListHdr.label:SetText(string.upper(\"Never posted (\"\n"
+     "        .. table.getn(list) .. \")\"))",
+     "    local _ = list",
+     "postall"),
+
+    ("options-not-in-a-well", "ui/frame.lua",
+     "    local well = ui.MakeWell(f, opt, 3)\n    opt:SetFrameLevel(well:GetFrameLevel() + 1)",
+     "    opt:SetFrameLevel(f:GetFrameLevel() + 1)",
+     "postall"),
+
+    ("heading-under-its-box", "ui/frame.lua",
+     "    h:SetFrameLevel(well:GetFrameLevel() + 1)",
+     "    local _ = well",
+     "postall"),
+
+    ("listed-rows-level-with-the-drop-target", "ui/frame.lua",
+     "        lr:SetFrameLevel(ui.blListWell:GetFrameLevel() + 2)",
+     "        lr:SetFrameLevel(ui.blListWell:GetFrameLevel() + 1)",
+     "postall"),
+
+    ("empty-text-under-the-box", "ui/frame.lua",
+     "    local pickEmpty = ui.blPickWell:CreateFontString(nil, \"OVERLAY\",",
+     "    local pickEmpty = f:CreateFontString(nil, \"OVERLAY\",",
+     "postall"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",

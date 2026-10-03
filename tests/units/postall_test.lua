@@ -510,4 +510,163 @@ H.check("a mode button saves its mode",
 H.check("the panel paints the options when it opens",
         has(bodyOf("function ui.RefreshBlacklist("), "ui.RefreshPostAllOptions()"))
 
+-- ---------------------------------------------------------------------------
+H.section("The panel: opaque, and built like the Ledger")
+-- ---------------------------------------------------------------------------
+
+-- Reported from a live client: the Sell tab's buttons, money boxes and
+-- scrollbars drew THROUGH the panel, and its labels showed behind it.
+local overlay = bodyOf("function ui.MakeContentOverlay(")
+H.check("the overlay sits 50 levels above the tab, like the Ledger's",
+        has(overlay, "f:SetFrameLevel(ui.content:GetFrameLevel() + 50)"))
+H.check("...with a solid fill under its tiled backdrop",
+        has(overlay, 'local fill = f:CreateTexture(nil, "BACKGROUND")')
+        and has(overlay, "fill:SetTexture(C.well[1], C.well[2], C.well[3])"))
+H.check("...and swallows clicks", has(overlay, "f:EnableMouse(true)"))
+H.check("the Post All panel is one",
+        has(bodyOf("function ui.BuildBlacklist("),
+            'local f = ui.MakeContentOverlay("AegisExchangeBlacklist")'))
+H.check("...and so is the Vendor list, which had the same fault",
+        has(bodyOf("function ui.BuildVendorList("),
+            'local f = ui.MakeContentOverlay("AegisExchangeVendorList")'))
+H.check("no Sell-tab overlay is left at +5",
+        not has(src, "SetFrameLevel(ui.content:GetFrameLevel() + 5)"))
+
+-- The layout, at the smallest window. A backdrop border hangs 6px outside
+-- its frame (SELLL.well_overhang), so every box reaches that much further.
+local function num(pattern)
+    local _, _, v = string.find(src, pattern)
+    return tonumber(v)
+end
+local MIN_W = num("local MIN_W, MIN_H = (%d+), %d+")
+local MIN_H = num("local MIN_W, MIN_H = %d+, (%d+)")
+local function inset(name)
+    local _, _, expr = string.find(src, "local " .. name .. " = ([%d %+]+)\n")
+    return assert(loadstring("return " .. expr))()
+end
+local PW = MIN_W - inset("PANEL_H_INSET")
+local PH = MIN_H - inset("PANEL_V_INSET")
+local function loadTable(name)
+    local at = string.find(src, "\nlocal " .. name .. " = {\n", 1, true)
+    local stop = string.find(src, "\n}\n", at, true)
+    local body = string.sub(src, at + 7, stop + 2)
+    assert(loadstring(body))()
+end
+loadTable("PAL")
+local _, _, rl, rr = string.find(src, "local ROWPAD = { l = (%d+), r = (%d+) }")
+ROWPAD = { l = tonumber(rl), r = tonumber(rr) }
+local OVER = 6
+
+local cardBottom = PAL.opt_top + PAL.opt_h + 3 + OVER
+local boxTop = PAL.box_top - OVER
+H.check("the options card clears the two lists (" .. cardBottom .. " < "
+        .. boxTop .. ")", cardBottom < boxTop)
+H.check("the card holds its second line of controls", 30 + 16 <= PAL.opt_h)
+H.check("the headings sit above their rule, the rows below it",
+        PAL.box_top + PAL.hdr_y + 16 <= PAL.box_top + PAL.hdr_h
+        and PAL.box_top + PAL.hdr_h < PAL.top)
+local boxBottom = PH - PAL.bot + 6 + OVER
+local footTop = PH - (PAL.foot_y + PAL.foot_h + 3 + OVER)
+H.check("the lists clear the footer well (" .. boxBottom .. " < " .. footTop
+        .. ")", boxBottom < footTop)
+local rows = math.floor((PH - PAL.top - PAL.bot) / PAL.row_h)
+H.check("at the smallest window the lists still show 8 rows or more ("
+        .. rows .. ")", rows >= 8)
+
+local half = math.floor(PW / 2)
+local leftBarEnd = half - PAL.mid + PAL.bar_x + 16
+local rightBoxStart = half + PAL.mid_r - 6 - OVER
+H.check("the left list's scrollbar clears the right box (" .. leftBarEnd
+        .. " < " .. rightBoxStart .. ")", leftBarEnd < rightBoxStart)
+H.check("the right list's scrollbar stays inside the panel's border",
+        PW - PAL.right + PAL.bar_x + 16 <= PW - 4)
+-- The first line of the card, with generous widths for its three captions.
+local line1 = PAL.opt_x + PAL.ctl_x + 4 * (PAL.mode_w + 4) + 6 + 34
+    + 4 + PAL.mode_w + 8 + 45 + 6 + 30 + 6 + 80
+H.check("the stack controls fit the card at the smallest window ("
+        .. line1 .. " <= " .. (PW - PAL.opt_x) .. ")", line1 <= PW - PAL.opt_x)
+
+assert(loadstring(wholeOf("function ui.PostAllNameWidths(")))()
+local lw, rw = ui.PostAllNameWidths(PW)
+H.eq("a bag item's name is cut to the room it has", lw, 332)
+H.eq("...a listed one's too", rw, 390)
+-- The name stops where the Qty column (and its gap) begins.
+local nameEnd = PAL.edge + ROWPAD.l + PAL.icon_x + lw
+local qtyStart = half - PAL.mid - ROWPAD.r - 8 - PAL.qty_w - PAL.qty_gap
+H.check("...never into the Qty column", nameEnd <= qtyStart)
+local tl, tr = ui.PostAllNameWidths(100)
+H.check("a panel too narrow to measure still leaves a name some room",
+        tl == 40 and tr == 40)
+
+-- A tooltip ADDED to a control, not swapped in for its own hover.
+GameTooltip = { SetOwner = function() end, AddLine = function() end,
+                SetText = function(self, t) self.text = t end,
+                Show = function(self) self.shown = true end,
+                Hide = function(self) self.shown = false end }
+local fake = { scripts = {} }
+function fake:GetScript(k) return self.scripts[k] end
+function fake:SetScript(k, fn) self.scripts[k] = fn end
+local painted, cleared = false, false
+fake.scripts.OnEnter = function() painted = true end
+fake.scripts.OnLeave = function() cleared = true end
+assert(loadstring(wholeOf("function ui.AttachTip(")))()
+ui.AttachTip(fake, "Smart", "what it does")
+fake.scripts.OnEnter()
+H.check("a tooltip keeps the button's own hover", painted)
+H.check("...and shows", GameTooltip.shown and GameTooltip.text == "Smart")
+fake.scripts.OnLeave()
+H.check("...and both go on leave", cleared and not GameTooltip.shown)
+
+-- Click-to-move: a click on a never-posted row takes it off -- unless an item
+-- is in hand, when it is a drop.
+local removed, dropped
+ui.BlacklistRemoveEntry = function(e) removed = e end
+ui.BlacklistDrop = function() dropped = true end
+assert(loadstring(wholeOf("function ui.BlacklistRowClick(")))()
+local holding = false
+CursorHasItem = function() return holding end
+ui.BlacklistRowClick({ itemId = 5 })
+H.eq("clicking a listed row takes it off", removed and removed.itemId, 5)
+removed, holding = nil, true
+ui.BlacklistRowClick({ itemId = 5 })
+H.check("...but with an item in hand it is a drop", dropped and not removed)
+
+local build = bodyOf("function ui.BuildBlacklist(")
+H.check("the options sit in a well, like the Ledger's buttons",
+        has(bodyOf("function ui.BuildPostAllOptions("),
+            "local well = ui.MakeWell(f, opt, 3)"))
+H.check("each list is a box like the Sell tab's",
+        has(build, "ui.blPickWell = ui.PostAllListBox(f, pick)")
+        and has(build, "ui.blListWell = ui.PostAllListBox(f, list)"))
+H.check("Clear all and Close share a footer well",
+        has(build, "local fwell = ui.MakeWell(f, footBar, 3)"))
+H.check("listed rows are clicked to take them off",
+        has(bodyOf("function ui.GrowPostAllRows("),
+            'lr:SetScript("OnClick", function() ui.BlacklistRowClick(lr.entry) end)'))
+H.check("the lists show as many rows as the window holds",
+        has(bodyOf("function ui.UpdateBlacklist("),
+            "local vis = ui.ListRowsAt(ui.WindowH(), PAL, PAL.row_h, PAL.rows_max)"))
+H.check("...built a few a frame, finishing on the next",
+        has(bodyOf("function ui.GrowPostAllRows("),
+            "if n < want then ui.blDirty = true end"))
+H.check("a resize repaints the panel through its flag",
+        has(bodyOf("function ui.RefreshCurrentTab("),
+            "if ui.blFrame and ui.blFrame:IsVisible() then ui.blDirty = true end"))
+H.check("headings draw above their box, not under its backdrop",
+        has(bodyOf("function ui.PostAllHeading("),
+            "h:SetFrameLevel(well:GetFrameLevel() + 1)"))
+-- The drop target covers the right box at +1. A listed row at the same level
+-- could lose its click to it, and a click with nothing in hand drops nothing.
+H.check("listed rows sit above the drop target, so a click reaches them",
+        has(bodyOf("function ui.GrowPostAllRows("),
+            "lr:SetFrameLevel(ui.blListWell:GetFrameLevel() + 2)"))
+H.check("...and bag rows above their box",
+        has(bodyOf("function ui.GrowPostAllRows("),
+            "pr:SetFrameLevel(ui.blPickWell:GetFrameLevel() + 2)"))
+H.check("the empty-list text is on its box, where the backdrop cannot cover it",
+        has(build, "local pickEmpty = ui.blPickWell:CreateFontString("))
+H.check("the count is in the list's heading",
+        has(bodyOf("function ui.UpdateBlacklist("),
+            'ui.blListHdr.label:SetText(string.upper("Never posted ("'))
+
 os.exit(H.report("postall"))

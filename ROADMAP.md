@@ -5071,6 +5071,17 @@ a per-item auction limit.**
   general undercut, not Smart's per-size price, because pricing every size of
   every item when the walk starts would walk the bags once per item and size.
 
+**v1.54.32: the panel rebuilt after a live-client report** ("hard to see, very
+buggy looking, doesn't fit the style"). It had copied the Vendor list's overlay
+at +5 frame levels, and the Sell tab's nested widgets drew through it. Both
+Sell-tab overlays now come from `ui.MakeContentOverlay` (+50, solid fill -- the
+Ledger's shape), and the panel uses the Ledger's furniture: options in a well,
+two boxed lists like Your Bags (`ui.PostAllListBox`), Clear all / Close in a
+footer well, tooltips (`ui.AttachTip`, which keeps a button's own hover)
+instead of grey hint text, and click-to-move rows instead of a Remove button
+per row. The layout arithmetic -- every gap at the smallest window -- is
+checked in tests/units/postall_test.lua; how it LOOKS still needs a client.
+
 The original entry:
 
 

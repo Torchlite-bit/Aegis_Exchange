@@ -18,6 +18,23 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.32]
+
+### Fixed
+- **The Post All panel was hard to read.** The Sell tab's own buttons, price
+  boxes, duration buttons and column headings drew straight through it. It is
+  now solid, and laid out like the Ledger and the Receipt:
+  - the stack and walk options sit together in one box at the top, and what
+    each does is on its **tooltip** instead of a line of grey text;
+  - your bags and the never-posted list are two boxed tables, like Your Bags on
+    the Sell tab — headings, row stripes, scrollbars outside the box;
+  - **click an item to move it across**: on the left to never post it, on the
+    right to post it again. No more Remove button on every row;
+  - **Clear all** and **Close** share a footer box, as on the Receipt.
+- **The Vendor list had the same see-through fault** and is solid now too.
+
+---
+
 ## [1.54.31]
 
 ### Added
@@ -6511,6 +6528,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
