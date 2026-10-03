@@ -18,6 +18,92 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.32]
+
+### Fixed
+- **The Post All panel was hard to read.** The Sell tab's own buttons, price
+  boxes, duration buttons and column headings drew straight through it. It is
+  now solid, and laid out like the Ledger and the Receipt:
+  - the stack and walk options sit together in one box at the top, and what
+    each does is on its **tooltip** instead of a line of grey text;
+  - your bags and the never-posted list are two boxed tables, like Your Bags on
+    the Sell tab — headings, row stripes, scrollbars outside the box;
+  - **click an item to move it across**: on the left to never post it, on the
+    right to post it again. No more Remove button on every row;
+  - **Clear all** and **Close** share a footer box, as on the Receipt.
+- **The Vendor list had the same see-through fault** and is solid now too.
+
+---
+
+## [1.54.31]
+
+### Added
+- **Smart stacks for Post All.** Pick **Smart** in the Post All panel and the
+  walk compares the stack sizes people are actually selling in — plus your own
+  full stack — and posts the one that would **net the most if it all sold**:
+  - each size is priced just under the cheapest listing **of that size**
+    (singles against singles, 20s against 20s);
+  - it posts **at most N auctions of an item** (5 by default, set it next to
+    the button), **counting the ones you already have up** — so it can't flood
+    the market or fill your 120-auction cap with singles;
+  - a tie goes to the bigger stack: fewer auctions, same money.
+  - The status line shows the choice and what it beat:
+    *Smart: 2 x 20 nets 37s 60c (1: 7s 5c)*.
+  - An item you already have N auctions of is left out (*left out: 1 at your
+    limit of 5*). Smart always moves on after posting: what's left waits for
+    the next Post All.
+
+### Fixed
+- After posting an item, the next bag scan in the same visit reads its
+  listings again instead of reusing ones that didn't include what you just
+  posted.
+
+---
+
+## [1.54.30]
+
+### Added
+- **Post All skips what would sell for less than a vendor pays.** After the
+  bag scan, any item whose price — after the 5% cut — is below what a merchant
+  gives you is left out of the Post / Skip walk, and the status line says how
+  many (*left out: 2 below vendor*). It only leaves an item out when it knows
+  both prices; anything unpriced is still offered. On by default; untick
+  **Skip what nets below vendor** in the Post All panel to turn it off.
+- **Most valuable first.** Tick it in the Post All panel and the walk starts
+  with the items worth the most — the price it would post at, after the cut,
+  times how many you hold — instead of going down your bags. Items with no
+  price come last.
+
+Both use the prices the bag scan just fetched, through the same undercut rule
+that fills the price box, so the walk's estimate and the price you see agree.
+The deposit is not counted: you get it back when the auction sells.
+
+---
+
+## [1.54.29]
+
+### Added
+- **Post All stacks the way you choose.** The Post / Skip walk after a bag scan
+  can now set up each item as:
+  - **As in bags** — one stack, the size it is in your bags. This is what it
+    always did, and stays the default.
+  - **Full stacks** — as many full stacks as you can make. 1.12 can't merge
+    stacks, so thirty held as three tens posts three tens.
+  - **Singles** — one item per auction.
+  - **Fixed size** — stacks of the size you type.
+- **Post what's left over** — after those stacks, whatever is left comes back
+  into the slot as one more, ready to post. Turn it off and the walk moves on
+  to the next item instead; with a fixed size, items you hold fewer than one
+  stack of are then left out, and the status line says how many.
+
+### Changed
+- The blacklist button (now a gear) opens the **Post All** panel: how it posts
+  at the top, the never-posted list below.
+- Placing an item by hand still starts at one stack of what's in the slot —
+  the stack setting is Post All's, not the tab's.
+
+---
+
 ## [1.54.28]
 
 ### Added
@@ -6442,6 +6528,10 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.29]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.28]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.27]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.26]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

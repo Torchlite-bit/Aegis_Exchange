@@ -5010,7 +5010,80 @@ cannot return.
 The lesson is the same one this file keeps recording: **the entry was written
 from a plausible reading and not checked.** One search settled it.
 
-### 5.4 Post All: a policy, not just a walk
+### 5.4 Post All: a policy, not just a walk — ✅ **DONE** (v1.54.29–v1.54.31)
+
+**Shipped in v1.54.29: the stack modes and the remainder.** Built as the first
+**operation** (4.2), the way the blacklist was built as the first group:
+`db.account.operations.post.postAll`, read through `db.PostOp(field)` over
+`db.POST_OP_DEFAULTS` and written by `db.SetPostOp`. Only changed fields are
+stored, so an untouched field follows its default if that ever moves.
+
+- `sell.PlanStacks(mode, fixed, slotted, maxStack, remainder, stacksAt)` is the
+  whole decision and is pure: "bags" (the old behaviour, one stack of the
+  slotted size), "max", "singles", "fixed". No mode asks for a size above the
+  largest stack held -- 1.12 has no merge -- except "fixed", which falls to the
+  remainder when there is not one stack of it.
+- **The plan applies only while the walk runs** (`ui.DefaultStacks`). An item
+  placed by hand keeps one stack of what is in the slot.
+- **The remainder is the walk's own switch** (`ui.LeftoverSetting`): Post All's
+  "Post what's left over" while walking, the Aegis tab's "Keep leftovers" by
+  hand. An item the plan cannot post at all is put back and counted in the
+  status line rather than stopping the walk on a dead Post button.
+- The settings live at the top of the **Post All panel** -- the one the
+  blacklist already had -- not as loose controls on the tab.
+
+**Shipped in v1.54.30: the below-vendor gate and value ordering.** Both need
+a price for an item BEFORE it is slotted. `sell.PlannedUnit(itemId, mode)`
+reads the pre-scan's cache through `sell.UndercutFrom(rows, itemId)` -- the
+undercut rule, now taking its listing rows as an argument, so the slot
+(`sell.UndercutUnit`, over `sell.listings`) and the plan run ONE rule and
+cannot disagree.
+
+- `sell.PostAllQueue(gate, byValue, priceMode)` builds the walk's queue on top
+  of `sell.PostAllItems`. The Scan stays on the unfiltered list: it is what
+  fetches the prices the gate reads.
+- `sell.NetsBelowVendor` is the Sell tab's "Nets below vendor price" test,
+  and is only true when BOTH prices are known -- nothing is left out on a
+  guess. The vendor gate defaults ON; ordering defaults OFF (bag order).
+- **The deposit is still not subtracted** -- the original request said "after
+  deposit and auction cut", and 5.3 below records why that is wrong: a
+  deposit is refunded when the auction sells.
+
+**Shipped in v1.54.31: Smart stacks.** The definition was the owner's call:
+from one snapshot of listings, picking the best unit price always picks
+singles, which floods the market and the 120 cap. Chosen: **best total within
+a per-item auction limit.**
+
+- `sell.SmartStacks(itemId, rows, held, maxStack, limit)` -- candidates are
+  the stack sizes other sellers list that you can make, plus your full stack.
+  Each is priced against listings OF ITS OWN SIZE through
+  `sell.UndercutFrom` (your full stack, unlisted, against any size). The
+  winner nets the most if all sold: net unit x size x stacks, stacks capped at
+  `limit` minus YOUR auctions already up. A tie goes to the larger stack.
+- `db.PostOp("postCap")`, default 5. Smart always moves on after posting
+  (`ui.LeftoverSetting`): re-slotting the rest would post past the limit.
+- The price box takes Smart's per-size price while walking (`ui.WalkUnit`),
+  and the status line shows the comparison (`ui.SmartNote`).
+- `sell.HeldStacks` + `sell.StacksAt`: one bag walk per plan, however many
+  sizes it asks about. `sell.ForgetListings` after a post, so the next Scan
+  counts the auctions just posted against the limit.
+- **Known edge:** the vendor gate and value ordering price an item with the
+  general undercut, not Smart's per-size price, because pricing every size of
+  every item when the walk starts would walk the bags once per item and size.
+
+**v1.54.32: the panel rebuilt after a live-client report** ("hard to see, very
+buggy looking, doesn't fit the style"). It had copied the Vendor list's overlay
+at +5 frame levels, and the Sell tab's nested widgets drew through it. Both
+Sell-tab overlays now come from `ui.MakeContentOverlay` (+50, solid fill -- the
+Ledger's shape), and the panel uses the Ledger's furniture: options in a well,
+two boxed lists like Your Bags (`ui.PostAllListBox`), Clear all / Close in a
+footer well, tooltips (`ui.AttachTip`, which keeps a button's own hover)
+instead of grey hint text, and click-to-move rows instead of a Remove button
+per row. The layout arithmetic -- every gap at the smallest window -- is
+checked in tests/units/postall_test.lua; how it LOOKS still needs a client.
+
+The original entry:
+
 
 `ui.StartSellQueue` walks bags item by item and puts each in the slot for a
 manual Post or Skip. `ui.sellStackSize` / `ui.sellNumStacks` set stack shape

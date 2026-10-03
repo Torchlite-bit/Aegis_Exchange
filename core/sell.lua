@@ -1186,8 +1186,16 @@ end
 -- when yours is the cheapest. Falls back to the price DB, then market value.
 -- Returns copper, or nil if we have no data for the item.
 function sell.UndercutUnit(itemId)
-    local ref, under = sell.PriceReference(sell.LowestListingUnit(true),
-                                           sell.LowestOwnUnit())
+    return sell.UndercutFrom(sell.listings, itemId)
+end
+
+-- The same rule over any set of listing rows -- the slotted item's live scan
+-- (above), or an item's CACHED scan, which is how Post All prices an item it
+-- has not slotted yet (sell.PlannedUnit). One rule, so the walk's plan and
+-- the price that lands in the box cannot disagree.
+function sell.UndercutFrom(rows, itemId)
+    local ref, under = sell.PriceReference(sell.LowestUnitIn(rows, true),
+                                           sell.LowestOwnUnitIn(rows))
     if ref then
         if not under then return ref end
         return ApplyUndercut(ref)
@@ -1312,11 +1320,15 @@ end
 -- Lowest per-unit buyout among the last scan's listings. `excludeMine` skips
 -- your own auctions (so undercut targets other sellers). Returns nil if none.
 function sell.LowestListingUnit(excludeMine)
-    if not sell.listings then return nil end
+    return sell.LowestUnitIn(sell.listings, excludeMine)
+end
+
+function sell.LowestUnitIn(rows, excludeMine)
+    if not rows then return nil end
     local best = nil
     local i = 1
-    while i <= table.getn(sell.listings) do
-        local r = sell.listings[i]
+    while i <= table.getn(rows) do
+        local r = rows[i]
         if r.unit and r.unit > 0 and not (excludeMine and r.isMine) then
             if not best or r.unit < best then best = r.unit end
         end
@@ -1332,11 +1344,15 @@ end
 -- list is YOURS, there is no competition to undercut and the honest answer is
 -- to match what you already have. See sell.PriceReference.
 function sell.LowestOwnUnit()
-    if not sell.listings then return nil end
+    return sell.LowestOwnUnitIn(sell.listings)
+end
+
+function sell.LowestOwnUnitIn(rows)
+    if not rows then return nil end
     local best = nil
     local i = 1
-    while i <= table.getn(sell.listings) do
-        local r = sell.listings[i]
+    while i <= table.getn(rows) do
+        local r = rows[i]
         if r.unit and r.unit > 0 and r.isMine then
             if not best or r.unit < best then best = r.unit end
         end
@@ -1750,6 +1766,275 @@ function sell.PostAllItems()
         ci = ci + 1
     end
     return out, skipped
+end
+
+-- How Post All posts ONE item: returns (size, count). PURE -- the bag reads
+-- come in through `stacksAt(size)`, which answers how many stacks of that size
+-- can be made (sell.MaxStacks).
+--
+--   mode       db.PostOp("stackMode"): "bags" | "max" | "singles" | "fixed"
+--   fixed      the "fixed" stack size
+--   slotted    units in the slot -- the walk slots the LARGEST stack held
+--   maxStack   the item's own limit; nil when the client did not say
+--   remainder  db.PostOp("remainder")
+--
+-- COUNT 0 MEANS NOTHING TO POST under this plan, and the walk moves on: a
+-- fixed size of 10 with the remainder off, and only 3 held.
+--
+-- NO SIZE ABOVE THE LARGEST STACK HELD, except "fixed", which says what it
+-- wants. 1.12 has no merge: thirty held as three tens makes no stack of 20,
+-- so "full stacks" there means stacks of ten -- the biggest that exist.
+function sell.PlanStacks(mode, fixed, slotted, maxStack, remainder, stacksAt)
+    slotted = slotted or 0
+    if slotted < 1 then return 1, 0 end
+    local cap = maxStack
+    if not cap or cap < 1 then cap = slotted end
+    local size
+    if mode == "singles" then
+        size = 1
+    elseif mode == "max" then
+        size = cap
+        if size > slotted then size = slotted end
+    elseif mode == "fixed" then
+        size = math.floor(fixed or 0)
+        if size < 1 then size = 1 end
+        if size > cap then size = cap end
+    else
+        -- "bags", and anything unrecognised: exactly what Post All did before
+        -- it had a choice -- one stack, the size it is in the slot.
+        size = slotted
+        if size > cap then size = cap end
+        return size, 1
+    end
+    local n = stacksAt(size) or 0
+    if n < 1 and remainder then
+        -- Not one stack of the size asked for. With the remainder on, what
+        -- there is goes up as it is.
+        size = slotted
+        if size > cap then size = cap end
+        n = stacksAt(size) or 0
+        if n < 1 then n = 1 end
+    end
+    return size, n
+end
+
+-- Every stack of `itemId` held, as a list of unit counts: ONE bag walk, so a
+-- plan that asks about several sizes (sell.SmartStacks) does not walk the bags
+-- -- and read a tooltip per matching slot -- once per size.
+function sell.HeldStacks(itemId)
+    local out = {}
+    if not itemId then return out end
+    local bag = 0
+    while bag <= 4 do
+        local slots = GetContainerNumSlots(bag) or 0
+        local slot = 1
+        while slot <= slots do
+            local link = GetContainerItemLink(bag, slot)
+            if link and util.ItemIdFromLink(link) == itemId
+                and sell.IsAuctionable(bag, slot) then
+                table.insert(out, util.SlotUnits(bag, slot, itemId) or 0)
+            end
+            slot = slot + 1
+        end
+        bag = bag + 1
+    end
+    return out
+end
+
+-- How many stacks of `size` the held stacks make: per stack, since 1.12
+-- splits but never merges. sell.MaxStacks over a list. PURE.
+function sell.StacksAt(held, size)
+    if not size or size < 1 then return 0 end
+    local n = 0
+    local i = 1
+    while i <= table.getn(held or {}) do
+        n = n + math.floor((held[i] or 0) / size)
+        i = i + 1
+    end
+    return n
+end
+
+-- The listing rows known for `itemId`: its cached scan while fresh, else the
+-- live scan when that is for this item. nil when there is neither.
+function sell.ListingsFor(itemId)
+    if not itemId then return nil end
+    local entry = sell.cache[itemId]
+    if entry and time() - entry.when < sell.CACHE_TTL then return entry.listings end
+    if sell.scanItemId == itemId then return sell.listings end
+    return nil
+end
+
+-- After posting `itemId`, its cached scan no longer shows your own auctions --
+-- the ones just posted. Forget it, so the next Scan reads the auction house
+-- again; otherwise a second Post All in the same visit would count too few
+-- of your auctions against Smart's limit and post past it.
+function sell.ForgetListings(itemId)
+    if itemId then sell.cache[itemId] = nil end
+end
+
+-- SMART STACKS: which stack size nets the most, within a limit on auctions.
+--
+-- Asked for as "smart stacks based on profitability" and "profit comparison
+-- between different stack sizes". From one snapshot of listings that has to
+-- mean something measurable, and the owner chose this:
+--
+--   * CANDIDATES are the stack sizes other sellers are listing -- where buyers
+--     are evidently shopping -- that you can make, plus your full stack.
+--   * EACH IS PRICED against listings OF ITS OWN SIZE (undercut, or matched
+--     when yours is the cheapest), since a buyer of singles is not looking at
+--     stacks of 20. Your full stack, when nobody lists that size, is priced
+--     against the cheapest listing of any size.
+--   * THE LIMIT is what keeps it honest: `limit` auctions of this item on the
+--     auction house at once, YOURS ALREADY THERE INCLUDED. Without it singles
+--     win every time on unit price, flood the market and fill the 120 cap.
+--   * The winner nets the most if everything posted sold: net unit x size x
+--     stacks. A tie goes to the larger stack -- fewer auctions, same money.
+--
+-- `held` is sell.HeldStacks. Returns the best option {size, count, unit,
+-- total} and every option, smallest size first, for the comparison line --
+-- or nil, {}, "limit" when your own auctions already fill the limit. nil and
+-- an empty list with no reason means no price is known at any size. PURE but
+-- for the price DB fallback that sell.UndercutFrom shares with the slot.
+function sell.SmartStacks(itemId, rows, held, maxStack, limit)
+    local largest = 0
+    local hi = 1
+    while hi <= table.getn(held or {}) do
+        if (held[hi] or 0) > largest then largest = held[hi] end
+        hi = hi + 1
+    end
+    if largest < 1 then return nil, {} end
+    local cap = maxStack
+    if not cap or cap < 1 then cap = largest end
+    local full = (cap < largest) and cap or largest
+
+    local mine, sizes, seen = 0, {}, {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.isMine then
+            mine = mine + 1
+        elseif r.unit and r.unit > 0 and r.count and r.count >= 1
+            and not seen[r.count] then
+            seen[r.count] = true
+            table.insert(sizes, r.count)
+        end
+        i = i + 1
+    end
+    if not seen[full] then table.insert(sizes, full) end
+    local left = (limit or 0) - mine
+    if left < 1 then return nil, {}, "limit" end
+
+    local general = sell.UndercutFrom(rows, itemId)
+    local opts, best = {}, nil
+    i = 1
+    while i <= table.getn(sizes) do
+        local size = sizes[i]
+        local unit = general
+        if seen[size] then
+            local same = {}
+            local j = 1
+            while j <= table.getn(rows) do
+                if rows[j].count == size then table.insert(same, rows[j]) end
+                j = j + 1
+            end
+            unit = sell.UndercutFrom(same, itemId)
+        end
+        local n = sell.StacksAt(held, size)
+        if n > left then n = left end
+        if unit and n >= 1 then
+            local o = { size = size, count = n, unit = unit,
+                        total = sell.NetUnit(unit) * size * n }
+            table.insert(opts, o)
+            if not best or o.total > best.total
+                or (o.total == best.total and o.size > best.size) then
+                best = o
+            end
+        end
+        i = i + 1
+    end
+    table.sort(opts, function(a, b) return a.size < b.size end)
+    return best, opts
+end
+
+-- The per-item price Post All expects to post `itemId` at, BEFORE it is
+-- slotted: what the price box will be filled with when the walk reaches it.
+-- nil when nothing is known.
+--
+-- FROM THE PRE-SCAN'S CACHE. Scan fills sell.cache for every bag item before
+-- the walk starts, and slotting reads that same cache, so a price computed here
+-- is the price that lands in the box -- through the same rule
+-- (sell.UndercutFrom) and the same "Default sell price" setting
+-- (`priceMode`, ui.DefaultSellUnit's). "none" leaves the box empty, but the
+-- walk still needs an estimate, so it is planned as "undercut".
+function sell.PlannedUnit(itemId, priceMode)
+    if not itemId then return nil end
+    if priceMode == "market" then
+        local m = A.db.MarketValue(itemId)
+        if m then return m end
+    end
+    local entry = sell.cache[itemId]
+    local rows = nil
+    if entry and time() - entry.when < sell.CACHE_TTL then rows = entry.listings end
+    return sell.UndercutFrom(rows, itemId)
+end
+
+-- Would posting at `unit` keep less than a merchant pays? Only TRUE WHEN BOTH
+-- ARE KNOWN: an item with no vendor price, or no price at all, is not proven
+-- to be below anything, and Post All does not leave out what it cannot prove.
+--
+-- AGAINST THE NET, the same comparison as the Sell tab's "Nets below vendor
+-- price" line. The deposit stays out: it is refunded when the auction sells
+-- (ROADMAP 5.3).
+function sell.NetsBelowVendor(itemId, unit)
+    local vc = sell.VendorCompare(itemId, sell.NetUnit(unit))
+    return (vc and not vc.above) and true or false
+end
+
+-- Comparator for "most valuable first": by `value` (what the whole holding
+-- nets), highest first; anything without a value after everything with one;
+-- ties and unknowns keep bag order (`i`), since table.sort is not stable.
+function sell.ValueFirst(a, b)
+    if a.value and b.value then
+        if a.value ~= b.value then return a.value > b.value end
+        return a.i < b.i
+    end
+    if a.value then return true end
+    if b.value then return false end
+    return a.i < b.i
+end
+
+-- The Post / Skip walk's queue: sell.PostAllItems, then Post All's own rules.
+--   gate      leave out what nets below vendor (sell.NetsBelowVendor)
+--   byValue   most valuable holding first, rather than bag order
+-- Returns the queue, how many the blacklist left out, and how many the gate
+-- did.
+--
+-- NOT the Scan's list. The Scan is what FETCHES the prices this needs, so it
+-- walks sell.PostAllItems unfiltered; only the walk after it is gated.
+function sell.PostAllQueue(gate, byValue, priceMode)
+    local items, blacklisted = sell.PostAllItems()
+    local rows, below = {}, 0
+    local i = 1
+    while i <= table.getn(items) do
+        local it = items[i]
+        local unit = sell.PlannedUnit(it.itemId, priceMode)
+        if gate and unit and sell.NetsBelowVendor(it.itemId, unit) then
+            below = below + 1
+        else
+            local net = sell.NetUnit(unit)
+            table.insert(rows, { item = it, i = i,
+                                 value = net and net * (it.count or 1) })
+        end
+        i = i + 1
+    end
+    if byValue then table.sort(rows, sell.ValueFirst) end
+    local out = {}
+    i = 1
+    while i <= table.getn(rows) do
+        out[i] = rows[i].item
+        i = i + 1
+    end
+    return out, blacklisted, below
 end
 
 -- Put the item at (bag, slot) into the auction sell slot.

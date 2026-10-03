@@ -16160,9 +16160,10 @@ function ui.BuildSellTab()
     vendListBtn:SetScript("OnClick", function() ui.ToggleVendorList() end)
     ui.sellVendorListBtn = vendListBtn
 
-    -- The Post All blacklist. An ICON, not a word: this band also carries your
-    -- gold on the left, and a third labelled button would run into a
-    -- five-figure purse on a narrow window. The tooltip says what it is.
+    -- The Post All panel: how it posts, and the blacklist. An ICON, not a
+    -- word: this band also carries your gold on the left, and a third labelled
+    -- button would run into a five-figure purse on a narrow window. The
+    -- tooltip says what it is.
     local blBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBlacklistButton")
     blBtn:SetWidth(22)
     blBtn:SetHeight(18)
@@ -16170,15 +16171,17 @@ function ui.BuildSellTab()
     local blIcon = blBtn:CreateTexture(nil, "OVERLAY")
     blIcon:SetWidth(14); blIcon:SetHeight(14)
     blIcon:SetPoint("CENTER", blBtn, "CENTER", 0, 0)
-    blIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+    blIcon:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+    blIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     blBtn:SetScript("OnClick", function() ui.ToggleBlacklist() end)
     blBtn:SetScript("OnEnter", function()
         GameTooltip:SetOwner(blBtn, "ANCHOR_TOP")
-        GameTooltip:SetText("Post All blacklist")
+        GameTooltip:SetText("Post All")
+        GameTooltip:AddLine("How Scan, then Post / Skip, posts your bags --"
+            .. " and what it never offers.", 1, 1, 1)
         GameTooltip:AddLine(A.db.GroupCount(A.db.GROUP_NO_POST)
-            .. " item(s) Post All never offers.", 1, 1, 1)
-        GameTooltip:AddLine("Right-click a row in Your Bags to add or remove"
-            .. " one.", 0.7, 0.7, 0.7)
+            .. " item(s) on the never-posted list. Right-click a row in Your"
+            .. " Bags to add or remove one.", 0.7, 0.7, 0.7, 1)
         GameTooltip:Show()
     end)
     blBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -16680,7 +16683,7 @@ function ui.OnItemListings(rows)
     -- clearing the price and re-scanning re-prices it.
     if ui.sellPrefilledFor ~= it.itemId
         or util.Trim(ui.sellBuyout:GetText() or "") == "" then
-        local u = ui.DefaultSellUnit(it.itemId)
+        local u = ui.WalkUnit(it) or ui.DefaultSellUnit(it.itemId)
         if u then
             SetMoneyBox(ui.sellBuyout, u)
             ui.SyncSellPrices("unit")   -- keep the stack price in step
@@ -16845,11 +16848,9 @@ function ui.RefreshSell()
     local totalHave = A.sell.CountInBags(it.itemId)
     if it.itemId ~= ui.sellDefaultsFor then
         ui.sellDefaultsFor = it.itemId
-        local defSize = it.count
-        if it.maxStack and defSize > it.maxStack then defSize = it.maxStack end
-        if defSize < 1 then defSize = 1 end
+        local defSize, defCount = ui.DefaultStacks(it)
         ui.sellStackSize:SetText(tostring(defSize))
-        ui.sellNumStacks:SetText("1")
+        ui.sellNumStacks:SetText(tostring(defCount))
     end
     ui.sellName:SetText(it.name .. "  (" .. totalHave .. " total)")
 
@@ -17029,6 +17030,64 @@ function ui.RefreshSell()
     ui.MaybeScanSlotItem()
 end
 
+-- How Post All would post the slotted item: (size, count, why, best, opts).
+-- Count 0 means nothing under the current plan, and `why` says which: "few"
+-- (not one stack of the fixed size) or "limit" (Smart's limit is already
+-- filled by your own auctions). `best` / `opts` are Smart's choice and the
+-- comparison, for the status line. Post All's own settings (the Post All
+-- panel) through A.sell.PlanStacks or A.sell.SmartStacks.
+--
+-- ONE BAG WALK (A.sell.HeldStacks), however many sizes the plan asks about.
+function ui.WalkPlan(it)
+    if not it or not it.itemId then return 1, 0, "few" end
+    local held = A.sell.HeldStacks(it.itemId)
+    local function stacksAt(size) return A.sell.StacksAt(held, size) end
+    local mode = A.db.PostOp("stackMode")
+    if mode == "smart" then
+        local limit = A.db.PostOp("postCap") or 0
+        local best, opts, why = A.sell.SmartStacks(it.itemId,
+            A.sell.ListingsFor(it.itemId), held, it.maxStack, limit)
+        if best then return best.size, best.count, nil, best, opts end
+        if why == "limit" then return 1, 0, "limit" end
+        -- No price at any size: full stacks, within the limit, and the price
+        -- is yours to type.
+        local size, n = A.sell.PlanStacks("max", nil, it.count, it.maxStack,
+            false, stacksAt)
+        if n > limit then n = limit end
+        return size, n, (n < 1) and "limit" or nil
+    end
+    local size, n = A.sell.PlanStacks(mode, A.db.PostOp("stackSize"),
+        it.count, it.maxStack, A.db.PostOp("remainder"), stacksAt)
+    return size, n, (n < 1) and "few" or nil
+end
+
+-- The price for the slotted item while Post All walks in Smart mode: the one
+-- Smart chose its size for, priced against listings OF THAT SIZE. nil
+-- otherwise, and the "Default sell price" setting decides as always.
+--
+-- The mode is checked FIRST, before any planning: this runs every time a
+-- walked item's listings land, and planning walks the bags.
+function ui.WalkUnit(it)
+    if not ui.sellQueue or A.db.PostOp("stackMode") ~= "smart" then return nil end
+    local _, _, _, best = ui.WalkPlan(it)
+    return best and best.unit
+end
+
+-- The size and count a freshly slotted item starts at. WHILE POST ALL IS
+-- WALKING, its plan; otherwise one stack of what is in the slot, which is what
+-- the Sell tab has always done and what a single item placed by hand wants.
+function ui.DefaultStacks(it)
+    if ui.sellQueue then
+        local size, n = ui.WalkPlan(it)
+        if n < 1 then n = 1 end
+        return size, n
+    end
+    local defSize = it.count
+    if it.maxStack and defSize > it.maxStack then defSize = it.maxStack end
+    if defSize < 1 then defSize = 1 end
+    return defSize, 1
+end
+
 -- Current stack-size / stack-count entry values (with sensible fallbacks).
 -- Set the number of stacks and re-sync. ONE writer, because the count box and
 -- its slider are re-ranged against each other on every repaint -- writing the
@@ -17093,13 +17152,22 @@ end
 
 local VEND_ROWS, VEND_ROW_H = 12, 20
 
-function ui.BuildVendorList()
-    if ui.vendList then return end
-    local f = CreateFrame("Frame", "AegisExchangeVendorList", ui.frame)
+-- An opaque panel over the window's content area: the Ledger's and the
+-- Receipt's shape (see ui.BuildLedgerWindow for the reasoning), for the
+-- Sell tab's two overlays.
+--
+-- +50 LEVELS, NOT +5. A tab's own widgets are children of children, each
+-- nesting another level up, so a small bump leaves the deepest of them
+-- drawing THROUGH the overlay. Both Sell-tab overlays were built at +5 and
+-- showed the tab's buttons, money boxes and scrollbars on top of themselves.
+-- And a SOLID FILL under the tiling backdrop, which is only as opaque as its
+-- texture -- without it every label behind shows through.
+function ui.MakeContentOverlay(name)
+    local f = CreateFrame("Frame", name, ui.frame)
     f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
     f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
-    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)
-    f:EnableMouse(true)
+    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)
+    f:EnableMouse(true)   -- swallow clicks so they don't fall through
     f:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -17108,7 +17176,17 @@ function ui.BuildVendorList()
     })
     f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
     f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    local fill = f:CreateTexture(nil, "BACKGROUND")
+    fill:SetPoint("TOPLEFT", f, "TOPLEFT", 3, -3)
+    fill:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, 3)
+    fill:SetTexture(C.well[1], C.well[2], C.well[3])
     f:Hide()
+    return f
+end
+
+function ui.BuildVendorList()
+    if ui.vendList then return end
+    local f = ui.MakeContentOverlay("AegisExchangeVendorList")
     ui.vendList = f
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -17288,41 +17366,288 @@ function ui.ToggleVendorList()
     else ui.ShowVendorList() end
 end
 
--- ---- Post All blacklist manager -----------------------------------------
+-- ---- The Post All panel: how it posts, and what it never offers ---------
 --
--- Items Post All never offers (A.sell.IsBlacklisted). Asked for as: select
--- items directly from your bags, drag and drop them in, see the icon and name,
--- remove and clear easily. So, over the tab like the Vendor list:
+-- Opened from the gear beside Vendor. ONE panel for everything about Post
+-- All, so the tab's button row -- which also carries your gold -- gains
+-- nothing, and the settings are not loose checkboxes on the tab (ROADMAP 5.4).
 --
+-- BUILT THE WAY THE LEDGER AND THE RECEIPT ARE, and it was not at first. It
+-- copied the Vendor list's overlay, which sits only 5 levels above the tab:
+-- the Sell tab's own buttons, money boxes and scrollbars -- children of
+-- children, each nesting another level up -- drew straight through it, and its
+-- tiled backdrop let every label behind it show. Reported as "hard to see,
+-- very buggy looking". It is ui.MakeContentOverlay now, with the Ledger's
+-- furniture: controls in a well, tables boxed like the Sell tab's, Clear and
+-- Close in a footer well.
+--
+-- TOP, in a card: how it posts -- Post All's operation (A.db.PostOp): the
+-- stack mode with its two numbers, and the walk's three switches. What each
+-- does is on its tooltip, not in a line of grey text under it.
+--
+-- BELOW, two boxed lists, the blacklist (A.sell.IsBlacklisted):
 --   LEFT   what Post All would offer right now (A.sell.PostAllItems) -- your
 --          bags, minus what is already listed. Click one to add it.
---   RIGHT  the blacklist: icon, name, and a remove button on every row. Drop
---          an item from your bags anywhere on it to add that.
+--   RIGHT  what it never offers. Click one to take it off. Drop an item from
+--          your bags anywhere on the box to add that.
+-- Click-to-move both ways: nothing to aim at but the row itself.
 --
 -- And two ways in that need no panel: right-click an item in your bags while
 -- the panel is open, or right-click a row in the Sell tab's Your Bags list.
 --
 -- One table for the layout numbers: every file-scope local a builder reads is
 -- an upvalue, and this file lives near Lua 5.0's ceiling of 32 (CLAUDE.md
--- 12a).
-local BLL = { rows = 12, row_h = 20, top = 76, bottom = 34, gap = 6 }
+-- 12a). `top` / `bot` are the rows band, read by ui.ListRowsAt as a LISTBOX
+-- entry would be.
+--
+-- THE GAPS ARE MEASURED, in tests/units/postall_test.lua: a backdrop border
+-- hangs 6px OUTSIDE its frame, so the card, the two boxes and the footer well
+-- each reach 6px further than their anchors say, and at the smallest window
+-- (a 960 x 384 panel) the arithmetic is all that keeps them apart.
+local PAL = {
+    row_h    = 20,
+    rows_max = 30,
+    opt_x    = 15,    -- the options card, in from each side (its well 3 more)
+    opt_top  = 34,    -- ...under the title
+    opt_h    = 50,    -- ...two lines of controls
+    lab_x    = 8,     -- the card's captions
+    ctl_x    = 70,    -- ...and where the controls start, past them
+    mode_w   = 82,
+    chk_col  = 240,   -- the three checkboxes, one column each
+    box_top  = 102,   -- top of the two list boxes
+    hdr_y    = 6,     -- their headings, down from the box's top
+    hdr_h    = 22,    -- the rule under the headings, ditto
+    top      = 132,   -- the first row: the rows band starts here...
+    bot      = 66,    -- ...and ends this far from the bottom
+    edge     = 18,    -- the left list, in from the panel's left edge
+    mid      = 30,    -- it stops this far left of centre; its bar is in the gap
+    mid_r    = 12,    -- the right list starts this far right of centre
+    right    = 32,    -- ...and stops this far from the right: room for its bar
+    bar_x    = 8,     -- scrollbars pushed out past the box border (SELLL.bar_x)
+    icon_x   = 24,    -- a row's name, past its icon
+    qty_w    = 44,    -- the left list's Qty column (SELLL.bag_qty_w)
+    qty_gap  = 10,
+    foot_w   = 176,   -- the Clear all / Close well
+    foot_h   = 30,
+    foot_x   = 12,    -- ...in from the right
+    foot_y   = 10,    -- ...and up from the bottom
+}
+
+-- The widest a name may be in each list, at panel width `panelW`, so a long
+-- one is cut with "..." rather than wrapping over the row below. PURE.
+--
+-- FROM THE WINDOW, NOT THE FRAME: a two-corner-anchored scroll frame reports
+-- the width it was first laid out at (see ui.PanelWidthAt).
+function ui.PostAllNameWidths(panelW)
+    local half = math.floor((panelW or 0) / 2)
+    local inner = ROWPAD.l + ROWPAD.r + PAL.icon_x
+    local left = (half - PAL.mid - PAL.edge) - inner
+        - (6 + 2 + PAL.qty_w + PAL.qty_gap)
+    local right = ((panelW or 0) - half - PAL.mid_r - PAL.right) - inner - 8
+    if left < 40 then left = 40 end
+    if right < 40 then right = 40 end
+    return left, right
+end
+
+-- A tooltip on any control, ADDED to whatever it already does on hover rather
+-- than replacing it: ui.MakeButton owns OnEnter / OnLeave to paint its plate,
+-- and SetScript would silently take that away.
+function ui.AttachTip(frame, title, body)
+    local enter = frame.GetScript and frame:GetScript("OnEnter")
+    local leave = frame.GetScript and frame:GetScript("OnLeave")
+    frame:SetScript("OnEnter", function()
+        if enter then enter() end
+        GameTooltip:SetOwner(frame, "ANCHOR_TOP")
+        GameTooltip:SetText(title)
+        GameTooltip:AddLine(body, 1, 1, 1, 1)
+        GameTooltip:Show()
+    end)
+    frame:SetScript("OnLeave", function()
+        if leave then leave() end
+        GameTooltip:Hide()
+    end)
+end
+
+-- The options card at the top of the Post All panel.
+function ui.BuildPostAllOptions(f)
+    -- A CARD, which is to say a well with the controls on it: a button plate
+    -- is translucent, so the ground behind it decides how it reads, and this
+    -- is the ground the Ledger's period and view buttons sit on.
+    local opt = CreateFrame("Frame", nil, f)
+    opt:SetPoint("TOPLEFT", f, "TOPLEFT", PAL.opt_x, -PAL.opt_top)
+    opt:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAL.opt_x, -PAL.opt_top)
+    opt:SetHeight(PAL.opt_h)
+    local well = ui.MakeWell(f, opt, 3)
+    opt:SetFrameLevel(well:GetFrameLevel() + 1)
+
+    local stLbl = ui.MakeHeaderCell(opt, false, "Stacks", "LEFT", 56)
+    stLbl:SetPoint("TOPLEFT", opt, "TOPLEFT", PAL.lab_x, -6)
+    local wkLbl = ui.MakeHeaderCell(opt, false, "Walk", "LEFT", 56)
+    wkLbl:SetPoint("TOPLEFT", opt, "TOPLEFT", PAL.lab_x, -30)
+
+    -- Each number box follows the mode it belongs to: the fixed size after
+    -- "Fixed size", the auction limit after "Smart".
+    local modes = {
+        { "As in bags", "bags", "One stack, the size it is in your bags"
+            .. " \226\128\148 what Post All always did." },
+        { "Full stacks", "max", "As many full stacks as you can make. 1.12"
+            .. " cannot merge stacks, so three tens go up as three tens." },
+        { "Singles", "singles", "One item per auction." },
+        { "Fixed size", "fixed", "Stacks of the size in the box beside it." },
+        { "Smart", "smart", "Compares the stack sizes on sale and posts the"
+            .. " one that nets the most if it all sold \226\128\148 at most the"
+            .. " number of auctions in the box, counting yours already up."
+            .. " Always moves on after posting." },
+    }
+    ui.paModeBtns = {}
+    local prev
+    local mi = 1
+    while mi <= table.getn(modes) do
+        local b = ui.MakeButton(opt, "quiet")
+        b:SetWidth(PAL.mode_w); b:SetHeight(20)
+        if prev then b:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else b:SetPoint("TOPLEFT", opt, "TOPLEFT", PAL.ctl_x, -4) end
+        b:SetText(modes[mi][1])
+        b.mode = modes[mi][2]
+        b:SetScript("OnClick", function()
+            A.db.SetPostOp("stackMode", b.mode)
+            ui.RefreshPostAllOptions()
+        end)
+        ui.AttachTip(b, modes[mi][1], modes[mi][3])
+        ui.paModeBtns[mi] = b
+        prev = b
+        if b.mode == "fixed" then
+            -- The fixed size. Read on every change, so there is nothing to
+            -- confirm; a blank or zero box keeps the size it had.
+            local size = MakeNumBox(opt, 34, function()
+                local n = NumVal(this, nil)
+                if n then A.db.SetPostOp("stackSize", n) end
+            end, 20)
+            size:SetPoint("LEFT", b, "RIGHT", 6, 0)
+            ui.InputText(size, "Post All: fixed stack size")
+            ui.paSizeBox = size
+            prev = size
+        end
+        mi = mi + 1
+    end
+
+    -- Smart's limit: auctions of one item on the house at once, yours already
+    -- there included. Without one, singles win every comparison.
+    local capLbl = opt:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    capLbl:SetPoint("LEFT", prev, "RIGHT", 8, 0)
+    capLbl:SetText("at most")
+    capLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+    local cap = MakeNumBox(opt, 30, function()
+        local n = NumVal(this, nil)
+        if n then A.db.SetPostOp("postCap", n) end
+    end, 20)
+    cap:SetPoint("LEFT", capLbl, "RIGHT", 6, 0)
+    ui.InputText(cap, "Post All: smart auction limit")
+    ui.paCapBox = cap
+    local capTail = opt:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    capTail:SetPoint("LEFT", cap, "RIGHT", 6, 0)
+    capTail:SetText("auctions each")
+    capTail:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+    local rem = ui.MakeCheckBox(opt, 16, "AegisExchangePostAllRemainder")
+    rem:SetPoint("TOPLEFT", opt, "TOPLEFT", PAL.ctl_x, -30)
+    rem:SetLabel("Post what's left over", C.text)
+    rem:SetScript("OnClick", function()
+        A.db.SetPostOp("remainder", rem:GetChecked() and true or false)
+    end)
+    ui.AttachTip(rem, "Post what's left over", "After the stacks, the rest"
+        .. " comes back into the slot as one more. Off: the walk moves on to"
+        .. " the next item. Smart always moves on.")
+    ui.paRemainder = rem
+
+    -- Leave out what nets below vendor. Judged when the walk starts, from the
+    -- Scan's prices, and only where both prices are known.
+    local gate = ui.MakeCheckBox(opt, 16, "AegisExchangePostAllVendorGate")
+    gate:SetPoint("LEFT", rem, "LEFT", PAL.chk_col, 0)
+    gate:SetLabel("Skip what nets below vendor", C.text)
+    gate:SetScript("OnClick", function()
+        A.db.SetPostOp("vendorGate", gate:GetChecked() and true or false)
+    end)
+    ui.AttachTip(gate, "Skip what nets below vendor", "Leave out anything"
+        .. " whose price after the 5% cut is less than a merchant pays. Only"
+        .. " when both prices are known, from the Scan just run.")
+    ui.paVendorGate = gate
+
+    local byValue = ui.MakeCheckBox(opt, 16, "AegisExchangePostAllByValue")
+    byValue:SetPoint("LEFT", gate, "LEFT", PAL.chk_col, 0)
+    byValue:SetLabel("Most valuable first", C.text)
+    byValue:SetScript("OnClick", function()
+        A.db.SetPostOp("byValue", byValue:GetChecked() and true or false)
+    end)
+    ui.AttachTip(byValue, "Most valuable first", "Start with what your whole"
+        .. " holding of an item would net, instead of going down your bags."
+        .. " Items with no price come last.")
+    ui.paByValue = byValue
+end
+
+-- Paint the options from the saved operation.
+function ui.RefreshPostAllOptions()
+    if not ui.paModeBtns then return end
+    local mode = A.db.PostOp("stackMode")
+    ui.MarkChosen(ui.paModeBtns, function(b) return b.mode == mode end)
+    -- Repainted on show and on a mode click, never from the box's own
+    -- typing, so this cannot fight the keyboard.
+    ui.paSizeBox:SetText(tostring(A.db.PostOp("stackSize")))
+    if mode == "fixed" then ui.paSizeBox:SetAlpha(1)
+    else ui.paSizeBox:SetAlpha(0.5) end
+    ui.paCapBox:SetText(tostring(A.db.PostOp("postCap")))
+    if mode == "smart" then ui.paCapBox:SetAlpha(1)
+    else ui.paCapBox:SetAlpha(0.5) end
+    ui.paRemainder:SetChecked(A.db.PostOp("remainder") and 1 or nil)
+    -- Smart always moves on (ui.LeftoverSetting), so the box is dimmed there.
+    if mode == "smart" then ui.paRemainder:SetAlpha(0.5)
+    else ui.paRemainder:SetAlpha(1) end
+    ui.paVendorGate:SetChecked(A.db.PostOp("vendorGate") and 1 or nil)
+    ui.paByValue:SetChecked(A.db.PostOp("byValue") and 1 or nil)
+end
+
+-- One of the panel's two lists: a box the way the Sell tab's Your Bags is
+-- one -- reaching up past the scroll frame to enclose its heading band, a rule
+-- under the headings, the scrollbar pushed out past the border.
+function ui.PostAllListBox(f, scroll)
+    local well = CreateFrame("Frame", nil, f)
+    well:SetPoint("TOPLEFT", scroll, "TOPLEFT", -6, PAL.top - PAL.box_top)
+    well:SetPoint("BOTTOMRIGHT", scroll, "BOTTOMRIGHT", 0, -6)
+    well:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    well:SetBackdropColor(0.05, 0.04, 0.03, 0.85)
+    well:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    -- On the box itself, so it draws ABOVE the box's own backdrop.
+    local rule = well:CreateTexture(nil, "ARTWORK")
+    rule:SetPoint("TOPLEFT", well, "TOPLEFT", 6, -PAL.hdr_h)
+    rule:SetPoint("TOPRIGHT", well, "TOPRIGHT", -6, -PAL.hdr_h)
+    rule:SetHeight(1)
+    rule:SetTexture(0.45, 0.38, 0.22, 0.85)
+    local bar = getglobal(scroll:GetName() .. "ScrollBar")
+    if bar then
+        bar:ClearAllPoints()
+        bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", PAL.bar_x, -16)
+        bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", PAL.bar_x, 16)
+    end
+    return well
+end
+
+-- A heading inside one of those boxes, ABOVE the box's backdrop: built as a
+-- child frame at the same level, it could draw under it and come out grey
+-- (see ui.MakeHeaderCell).
+function ui.PostAllHeading(f, well, text, just, w)
+    local h = ui.MakeHeaderCell(f, false, text, just, w)
+    h:SetFrameLevel(well:GetFrameLevel() + 1)
+    return h
+end
 
 function ui.BuildBlacklist()
     if ui.blFrame then return end
-    local f = CreateFrame("Frame", "AegisExchangeBlacklist", ui.frame)
-    f:SetPoint("TOPLEFT", ui.content, "TOPLEFT", 0, 0)
-    f:SetPoint("BOTTOMRIGHT", ui.content, "BOTTOMRIGHT", 0, 0)
-    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)
-    f:EnableMouse(true)
-    f:SetBackdrop({
-        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 14,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
-    })
-    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)
-    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
-    f:Hide()
+    local f = ui.MakeContentOverlay("AegisExchangeBlacklist")
     ui.blFrame = f
     -- The left column is your bags, so it follows them -- but BAG_UPDATE
     -- storms, so the handler only sets ui.blDirty and this repaints once a
@@ -17336,90 +17661,134 @@ function ui.BuildBlacklist()
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
-    title:SetText("Post All blacklist")
     title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Post All")
+    local sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sub:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    sub:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    sub:SetText("how Scan, then Post / Skip, posts your bags \226\128\148 and"
+        .. " what it never offers")
 
-    local closeBtn = ui.MakeButton(f, "quiet")
-    closeBtn:SetWidth(60); closeBtn:SetHeight(20)
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -8)
+    ui.BuildPostAllOptions(f)
+
+    -- LEFT: what Post All would offer. RIGHT: what it never offers. Split at
+    -- the panel's centre, the left list's scrollbar in the gap between.
+    local pick = CreateFrame("ScrollFrame", "AegisExchangeBlPickScroll", f,
+        "FauxScrollFrameTemplate")
+    pick:SetPoint("TOPLEFT", f, "TOPLEFT", PAL.edge, -PAL.top)
+    pick:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -PAL.mid, PAL.bot)
+    pick:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(PAL.row_h, ui.UpdateBlacklist)
+    end)
+    ui.blPickScroll = pick
+    ui.blPickWell = ui.PostAllListBox(f, pick)
+
+    local list = CreateFrame("ScrollFrame", "AegisExchangeBlListScroll", f,
+        "FauxScrollFrameTemplate")
+    list:SetPoint("TOPLEFT", f, "TOP", PAL.mid_r, -PAL.top)
+    list:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PAL.right, PAL.bot)
+    list:SetScript("OnVerticalScroll", function()
+        FauxScrollFrame_OnVerticalScroll(PAL.row_h, ui.UpdateBlacklist)
+    end)
+    ui.blListScroll = list
+    ui.blListWell = ui.PostAllListBox(f, list)
+
+    -- Headings, placed the way their cells are (ui.MakeHeaderCell).
+    local hx = 6 + ROWPAD.l + PAL.icon_x
+    local pickHdr = ui.PostAllHeading(f, ui.blPickWell, "In your bags", "LEFT", 200)
+    pickHdr:SetPoint("TOPLEFT", ui.blPickWell, "TOPLEFT", hx, -PAL.hdr_y)
+    local qtyHdr = ui.PostAllHeading(f, ui.blPickWell, "Qty", "CENTER", PAL.qty_w)
+    qtyHdr:SetPoint("TOPRIGHT", ui.blPickWell, "TOPRIGHT",
+        -(6 + 2 + ROWPAD.r), -PAL.hdr_y)
+    local listHdr = ui.PostAllHeading(f, ui.blListWell, "Never posted", "LEFT", 200)
+    listHdr:SetPoint("TOPLEFT", ui.blListWell, "TOPLEFT", hx, -PAL.hdr_y)
+    ui.blListHdr = listHdr
+
+    -- The drop target: the whole right-hand box, under its rows. Each row
+    -- takes a drop too, so a drop lands wherever it is let go.
+    local drop = CreateFrame("Button", "AegisExchangeBlacklistDrop", f)
+    drop:SetAllPoints(ui.blListWell)
+    drop:SetFrameLevel(ui.blListWell:GetFrameLevel() + 1)
+    drop:SetScript("OnReceiveDrag", function() ui.BlacklistDrop() end)
+    drop:SetScript("OnClick", function() ui.BlacklistDrop() end)
+
+    local empty = drop:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    empty:SetPoint("CENTER", ui.blListWell, "CENTER", 0, -PAL.hdr_h / 2)
+    empty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    empty:SetText("Nothing here yet \226\128\148 click an item on the left,"
+        .. " or drag one in")
+    ui.blEmpty = empty
+    -- On the box, not the panel: the box's backdrop would cover it.
+    local pickEmpty = ui.blPickWell:CreateFontString(nil, "OVERLAY",
+        "GameFontHighlightSmall")
+    pickEmpty:SetPoint("CENTER", ui.blPickWell, "CENTER", 0, -PAL.hdr_h / 2)
+    pickEmpty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    pickEmpty:SetText("Nothing in your bags that Post All would offer")
+    ui.blPickEmpty = pickEmpty
+
+    -- The footer: what the lists are for, and Clear all / Close sharing a
+    -- well the way the Receipt's footer pair does.
+    local footBar = CreateFrame("Frame", nil, f)
+    footBar:SetHeight(PAL.foot_h); footBar:SetWidth(PAL.foot_w)
+    local fwell = ui.MakeWell(f, footBar, 3)
+    footBar:SetFrameLevel(fwell:GetFrameLevel() + 1)
+    footBar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PAL.foot_x, PAL.foot_y)
+
+    local closeBtn = ui.MakeButton(footBar, "quiet",
+        "AegisExchangePostAllCloseButton")
+    closeBtn:SetWidth(80); closeBtn:SetHeight(22)
+    closeBtn:SetPoint("RIGHT", footBar, "RIGHT", -4, 0)
     closeBtn:SetText("Close")
     closeBtn:SetScript("OnClick", function() ui.HideBlacklist() end)
 
-    local clearBtn = ui.MakeButton(f, "quiet", "AegisExchangeBlacklistClear")
-    clearBtn:SetWidth(74); clearBtn:SetHeight(20)
+    local clearBtn = ui.MakeButton(footBar, "quiet", "AegisExchangeBlacklistClear")
+    clearBtn:SetWidth(80); clearBtn:SetHeight(22)
     clearBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
     clearBtn:SetText("Clear all")
     clearBtn:SetScript("OnClick", function() ui.ConfirmBlacklistClear() end)
+    ui.AttachTip(clearBtn, "Clear all", "Empty the never-posted list. Asks"
+        .. " first.")
     ui.blClearBtn = clearBtn
 
     local note = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -30)
-    note:SetPoint("RIGHT", f, "RIGHT", -12, 0)
+    note:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 14)
+    note:SetPoint("RIGHT", footBar, "LEFT", -16, 0)
     note:SetJustifyH("LEFT")
     note:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
-    note:SetText("Post All never offers these. You can still post one by hand."
-        .. "  Add: click an item on the left, right-click it in your bags,"
-        .. " or drag it onto the list.")
-
-    local pickHdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    pickHdr:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -(BLL.top - 16))
-    pickHdr:SetText("In your bags \226\128\148 click to add")
-    local listHdr = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    listHdr:SetPoint("TOPLEFT", f, "TOP", BLL.gap + 6, -(BLL.top - 16))
-    ui.blListHdr = listHdr
-
-    -- LEFT: what Post All would offer. Half the panel, split at its centre.
-    local pick = CreateFrame("ScrollFrame", "AegisExchangeBlPickScroll", f,
-        "FauxScrollFrameTemplate")
-    pick:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -BLL.top)
-    pick:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -(BLL.gap + 22), BLL.bottom)
-    pick:SetScript("OnVerticalScroll", function()
-        FauxScrollFrame_OnVerticalScroll(BLL.row_h, ui.UpdateBlacklist)
-    end)
-    ui.blPickScroll = pick
-
-    -- RIGHT: the blacklist, and the drop target. A frame under the rows
-    -- catches a drop on the empty part of the list; each row catches its own.
-    local list = CreateFrame("ScrollFrame", "AegisExchangeBlListScroll", f,
-        "FauxScrollFrameTemplate")
-    list:SetPoint("TOPLEFT", f, "TOP", BLL.gap, -BLL.top)
-    list:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -28, BLL.bottom)
-    list:SetScript("OnVerticalScroll", function()
-        FauxScrollFrame_OnVerticalScroll(BLL.row_h, ui.UpdateBlacklist)
-    end)
-    ui.blListScroll = list
-    local drop = CreateFrame("Button", "AegisExchangeBlacklistDrop", f)
-    drop:SetAllPoints(list)
-    drop:SetFrameLevel(f:GetFrameLevel() + 1)
-    drop:SetScript("OnReceiveDrag", function() ui.BlacklistDrop() end)
-    drop:SetScript("OnClick", function() ui.BlacklistDrop() end)
-    local empty = drop:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    empty:SetPoint("CENTER", drop, "CENTER", 0, 0)
-    empty:SetText("Nothing listed yet \226\128\148 drag an item here")
-    ui.blEmpty = empty
+    note:SetText("Click an item to move it across. You can also drag one in"
+        .. " from your bags, or right-click it there while this is open."
+        .. " A never-posted item can still be posted by hand.")
 
     ui.blPickRows, ui.blListRows = {}, {}
-    local i = 1
-    while i <= BLL.rows do
+end
+
+-- Build list rows up to `n`, a few a frame (ui.RowBudget). Both lists grow
+-- together, so one budget covers the pair. Returns how many exist.
+function ui.GrowPostAllRows(want)
+    if want > PAL.rows_max then want = PAL.rows_max end
+    local n = ui.RowBudget(ui.blPickRows, want)
+    local f = ui.blFrame
+    local i = table.getn(ui.blPickRows) + 1
+    while i <= n do
         -- A bag item: click to add it.
         local pr = CreateFrame("Button", nil, f)
-        pr:SetHeight(BLL.row_h)
+        pr:SetHeight(PAL.row_h)
         pr.aegisNoSkin = true          -- a list row: see tests/lint/rowskin.py
-        ui.PlaceRow(pr, pick, i, BLL.row_h, 0, 0)
+        ui.PlaceRow(pr, ui.blPickScroll, i, PAL.row_h, ROWPAD.l, ROWPAD.r)
         ui.AddRowChrome(pr, i)
-        pr:SetFrameLevel(f:GetFrameLevel() + 2)
+        pr:SetFrameLevel(ui.blPickWell:GetFrameLevel() + 2)
         local pic = pr:CreateTexture(nil, "ARTWORK")
         pic:SetWidth(16); pic:SetHeight(16)
         pic:SetPoint("LEFT", pr, "LEFT", 4, 0)
         pr.icon = pic
         local pname = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        pname:SetPoint("LEFT", pr, "LEFT", 24, 0)
-        pname:SetPoint("RIGHT", pr, "RIGHT", -34, 0)
+        pname:SetPoint("LEFT", pr, "LEFT", PAL.icon_x, 0)
         pname:SetJustifyH("LEFT")
         pr.name = pname
         local pqty = pr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        pqty:SetPoint("RIGHT", pr, "RIGHT", -4, 0)
-        pqty:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+        pqty:SetWidth(PAL.qty_w)
+        pqty:SetPoint("RIGHT", pr, "RIGHT", -(6 + 2), 0)
+        pqty:SetJustifyH("CENTER")
         pr.qty = pqty
         pr:SetScript("OnClick", function()
             if pr.entry then ui.BlacklistAddEntry(pr.entry) end
@@ -17429,6 +17798,7 @@ function ui.BuildBlacklist()
             if e and e.bag and GameTooltip.SetBagItem then
                 GameTooltip:SetOwner(pr, "ANCHOR_RIGHT")
                 GameTooltip:SetBagItem(e.bag, e.slot)
+                GameTooltip:AddLine("Click: never post this.", 0.7, 0.7, 0.7)
                 GameTooltip:Show()
             end
         end)
@@ -17436,48 +17806,106 @@ function ui.BuildBlacklist()
         pr:Hide()
         ui.blPickRows[i] = pr
 
-        -- A listed item: icon, name, and its own remove button.
+        -- A listed item: click to take it off; a drop on it adds the drop.
         local lr = CreateFrame("Button", nil, f)
-        lr:SetHeight(BLL.row_h)
+        lr:SetHeight(PAL.row_h)
         lr.aegisNoSkin = true
-        ui.PlaceRow(lr, list, i, BLL.row_h, 0, 0)
+        ui.PlaceRow(lr, ui.blListScroll, i, PAL.row_h, ROWPAD.l, ROWPAD.r)
         ui.AddRowChrome(lr, i)
-        lr:SetFrameLevel(f:GetFrameLevel() + 2)
+        lr:SetFrameLevel(ui.blListWell:GetFrameLevel() + 2)
         local lic = lr:CreateTexture(nil, "ARTWORK")
         lic:SetWidth(16); lic:SetHeight(16)
         lic:SetPoint("LEFT", lr, "LEFT", 4, 0)
         lr.icon = lic
         local lname = lr:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lname:SetPoint("LEFT", lr, "LEFT", 24, 0)
-        lname:SetPoint("RIGHT", lr, "RIGHT", -64, 0)
+        lname:SetPoint("LEFT", lr, "LEFT", PAL.icon_x, 0)
         lname:SetJustifyH("LEFT")
         lr.name = lname
-        local rm = ui.MakeButton(lr, "quiet")
-        rm:SetWidth(58); rm:SetHeight(16)
-        rm:SetPoint("RIGHT", lr, "RIGHT", -2, 0)
-        rm:SetText("Remove")
-        rm:SetScript("OnClick", function()
-            if lr.entry then ui.BlacklistRemoveEntry(lr.entry) end
-        end)
-        lr.remove = rm
-        -- A drop on a row is a drop on the list.
         lr:SetScript("OnReceiveDrag", function() ui.BlacklistDrop() end)
-        lr:SetScript("OnClick", function() ui.BlacklistDrop() end)
+        lr:SetScript("OnClick", function() ui.BlacklistRowClick(lr.entry) end)
+        lr:SetScript("OnEnter", function()
+            local l = lr.entry
+            if not l then return end
+            GameTooltip:SetOwner(lr, "ANCHOR_RIGHT")
+            local shown = false
+            if GameTooltip.SetHyperlink then
+                shown = pcall(function()
+                    GameTooltip:SetHyperlink("item:" .. l.itemId .. ":0:0:0")
+                end)
+            end
+            if not shown then GameTooltip:SetText(l.name or ("item " .. l.itemId)) end
+            GameTooltip:AddLine("Click: post it again.", 0.7, 0.7, 0.7)
+            GameTooltip:Show()
+        end)
+        lr:SetScript("OnLeave", function() GameTooltip:Hide() end)
         lr:Hide()
         ui.blListRows[i] = lr
         i = i + 1
     end
+    -- Short of what was asked: paint again next frame, which grows the rest.
+    if n < want then ui.blDirty = true end
+    return table.getn(ui.blPickRows)
 end
 
--- " (3 blacklisted left out)", or "" -- for the Post / Skip walk's status line,
--- so a shorter walk than expected says why. PURE.
-function ui.BlacklistSkippedNote(n)
-    if not n or n < 1 then return "" end
-    return " (" .. n .. " blacklisted left out)"
+-- A click on a never-posted row: with an item in hand it is a drop, which adds
+-- that; otherwise it takes this one off the list.
+function ui.BlacklistRowClick(entry)
+    if CursorHasItem and CursorHasItem() then
+        ui.BlacklistDrop()
+        return
+    end
+    if entry then ui.BlacklistRemoveEntry(entry) end
+end
+
+-- " (left out: 3 blacklisted, 1 below vendor, 2 fewer than 10, 1 at your
+-- limit of 5)", or "" -- for the Post / Skip walk's status line, so a shorter
+-- walk than expected says why. `t` is ui.sellLeftOut; `size` is the fixed
+-- stack size and `limit` Smart's, the only plans that can leave an item out.
+-- PURE.
+function ui.WalkLeftOutNote(t, size, limit)
+    t = t or {}
+    local parts = {}
+    if t.blacklisted and t.blacklisted > 0 then
+        table.insert(parts, t.blacklisted .. " blacklisted")
+    end
+    if t.below and t.below > 0 then
+        table.insert(parts, t.below .. " below vendor")
+    end
+    if t.tooFew and t.tooFew > 0 then
+        table.insert(parts, t.tooFew .. " fewer than " .. (size or "a stack"))
+    end
+    if t.atLimit and t.atLimit > 0 then
+        table.insert(parts, t.atLimit .. " at your limit of " .. (limit or "?"))
+    end
+    if table.getn(parts) == 0 then return "" end
+    return " (left out: " .. table.concat(parts, ", ") .. ")"
+end
+
+-- " Smart: 2 x 20 nets 37s 60c (1: 7s 5c, 5: 9s 40c)" -- what Smart chose and
+-- what it beat, so the choice can be checked rather than trusted. "" when
+-- Smart is not deciding. Totals are what each would net if it all sold. PURE.
+function ui.SmartNote(best, opts)
+    if not best then return "" end
+    local others = {}
+    local i = 1
+    while i <= table.getn(opts or {}) do
+        local o = opts[i]
+        if o ~= best then
+            table.insert(others, o.size .. ": " .. util.FormatMoney(o.total))
+        end
+        i = i + 1
+    end
+    local note = " Smart: " .. best.count .. " x " .. best.size .. " nets "
+        .. util.FormatMoney(best.total)
+    if table.getn(others) > 0 then
+        note = note .. " (" .. table.concat(others, ", ") .. ")"
+    end
+    return note
 end
 
 function ui.RefreshBlacklist()
     if not ui.blFrame then return end
+    ui.RefreshPostAllOptions()
     ui.blPick = A.sell.PostAllItems()
     ui.blList = A.sell.Blacklist()
     ui.UpdateBlacklist()
@@ -17486,37 +17914,48 @@ end
 function ui.UpdateBlacklist()
     if not ui.blPickScroll then return end
     local pick, list = ui.blPick or {}, ui.blList or {}
-    ui.blListHdr:SetText("Blacklisted (" .. table.getn(list) .. ")")
+    ui.blListHdr.label:SetText(string.upper("Never posted ("
+        .. table.getn(list) .. ")"))
     if table.getn(list) == 0 then ui.blEmpty:Show() else ui.blEmpty:Hide() end
+    if table.getn(pick) == 0 then ui.blPickEmpty:Show()
+    else ui.blPickEmpty:Hide() end
     if table.getn(list) == 0 then ui.blClearBtn:Disable()
     else ui.blClearBtn:Enable() end
 
-    FauxScrollFrame_Update(ui.blPickScroll, table.getn(pick), BLL.rows, BLL.row_h)
+    -- AS MANY ROWS AS THE WINDOW HOLDS, like every other list in it.
+    local vis = ui.ListRowsAt(ui.WindowH(), PAL, PAL.row_h, PAL.rows_max)
+    local built = ui.GrowPostAllRows(vis)
+    if vis > built then vis = built end
+    ui.SkinNewRows(ui.blPickRows)
+    ui.SkinNewRows(ui.blListRows)
+    local leftW, rightW = ui.PostAllNameWidths(ui.PanelWidthAt(ui.WindowW()))
+
+    FauxScrollFrame_Update(ui.blPickScroll, table.getn(pick), vis, PAL.row_h)
     local po = FauxScrollFrame_GetOffset(ui.blPickScroll)
-    FauxScrollFrame_Update(ui.blListScroll, table.getn(list), BLL.rows, BLL.row_h)
+    FauxScrollFrame_Update(ui.blListScroll, table.getn(list), vis, PAL.row_h)
     local lo = FauxScrollFrame_GetOffset(ui.blListScroll)
     local i = 1
-    while i <= BLL.rows do
-        local pr, e = ui.blPickRows[i], pick[i + po]
+    while i <= table.getn(ui.blPickRows) do
+        local pr, e = ui.blPickRows[i], (i <= vis) and pick[i + po] or nil
         if e then
             pr.entry = e
             if e.texture then pr.icon:SetTexture(e.texture); pr.icon:Show()
             else pr.icon:Hide() end
-            pr.name:SetText(e.name or "")
+            ui.SetTextClipped(pr.name, e.name or "", leftW)
             pr.name:SetTextColor(ui.QualityColor(e.quality))
-            pr.qty:SetText((e.count and e.count > 1) and e.count or "")
+            pr.qty:SetText(e.count and tostring(e.count) or "")
             pr:Show()
         else
             pr.entry = nil
             pr:Hide()
         end
-        local lr, l = ui.blListRows[i], list[i + lo]
+        local lr, l = ui.blListRows[i], (i <= vis) and list[i + lo] or nil
         if l then
             lr.entry = l
             if l.texture then lr.icon:SetTexture(l.texture); lr.icon:Show()
             else lr.icon:Hide() end
             -- The name it had when listed; an id only if it never had one.
-            lr.name:SetText(l.name or ("item " .. l.itemId))
+            ui.SetTextClipped(lr.name, l.name or ("item " .. l.itemId), rightW)
             lr.name:SetTextColor(C.text[1], C.text[2], C.text[3])
             lr:Show()
         else
@@ -17840,6 +18279,22 @@ end
 --
 -- NOT AFTER A CANCEL: the user asked to stop, and re-slotting the same item
 -- is the opposite of stopping.
+-- Which switch decides whether leftovers come back into the slot: Post All's
+-- own "Post what's left over" while it is walking, the Aegis tab's "Keep
+-- leftovers ready to post" otherwise. A function rather than
+-- `walking and op or setting`, because that idiom returns the SETTING when
+-- the op says false.
+--
+-- SMART ALWAYS MOVES ON. Its limit decided how many went up; what is left
+-- waits for the next Post All, which counts the auctions now on the house.
+function ui.LeftoverSetting(walking)
+    if walking then
+        if A.db.PostOp("stackMode") == "smart" then return false end
+        return A.db.PostOp("remainder")
+    end
+    return A.db.Setting("keepLeftovers")
+end
+
 function ui.KeepLeftovers(setting, reason, left)
     if setting == false then return false end
     if reason == "cancelled" then return false end
@@ -17872,11 +18327,16 @@ end
 
 -- Build the queue from the current bag contents and slot the first item.
 function ui.StartSellQueue()
-    -- What Post All offers: the bags minus the blacklist. The same list the
+    -- What Post All offers: the bags minus the blacklist -- the same list the
     -- Scan before it walked (A.sell.PostAllItems), so the two halves of Post
-    -- All cannot disagree about what is in it.
-    local q, skipped = A.sell.PostAllItems()
-    ui.sellQueueSkipped = skipped
+    -- All cannot disagree about what is in it -- and then Post All's own
+    -- rules on top: the vendor gate and the order (A.sell.PostAllQueue).
+    local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp("vendorGate"),
+        A.db.PostOp("byValue"), A.db.Setting("sellDefault"))
+    -- What this walk leaves out, and why -- the status line reads it. A fresh
+    -- table each walk, so one walk's counts never carry into the next.
+    ui.sellLeftOut = { blacklisted = skipped, below = below, tooFew = 0,
+                       atLimit = 0 }
     ui.sellQueue = q
     ui.sellQueueIndex = 0
     if table.getn(q) == 0 then
@@ -17898,20 +18358,41 @@ function ui.AdvanceSellQueue()
         -- goes stale as posting shifts bags around, which is why the walk
         -- sometimes slotted the wrong item (or nothing) instead of the next one.
         if item.itemId and A.sell.PlaceItemById(item.itemId) then
-            ui.sellQueueIndex = i
-            ui.RefreshSell()
-            if ui.sellStatus then
-                ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
-                    .. " \226\128\148 Post or Skip."
-                    .. ui.BlacklistSkippedNote(ui.sellQueueSkipped))
+            -- NOTHING TO POST under the plan -- a fixed size of 10 with the
+            -- remainder off and only 3 held, or Smart's limit already filled
+            -- by your own auctions: put it back and move on, rather than stop
+            -- on an item whose Post button cannot work.
+            local _, n, why, best, opts = ui.WalkPlan(A.sell.GetItem())
+            if n < 1 then
+                A.sell.ClearSlot()
+                local lo = ui.sellLeftOut
+                if why == "limit" then lo.atLimit = lo.atLimit + 1
+                else lo.tooFew = lo.tooFew + 1 end
+            else
+                ui.sellQueueIndex = i
+                -- Re-derive the stacks even when this item was in the slot
+                -- already, by hand: the walk's plan is not the hand default.
+                ui.sellDefaultsFor = nil
+                ui.RefreshSell()
+                if ui.sellStatus then
+                    ui.sellStatus:SetText("Item " .. i .. " of " .. table.getn(q)
+                        .. " \226\128\148 Post or Skip."
+                        .. ui.SmartNote(best, opts)
+                        .. ui.WalkLeftOutNote(ui.sellLeftOut,
+                            A.db.PostOp("stackSize"), A.db.PostOp("postCap")))
+                end
+                return true
             end
-            return true
         end
         i = i + 1
     end
     ui.sellQueue = nil
     ui.sellQueueIndex = nil
-    if ui.sellStatus then ui.sellStatus:SetText("Bag list finished.") end
+    ui.sellDefaultsFor = nil
+    if ui.sellStatus then
+        ui.sellStatus:SetText("Bag list finished." .. ui.WalkLeftOutNote(
+            ui.sellLeftOut, A.db.PostOp("stackSize"), A.db.PostOp("postCap")))
+    end
     return false
 end
 
@@ -18020,6 +18501,9 @@ function ui.DoPost()
                     .. "...")
             end,
             onDone = function(done, total, reason)
+                -- Its cached scan no longer shows your own auctions: forget
+                -- it, so the next Scan reads them (A.sell.ForgetListings).
+                if done > 0 then A.sell.ForgetListings(p.itemId) end
                 local msg = "Posted " .. done .. " of " .. total .. "."
                 if reason == "out" then
                     msg = msg .. " (ran out of items)"
@@ -18056,7 +18540,8 @@ function ui.DoPost()
                 -- See ui.AdvanceAfterPost.
                 local left = p.itemId and A.sell.CountInBags(p.itemId) or 0
                 local kept = false
-                if ui.KeepLeftovers(A.db.Setting("keepLeftovers"), reason, left)
+                if ui.KeepLeftovers(ui.LeftoverSetting(ui.sellQueue ~= nil),
+                        reason, left)
                     and A.sell.PlaceItemById(p.itemId) then
                     kept = true
                     -- The holding is smaller now, so the stack controls
@@ -18461,6 +18946,8 @@ function ui.RefreshCurrentTab(requestAuctions)
     if name == "Sell" then
         ui.RefreshBags()
         ui.RefreshSell()
+        -- The Post All panel over it: a flag, flushed by its own OnUpdate.
+        if ui.blFrame and ui.blFrame:IsVisible() then ui.blDirty = true end
     elseif name == "Buy" then
         ui.RefreshBuy()
     elseif name == "Crafting" then

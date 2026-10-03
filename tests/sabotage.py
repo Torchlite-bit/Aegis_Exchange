@@ -7772,8 +7772,23 @@ end""",
      "blacklist"),
 
     ("postskip-walk-builds-its-own-list", "ui/frame.lua",
-     "    local q, skipped = A.sell.PostAllItems()",
-     "    local q, skipped = A.sell.ScanBags(), 0",
+     "    local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp(\"vendorGate\"),\n"
+     "        A.db.PostOp(\"byValue\"), A.db.Setting(\"sellDefault\"))",
+     "    local q, skipped, below = A.sell.ScanBags(), 0, 0",
+     "blacklist"),
+
+    # The walk's queue flattening the bags itself again.
+    ("walk-queue-forgets-the-blacklist", "core/sell.lua",
+     "    local items, blacklisted = sell.PostAllItems()\n"
+     "    local rows, below = {}, 0",
+     "    local items, blacklisted = {}, 0\n"
+     "    local cats = sell.ScanBags()\n"
+     "    for ci = 1, table.getn(cats) do\n"
+     "        for ii = 1, table.getn(cats[ci].items) do\n"
+     "            table.insert(items, cats[ci].items[ii])\n"
+     "        end\n"
+     "    end\n"
+     "    local rows, below = {}, 0",
      "blacklist"),
 
     # A cold cache forgets the name; a later bare add must not erase it.
@@ -7908,16 +7923,520 @@ end""",
      "blacklist"),
 
     ("skipped-note-says-nothing", "ui/frame.lua",
-     '    return " (" .. n .. " blacklisted left out)"',
+     '    return " (left out: " .. table.concat(parts, ", ") .. ")"',
      '    return ""',
      "blacklist"),
 
     ("skipped-note-speaks-for-zero", "ui/frame.lua",
-     "    if not n or n < 1 then return \"\" end\n"
-     "    return \" (\" .. n",
-     "    if not n then return \"\" end\n"
-     "    return \" (\" .. n",
+     "    if t.blacklisted and t.blacklisted > 0 then",
+     "    if t.blacklisted then",
      "blacklist"),
+
+    # ---- how Post All posts (ROADMAP 5.4) -----------------------------------
+    # "As in bags" is the old behaviour exactly: one stack.
+    ("planstacks-as-in-bags-posts-every-stack", "core/sell.lua",
+     "        return size, 1\n    end\n    local n = stacksAt(size) or 0",
+     "        return size, stacksAt(size) or 1\n    end\n"
+     "    local n = stacksAt(size) or 0",
+     "postall"),
+
+    # 1.12 cannot merge: a size bigger than any stack held makes nothing.
+    ("planstacks-full-stacks-bigger-than-held", "core/sell.lua",
+     "        if size > slotted then size = slotted end\n"
+     "    elseif mode == \"fixed\" then",
+     "    elseif mode == \"fixed\" then",
+     "postall"),
+
+    ("planstacks-fixed-above-the-limit", "core/sell.lua",
+     "        if size > cap then size = cap end\n    else\n",
+     "    else\n",
+     "postall"),
+
+    ("planstacks-singles-are-not-singles", "core/sell.lua",
+     "        size = 1\n    elseif mode == \"max\" then",
+     "        size = slotted\n    elseif mode == \"max\" then",
+     "postall"),
+
+    ("planstacks-remainder-ignored", "core/sell.lua",
+     "    if n < 1 and remainder then",
+     "    if false then",
+     "postall"),
+
+    ("planstacks-remainder-always-on", "core/sell.lua",
+     "    if n < 1 and remainder then",
+     "    if n < 1 then",
+     "postall"),
+
+    ("planstacks-remainder-only-ever-one-stack", "core/sell.lua",
+     "        n = stacksAt(size) or 0\n        if n < 1 then n = 1 end",
+     "        n = 1",
+     "postall"),
+
+    ("planstacks-nothing-held-still-posts", "core/sell.lua",
+     "    if slotted < 1 then return 1, 0 end",
+     "    if slotted < 1 then return 1, 1 end",
+     "postall"),
+
+    # The and/or trap: a stored false reads as the default.
+    ("postop-false-reads-as-default", "core/db.lua",
+     "    if v == nil then return db.POST_OP_DEFAULTS[field] end\n    return v",
+     "    return v or db.POST_OP_DEFAULTS[field]",
+     "postall"),
+
+    # Defaults written into the save stop following the code.
+    ("postop-stores-the-defaults", "core/db.lua",
+     "    if not k[name] then k[name] = {} end",
+     "    if not k[name] then k[name] = { stackSize = 5 } end",
+     "postall"),
+
+    ("older-save-gets-no-operations-table", "core/db.lua",
+     "        operations = {},   -- kind -> name -> { field = value }\n",
+     "",
+     "postall"),
+
+    ("walk-ignores-the-plan", "ui/frame.lua",
+     "    if ui.sellQueue then\n        local size, n = ui.WalkPlan(it)",
+     "    if false then\n        local size, n = ui.WalkPlan(it)",
+     "postall"),
+
+    # The plan is Post All's; an item placed by hand keeps the old default.
+    ("hand-placed-item-follows-post-all", "ui/frame.lua",
+     "    if ui.sellQueue then\n        local size, n = ui.WalkPlan(it)",
+     "    if true then\n        local size, n = ui.WalkPlan(it)",
+     "postall"),
+
+    ("stack-count-box-reads-zero", "ui/frame.lua",
+     "        if n < 1 then n = 1 end\n        return size, n",
+     "        return size, n",
+     "postall"),
+
+    # Stopping on an item whose Post button cannot work.
+    ("walk-stops-on-an-unpostable-item", "ui/frame.lua",
+     "            if n < 1 then\n                A.sell.ClearSlot()",
+     "            if false then\n                A.sell.ClearSlot()",
+     "postall"),
+
+    ("walk-does-not-count-what-it-skipped", "ui/frame.lua",
+     "                else lo.tooFew = lo.tooFew + 1 end",
+     "                end",
+     "postall"),
+
+    # Left out at the limit, but reported as too few for a stack of 10.
+    ("walk-counts-the-limit-as-too-few", "ui/frame.lua",
+     "                if why == \"limit\" then lo.atLimit = lo.atLimit + 1\n"
+     "                else lo.tooFew = lo.tooFew + 1 end",
+     "                lo.tooFew = lo.tooFew + 1",
+     "postall"),
+
+    # An item slotted by hand before the walk keeps its hand-made stacks.
+    ("walk-keeps-stale-stack-boxes", "ui/frame.lua",
+     "                ui.sellDefaultsFor = nil\n                ui.RefreshSell()",
+     "                ui.RefreshSell()",
+     "postall"),
+
+    ("walk-skipped-count-carries-over", "ui/frame.lua",
+     "    ui.sellLeftOut = { blacklisted = skipped, below = below, tooFew = 0,\n"
+     "                       atLimit = 0 }",
+     "    ui.sellLeftOut = ui.sellLeftOut or { blacklisted = skipped,\n"
+     "        below = below, tooFew = 0, atLimit = 0 }",
+     "postall"),
+
+    ("walk-leftovers-ask-the-aegis-tab", "ui/frame.lua",
+     "ui.KeepLeftovers(ui.LeftoverSetting(ui.sellQueue ~= nil),",
+     "ui.KeepLeftovers(ui.LeftoverSetting(false),",
+     "postall"),
+
+    ("leftover-setting-and-or-trap", "ui/frame.lua",
+     "        return A.db.PostOp(\"remainder\")\n    end\n"
+     "    return A.db.Setting(\"keepLeftovers\")",
+     "        return A.db.PostOp(\"remainder\") or A.db.Setting(\"keepLeftovers\")\n"
+     "    end\n    return A.db.Setting(\"keepLeftovers\")",
+     "postall"),
+
+    # Smart re-slotting its leftovers posts past its own limit.
+    ("smart-keeps-leftovers", "ui/frame.lua",
+     "        if A.db.PostOp(\"stackMode\") == \"smart\" then return false end\n"
+     "        return A.db.PostOp(\"remainder\")",
+     "        return A.db.PostOp(\"remainder\")",
+     "postall"),
+
+    ("walk-note-silent-about-too-few", "ui/frame.lua",
+     "        table.insert(parts, t.tooFew .. \" fewer than \" .. (size or \"a stack\"))",
+     "        local _ = t.tooFew",
+     "postall"),
+
+    ("walk-note-silent-about-the-limit", "ui/frame.lua",
+     "        table.insert(parts, t.atLimit .. \" at your limit of \" .. (limit or \"?\"))",
+     "        local _ = t.atLimit",
+     "postall"),
+
+    ("options-show-the-remainder-always-on", "ui/frame.lua",
+     "    ui.paRemainder:SetChecked(A.db.PostOp(\"remainder\") and 1 or nil)",
+     "    ui.paRemainder:SetChecked(1)",
+     "postall"),
+
+    ("mode-button-saves-nothing", "ui/frame.lua",
+     "            A.db.SetPostOp(\"stackMode\", b.mode)",
+     "            local _ = b.mode",
+     "postall"),
+
+    # ---- the vendor gate and value order -----------------------------------
+    # A second copy of the undercut rule is how the walk's estimate and the
+    # price in the box came to disagree.
+    ("planned-price-ignores-your-own-listing", "core/sell.lua",
+     "    local ref, under = sell.PriceReference(sell.LowestUnitIn(rows, true),\n"
+     "                                           sell.LowestOwnUnitIn(rows))",
+     "    local ref, under = sell.PriceReference(sell.LowestUnitIn(rows, true),\n"
+     "                                           nil)",
+     "postall"),
+
+    ("planned-price-trusts-a-stale-cache", "core/sell.lua",
+     "    if entry and time() - entry.when < sell.CACHE_TTL then rows = entry.listings end",
+     "    if entry then rows = entry.listings end",
+     "postall"),
+
+    ("planned-price-ignores-market-default", "core/sell.lua",
+     "    if priceMode == \"market\" then\n        local m = A.db.MarketValue(itemId)",
+     "    if false then\n        local m = A.db.MarketValue(itemId)",
+     "postall"),
+
+    # A gross comparison: what you would keep is 95% of it.
+    ("vendor-gate-compares-the-gross", "core/sell.lua",
+     "    local vc = sell.VendorCompare(itemId, sell.NetUnit(unit))",
+     "    local vc = sell.VendorCompare(itemId, unit)",
+     "postall"),
+
+    ("vendor-gate-without-a-price-leaves-out", "core/sell.lua",
+     "    return (vc and not vc.above) and true or false",
+     "    return (not vc or not vc.above) and true or false",
+     "postall"),
+
+    ("vendor-gate-ignores-its-switch", "core/sell.lua",
+     "        if gate and unit and sell.NetsBelowVendor(it.itemId, unit) then",
+     "        if unit and sell.NetsBelowVendor(it.itemId, unit) then",
+     "postall"),
+
+    ("vendor-gate-never-closes", "core/sell.lua",
+     "        if gate and unit and sell.NetsBelowVendor(it.itemId, unit) then",
+     "        if false then",
+     "postall"),
+
+    ("vendor-gate-uncounted", "core/sell.lua",
+     "            below = below + 1\n",
+     "",
+     "postall"),
+
+    ("value-order-ignores-its-switch", "core/sell.lua",
+     "    if byValue then table.sort(rows, sell.ValueFirst) end",
+     "    table.sort(rows, sell.ValueFirst)",
+     "postall"),
+
+    ("value-order-never-sorts", "core/sell.lua",
+     "    if byValue then table.sort(rows, sell.ValueFirst) end",
+     "",
+     "postall"),
+
+    ("value-order-by-unit-not-holding", "core/sell.lua",
+     "                                 value = net and net * (it.count or 1) })",
+     "                                 value = net })",
+     "postall"),
+
+    ("value-order-lowest-first", "core/sell.lua",
+     "        if a.value ~= b.value then return a.value > b.value end",
+     "        if a.value ~= b.value then return a.value < b.value end",
+     "postall"),
+
+    ("value-order-unpriced-first", "core/sell.lua",
+     "    if a.value then return true end\n    if b.value then return false end",
+     "    if a.value then return false end\n    if b.value then return true end",
+     "postall"),
+
+    ("value-order-ties-unstable", "core/sell.lua",
+     "        if a.value ~= b.value then return a.value > b.value end\n"
+     "        return a.i < b.i",
+     "        if a.value ~= b.value then return a.value > b.value end\n"
+     "        return a.i > b.i",
+     "postall"),
+
+    ("vendor-gate-defaults-off", "core/db.lua",
+     "    vendorGate = true,",
+     "    vendorGate = false,",
+     "postall"),
+
+    ("walk-ignores-the-gate-switch", "ui/frame.lua",
+     "    local q, skipped, below = A.sell.PostAllQueue(A.db.PostOp(\"vendorGate\"),",
+     "    local q, skipped, below = A.sell.PostAllQueue(true,",
+     "postall"),
+
+    ("walk-note-silent-about-below-vendor", "ui/frame.lua",
+     "        table.insert(parts, t.below .. \" below vendor\")",
+     "        local _ = t.below",
+     "postall"),
+
+    # ---- smart stacks ------------------------------------------------------
+    ("smart-ignores-your-own-auctions", "core/sell.lua",
+     "        if r.isMine then\n            mine = mine + 1\n        elseif",
+     "        if r.isMine then\n        elseif",
+     "postall"),
+
+    ("smart-without-a-limit", "core/sell.lua",
+     "        if n > left then n = left end\n        if unit and n >= 1 then",
+     "        if unit and n >= 1 then",
+     "postall"),
+
+    ("smart-at-the-limit-posts-anyway", "core/sell.lua",
+     "    if left < 1 then return nil, {}, \"limit\" end",
+     "    if left < 1 then left = 1 end",
+     "postall"),
+
+    # Every size priced against the cheapest of ANY size: singles stop
+    # fetching what singles sell for, and the comparison means nothing.
+    ("smart-prices-every-size-alike", "core/sell.lua",
+     "            unit = sell.UndercutFrom(same, itemId)",
+     "            unit = general",
+     "postall"),
+
+    ("smart-forgets-your-full-stack", "core/sell.lua",
+     "    if not seen[full] then table.insert(sizes, full) end",
+     "",
+     "postall"),
+
+    ("smart-by-unit-price-not-total", "core/sell.lua",
+     "                        total = sell.NetUnit(unit) * size * n }",
+     "                        total = sell.NetUnit(unit) }",
+     "postall"),
+
+    ("smart-ties-go-small", "core/sell.lua",
+     "                or (o.total == best.total and o.size > best.size) then",
+     "                or (o.total == best.total and o.size < best.size) then",
+     "postall"),
+
+    ("smart-picks-the-worst", "core/sell.lua",
+     "            if not best or o.total > best.total",
+     "            if not best or o.total < best.total",
+     "postall"),
+
+    ("stacks-at-merges-stacks", "core/sell.lua",
+     "        n = n + math.floor((held[i] or 0) / size)",
+     "        n = n + (held[i] or 0) / size",
+     "postall"),
+
+    ("listings-for-trusts-a-stale-cache", "core/sell.lua",
+     "    if entry and time() - entry.when < sell.CACHE_TTL then return entry.listings end",
+     "    if entry then return entry.listings end",
+     "postall"),
+
+    ("listings-for-takes-another-items-scan", "core/sell.lua",
+     "    if sell.scanItemId == itemId then return sell.listings end",
+     "    return sell.listings",
+     "postall"),
+
+    ("post-keeps-a-stale-cache", "core/sell.lua",
+     "    if itemId then sell.cache[itemId] = nil end",
+     "    local _ = itemId",
+     "postall"),
+
+    ("walk-plan-ignores-smart", "ui/frame.lua",
+     "    if mode == \"smart\" then\n        local limit = A.db.PostOp(\"postCap\") or 0",
+     "    if false then\n        local limit = A.db.PostOp(\"postCap\") or 0",
+     "postall"),
+
+    ("walk-plan-no-price-ignores-the-limit", "ui/frame.lua",
+     "        if n > limit then n = limit end\n        return size, n, (n < 1) and \"limit\" or nil",
+     "        return size, n, (n < 1) and \"limit\" or nil",
+     "postall"),
+
+    ("walk-unit-outside-smart", "ui/frame.lua",
+     "    if not ui.sellQueue or A.db.PostOp(\"stackMode\") ~= \"smart\" then return nil end",
+     "    if not ui.sellQueue then return nil end",
+     "postall"),
+
+    ("walk-unit-by-hand", "ui/frame.lua",
+     "    if not ui.sellQueue or A.db.PostOp(\"stackMode\") ~= \"smart\" then return nil end",
+     "    if A.db.PostOp(\"stackMode\") ~= \"smart\" then return nil end",
+     "postall"),
+
+    ("smart-price-never-reaches-the-box", "ui/frame.lua",
+     "        local u = ui.WalkUnit(it) or ui.DefaultSellUnit(it.itemId)",
+     "        local u = ui.DefaultSellUnit(it.itemId)",
+     "postall"),
+
+    ("post-never-forgets-the-scan", "ui/frame.lua",
+     "                if done > 0 then A.sell.ForgetListings(p.itemId) end\n",
+     "",
+     "postall"),
+
+    ("smart-note-lists-the-winner-twice", "ui/frame.lua",
+     "        if o ~= best then\n            table.insert(others,",
+     "        if true then\n            table.insert(others,",
+     "postall"),
+
+    ("smart-note-missing", "ui/frame.lua",
+     "                        .. ui.SmartNote(best, opts)\n",
+     "",
+     "postall"),
+
+    ("limit-box-saves-nothing", "ui/frame.lua",
+     "        if n then A.db.SetPostOp(\"postCap\", n) end",
+     "        local _ = n",
+     "postall"),
+
+    ("smart-limit-defaults-off", "core/db.lua",
+     "    postCap = 5,",
+     "    postCap = 0,",
+     "postall"),
+
+    ("gate-box-shows-always-on", "ui/frame.lua",
+     "    ui.paVendorGate:SetChecked(A.db.PostOp(\"vendorGate\") and 1 or nil)",
+     "    ui.paVendorGate:SetChecked(1)",
+     "postall"),
+
+    ("order-box-saves-nothing", "ui/frame.lua",
+     "        A.db.SetPostOp(\"byValue\", byValue:GetChecked() and true or false)",
+     "        local _ = byValue",
+     "postall"),
+
+    # ---- the Post All panel: opaque, and built like the Ledger -------------
+    # Reported from a live client: the Sell tab's buttons and labels drew
+    # through the panel. +5 is where both Sell-tab overlays started.
+    ("overlay-sits-at-plus-5", "ui/frame.lua",
+     "    f:SetPoint(\"BOTTOMRIGHT\", ui.content, \"BOTTOMRIGHT\", 0, 0)\n"
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 50)\n"
+     "    f:EnableMouse(true)   -- swallow clicks so they don't fall through\n"
+     "    f:SetBackdrop({\n"
+     "        bgFile = \"Interface\\\\Tooltips\\\\UI-Tooltip-Background\",\n"
+     "        edgeFile = \"Interface\\\\Tooltips\\\\UI-Tooltip-Border\",\n"
+     "        tile = true, tileSize = 16, edgeSize = 14,\n"
+     "        insets = { left = 4, right = 4, top = 4, bottom = 4 },\n"
+     "    })\n"
+     "    f:SetBackdropColor(C.well[1], C.well[2], C.well[3], 1)\n"
+     "    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])\n"
+     "    local fill = f:CreateTexture(nil, \"BACKGROUND\")\n"
+     "    fill:SetPoint(\"TOPLEFT\", f, \"TOPLEFT\", 3, -3)\n"
+     "    fill:SetPoint(\"BOTTOMRIGHT\", f, \"BOTTOMRIGHT\", -3, 3)\n"
+     "    fill:SetTexture(C.well[1], C.well[2], C.well[3])\n"
+     "    f:Hide()\n    return f",
+     "    f:SetPoint(\"BOTTOMRIGHT\", ui.content, \"BOTTOMRIGHT\", 0, 0)\n"
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)\n"
+     "    f:EnableMouse(true)\n"
+     "    local fill = f:CreateTexture(nil, \"BACKGROUND\")\n"
+     "    fill:SetTexture(C.well[1], C.well[2], C.well[3])\n"
+     "    f:Hide()\n    return f",
+     "postall"),
+
+    ("overlay-without-a-fill", "ui/frame.lua",
+     "    fill:SetTexture(C.well[1], C.well[2], C.well[3])\n    f:Hide()\n    return f",
+     "    f:Hide()\n    return f",
+     "postall"),
+
+    ("vendor-list-back-at-plus-5", "ui/frame.lua",
+     "    local f = ui.MakeContentOverlay(\"AegisExchangeVendorList\")",
+     "    local f = CreateFrame(\"Frame\", \"AegisExchangeVendorList\", ui.frame)\n"
+     "    f:SetPoint(\"TOPLEFT\", ui.content, \"TOPLEFT\", 0, 0)\n"
+     "    f:SetPoint(\"BOTTOMRIGHT\", ui.content, \"BOTTOMRIGHT\", 0, 0)\n"
+     "    f:SetFrameLevel(ui.content:GetFrameLevel() + 5)\n"
+     "    f:Hide()",
+     "postall"),
+
+    # SetScript replaces: a tooltip that forgets the plate's own hover leaves
+    # every mode button dead to the mouse.
+    ("tooltip-replaces-the-hover", "ui/frame.lua",
+     "        if enter then enter() end\n        GameTooltip:SetOwner(frame, \"ANCHOR_TOP\")",
+     "        GameTooltip:SetOwner(frame, \"ANCHOR_TOP\")",
+     "postall"),
+
+    ("tooltip-stays-up", "ui/frame.lua",
+     "        if leave then leave() end\n        GameTooltip:Hide()",
+     "        if leave then leave() end",
+     "postall"),
+
+    ("row-click-removes-while-holding-an-item", "ui/frame.lua",
+     "    if CursorHasItem and CursorHasItem() then\n        ui.BlacklistDrop()\n"
+     "        return\n    end\n    if entry then ui.BlacklistRemoveEntry(entry) end",
+     "    if entry then ui.BlacklistRemoveEntry(entry) end",
+     "postall"),
+
+    ("row-click-removes-nothing", "ui/frame.lua",
+     "    if entry then ui.BlacklistRemoveEntry(entry) end",
+     "    local _ = entry",
+     "postall"),
+
+    ("listed-rows-not-clickable", "ui/frame.lua",
+     "        lr:SetScript(\"OnClick\", function() ui.BlacklistRowClick(lr.entry) end)",
+     "        lr:SetScript(\"OnClick\", function() ui.BlacklistDrop() end)",
+     "postall"),
+
+    ("names-run-into-the-qty-column", "ui/frame.lua",
+     "    local left = (half - PAL.mid - PAL.edge) - inner\n"
+     "        - (6 + 2 + PAL.qty_w + PAL.qty_gap)",
+     "    local left = (half - PAL.mid - PAL.edge) - inner",
+     "postall"),
+
+    ("names-no-floor", "ui/frame.lua",
+     "    if left < 40 then left = 40 end\n    if right < 40 then right = 40 end",
+     "",
+     "postall"),
+
+    ("card-runs-into-the-lists", "ui/frame.lua",
+     "    box_top  = 102,",
+     "    box_top  = 94,",
+     "postall"),
+
+    ("lists-run-into-the-footer", "ui/frame.lua",
+     "    bot      = 66,    -- ...and ends this far from the bottom",
+     "    bot      = 56,    -- ...and ends this far from the bottom",
+     "postall"),
+
+    ("left-scrollbar-in-the-right-box", "ui/frame.lua",
+     "    mid_r    = 12,",
+     "    mid_r    = 0,",
+     "postall"),
+
+    ("rows-never-finish-growing", "ui/frame.lua",
+     "    if n < want then ui.blDirty = true end\n",
+     "",
+     "postall"),
+
+    ("resize-forgets-the-panel", "ui/frame.lua",
+     "        if ui.blFrame and ui.blFrame:IsVisible() then ui.blDirty = true end\n",
+     "",
+     "postall"),
+
+    ("lists-fixed-row-count", "ui/frame.lua",
+     "    local vis = ui.ListRowsAt(ui.WindowH(), PAL, PAL.row_h, PAL.rows_max)",
+     "    local vis = 9",
+     "postall"),
+
+    ("list-heading-without-count", "ui/frame.lua",
+     "    ui.blListHdr.label:SetText(string.upper(\"Never posted (\"\n"
+     "        .. table.getn(list) .. \")\"))",
+     "    local _ = list",
+     "postall"),
+
+    ("options-not-in-a-well", "ui/frame.lua",
+     "    local well = ui.MakeWell(f, opt, 3)\n    opt:SetFrameLevel(well:GetFrameLevel() + 1)",
+     "    opt:SetFrameLevel(f:GetFrameLevel() + 1)",
+     "postall"),
+
+    ("heading-under-its-box", "ui/frame.lua",
+     "    h:SetFrameLevel(well:GetFrameLevel() + 1)",
+     "    local _ = well",
+     "postall"),
+
+    ("listed-rows-level-with-the-drop-target", "ui/frame.lua",
+     "        lr:SetFrameLevel(ui.blListWell:GetFrameLevel() + 2)",
+     "        lr:SetFrameLevel(ui.blListWell:GetFrameLevel() + 1)",
+     "postall"),
+
+    ("empty-text-under-the-box", "ui/frame.lua",
+     "    local pickEmpty = ui.blPickWell:CreateFontString(nil, \"OVERLAY\",",
+     "    local pickEmpty = f:CreateFontString(nil, \"OVERLAY\",",
+     "postall"),
+
+    ("panel-opens-with-stale-options", "ui/frame.lua",
+     "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
+     "    if not ui.blFrame then return end\n",
+     "postall"),
 
 ]
 
@@ -7973,6 +8492,7 @@ SUITES = {
     "charges": "tests/units/charges_test.lua",
     "gather": "tests/units/gather_test.lua",
     "blacklist": "tests/units/blacklist_test.lua",
+    "postall": "tests/units/postall_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
