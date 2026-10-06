@@ -18,6 +18,33 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.33]
+
+### Fixed
+- **The Ledger's Items view showed `?` for every sale with Aegis: Courier
+  installed.** Courier collects your sale mail and books it, and a sale mail
+  never says how many were sold. Aegis keeps a book of what you posted for
+  exactly that, but only its own mailbox scan asked it, and that scan steps
+  aside for Courier. Sales Courier books now get their count from the book too,
+  so **Sold, Avg Sell and Avg Profit fill in** from your next sale.
+  - Sales already logged without a count stay `?` — Aegis never guesses one
+    after the fact.
+- **Expired auctions are given back to the book with Courier installed too.**
+  They were being skipped along with the sales, so an item left the book only
+  when it sold, and an item that had ever been up in two sizes stayed
+  uncountable.
+- **An item up in more than one stack size can now be counted.** Post All's
+  full stacks plus the few left over (20, 20 and 5) left every one of those
+  sales as `?`, because there's no way to ask which auction sold. Aegis now
+  remembers what each stack was listed for, and the money in the mail says
+  which one it was. Only when the prices are too close to tell apart is it
+  still `?`.
+- **"Vendor sale (2 stacks)" no longer shows up as an item** in the Items view.
+  Selling your marked items at a merchant is still income in Transactions and
+  the totals; it just isn't one item you could have a count for.
+
+---
+
 ## [1.54.32]
 
 ### Fixed
@@ -6528,6 +6555,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.30]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

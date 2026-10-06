@@ -5262,6 +5262,40 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### Sale counts with Courier, and with mixed stack sizes — ✅ **FIXED** (v1.54.33)
+
+Reported from a live client: the Ledger's Items view read `?` for every sale,
+with Sold, Avg Sell and Avg Profit empty, while Transactions listed the sales.
+
+**The cause was the integration, not the book.** With Aegis: Courier installed,
+`ui.ScanMailSales` stands down and Courier books the sales through
+`A.RecordExternalTxn` -- and a sale mail cannot say how many sold, so Courier
+sends no `qty`. The posting book that knows was only ever asked by the scan
+that had stood down. `A.RecordExternalTxn` now fills a sale's missing count
+from `db.MatchPosting`, after the duplicate check because matching consumes. A
+count the caller does send is kept. No `INTEGRATION_VERSION` bump: no
+signature or field meaning changed, and an older Courier gains the count
+without doing anything.
+
+**Two more holes the same report exposed:**
+
+- **Expiries stood down with the sales.** They book no money, only give a
+  posting back to this character's book, which Courier cannot see -- so
+  skipping them left an item that was ever up in two sizes "mixed" until the
+  33-day prune. The walk now stands down on sales only.
+- **A mixed book could never answer**, and Post All's full stacks plus a
+  remainder make one routinely. Postings now carry their stack buyout, start
+  bid and deposit (`db.RecordPosting`'s `price`; the owner sweep supplies
+  buyout and minimum bid), and `db.MatchPosting(name, now, money)` keeps only
+  the postings whose `db.PostingWindow` -- start bid to buyout, less the cut,
+  plus the deposit -- holds what the mail paid. One size among those is an
+  answer; a posting with no price stays a candidate, and two sizes stay
+  unknown. Never a guess, as before.
+
+**No backfill**, per §3.4's rule: sales logged without a count stay unknown.
+The merchant sell-off ("Vendor sale (N stacks)") also left the Items table --
+it is income, kept in Transactions and the totals, but not an item.
+
 ### A disenchant floor from the priced materials — ✅ **FIXED** (v1.54.27)
 
 Reported on Discord: *"why does the disenchant/vendor check give up on both

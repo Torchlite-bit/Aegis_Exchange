@@ -330,15 +330,47 @@ function db.PrunePostings(now)
 end
 
 -- Remember that `qty` of `name` went up for auction.
-function db.RecordPosting(name, itemId, qty, now)
+--
+-- `price` (optional) is { b = stack buyout, s = stack start bid, d = deposit }
+-- -- what the sale mail's money will be measured against when this item is up
+-- in more than one stack size. See db.PostingWindow.
+function db.RecordPosting(name, itemId, qty, now, price)
     if not db.char or not name or name == "" then return false end
     local n = tonumber(qty)
     if not n or n < 1 then return false end
     local book = db.Postings()
-    table.insert(book, { name = name, id = itemId, qty = math.floor(n),
-                         t = now or time() })
+    local e = { name = name, id = itemId, qty = math.floor(n), t = now or time() }
+    if price then
+        local b, st, d = tonumber(price.b), tonumber(price.s), tonumber(price.d)
+        if b and b > 0 then e.b = math.floor(b) end
+        if st and st > 0 then e.s = math.floor(st) end
+        if d and d >= 0 then e.d = math.floor(d) end
+    end
+    table.insert(book, e)
     db.PrunePostings(now)
     return true
+end
+
+-- The range of money a sale mail for posting `p` can carry: what it sold for
+-- -- anywhere from its start bid to its buyout -- less the consignment cut,
+-- plus the deposit back. Returns lo, hi; nil when the posting never recorded a
+-- buyout, which means it could be ANY amount. PURE.
+--
+-- THE DEPOSIT IS ONLY EVER ADDED TO THE TOP. A sale refunds it, and it rides
+-- in the same mail; leaving it off the bottom keeps a client that pays it
+-- separately inside the range too. A posting the owner sweep learned has no
+-- deposit on record, so its top is the buyout again -- deposits run to a large
+-- share of a cheap item's price -- which is wide, and wide is the safe
+-- direction: an overlap leaves the sale unknown, it never picks the wrong size.
+function db.PostingWindow(p, cut)
+    if not p or not p.b or p.b <= 0 then return nil end
+    cut = cut or 0.05
+    local lowPrice = p.s
+    if not lowPrice or lowPrice <= 0 or lowPrice > p.b then lowPrice = p.b end
+    local lo = math.floor(lowPrice * (1 - cut)) - 1
+    local hi = math.ceil(p.b * (1 - cut)) + 1
+    if p.d then hi = hi + p.d else hi = hi + p.b end
+    return lo, hi
 end
 
 -- How many were in the stack that just sold, or nil when we cannot say.
@@ -346,11 +378,22 @@ end
 -- CONSUMES ONE POSTING on a confident answer and NONE otherwise. Consuming on
 -- an ambiguous match would be picking a stack size at random and then throwing
 -- away the evidence that we had guessed.
-function db.MatchPosting(name, now)
+--
+-- `money`, the sale mail's amount, settles a MIXED book. All of an item's
+-- stacks the same size needs nothing more: whichever sold, that is the size.
+-- Up in two sizes -- Post All's full stacks and the five left over, say -- the
+-- stacks still differ in PRICE, and a mail that could only have come from the
+-- twenties says twenty. Only postings whose range (db.PostingWindow) holds
+-- the money are candidates; a posting with no price on record could be any of
+-- them, so it stays a candidate. One size among the candidates is an answer;
+-- two is still unknown.
+function db.MatchPosting(name, now, money)
     if not db.char or not name then return nil end
     db.PrunePostings(now)
     local book = db.Postings()
     local firstAt, qty, mixed = nil, nil, false
+    local fitAt, fitQty, fitMixed = nil, nil, false
+    local cut = (A.sell and A.sell.CUT) or 0.05
     local i = 1
     while i <= table.getn(book) do
         local p = book[i]
@@ -358,12 +401,27 @@ function db.MatchPosting(name, now)
             if not firstAt then firstAt = i end
             if qty == nil then qty = p.qty
             elseif p.qty ~= qty then mixed = true end
+            if money then
+                local lo, hi = db.PostingWindow(p, cut)
+                if not lo or (money >= lo and money <= hi) then
+                    if not fitAt then fitAt = i end
+                    if fitQty == nil then fitQty = p.qty
+                    elseif p.qty ~= fitQty then fitMixed = true end
+                end
+            end
         end
         i = i + 1
     end
-    if not firstAt or mixed then return nil end
-    table.remove(book, firstAt)
-    return qty
+    if not firstAt then return nil end
+    if not mixed then
+        table.remove(book, firstAt)
+        return qty
+    end
+    if money and fitAt and not fitMixed then
+        table.remove(book, fitAt)
+        return fitQty
+    end
+    return nil
 end
 
 -- An auction that came BACK unsold is not waiting on a sale mail either, and
@@ -432,21 +490,35 @@ function db.ReconcilePostings(stacks, now)
     -- An id per name, so a topped-up entry carries what the sweep knew. The
     -- name is what a sale mail matches on, so a row the client could not
     -- identify is still worth recording -- it just records without an id.
-    local ids = {}
+    --
+    -- ...and the PRICES per name and size, in the order the sweep saw them:
+    -- the server's list says what each auction is asking, which is what a
+    -- mixed book needs to tell a sale of one size from another
+    -- (db.MatchPosting). A topped-up entry takes the next unused one.
+    local ids, prices = {}, {}
     local i = 1
     while i <= table.getn(stacks or {}) do
         local e = stacks[i]
         if e and e.name and e.id and not ids[e.name] then ids[e.name] = e.id end
+        local q = tonumber(e and e.qty)
+        if e and e.name and q then
+            local key = e.name .. "\001" .. math.floor(q)
+            if not prices[key] then prices[key] = {} end
+            table.insert(prices[key], { b = e.b, s = e.s })
+        end
         i = i + 1
     end
     local added = 0
     for name, sizes in pairs(want) do
         local mine = have[name] or {}
         for qty, n in pairs(sizes) do
-            local short = n - (mine[qty] or 0)
+            local have_n = mine[qty] or 0
+            local short = n - have_n
+            local list = prices[name .. "\001" .. qty] or {}
             local k = 1
             while k <= short do
-                if db.RecordPosting(name, ids[name], qty, now) then
+                if db.RecordPosting(name, ids[name], qty, now,
+                                    list[have_n + k]) then
                     added = added + 1
                 end
                 k = k + 1
@@ -1748,7 +1820,19 @@ function A.RecordExternalTxn(txn)
     -- ledger without widening this would have left the new field reachable
     -- only from Aegis's own header-only path, which is the one path that
     -- cannot see it. Additive, so an older Courier keeps working unchanged.
-    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId, txn.qty)
+    -- THE QUANTITY FROM THE POSTING BOOK when the caller has none -- and
+    -- Courier never has one: a sale mail does not say how many sold. The book
+    -- is the only place that number exists, and with Courier owning the
+    -- mailbox this is the only place a sale passes through Aegis, so asking
+    -- here is what lets a Courier user's sales be counted at all. Reported as
+    -- the Ledger's Items view reading "?" for every sale.
+    --
+    -- AFTER the duplicate check, because matching CONSUMES a posting.
+    local qty = txn.qty
+    if txn.kind == "sale" and txn.item and not (tonumber(qty) and qty > 0) then
+        qty = db.MatchPosting(txn.item, nil, txn.amount)
+    end
+    db.RecordTxn(txn.kind, txn.item or "?", txn.amount, txn.itemId, qty)
     return true
 end
 
@@ -2270,6 +2354,18 @@ end
 -- KEYED BY NAME, for the reason db.LedgerStats is: keying by id-or-name splits
 -- an item whose history straddles the release where ids started being
 -- recorded, and neither half is then the whole item.
+-- What the merchant sell-off books its income under: one entry for the lot
+-- ("Vendor sale (6 stacks)"), because it sells several items at once. Income,
+-- but not an ITEM -- see db.LedgerItems.
+db.VENDOR_SALE_PREFIX = "Vendor sale ("
+
+function db.IsVendorSale(e)
+    local name = e and e.item
+    if not name then return false end
+    local n = string.len(db.VENDOR_SALE_PREFIX)
+    return string.sub(name, 1, n) == db.VENDOR_SALE_PREFIX
+end
+
 function db.LedgerItems(sinceEpoch, now)
     local byName, order = {}, {}
     local led = db.LedgerSource()
@@ -2279,7 +2375,12 @@ function db.LedgerItems(sinceEpoch, now)
         local t = e.t
         if not sinceEpoch or (t and t >= sinceEpoch) then
             local amount = e.amount or 0
-            if amount > 0 and (e.kind == "sale" or e.kind == "buy") then
+            -- NOT THE MERCHANT LUMP. It is income -- the Transactions view and
+            -- the totals keep it -- but a row per ITEM cannot hold "six
+            -- stacks of whatever was marked", and it sat in this table as an
+            -- item whose count could never be known.
+            if amount > 0 and (e.kind == "sale" or e.kind == "buy")
+                and not db.IsVendorSale(e) then
                 local key = e.item or "?"
                 local rec = byName[key]
                 if not rec then

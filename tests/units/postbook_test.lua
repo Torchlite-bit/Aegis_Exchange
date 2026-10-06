@@ -409,16 +409,19 @@ do
         return string.find(src, needle, 1, true) ~= nil
     end
 
-    H.check("posting one stack remembers it",
-            says(sellSrc, "A.db.RecordPosting(it.name, it.itemId, count)"))
+    H.check("posting one stack remembers it, with its price",
+            says(sellSrc, "A.db.RecordPosting(it.name, it.itemId, count, nil,\n"
+                .. "            { b = buyout, s = start, d = sell.EstimateDeposit(minutes) })"))
     -- ONE PER StartAuction, or a run of ten stacks leaves nine sales unable to
     -- say how many they were.
     H.check("...and so does every stack of a multi-post",
             says(sellSrc,
-                 "A.db.RecordPosting(it.name, job.itemId, job.stackSize)"))
+                 "A.db.RecordPosting(it.name, job.itemId, job.stackSize, nil,\n"
+                 .. "                    { b = buyout, s = start,\n"
+                 .. "                      d = sell.EstimateDeposit(job.minutes) })"))
 
-    H.check("a sale mail matches against it",
-            says(uiSrc, "local qty = A.db.MatchPosting(item)"))
+    H.check("a sale mail matches against it, with what it paid",
+            says(uiSrc, "local qty = A.db.MatchPosting(item, nil, money)"))
     H.check("...and passes the count to the ledger",
             says(uiSrc,
                  'A.db.RecordTxn("sale", item, money, A.db.IdFromName(item), qty)'))
@@ -439,6 +442,217 @@ do
     H.check("the inbox walk never CALLS the invoice API",
             string.find(walk, "GetInboxInvoiceInfo(", 1, true) == nil,
             "it reads the mail, which shortens every mail's life")
+end
+
+-- ---------------------------------------------------------------------------
+H.section("what a sale mail can carry, per posting")
+-- ---------------------------------------------------------------------------
+
+-- 20 Linen, start 1500, buyout 2000, deposit 60. Sold anywhere from the start
+-- bid to the buyout, less 5%, plus the deposit back.
+do
+    local lo, hi = db.PostingWindow({ b = 2000, s = 1500, d = 60 }, 0.05)
+    H.eq("lowest: the start bid less the cut", lo, 1424)
+    H.eq("highest: the buyout less the cut, plus the deposit", hi, 1961)
+    lo, hi = db.PostingWindow({ b = 2000, d = 60 }, 0.05)
+    H.eq("no start bid on record: the buyout is the floor too", lo, 1899)
+    lo, hi = db.PostingWindow({ b = 2000, s = 1500 }, 0.05)
+    H.eq("no deposit on record: the top stays wide", hi, 1901 + 2000)
+    H.isNil("no price at all: could be anything", db.PostingWindow({ qty = 5 }))
+end
+
+-- ---------------------------------------------------------------------------
+H.section("two stack sizes up: the money says which sold")
+-- ---------------------------------------------------------------------------
+
+-- Post All's full stacks and the five left over: 20 Linen for 20s, 5 for 5s.
+local function both()
+    reset()
+    db.RecordPosting("Linen Cloth", 2589, 20, NOW, { b = 2000, s = 2000, d = 60 })
+    db.RecordPosting("Linen Cloth", 2589, 5, NOW, { b = 500, s = 500, d = 15 })
+end
+do
+    both()
+    H.eq("a mail of 19s 60c is the twenty", db.MatchPosting("Linen Cloth", NOW, 1960), 20)
+    H.eq("...which is the one consumed", db.Postings()[1].qty, 5)
+    H.eq("...and the five then answers alone", db.MatchPosting("Linen Cloth", NOW), 5)
+
+    both()
+    H.eq("a mail of 4s 90c is the five", db.MatchPosting("Linen Cloth", NOW, 490), 5)
+    H.eq("...leaving the twenty", db.Postings()[1].qty, 20)
+
+    both()
+    H.isNil("money neither could have paid is still unknown",
+            db.MatchPosting("Linen Cloth", NOW, 3))
+    H.eq("...and consumes nothing", table.getn(db.Postings()), 2)
+
+    both()
+    H.isNil("no money: a mixed book still cannot say",
+            db.MatchPosting("Linen Cloth", NOW))
+end
+-- Bought out by a BID below the buyout: still inside the twenty's range.
+do
+    reset()
+    db.RecordPosting("Linen Cloth", 2589, 20, NOW, { b = 2000, s = 1500, d = 60 })
+    db.RecordPosting("Linen Cloth", 2589, 5, NOW, { b = 500, s = 400, d = 15 })
+    H.eq("a sale on a bid is placed by its range",
+         db.MatchPosting("Linen Cloth", NOW, 1485), 20)
+end
+-- Two sizes at prices too close to tell apart: unknown, not a guess.
+do
+    reset()
+    db.RecordPosting("Linen Cloth", 2589, 20, NOW, { b = 2000, s = 2000, d = 60 })
+    db.RecordPosting("Linen Cloth", 2589, 5, NOW, { b = 1980, s = 1980, d = 60 })
+    -- The twenty covers 1899..1961 and the five 1880..1942: 1920 is in both.
+    H.isNil("overlapping ranges cannot say", db.MatchPosting("Linen Cloth", NOW, 1920))
+    H.eq("...and consume nothing", table.getn(db.Postings()), 2)
+end
+-- A posting with no price on record could be any sale, so it stays a
+-- candidate -- and a candidate of another size keeps the answer unknown.
+do
+    reset()
+    db.RecordPosting("Linen Cloth", 2589, 20, NOW, { b = 2000, s = 2000, d = 60 })
+    db.RecordPosting("Linen Cloth", 2589, 5, NOW)
+    H.isNil("an unpriced posting of another size keeps it unknown",
+            db.MatchPosting("Linen Cloth", NOW, 1960))
+end
+
+-- ---------------------------------------------------------------------------
+H.section("prices reach the book from every road in")
+-- ---------------------------------------------------------------------------
+
+do
+    reset()
+    W.AddItem(765, { name = "Silverleaf", quality = 1, stackCount = 20,
+                     sellPrice = 25, texture = "icon" })
+    W.sellSlot = { link = "|cffffffff|Hitem:765:0:0:0|h[Silverleaf]|h|r", count = 5 }
+    sell.Post(2000, 1000, 480)
+    local p = db.Postings()[1]
+    H.eq("a post records the stack's buyout", p and p.b, 10000)
+    H.eq("...its start bid", p and p.s, 5000)
+    H.check("...and its deposit", p and type(p.d) == "number")
+    W.sellSlot = nil
+end
+
+do
+    reset()
+    W.SetOwned({
+        { name = "Silverleaf", count = 5, buyout = 10000, minBid = 8000,
+          link = "|cffffffff|Hitem:765:0:0:0|h[Silverleaf]|h|r" },
+    })
+    sell.StartOwnerSweep()
+    local guard = 0
+    while sell.ownerSweep and guard < 10 do sell.OwnerSweepStep(); guard = guard + 1 end
+    local p = db.Postings()[1]
+    H.eq("the owner sweep hands over each auction's buyout", p and p.b, 10000)
+    H.eq("...and its minimum bid", p and p.s, 8000)
+end
+
+-- A top-up takes the NEXT unused price: one five already in the book, two up.
+do
+    reset()
+    db.RecordPosting("Silverleaf", 765, 5, NOW, { b = 500 })
+    db.ReconcilePostings({
+        { name = "Silverleaf", id = 765, qty = 5, b = 500 },
+        { name = "Silverleaf", id = 765, qty = 5, b = 600 },
+    }, NOW)
+    H.eq("the book now holds both", table.getn(db.Postings()), 2)
+    H.eq("...the new one at the second auction's price", db.Postings()[2].b, 600)
+end
+
+-- ---------------------------------------------------------------------------
+H.section("Courier's sales: the count comes from the book")
+-- ---------------------------------------------------------------------------
+
+-- Reported as the Ledger's Items view reading "?" for every sale. With Aegis:
+-- Courier installed, Courier books the sales -- and a sale mail never says how
+-- many. The book does.
+do
+    reset()
+    db.ClearLedger()
+    db.RecordPosting("Clam Meat", 5503, 20, NOW, { b = 2600, s = 2600, d = 30 })
+    local ok = A.RecordExternalTxn({ kind = "sale", item = "Clam Meat",
+                                     amount = 2500, itemId = 5503 })
+    H.check("Courier's sale is booked", ok)
+    local led = db.account.ledger
+    H.eq("...with the count from the posting book", led[table.getn(led)].qty, 20)
+    H.eq("...which consumed the posting", table.getn(db.Postings()), 0)
+end
+do
+    reset()
+    db.ClearLedger()
+    db.RecordPosting("Clam Meat", 5503, 20, NOW, { b = 2600 })
+    A.RecordExternalTxn({ kind = "sale", item = "Clam Meat", amount = 2500,
+                          qty = 7 })
+    local led = db.account.ledger
+    H.eq("a count the caller DOES send is kept", led[table.getn(led)].qty, 7)
+    H.eq("...and the book is left alone", table.getn(db.Postings()), 1)
+    A.RecordExternalTxn({ kind = "buy", item = "Clam Meat", amount = 2500 })
+    H.eq("a purchase never consumes a posting", table.getn(db.Postings()), 1)
+    A.RecordExternalTxn({ kind = "sale", item = "Clam Meat", amount = 2500, key = "k1" })
+    A.RecordExternalTxn({ kind = "sale", item = "Clam Meat", amount = 2500, key = "k1" })
+    H.eq("a duplicate consumes nothing more", table.getn(db.Postings()), 0)
+end
+
+-- With Courier owning the mailbox, Aegis still gives EXPIRED auctions back to
+-- its own book -- they book no money, so nothing is counted twice. Run for
+-- real: the walk and the subject parsers it uses, out of ui/frame.lua.
+local uiSrc
+do
+    local f = assert(io.open("ui/frame.lua", "r"))
+    uiSrc = f:read("*a")
+    f:close()
+end
+local function chunk(head)
+    local at = assert(string.find(uiSrc, head, 1, true), head)
+    local stop = string.find(uiSrc, "\nend\n", at, true)
+    return string.sub(uiSrc, at, stop + 4)
+end
+do
+    local code = chunk("local function MailPrefix(") .. chunk("local function SubjectItem(")
+        .. chunk("local function AuctionSoldItem(") .. chunk("local function AuctionExpiredItem(")
+        .. chunk("function ui.ScanMailSales(")
+    ui = { selectedSubTab = "Sell" }
+    _G.A = A
+    assert(loadstring(code))()
+
+    reset()
+    db.ClearLedger()
+    db.RecordPosting("Linen Cloth", 2589, 20, NOW)
+    db.RecordPosting("Linen Cloth", 2589, 20, NOW)
+    A.ClaimMailScanning("Aegis: Courier")
+    W.SetInbox({
+        { subject = "Auction expired: Linen Cloth", money = 0, daysLeft = 29.5 },
+        { subject = "Auction successful: Silk Cloth", money = 900, daysLeft = 29.4 },
+    })
+    ui.ScanMailSales()
+    H.eq("with Courier owning the mailbox, an expiry still gives one back",
+         table.getn(db.Postings()), 1)
+    H.eq("...no sale is booked by Aegis -- Courier books them",
+         table.getn(db.account.ledger), 0)
+    A.ReleaseMailScanning()
+    W.SetInbox({})
+end
+H.check("the merchant sell-off books under the shared name",
+        string.find(uiSrc, 'A.db.RecordTxn("sale", A.db.VENDOR_SALE_PREFIX .. sold .. " stacks)",',
+                    1, true) ~= nil)
+
+-- ---------------------------------------------------------------------------
+H.section("the merchant sell-off is income, not an item")
+-- ---------------------------------------------------------------------------
+
+do
+    db.ClearLedger()
+    db.RecordTxn("sale", db.VENDOR_SALE_PREFIX .. "2 stacks)", 154)
+    db.RecordTxn("sale", "Clam Meat", 2455, 5503, 20)
+    local rows = db.LedgerItems()
+    H.eq("the Items table holds the item and not the lump", table.getn(rows), 1)
+    H.eq("...the item", rows[1] and rows[1].item, "Clam Meat")
+    local income = db.LedgerTotals()
+    H.eq("...while the lump still counts as income", income, 2609)
+    H.check("an old lump is recognised by its name",
+            db.IsVendorSale({ item = "Vendor sale (6 stacks)" }))
+    H.check("...and an item is not", not db.IsVendorSale({ item = "Vendorbound Ore" }))
 end
 
 os.exit(H.report("postbook"))

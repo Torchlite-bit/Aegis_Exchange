@@ -14107,17 +14107,23 @@ end
 
 -- approximate arrival time so the same mail isn't re-counted across sessions).
 function ui.ScanMailSales()
-    -- Stand down when a companion addon (Aegis: Courier) owns the mailbox.
-    -- Two scanners on one inbox means two hooks racing and sales counted
-    -- twice; Courier reads mail far more thoroughly, so it wins. See the
-    -- integration block in core/db.lua.
-    if A.MailScanningExternal and A.MailScanningExternal() then return end
+    -- SALES stand down when a companion addon (Aegis: Courier) owns the
+    -- mailbox. Two scanners on one inbox means two hooks racing and sales
+    -- counted twice; Courier reads mail far more thoroughly, so it wins. See
+    -- the integration block in core/db.lua.
+    --
+    -- EXPIRIES DO NOT. They book nothing -- no money moves -- and only give
+    -- a posting back to this character's own book, which Courier cannot see.
+    -- Standing down for those too left every expired auction in the book, so
+    -- an item once up in two sizes stayed "mixed" long after one had come
+    -- back, and its later sales could not say how many they were.
+    local external = A.MailScanningExternal and A.MailScanningExternal()
     if not GetInboxNumItems then return end
     local n = GetInboxNumItems() or 0
     local i = 1
     while i <= n do
         local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
-        local item = AuctionSoldItem(subject)
+        local item = (not external) and AuctionSoldItem(subject) or nil
         -- HEADER ONLY, STILL. GetInboxInvoiceInfo would give the buyer, the
         -- deposit and the cut -- and it MARKS THE MAIL AS READ, which shortens
         -- its timeout. Calling it here would do that to every mail in the box,
@@ -14147,7 +14153,9 @@ function ui.ScanMailSales()
                 -- INSIDE THE DEDUPE, deliberately: matching CONSUMES a
                 -- posting, so the same call outside this guard would eat one
                 -- per re-scan of a mail already logged.
-                local qty = A.db.MatchPosting(item)
+                -- The money too: when the item is up in more than one stack
+                -- size, what the mail paid is what says which one sold.
+                local qty = A.db.MatchPosting(item, nil, money)
                 A.db.RecordTxn("sale", item, money, A.db.IdFromName(item), qty)
             end
         end
@@ -18259,7 +18267,8 @@ function ui.DoSellMarked()
         .. util.FormatMoney(value) .. ".")
     -- Vendor sales are income too.
     if value > 0 then
-        A.db.RecordTxn("sale", "Vendor sale (" .. sold .. " stacks)", value)
+        A.db.RecordTxn("sale", A.db.VENDOR_SALE_PREFIX .. sold .. " stacks)",
+            value)
     end
     ui.RefreshMerchantButton()
     if ui.vendList and ui.vendList:IsVisible() then ui.RefreshVendorList() end
