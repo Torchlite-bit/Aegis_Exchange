@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.32)
+# Aegis: Exchange (v1.54.33)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -237,11 +237,13 @@ earns. They are rarely the same thing.
   sortable, with a footer of what you resold and made.
 - **Transactions** — every sale and purchase, with Income · Spent · Net.
 
-Sales are logged **from your mailbox**, in any client language; purchases when
-you buy. **Stack sizes are recorded both ways** — for sales, by matching the
-mail against what you posted and what's still up. A sale that can't be counted
-shows **`?`** (or `120 +2?`) rather than a guess, and an average only ever uses
-money and units from the same sales.
+Sales are logged **from your mailbox**, in any client language — or by
+**Aegis: Courier** when you run it — and purchases when you buy. **Stack sizes
+are recorded both ways**: for sales, by matching the mail against what you
+posted and what's still up, and when an item was up in more than one stack size,
+by what the mail paid. A sale that can't be counted shows **`?`** (or `120 +2?`)
+rather than a guess, and an average only ever uses money and units from the
+same sales. Selling marked items at a merchant counts as income, not as an item.
 
 Money reads in **gold, silver and copper**. About **three months** of gold
 history fits in your saved variables.
@@ -446,7 +448,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.32`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.33`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

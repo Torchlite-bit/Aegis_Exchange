@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.54.32
+# ⚔️ Aegis: Exchange v1.54.33
 
 ## ✨ New
 - **Post All, your way** — full stacks, singles, a fixed size or **Smart** (the stack size that nets most, max N auctions); skips anything worth more at a vendor; most valuable first; **blacklist**
@@ -13,6 +13,7 @@
 ## 🛠️ Fixed
 - **Disenchant values rebuilt from the server's own loot table** — epics have a value, weapons answer at every level, the 5% Brilliant Shard is back for ilvl 51–65 greens, shields & off-hands priced right
 - **Sell tab showed no listings** for items your client hadn't seen yet
+- **Ledger Items showed ? for sales** booked by Courier or from mixed stack sizes
 - **Post All panel & Vendor list** let the Sell tab show through — solid now
 - **Disenchant line said "?"** when one material had no price — now shows *at least* and still calls *worth more than vendor*
 - **Buying again after a buyout** said *no longer available* until you searched again
@@ -23,6 +24,5 @@
 - Sales weren't logged on **non-English clients**
 - `/aex demo` could change or delete your **real** crafting recipes
 - Below-vendor warning now counts the 5% AH cut
-- Sale counts work for auctions posted before you updated
 
 📥 https://github.com/Torchlite-bit/Aegis_Exchange

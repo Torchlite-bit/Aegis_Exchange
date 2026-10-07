@@ -7473,7 +7473,7 @@ end""",
     # A.RecordExternalTxn dropped every field it did not name, and Courier is
     # the thorough mail reader -- the one caller that would HAVE a quantity.
     ("external-txn-drops-the-quantity", "core/db.lua",
-     "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId, txn.qty)",
+     "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId, qty)",
      "    db.RecordTxn(txn.kind, txn.item or \"?\", txn.amount, txn.itemId)",
      "histstats"),
 
@@ -7489,8 +7489,8 @@ end""",
     # Picking one is a number the player reconciles against their mail and
     # finds wrong.
     ("postbook-guesses-a-mixed-book", "core/db.lua",
-     "    if not firstAt or mixed then return nil end",
-     "    if not firstAt then return nil end",
+     "    if not mixed then\n        table.remove(book, firstAt)\n        return qty\n    end",
+     "    if true then\n        table.remove(book, firstAt)\n        return qty\n    end",
      "postbook"),
 
     # ...and consuming on a guess throws away the evidence that we guessed.
@@ -7502,8 +7502,8 @@ end""",
     # A match has to CONSUME, or one stack answers for every later sale of the
     # same item.
     ("postbook-never-consumes", "core/db.lua",
-     "    table.remove(book, firstAt)\n    return qty",
-     "    return qty",
+     "        table.remove(book, firstAt)\n        return qty",
+     "        return qty",
      "postbook"),
 
     # An expired auction is not waiting on a sale mail. Left in the book it
@@ -7540,12 +7540,15 @@ end""",
 
     # ---- posting and matching are wired to the real paths ------------------
     ("sell-post-does-not-remember", "core/sell.lua",
-     "        A.db.RecordPosting(it.name, it.itemId, count)",
+     "        A.db.RecordPosting(it.name, it.itemId, count, nil,\n"
+     "            { b = buyout, s = start, d = sell.EstimateDeposit(minutes) })",
      "        local _ = count",
      "postbook"),
 
     ("sell-queue-does-not-remember", "core/sell.lua",
-     "                A.db.RecordPosting(it.name, job.itemId, job.stackSize)",
+     "                A.db.RecordPosting(it.name, job.itemId, job.stackSize, nil,\n"
+     "                    { b = buyout, s = start,\n"
+     "                      d = sell.EstimateDeposit(job.minutes) })",
      "                local _ = job",
      "postbook"),
 
@@ -7572,7 +7575,7 @@ end""",
     # the same size, so MatchPosting answers confidently for sales that never
     # happened.
     ("reconcile-appends-on-every-visit", "core/db.lua",
-     "            local short = n - (mine[qty] or 0)",
+     "            local short = n - have_n",
      "            local short = n",
      "postbook"),
 
@@ -7580,15 +7583,15 @@ end""",
     # already on the books -- and a book missing a size is a book that cannot
     # answer for it.
     ("reconcile-tops-up-per-item-not-per-size", "core/db.lua",
-     "            local short = n - (mine[qty] or 0)",
-     "            local short = n - (next(mine) and 1 or 0)",
+     "            local have_n = mine[qty] or 0",
+     "            local have_n = next(mine) and 1 or 0",
      "postbook"),
 
     # A row the client could not identify still has a NAME, and the name is
     # the whole of what a sale mail matches on.
     ("reconcile-drops-rows-with-no-id", "core/db.lua",
-     "                if db.RecordPosting(name, ids[name], qty, now) then",
-     "                if ids[name] and db.RecordPosting(name, ids[name], qty, now) then",
+     "                if db.RecordPosting(name, ids[name], qty, now,",
+     "                if ids[name] and db.RecordPosting(name, ids[name], qty, now,",
      "postbook"),
 
     # The tally is what both sides are counted with; folding sizes together
@@ -7609,7 +7612,9 @@ end""",
     # sw.counts SUMS units per item, which throws the stack sizes away -- the
     # one thing the book is about. One entry per AUCTION, not per item.
     ("sweep-sends-summed-counts-not-stacks", "core/sell.lua",
-     "        table.insert(sw.stacks, { name = r.name, id = r.itemId,\n                                  qty = r.count or 1 })",
+     "        table.insert(sw.stacks, { name = r.name, id = r.itemId,\n"
+     "                                  qty = r.count or 1,\n"
+     "                                  b = r.buyout, s = r.minBid })",
      "        local _ = r",
      "postbook"),
 
@@ -8432,6 +8437,120 @@ end""",
      "    local pickEmpty = ui.blPickWell:CreateFontString(nil, \"OVERLAY\",",
      "    local pickEmpty = f:CreateFontString(nil, \"OVERLAY\",",
      "postall"),
+
+    # ---- sale quantities: Courier, mixed stack sizes, the vendor lump ------
+    # Reported: the Ledger's Items view read "?" for every sale. With Courier
+    # owning the mailbox, its sales passed through without a count.
+    ("courier-sales-never-ask-the-book", "core/db.lua",
+     "        qty = db.MatchPosting(txn.item, nil, txn.amount)",
+     "        qty = nil",
+     "postbook"),
+
+    ("courier-count-overridden-by-the-book", "core/db.lua",
+     "    if txn.kind == \"sale\" and txn.item and not (tonumber(qty) and qty > 0) then",
+     "    if txn.kind == \"sale\" and txn.item then",
+     "postbook"),
+
+    ("courier-purchases-consume-postings", "core/db.lua",
+     "    if txn.kind == \"sale\" and txn.item and not (tonumber(qty) and qty > 0) then",
+     "    if txn.item and not (tonumber(qty) and qty > 0) then",
+     "postbook"),
+
+    # Matching before the duplicate check eats a posting per re-sent mail.
+    ("courier-duplicate-consumes-a-posting", "core/db.lua",
+     "    if txn.key then\n        if db.WasSeen(txn.key) then return false, \"duplicate\" end",
+     "    if txn.kind == \"sale\" and txn.item and not txn.qty then\n"
+     "        db.MatchPosting(txn.item, nil, txn.amount)\n    end\n"
+     "    if txn.key then\n        if db.WasSeen(txn.key) then return false, \"duplicate\" end",
+     "postbook"),
+
+    ("expiries-stand-down-for-courier", "ui/frame.lua",
+     "    local external = A.MailScanningExternal and A.MailScanningExternal()\n"
+     "    if not GetInboxNumItems then return end",
+     "    local external = A.MailScanningExternal and A.MailScanningExternal()\n"
+     "    if external then return end\n"
+     "    if not GetInboxNumItems then return end",
+     "postbook"),
+
+    ("mail-match-without-the-money", "ui/frame.lua",
+     "                local qty = A.db.MatchPosting(item, nil, money)",
+     "                local qty = A.db.MatchPosting(item)",
+     "postbook"),
+
+    ("mixed-book-ignores-the-money", "core/db.lua",
+     "    if money and fitAt and not fitMixed then",
+     "    if false then",
+     "postbook"),
+
+    # Two sizes inside the money's range is still a guess.
+    ("mixed-book-guesses-on-overlap", "core/db.lua",
+     "    if money and fitAt and not fitMixed then",
+     "    if money and fitAt then",
+     "postbook"),
+
+    ("mixed-book-consumes-the-wrong-posting", "core/db.lua",
+     "        table.remove(book, fitAt)\n        return fitQty",
+     "        table.remove(book, firstAt)\n        return fitQty",
+     "postbook"),
+
+    # An unpriced posting dropped from the candidates makes the money
+    # "settle" a book it cannot.
+    ("unpriced-posting-is-no-candidate", "core/db.lua",
+     "                if not lo or (money >= lo and money <= hi) then",
+     "                if lo and money >= lo and money <= hi then",
+     "postbook"),
+
+    ("window-forgets-the-cut", "core/db.lua",
+     "    local lo = math.floor(lowPrice * (1 - cut)) - 1",
+     "    local lo = math.floor(lowPrice) - 1",
+     "postbook"),
+
+    ("window-forgets-the-bid", "core/db.lua",
+     "    if not lowPrice or lowPrice <= 0 or lowPrice > p.b then lowPrice = p.b end",
+     "    lowPrice = p.b",
+     "postbook"),
+
+    ("window-forgets-the-deposit", "core/db.lua",
+     "    if p.d then hi = hi + p.d else hi = hi + p.b end",
+     "    if not p.d then hi = hi + p.b end",
+     "postbook"),
+
+    ("window-narrow-without-a-deposit", "core/db.lua",
+     "    if p.d then hi = hi + p.d else hi = hi + p.b end",
+     "    if p.d then hi = hi + p.d end",
+     "postbook"),
+
+    ("posting-drops-its-price", "core/db.lua",
+     "        if b and b > 0 then e.b = math.floor(b) end",
+     "        local _ = b",
+     "postbook"),
+
+    ("post-records-no-price", "core/sell.lua",
+     "        A.db.RecordPosting(it.name, it.itemId, count, nil,\n"
+     "            { b = buyout, s = start, d = sell.EstimateDeposit(minutes) })",
+     "        A.db.RecordPosting(it.name, it.itemId, count)",
+     "postbook"),
+
+    ("sweep-hands-over-no-price", "core/sell.lua",
+     "                                  b = r.buyout, s = r.minBid })",
+     "                                  })",
+     "postbook"),
+
+    ("topup-takes-the-first-price-every-time", "core/db.lua",
+     "                                    list[have_n + k]) then",
+     "                                    list[1]) then",
+     "postbook"),
+
+    ("vendor-lump-back-in-the-items-table", "core/db.lua",
+     "            if amount > 0 and (e.kind == \"sale\" or e.kind == \"buy\")\n"
+     "                and not db.IsVendorSale(e) then",
+     "            if amount > 0 and (e.kind == \"sale\" or e.kind == \"buy\") then",
+     "postbook"),
+
+    ("vendor-lump-named-two-ways", "ui/frame.lua",
+     "        A.db.RecordTxn(\"sale\", A.db.VENDOR_SALE_PREFIX .. sold .. \" stacks)\",",
+     "        A.db.RecordTxn(\"sale\", \"Vendor sold (\" .. sold .. \" stacks)\",",
+     "postbook"),
 
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",

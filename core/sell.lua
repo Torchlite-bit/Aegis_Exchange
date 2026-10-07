@@ -527,8 +527,12 @@ function sell.OwnerSweepStep()
         -- One entry per AUCTION, not per item: the posting book is about stack
         -- SIZES, and sw.counts has already thrown those away by summing. Kept
         -- even for a row with no id, because a sale mail matches on the name.
+        --
+        -- With what each is asking, so a book topped up from here can still
+        -- tell one stack size's sale from another's (db.MatchPosting).
         table.insert(sw.stacks, { name = r.name, id = r.itemId,
-                                  qty = r.count or 1 })
+                                  qty = r.count or 1,
+                                  b = r.buyout, s = r.minBid })
         i = i + 1
     end
     sw.page = sw.page + 1
@@ -2190,9 +2194,11 @@ function sell.Post(unitBuyout, unitStart, minutes)
     sell.ArmDepositWatch(minutes)
     -- REMEMBERED BEFORE IT IS FIRED, because this is the only moment the stack
     -- size exists anywhere: the sale mail carries a name and money and no
-    -- count. See db.RecordPosting.
+    -- count. See db.RecordPosting. With its PRICE and deposit, so that when
+    -- this item is up in two sizes the sale's money can say which one sold.
     if A.db and A.db.RecordPosting then
-        A.db.RecordPosting(it.name, it.itemId, count)
+        A.db.RecordPosting(it.name, it.itemId, count, nil,
+            { b = buyout, s = start, d = sell.EstimateDeposit(minutes) })
     end
     StartAuction(start, buyout, minutes)
     return true
@@ -2644,7 +2650,9 @@ function sell.PostTick(dt)
             -- posting per StartAuction, or a run of ten stacks leaves nine
             -- sales unable to say how many they were.
             if A.db and A.db.RecordPosting then
-                A.db.RecordPosting(it.name, job.itemId, job.stackSize)
+                A.db.RecordPosting(it.name, job.itemId, job.stackSize, nil,
+                    { b = buyout, s = start,
+                      d = sell.EstimateDeposit(job.minutes) })
             end
             StartAuction(start, buyout, job.minutes)   -- posts, clears slot
             job.posted = job.posted + 1
