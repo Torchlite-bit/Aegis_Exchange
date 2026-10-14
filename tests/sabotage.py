@@ -8608,6 +8608,126 @@ end""",
      "                A.db.ExpirePosting(back)\n",
      "mailscan"),
 
+    # ---- the mouse wheel on numbers, and at the window's edge (#105) -------
+    ("wheel-shift-does-nothing", "ui/frame.lua",
+     "    if shift then n = n * ui.WHEEL_SHIFT end\n",
+     "",
+     "wheel"),
+
+    ("wheel-turns-backwards", "ui/frame.lua",
+     "    local n = (delta and delta > 0) and 1 or -1",
+     "    local n = (delta and delta > 0) and -1 or 1",
+     "wheel"),
+
+    ("wheel-number-below-its-floor", "ui/frame.lua",
+     "    if lo and v < lo then v = lo end\n    if hi and v > hi then v = hi end",
+     "    if hi and v > hi then v = hi end",
+     "wheel"),
+
+    ("wheel-number-past-its-ceiling", "ui/frame.lua",
+     "    if lo and v < lo then v = lo end\n    if hi and v > hi then v = hi end",
+     "    if lo and v < lo then v = lo end",
+     "wheel"),
+
+    ("wheel-price-below-nothing", "ui/frame.lua",
+     "    local v = (tonumber(copper) or 0) + ui.WheelStep(delta, shift) * (unit or 1)\n"
+     "    if v < 0 then v = 0 end",
+     "    local v = (tonumber(copper) or 0) + ui.WheelStep(delta, shift) * (unit or 1)",
+     "wheel"),
+
+    # Every coin a copper: "change the price by 1 copper" works, and a gold
+    # takes ten thousand notches.
+    ("wheel-price-ignores-the-coin", "ui/frame.lua",
+     "    local v = (tonumber(copper) or 0) + ui.WheelStep(delta, shift) * (unit or 1)",
+     "    local v = (tonumber(copper) or 0) + ui.WheelStep(delta, shift)",
+     "wheel"),
+
+    ("number-boxes-ignore-the-wheel", "ui/frame.lua",
+     "    e:SetScript(\"OnTextChanged\", onChanged)\n    return ui.WheelBox(e)\nend",
+     "    e:SetScript(\"OnTextChanged\", onChanged)\n    return e\nend",
+     "wheel"),
+
+    ("wheel-box-ignores-its-range", "ui/frame.lua",
+     "        if e.wheelRange then lo, hi = e.wheelRange() end\n",
+     "",
+     "wheel"),
+
+    ("wheel-box-never-commits", "ui/frame.lua",
+     "        e:SetText(tostring(ui.WheelNumber(cur, arg1, ui.WheelShift(), lo, hi)))\n"
+     "        if after then after() end",
+     "        e:SetText(tostring(ui.WheelNumber(cur, arg1, ui.WheelShift(), lo, hi)))",
+     "wheel"),
+
+    # The price boxes' SetText is quiet: without announcing it, a notch
+    # changes the boxes and nothing else -- the total beside them stays put.
+    ("wheel-price-change-unannounced", "ui/frame.lua",
+     "            grp:SetText(v > 0 and util.FormatMoney(v, false) or \"\")\n"
+     "            if onChange then onChange() end",
+     "            grp:SetText(v > 0 and util.FormatMoney(v, false) or \"\")",
+     "wheel"),
+
+    ("wheel-price-every-coin-a-copper", "ui/frame.lua",
+     "                MONEY_STEP[coin])",
+     "                1)",
+     "wheel"),
+
+    ("sliders-ignore-the-wheel", "ui/frame.lua",
+     "    sb:EnableMouseWheel(true)\n    sb:SetScript(\"OnMouseWheel\", function()\n"
+     "        local lo, hi = sb:GetMinMaxValues()\n"
+     "        sb:SetValue(ui.WheelNumber(sb:GetValue(), arg1, ui.WheelShift(), lo, hi))\n"
+     "    end)\n",
+     "",
+     "wheel"),
+
+    ("slider-wheel-past-its-ends", "ui/frame.lua",
+     "        sb:SetValue(ui.WheelNumber(sb:GetValue(), arg1, ui.WheelShift(), lo, hi))",
+     "        sb:SetValue(ui.WheelNumber(sb:GetValue(), arg1, ui.WheelShift()))",
+     "wheel"),
+
+    # The Booty Bay half: a wheel nothing inside took falls through to the
+    # game, and to whatever the player bound it to.
+    ("window-lets-the-wheel-through", "ui/frame.lua",
+     "    -- (issue #105). See ui.SwallowWheel.\n    ui.SwallowWheel(f)\n",
+     "    -- (issue #105). See ui.SwallowWheel.\n",
+     "wheel"),
+
+    ("shopping-list-lets-the-wheel-through", "ui/frame.lua",
+     "    ui.SwallowWheel(f)   -- same as the main window: see ui.SwallowWheel\n",
+     "",
+     "wheel"),
+
+    ("swallow-takes-nothing", "ui/frame.lua",
+     "    f:EnableMouseWheel(true)\n    f:SetScript(\"OnMouseWheel\", function() end)",
+     "    f:EnableMouseWheel(true)",
+     "wheel"),
+
+    ("stack-size-wheel-past-the-slider", "ui/frame.lua",
+     "    ui.sellStackSize.wheelRange = function()\n"
+     "        return ui.sellSizeSlider:GetMinMaxValues()\n    end\n",
+     "",
+     "wheel"),
+
+    ("stack-count-wheel-past-the-slider", "ui/frame.lua",
+     "    ui.sellNumStacks.wheelRange = function()\n"
+     "        return ui.sellCountSlider:GetMinMaxValues()\n    end\n",
+     "",
+     "wheel"),
+
+    ("level-boxes-past-sixty", "ui/frame.lua",
+     "function ui.LevelRange() return 1, 60 end",
+     "function ui.LevelRange() return 1, 70 end",
+     "wheel"),
+
+    ("auction-limit-past-the-cap", "ui/frame.lua",
+     "    cap.wheelRange = function() return 1, A.sell.CAP end\n",
+     "",
+     "wheel"),
+
+    ("undercut-wheel-never-commits", "ui/frame.lua",
+     "    ui.WheelBox(uc, function() ui.CommitUndercut() end)",
+     "    ui.WheelBox(uc)",
+     "wheel"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",
@@ -8669,6 +8789,7 @@ SUITES = {
     "blacklist": "tests/units/blacklist_test.lua",
     "postall": "tests/units/postall_test.lua",
     "mailscan": "tests/units/mailscan_test.lua",
+    "wheel": "tests/units/wheel_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

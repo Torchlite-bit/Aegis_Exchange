@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.34)
+# Aegis: Exchange (v1.54.35)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -388,6 +388,10 @@ but **rename the folder to exactly `Aegis_Exchange`** — GitHub's ZIP unpacks a
 | `/aex diag <shift-click an item>` | Everything Aegis knows about that item, and how |
 | `/aex cache` | How many items Aegis has learned from the client |
 | `/aex debug` | Scanner trace, for when something looks wrong |
+| **Mouse wheel** over any number | Up or down one — a stack size, a slider, or a price by **1c / 1s / 1g** depending on the coin under the pointer. **Shift** for ten |
+
+**The wheel stays inside the window.** Scrolling over Aegis never reaches the
+game, so a wheel bound to an action can't fire it while you browse.
 
 **Prices come from scanning.** A fresh install knows nothing — run a scan, or
 just search (every search feeds the database) and the numbers fill in.
@@ -448,7 +452,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.34`) — quote it.
+1. Check the **version** in the window's title bar (`v1.54.35`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.
