@@ -110,3 +110,18 @@ jobs:
         uses: BigWigsMods/packager@v2
         env:
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+      # Each new version's changelog goes to this addon's post in the Aegis Discord's changelogs
+      # forum (.github/discord_changelog.py), from the notes written above. Needs the
+      # DISCORD_WEBHOOK_URL secret and the DISCORD_THREAD_ID variable; without the secret it
+      # posts nothing. Nobody is pinged unless the DISCORD_PING_ROLE_ID variable names a role.
+      - name: Post the changelog to Discord
+        if: github.ref_type == 'tag'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_THREAD_ID: ${{ vars.DISCORD_THREAD_ID }}
+          DISCORD_PING_ROLE_ID: ${{ vars.DISCORD_PING_ROLE_ID }}
+          ADDON_TITLE: "Aegis: Exchange"
+          ADDON_COLOUR: "9E1B1B"
+          ADDON_LOGO_URL: "https://raw.githubusercontent.com/Torchlite-bit/Aegis_Exchange/main/.github/discord-logo.png"
+        run: python3 .github/discord_changelog.py RELEASE_NOTES.md
