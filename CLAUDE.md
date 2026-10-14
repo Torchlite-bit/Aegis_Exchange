@@ -193,12 +193,23 @@ or silent breakage on the 1.12 / Lua 5.0 client.
     copy whichever fits:
 
     - **O(1) / bounded, no item queries.** `ui.ScanMailSales`
-      (`ui/frame.lua`) does ONE pass over the mail headers per fire, reading
-      only `GetInboxHeaderInfo` — header text and money, never
-      `GetInboxItem`, never a tooltip. It touches no item data at all, so it
-      cannot participate in the cache storm no matter how often it fires,
-      and it repaints nothing unless the History tab is the visible one. N
-      fires × M mails costs N×M cheap header reads and nothing else.
+      (`ui/frame.lua`) does ONE pass over the mail headers, reading only
+      `GetInboxHeaderInfo` — header text and money, never `GetInboxItem`,
+      never a tooltip. It touches no item data at all, so it cannot
+      participate in the cache storm no matter how often it fires.
+      - **…and since v1.54.34 it is coalesced as well** (contributed in #107):
+        `MAIL_INBOX_UPDATE` only shows `ui.mailScanDriver`, whose `OnUpdate`
+        hides itself FIRST and then scans — once per frame however many fires
+        landed, and a fire during the scan re-arms it rather than being lost.
+      - **"Visible" means the WINDOW, not the selected tab.** This bullet used
+        to say the scan "repaints nothing unless the History tab is the
+        visible one", and the code checked `ui.selectedSubTab == "History"` —
+        which stays true with the window CLOSED, as it always is at a mailbox.
+        Every fire of the storm repainted the whole History tab, chart and
+        all, for anyone whose last tab was History. It now repaints only when
+        the pass logged something new AND `ui.frame:IsShown()`. Check the
+        frame, never the remembered tab. `tests/units/mailscan_test.lua` pins
+        both halves.
     - **State-gated.** `core/buy.lua`'s `AUCTION_ITEM_LIST_UPDATE` handler
       runs `ReadPage` only while `phase == "wait_results"`, and `ReadPage`
       sets `phase = "idle"` before it returns. Repeat fires in the same
@@ -207,7 +218,9 @@ or silent breakage on the 1.12 / Lua 5.0 client.
       execution per query WE sent, paced by `CanSendAuctionQuery()`.
     - **Dirty flag + once-per-frame flush.** Set a boolean in the handler,
       do the work in an existing `OnUpdate`. Use this whenever the work is a
-      full rescan that cannot be made cheap.
+      full rescan that cannot be made cheap. A hidden driver frame shown by
+      the handler is the same thing with the frame as the flag — see
+      `ui.mailScanDriver` and `ui.craftMadeDriver`.
 
     **What must never appear inline in a stormable handler:**
     `GetItemInfo` per item, any `GameTooltip:Set*` per item, a full bag or

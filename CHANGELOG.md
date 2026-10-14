@@ -18,6 +18,44 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.54.35]
+
+### Added
+- **The mouse wheel changes numbers.** Point at a number and scroll — no
+  dragging, no retyping:
+  - **Prices:** over the **copper** box it moves the price by 1c, over silver
+    by 1s, over gold by 1g, rolling over between them (99c up one is 1s).
+  - **Stack size, number of stacks** and their **sliders**, Post All's fixed
+    size and auction limit, the level boxes and the undercut %.
+  - **Hold Shift for ten at a time.**
+  - It stays inside what's possible: stack size and count stop at what your
+    bags can actually make, levels at 1–60.
+- **The wheel stays inside the window.** Scrolling over the Aegis window or the
+  shopping list no longer reaches the game — with the wheel bound to an attack,
+  browsing the auction house in Booty Bay could hit a guard. Lists still scroll.
+
+*Thanks to EirikAskheim for the request (#105).*
+
+---
+
+## [1.54.34]
+
+### Fixed
+- **Opening a mailbox could freeze the game for a moment** — the first time in
+  a session, with mail the client hadn't seen yet. The mailbox reports itself
+  updated dozens of times in a few frames while it loads each item, and Aegis
+  re-read the inbox on every one of them. If **History** was the last tab you
+  had open, it also redrew the whole History tab each time, chart included —
+  with the Aegis window closed.
+  - The inbox is now read **at most once per frame**, however many updates
+    arrive.
+  - History is redrawn only when a new sale (or a returned auction) was
+    actually logged, and only while the window is open.
+
+*Thanks to imKevinFlynn for the fix (#107).*
+
+---
+
 ## [1.54.33]
 
 ### Fixed
@@ -6555,6 +6593,8 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.35]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.54.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.32]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.31]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

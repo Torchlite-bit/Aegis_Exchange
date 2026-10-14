@@ -5262,6 +5262,28 @@ smaller one and reports an average that is too high, and plausible, which is
 worse. An uncounted transaction is excluded from both sums and counted
 separately.
 
+### The mouse wheel on numbers, and at the window's edge — ✅ **DONE** (v1.54.35)
+
+Issue #105. Every number takes the wheel on hover (the owner's choice over
+"click into it first"), one step a notch and ten with Shift: `ui.WheelBox` in
+`MakeNumBox`, a per-coin step in `MakeMoneyGSC` (1c / 1s / 1g, rolling over
+through the copper total), and `MakeHSlider`. Ranges come from the box's
+`wheelRange` -- the Sell tab's two ask the slider beside them, so the wheel
+cannot ask for a stack the bags cannot make.
+
+**The price boxes' `SetText` is quiet** -- it is how the code fills them -- so
+a notch calls the box's change callback by hand; otherwise the boxes would
+move and the totals beside them would not.
+
+**One thing still needs a real client: how 1.12 routes the wheel.** The main
+window and the shopping list take it with a no-op (`ui.SwallowWheel`), on the
+reading that the client hands the wheel to the topmost frame under the pointer
+that ACCEPTS it -- the Buy tab's category tree still scrolls with rows on top
+of it, which says so. One older note in the Saved Searches builder says the
+opposite (that a Button row "swallowed" the wheel). If a wheel over a button in
+the window still reaches a key binding, the fallback is to give every
+mouse-enabled frame in the window the same no-op.
+
 ### Sale counts with Courier, and with mixed stack sizes — ✅ **FIXED** (v1.54.33)
 
 Reported from a live client: the Ledger's Items view read `?` for every sale,

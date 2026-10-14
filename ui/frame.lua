@@ -1685,6 +1685,9 @@ function ui.BuildWindow()
     -- Everything else that can be on screen while trading learns the same
     -- trick, so clicking a bag brings the bag forward. See ui.ApplyRaiseGroup.
     ui.ApplyRaiseGroup()
+    -- A wheel nothing inside took ends here, not at your key bindings
+    -- (issue #105). See ui.SwallowWheel.
+    ui.SwallowWheel(f)
 
     -- ESC closes our window (and, via OnHide below, the AH session). Without
     -- this the client swallows ESC while our top-level frame is up instead of
@@ -2226,6 +2229,10 @@ function ui.BuildAegisSettings(panel, anchorAbove)
     uc:SetScript("OnEnterPressed", function() ui.CommitUndercut(); uc:ClearFocus() end)
     uc:SetScript("OnEscapePressed", function() uc:ClearFocus() end)
     uc:SetScript("OnEditFocusLost", function() ui.CommitUndercut() end)
+    -- The wheel too, committed at once: this box otherwise commits only on
+    -- Enter or focus lost, and a notch is not a keystroke still being typed.
+    uc.wheelRange = function() return 1, 99 end
+    ui.WheelBox(uc, function() ui.CommitUndercut() end)
     ui.setUndercut = uc
     local pctLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     pctLbl:SetPoint("LEFT", uc, "RIGHT", 3, 0)
@@ -2945,6 +2952,8 @@ end
 local MONEY_COIN_U = { gold = 0, silver = 0.25, copper = 0.5 }
 MakeMoneyGSC = function(parent, onChange)
     local grp = {}
+    -- What one notch of the wheel is worth over each coin.
+    local MONEY_STEP = { gold = 10000, silver = 100, copper = 1 }
     -- Blizzard's own coin art, the same the stock money frame uses -- so a
     -- price here reads exactly like a price anywhere else in the game.
     --
@@ -2974,6 +2983,17 @@ MakeMoneyGSC = function(parent, onChange)
             if grp.quiet then return end     -- our own SetText, not the user
             if onChange then onChange() end
         end)
+        -- THE WHEEL, by this box's coin: a copper over the copper, a silver
+        -- over the silver, a gold over the gold, rolling over between them.
+        -- SetText below is QUIET -- it is how the code fills the boxes -- so
+        -- the change is announced by hand, the way a keystroke would be.
+        e:EnableMouseWheel(true)
+        e:SetScript("OnMouseWheel", function()
+            local v = ui.WheelMoney(grp:Copper(), arg1, ui.WheelShift(),
+                MONEY_STEP[coin])
+            grp:SetText(v > 0 and util.FormatMoney(v, false) or "")
+            if onChange then onChange() end
+        end)
         -- `tag` stays the name the layout anchors off, texture or not.
         local tag = parent:CreateTexture(nil, "OVERLAY")
         tag:SetTexture("Interface\\MoneyFrame\\UI-MoneyIcons")
@@ -2990,11 +3010,15 @@ MakeMoneyGSC = function(parent, onChange)
     grp.s = mk(22, "silver")
     grp.c = mk(22, "copper")
 
-    grp.GetText = function(self)
+    -- The three boxes as one figure, in copper.
+    grp.Copper = function(self)
         local gg = tonumber(self.g:GetText()) or 0
         local ss = tonumber(self.s:GetText()) or 0
         local cc = tonumber(self.c:GetText()) or 0
-        local total = gg * 10000 + ss * 100 + cc
+        return gg * 10000 + ss * 100 + cc
+    end
+    grp.GetText = function(self)
+        local total = self:Copper()
         if total <= 0 then return "" end
         return util.FormatMoney(total, false)
     end
@@ -3407,6 +3431,85 @@ local function MakeDropdown(parent, width, onSelect, noAll, multi)
     return dd
 end
 
+-- ---------------------------------------------------------------------------
+-- The mouse wheel on a number (issue #105)
+-- ---------------------------------------------------------------------------
+--
+-- Asked for as: "much easier than needing to drag a slider or change a number
+-- when you want to change the price by 1 copper". So every number in the
+-- window takes the wheel while the pointer is over it -- stack size and count,
+-- their sliders, each coin of a price, Post All's two boxes -- one step a
+-- notch, TEN with Shift held. Hover, not focus: the owner's call, and nothing
+-- posts without a Post click anyway.
+--
+-- arg1 is the wheel's direction on this client (+1 up, -1 down) -- the same
+-- global the settings page and the Saved Searches lists already read.
+ui.WHEEL_SHIFT = 10
+
+-- One notch: +1 or -1, times ten with Shift. PURE.
+function ui.WheelStep(delta, shift)
+    local n = (delta and delta > 0) and 1 or -1
+    if shift then n = n * ui.WHEEL_SHIFT end
+    return n
+end
+
+-- A number after one notch, kept inside [lo, hi] (either may be nil). PURE.
+function ui.WheelNumber(value, delta, shift, lo, hi)
+    local v = math.floor((tonumber(value) or 0) + ui.WheelStep(delta, shift))
+    if lo and v < lo then v = lo end
+    if hi and v > hi then v = hi end
+    return v
+end
+
+-- A price after one notch over one of its coins, `unit` 1, 100 or 10000 --
+-- so the wheel over copper is a copper and rolls into silver, as typing the
+-- total would. Never below nothing. PURE.
+function ui.WheelMoney(copper, delta, shift, unit)
+    local v = (tonumber(copper) or 0) + ui.WheelStep(delta, shift) * (unit or 1)
+    if v < 0 then v = 0 end
+    return v
+end
+
+-- A level box: 1 to 60, the game's own range.
+function ui.LevelRange() return 1, 60 end
+
+-- Is Shift held? Through a function so the suite can say.
+function ui.WheelShift()
+    return (IsShiftKeyDown and IsShiftKeyDown()) and true or false
+end
+
+-- Give a numeric edit box the wheel. Its range is `e.wheelRange()` when the
+-- box has one -- the Sell tab's boxes ask the slider beside them -- else no
+-- lower than 1. SetText fires the box's own OnTextChanged, so whatever typing
+-- would repaint, the wheel repaints; `after` is for a box that only commits
+-- on Enter or focus lost.
+function ui.WheelBox(e, after)
+    if not e or not e.EnableMouseWheel then return e end
+    e:EnableMouseWheel(true)
+    e:SetScript("OnMouseWheel", function()
+        local lo, hi = 1, nil
+        if e.wheelRange then lo, hi = e.wheelRange() end
+        -- A blank box starts just below its floor, so one notch up is the
+        -- floor itself rather than a jump past it.
+        local cur = tonumber(e:GetText()) or ((lo or 1) - 1)
+        e:SetText(tostring(ui.WheelNumber(cur, arg1, ui.WheelShift(), lo, hi)))
+        if after then after() end
+    end)
+    return e
+end
+
+-- The wheel stops at the window's edge. Without this, a wheel that no number
+-- or list took fell through to the game -- and for anyone with the wheel
+-- bound to an action, that is an attack on a Booty Bay guard while scrolling
+-- an auction list. The window takes it and does nothing with it; the lists
+-- and the numbers inside are on top, so they still get theirs.
+function ui.SwallowWheel(f)
+    if not f or not f.EnableMouseWheel then return f end
+    f:EnableMouseWheel(true)
+    f:SetScript("OnMouseWheel", function() end)
+    return f
+end
+
 -- Horizontal slider, hand-built from the base Slider widget for the same reason
 -- as the Aegis tab's scroll bar: Slider is a primitive that always exists, so
 -- there's no "Couldn't find inherited node" risk from guessing a 1.12 template.
@@ -3433,6 +3536,13 @@ MakeHSlider = function(parent, width, onChange)
     sb:SetScript("OnValueChanged", function()
         if ui.sellSliderSync then return end   -- we moved it, not the user
         if onChange then onChange(this:GetValue()) end
+    end)
+    -- The wheel moves it a step, inside its own range. SetValue fires
+    -- OnValueChanged, so the box beside it follows as it would for a drag.
+    sb:EnableMouseWheel(true)
+    sb:SetScript("OnMouseWheel", function()
+        local lo, hi = sb:GetMinMaxValues()
+        sb:SetValue(ui.WheelNumber(sb:GetValue(), arg1, ui.WheelShift(), lo, hi))
     end)
     return sb
 end
@@ -3479,7 +3589,7 @@ local function MakeNumBox(parent, width, onChanged, height)
     e:SetScript("OnEnterPressed", function() e:ClearFocus() end)
     e:SetScript("OnEscapePressed", function() e:ClearFocus() end)
     e:SetScript("OnTextChanged", onChanged)
-    return e
+    return ui.WheelBox(e)
 end
 
 local function NumVal(e, default)
@@ -6160,12 +6270,14 @@ function ui.BuildBuyTab()
 
     -- Left cluster, chained left-to-right off Name at fixed widths.
     ui.buyMinLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
+    ui.buyMinLevel.wheelRange = ui.LevelRange
     ui.buyMinLevel:SetPoint("LEFT", box, "RIGHT", 14, 0)
     local lvlDash = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     lvlDash:SetPoint("LEFT", ui.buyMinLevel, "RIGHT", 7, 0)
     lvlDash:SetText("-")
     ui.buyLvlDash = lvlDash
     ui.buyMaxLevel = MakeNumBox(panel, BUY_LVL_W, nil, BUYL.ctl_h)
+    ui.buyMaxLevel.wheelRange = ui.LevelRange
     ui.buyMaxLevel:SetPoint("LEFT", lvlDash, "RIGHT", 7, 0)
 
     -- The two level boxes tab between themselves. Name is NOT in the list --
@@ -7222,12 +7334,14 @@ function ui.BuildFilterBuilder(panel, advLeft)
 
     label("Level Range", ui.FBRow(2))
     ui.fbMinLevel = MakeNumBox(colL, FBL.lvl_w, function() ui.RefreshBuilder() end)
+    ui.fbMinLevel.wheelRange = ui.LevelRange
     ui.fbMinLevel:SetPoint("TOPLEFT", colL, "TOPLEFT", CX, ui.FBRow(2) + 3)
     local dash = contentL:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     dash:SetPoint("LEFT", ui.fbMinLevel, "RIGHT", 7, 0)
     dash:SetText("\226\128\147")
     dash:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
     ui.fbMaxLevel = MakeNumBox(colL, FBL.lvl_w, function() ui.RefreshBuilder() end)
+    ui.fbMaxLevel.wheelRange = ui.LevelRange
     ui.fbMaxLevel:SetPoint("LEFT", dash, "RIGHT", 7, 0)
 
     ui.fbUsable = check("Usable", 0, 0)
@@ -15870,6 +15984,11 @@ function ui.BuildSellTab()
     end)
     ui.sellSizeSlider:SetPoint("LEFT", sizeLabel, "RIGHT", 10, 0)
     ui.sellStackSize:SetPoint("LEFT", ui.sellSizeSlider, "RIGHT", 8, 0)
+    -- The wheel stays inside what the slider allows: the largest stack you
+    -- can actually make (see ui.RefreshSell).
+    ui.sellStackSize.wheelRange = function()
+        return ui.sellSizeSlider:GetMinMaxValues()
+    end
 
     local cntLabel = gutter("Stacks", ROW2)
     ui.sellNumStacks = MakeNumBox(panel, 34, function() ui.RefreshSell() end)
@@ -15878,6 +15997,9 @@ function ui.BuildSellTab()
     end)
     ui.sellCountSlider:SetPoint("LEFT", cntLabel, "RIGHT", 10, 0)
     ui.sellNumStacks:SetPoint("LEFT", ui.sellCountSlider, "RIGHT", 8, 0)
+    ui.sellNumStacks.wheelRange = function()
+        return ui.sellCountSlider:GetMinMaxValues()
+    end
 
     -- "Max": fill the count with every stack of the chosen SIZE that can be
     -- assembled. sell.MaxStacks already computes it and the slider is already
@@ -17560,6 +17682,7 @@ function ui.BuildPostAllOptions(f)
     end, 20)
     cap:SetPoint("LEFT", capLbl, "RIGHT", 6, 0)
     ui.InputText(cap, "Post All: smart auction limit")
+    cap.wheelRange = function() return 1, A.sell.CAP end
     ui.paCapBox = cap
     local capTail = opt:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     capTail:SetPoint("LEFT", cap, "RIGHT", 6, 0)
@@ -19612,6 +19735,7 @@ function ui.BuildShopWindow()
     end)
     f:Hide()
     ui.shopFrame = f
+    ui.SwallowWheel(f)   -- same as the main window: see ui.SwallowWheel
 
     local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", f, "TOPLEFT", SHOPL.pad, -8)
