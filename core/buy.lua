@@ -3780,6 +3780,162 @@ function craft.Current()
     return nil, "No profession open."
 end
 
+-- ---------------------------------------------------------------------------
+-- Profession cooldowns across characters (ROADMAP Phase 6, issue #85)
+-- ---------------------------------------------------------------------------
+--
+-- Asked for as: "for crafts with cooldown I would like to know when to log on
+-- to that character to do those crafts. I have multiple alts doing this."
+--
+-- THE PROFESSION WINDOW IS THE SOURCE. GetTradeSkillCooldown(index) answers
+-- seconds remaining, and only while the window is open -- so this is captured
+-- whenever one is, and read back from any character afterwards. There is no
+-- GetCraftCooldown: the Craft window (Enchanting) has no cooldowns on 1.12, and
+-- nothing here pretends it has.
+
+-- The open profession window, read: one row per RECIPE, headers skipped --
+-- { name, remaining, itemId } -- and the profession's name. nil when no trade
+-- skill window is open. `known` (db.CooldownRecipes) decides which rows are
+-- worth asking for their product's link, so an ordinary recipe costs two
+-- calls and no more.
+--
+-- BOUNDED, and never run from an event: the UI flags it dirty on
+-- TRADE_SKILL_SHOW / TRADE_SKILL_UPDATE -- which fires repeatedly while a
+-- window settles -- and reads once a frame at most (HARD RULE 16).
+function craft.ReadCooldownWindow(known)
+    if not GetNumTradeSkills or not GetTradeSkillInfo
+        or not GetTradeSkillCooldown then
+        return nil
+    end
+    local prof = GetTradeSkillLine and GetTradeSkillLine()
+    if not prof or prof == "" or prof == "UNKNOWN" then return nil end
+    known = known or {}
+    local rows = {}
+    local n = GetNumTradeSkills() or 0
+    local i = 1
+    while i <= n do
+        local name, kind = GetTradeSkillInfo(i)
+        if name and kind ~= "header" then
+            local rem = GetTradeSkillCooldown(i)
+            local itemId
+            if (rem or known[name]) and GetTradeSkillItemLink then
+                itemId = util.ItemIdFromLink(GetTradeSkillItemLink(i))
+            end
+            table.insert(rows, { name = name, remaining = rem, itemId = itemId })
+        end
+        i = i + 1
+    end
+    return rows, prof
+end
+
+-- Fold one window read into a character's record. PURE: `rec`, and `known`,
+-- are the tables it writes; nothing is read from the client.
+--
+--   remaining > 0   on cooldown: ready at now + remaining. And the recipe is
+--                   learned as one that HAS a cooldown, for every character.
+--   no remaining    if the recipe is known to have one: it is READY. A ready
+--                   time already in the past is kept -- "ready since".
+--                   Otherwise an ordinary recipe, and nothing is stored.
+function craft.ApplyCooldownScan(rec, rows, prof, known, now)
+    if not rec or not rows then return end
+    known = known or {}
+    if not rec.recipes then rec.recipes = {} end
+    local i = 1
+    while i <= table.getn(rows) do
+        local r = rows[i]
+        local cur = rec.recipes[r.name]
+        local rem = tonumber(r.remaining)
+        if rem and rem > 0 then
+            known[r.name] = true
+            rec.recipes[r.name] = { ready = now + math.ceil(rem), prof = prof,
+                                    item = r.itemId or (cur and cur.item) }
+        elseif known[r.name] then
+            if not cur or not cur.ready or cur.ready > now then
+                rec.recipes[r.name] = { ready = now, prof = prof,
+                                        item = r.itemId or (cur and cur.item) }
+            end
+        end
+        i = i + 1
+    end
+end
+
+-- Every character's cooldowns, soonest first: { who, class, recipe, prof,
+-- ready, you }. Everything already ready sorts together at the top, by
+-- character, then recipe. PURE.
+function craft.CooldownRows(chars, now, me)
+    local rows = {}
+    for who, c in pairs(chars or {}) do
+        for name, r in pairs(c.recipes or {}) do
+            if r.ready then
+                table.insert(rows, { who = who, class = c.class, recipe = name,
+                                     prof = r.prof, ready = r.ready,
+                                     you = (who == me) })
+            end
+        end
+    end
+    table.sort(rows, function(a, b)
+        local ra, rb = a.ready, b.ready
+        if ra < now then ra = now end
+        if rb < now then rb = now end
+        if ra ~= rb then return ra < rb end
+        if a.who ~= b.who then return a.who < b.who end
+        return a.recipe < b.recipe
+    end)
+    return rows
+end
+
+-- "ready now", "in 14m", "in 2h 14m", "in 1d 6h" -- rounded UP, so a minute
+-- left never reads as ready. PURE.
+function craft.ReadyText(ready, now)
+    local left = (ready or 0) - (now or 0)
+    if left <= 0 then return "ready now" end
+    local mins = math.ceil(left / 60)
+    if mins < 60 then return "in " .. mins .. "m" end
+    if mins < 24 * 60 then
+        local h, m = math.floor(mins / 60), math.mod(mins, 60)
+        if m == 0 then return "in " .. h .. "h" end
+        return "in " .. h .. "h " .. m .. "m"
+    end
+    local hours = math.ceil(left / 3600)
+    local d, h = math.floor(hours / 24), math.mod(hours, 24)
+    if h == 0 then return "in " .. d .. "d" end
+    return "in " .. d .. "d " .. h .. "h"
+end
+
+-- How many ready cooldowns the login line names before it says "and N more".
+craft.REMIND_MAX = 5
+
+-- The login line, or nil when nothing is ready:
+--   "2 profession cooldowns are ready: Bronn (Transmute: Arcanite),
+--    Merrily (Mooncloth)"
+-- Nothing ready, nothing said. PURE.
+function craft.ReminderText(rows, now)
+    local ready = {}
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.ready <= now then
+            table.insert(ready, r.who .. " (" .. r.recipe .. ")")
+        end
+        i = i + 1
+    end
+    local n = table.getn(ready)
+    if n == 0 then return nil end
+    local shown = {}
+    i = 1
+    while i <= n and i <= craft.REMIND_MAX do
+        shown[i] = ready[i]
+        i = i + 1
+    end
+    local list = table.concat(shown, ", ")
+    if n > craft.REMIND_MAX then
+        list = list .. " and " .. (n - craft.REMIND_MAX) .. " more"
+    end
+    local head = (n == 1) and "1 profession cooldown is ready: "
+        or (n .. " profession cooldowns are ready: ")
+    return head .. list
+end
+
 -- You made something. The client prints "You create: [Item]" to CHAT_MSG_LOOT
 -- on every craft, and that is the only signal 1.12 offers -- there is no
 -- spell-success event on this client.

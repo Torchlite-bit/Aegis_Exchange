@@ -257,6 +257,9 @@ local SETTING_DEFAULTS = {
     -- thing Aegis actually knew about the item sat behind a checkbox nobody
     -- had been told about.
     tipDisenchantRows = true,
+    -- One chat line at login naming every profession cooldown that is ready,
+    -- on any character (ROADMAP 6.2). Toggled from the /aex cd window.
+    cdReminder     = true,
 }
 
 -- Read a user setting, falling back to its default when unset.
@@ -604,6 +607,95 @@ function db.Inventories()
     if not bucket then bucket = {}; realms[key] = bucket end
     if not bucket.inventory then bucket.inventory = {} end
     return bucket.inventory
+end
+
+-- ---- profession cooldowns (ROADMAP Phase 6, issue #85) -------------------
+--
+-- realms[realm].cooldowns[character] =
+--     { class = "MAGE",
+--       recipes = { [recipe] = { ready = epoch, prof = "Alchemy", item = id } } }
+--
+-- PER REALM, like inventory: the alts you can log onto from here.
+--
+-- THE READY TIME, NEVER THE TIME REMAINING. "2 hours left" means nothing the
+-- moment you log out, which is exactly when this feature is read -- from a
+-- different character. `time() + remaining`, stored once.
+function db.Cooldowns()
+    if not db.account then return nil end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.cooldowns then bucket.cooldowns = {} end
+    return bucket.cooldowns
+end
+
+-- This character's record, created on demand, with its class token kept for
+-- the name colour -- nothing on 1.12 can ask an offline character's class.
+function db.MyCooldowns(class)
+    local all = db.Cooldowns()
+    local who = db.CharKey()
+    if not all or not who then return nil end
+    local rec = all[who]
+    if not rec then rec = { recipes = {} }; all[who] = rec end
+    if not rec.recipes then rec.recipes = {} end
+    if class and class ~= "" then rec.class = class end
+    return rec
+end
+
+-- Which recipes HAVE a cooldown, by name, account-wide.
+--
+-- LEARNED, NOT LISTED. A recipe joins the moment any character is seen with it
+-- on cooldown, and from then on every character whose window lists it can say
+-- "ready now" -- which is the state worth knowing about, and the one the
+-- client cannot report (a ready recipe has no cooldown to read). A typed table
+-- of cooldown recipes would be English-only and would have to be right about
+-- Turtle's changes; this is neither.
+function db.CooldownRecipes()
+    if not db.account then return {} end
+    if not db.account.cdRecipes then db.account.cdRecipes = {} end
+    return db.account.cdRecipes
+end
+
+-- Take one recipe off one character's list. Returns true when it was there.
+function db.ForgetCooldown(who, recipe)
+    local all = db.Cooldowns()
+    local rec = all and who and all[who]
+    if not rec or not rec.recipes or not rec.recipes[recipe] then return false end
+    rec.recipes[recipe] = nil
+    return true
+end
+
+-- What the cooldown window and the login line read: invented while demo mode
+-- is on -- consulted instead of the store, never written to it.
+function db.CooldownSource(now)
+    if db.demo then return db.DemoCooldowns(now) end
+    return db.Cooldowns() or {}
+end
+
+-- The demo's cooldowns: the demo characters, with every state the list can
+-- draw -- ready a while, ready now, minutes, hours, days. Relative to NOW, so
+-- the list reads the same whenever it is opened.
+function db.DemoCooldowns(now)
+    now = now or time()
+    local c = db.DEMO_CHARS
+    local out = {}
+    out[c[1]] = { class = "MAGE", recipes = {
+        ["Transmute: Arcanite"] = { ready = now - 2 * 86400, prof = "Alchemy" },
+        ["Mooncloth"] = { ready = now + 2 * 3600 + 14 * 60, prof = "Tailoring" },
+    } }
+    out[c[2]] = { class = "ROGUE", recipes = {
+        ["Transmute: Arcanite"] = { ready = now + 26 * 3600, prof = "Alchemy" },
+    } }
+    out[c[3]] = { class = "PRIEST", recipes = {
+        ["Mooncloth"] = { ready = now - 600, prof = "Tailoring" },
+    } }
+    out[c[4]] = { class = "DRUID", recipes = {
+        ["Transmute: Iron to Gold"] = { ready = now + 38 * 60, prof = "Alchemy" },
+        ["Mooncloth"] = { ready = now + 3 * 86400 + 5 * 3600, prof = "Tailoring" },
+    } }
+    return out
 end
 
 function db.CharKey()

@@ -8728,6 +8728,150 @@ end""",
      "    ui.WheelBox(uc)",
      "wheel"),
 
+    # ---- profession cooldowns across characters (ROADMAP 6, #85) ----------
+    # "2 hours left" stored is meaningless the moment you log out -- which is
+    # when this is read, from another character.
+    ("cooldown-stores-time-remaining", "core/buy.lua",
+     "            rec.recipes[r.name] = { ready = now + math.ceil(rem), prof = prof,",
+     "            rec.recipes[r.name] = { ready = math.ceil(rem), prof = prof,",
+     "cooldowns"),
+
+    ("cooldown-ready-a-second-early", "core/buy.lua",
+     "ready = now + math.ceil(rem)",
+     "ready = now + math.floor(rem)",
+     "cooldowns"),
+
+    ("cooldown-recipes-never-learned", "core/buy.lua",
+     "            known[r.name] = true\n",
+     "",
+     "cooldowns"),
+
+    # The state worth knowing -- ready -- is the one the client cannot report.
+    ("ready-cooldowns-never-listed", "core/buy.lua",
+     "        elseif known[r.name] then",
+     "        elseif false then",
+     "cooldowns"),
+
+    ("every-recipe-becomes-a-cooldown", "core/buy.lua",
+     "        elseif known[r.name] then",
+     "        else",
+     "cooldowns"),
+
+    ("ready-since-pushed-to-now", "core/buy.lua",
+     "            if not cur or not cur.ready or cur.ready > now then",
+     "            if true then",
+     "cooldowns"),
+
+    ("window-read-lists-headers", "core/buy.lua",
+     "        if name and kind ~= \"header\" then",
+     "        if name then",
+     "cooldowns"),
+
+    ("window-read-links-every-recipe", "core/buy.lua",
+     "            if (rem or known[name]) and GetTradeSkillItemLink then",
+     "            if GetTradeSkillItemLink then",
+     "cooldowns"),
+
+    ("window-read-without-a-window", "core/buy.lua",
+     "    if not prof or prof == \"\" or prof == \"UNKNOWN\" then return nil end",
+     "    if not prof then return nil end",
+     "cooldowns"),
+
+    ("cooldown-list-latest-first", "core/buy.lua",
+     "        if ra ~= rb then return ra < rb end",
+     "        if ra ~= rb then return ra > rb end",
+     "cooldowns"),
+
+    ("cooldown-list-ready-ones-by-age", "core/buy.lua",
+     "        if ra < now then ra = now end\n        if rb < now then rb = now end\n",
+     "",
+     "cooldowns"),
+
+    ("ready-text-rounds-down", "core/buy.lua",
+     "    local mins = math.ceil(left / 60)",
+     "    local mins = math.floor(left / 60)",
+     "cooldowns"),
+
+    ("ready-text-a-minute-early", "core/buy.lua",
+     "    if left <= 0 then return \"ready now\" end\n    local mins",
+     "    if left < 60 then return \"ready now\" end\n    local mins",
+     "cooldowns"),
+
+    ("login-line-names-what-is-not-ready", "core/buy.lua",
+     "        if r.ready <= now then\n            table.insert(ready, r.who",
+     "        if true then\n            table.insert(ready, r.who",
+     "cooldowns"),
+
+    ("login-line-names-everyone", "core/buy.lua",
+     "    while i <= n and i <= craft.REMIND_MAX do",
+     "    while i <= n do",
+     "cooldowns"),
+
+    ("forget-always-says-it-did", "core/db.lua",
+     "    if not rec or not rec.recipes or not rec.recipes[recipe] then return false end",
+     "    if not rec or not rec.recipes then return false end",
+     "cooldowns"),
+
+    ("demo-cooldowns-written-to-the-store", "core/db.lua",
+     "    if db.demo then return db.DemoCooldowns(now) end",
+     "    if db.demo then\n        local d = db.DemoCooldowns(now)\n"
+     "        for k, v in pairs(d) do db.Cooldowns()[k] = v end\n"
+     "        return d\n    end",
+     "cooldowns"),
+
+    ("cooldown-class-not-kept", "core/db.lua",
+     "    if not rec.recipes then rec.recipes = {} end\n"
+     "    if class and class ~= \"\" then rec.class = class end",
+     "    if not rec.recipes then rec.recipes = {} end",
+     "cooldowns"),
+
+    # HARD RULE 16: TRADE_SKILL_UPDATE storms while a window settles.
+    ("cooldown-read-inline-per-update", "ui/frame.lua",
+     "A.RegisterEvent(\"TRADE_SKILL_UPDATE\", function() ui.MarkCooldownsDirty() end)",
+     "A.RegisterEvent(\"TRADE_SKILL_UPDATE\", function() ui.CaptureCooldowns() end)",
+     "cooldowns"),
+
+    ("cooldown-driver-never-idles", "ui/frame.lua",
+     "    ui.cdDriver:Hide()          -- FIRST, as ui.mailScanDriver: a re-fire re-arms\n",
+     "",
+     "cooldowns"),
+
+    ("cooldown-not-read-on-open", "ui/frame.lua",
+     "A.RegisterEvent(\"TRADE_SKILL_SHOW\", function() ui.MarkCooldownsDirty() end)\n",
+     "",
+     "cooldowns"),
+
+    ("craft-does-not-reread-the-window", "ui/frame.lua",
+     "    if A.craft and A.craft.ParseCreate and A.craft.ParseCreate(arg1) then\n"
+     "        ui.MarkCooldownsDirty()",
+     "    if false then\n        ui.MarkCooldownsDirty()",
+     "cooldowns"),
+
+    ("login-line-every-loading-screen", "ui/frame.lua",
+     "    if ui.cdReminded then return end\n    ui.cdReminded = true\n",
+     "",
+     "cooldowns"),
+
+    ("login-line-ignores-the-setting", "ui/frame.lua",
+     "    if A.db.Setting(\"cdReminder\") == false then return nil end\n",
+     "",
+     "cooldowns"),
+
+    ("cd-command-matches-any-cd", "ui/frame.lua",
+     "    if string.find(cmd, \"^%s*cd%s*$\") then",
+     "    if string.find(cmd, \"cd\", 1, true) then",
+     "cooldowns"),
+
+    ("forget-touches-demo-rows", "ui/frame.lua",
+     "            if not e or arg1 ~= \"RightButton\" or A.db.demo then return end",
+     "            if not e or arg1 ~= \"RightButton\" then return end",
+     "cooldowns"),
+
+    ("cooldown-window-lets-the-wheel-through", "ui/frame.lua",
+     "    ui.cdFrame = f\n    ui.SwallowWheel(f)\n",
+     "    ui.cdFrame = f\n",
+     "cooldowns"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",
@@ -8790,6 +8934,7 @@ SUITES = {
     "postall": "tests/units/postall_test.lua",
     "mailscan": "tests/units/mailscan_test.lua",
     "wheel": "tests/units/wheel_test.lua",
+    "cooldowns": "tests/units/cooldowns_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

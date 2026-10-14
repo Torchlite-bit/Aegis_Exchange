@@ -5840,6 +5840,21 @@ feature with a hard constraint in front of it.
 
 ### 6.0 The constraint, because it shapes everything below
 
+> **CORRECTED (v1.55.0).** The paragraph below was true of a stock client and
+> of ClassicAPI, and was written as if it were true of every client. It is not:
+> **SuperWoW 1.3+ adds `ExportFile(name, text)`**, which writes a `.txt` into
+> `<WoW>\imports\` straight away, and `ImportFile` to read one back. That is a
+> live file, which is what #85 asked for. Caveats found at the same time:
+> `ExportFile` rewrites the WHOLE file each call (no append -- `AppendText` is
+> only in the unreleased SuperWoW 3.0), so writes must be batched every second
+> or two and the file kept bounded; and two clients open at once must write
+> different files, so one per character. `imports\` is shared by every
+> account on the PC, which also lifts 6.2's one-account limit for a tool that
+> reads the files. **Verify against the player's SuperWoW version before
+> building 6.3's live half**, and keep the SavedVariables log as the path for
+> everyone without it. A SuperWoW badge in the README returns only when code
+> actually calls it (see CLAUDE.md).
+
 **A 1.12 addon cannot write a file.** No `io`, no `os`, no `require` — and no
 DLL closes that gap: ClassicAPI's manifest backports 550+ functions across 45
 `C_*` namespaces and contains none of them. SavedVariables is the only way data
@@ -5861,7 +5876,30 @@ needed.** For the stated purpose it is not: you want to know an alt's cooldown
 written when you logged that alt out. The flush happens at precisely the moment
 the data becomes worth reading.
 
-### 6.1 Capturing a cooldown
+### 6.1 Capturing a cooldown — ✅ **DONE** (v1.55.0)
+
+**As built, and where it differs from the plan below.** The window read is the
+whole capture: `craft.ReadCooldownWindow` on `TRADE_SKILL_SHOW` /
+`TRADE_SKILL_UPDATE`, behind `ui.cdDriver` (a flag, flushed once a frame), and
+`craft.ApplyCooldownScan` stores `now + ceil(remaining)`.
+
+**No table of cooldown lengths, and the craft message never STARTS a
+cooldown.** A "You create:" line names an item, and an item can come from more
+than one recipe -- a Gold Bar is both *Transmute: Iron to Gold* and *Smelt
+Gold* -- so starting a cooldown from it would put a transmute on cooldown every
+time someone smelted. And a trade skill cannot be crafted with its window
+closed, so the window is always there to read. The create line therefore only
+re-reads the open window (the client does not always send `TRADE_SKILL_UPDATE`
+before you close it).
+
+**Which recipes have a cooldown is LEARNED**, account-wide
+(`db.CooldownRecipes`): a recipe joins the moment any character is seen with it
+on cooldown. That is what lets an alt whose window lists it with no cooldown
+running read "ready now" -- the state worth knowing, and the one the client
+cannot report. A typed list would have been English-only and would have had to
+be right about Turtle's changes.
+
+The original plan:
 
 Two independent signals, and we want both because each covers the other's blind
 spot.
@@ -5890,7 +5928,15 @@ calling `GetTradeSkillCooldown` per index is an unbounded rescan inline in a
 stormable handler — the exact shape that froze Courier. **Dirty flag, flushed
 once per frame from an existing `OnUpdate`**, and nothing per-recipe inline.
 
-### 6.2 The alt view (the actual feature)
+### 6.2 The alt view (the actual feature) — ✅ **DONE** (v1.55.0)
+
+Built as settled below: `/aex cd` (`ui.BuildCooldownWindow`, on the model of
+the shopping list), the once-per-session login line (`ui.CooldownLoginLine`,
+off with a box in the window -- setting `cdReminder`), and `/aex demo` reading
+`db.DemoCooldowns` instead of the store. Stored per realm, like inventory,
+under `realms[realm].cooldowns[character]` with the class for the name colour.
+Right-click forgets a row. `tests/units/cooldowns_test.lua`.
+
 
 `AegisExchangeDB` is already account-wide and `db.CharKey()` already exists —
 the ledger has used it since it shipped. So cross-character cooldowns need no
@@ -5934,8 +5980,8 @@ read another account's. Alts on a second login see only their own account's
 cooldowns. A client limit, not a design choice — say so in the window rather
 than letting an empty row imply there is nothing to craft.
 
-**Deferred by the owner (asked 1.54.18):** not started yet; the project stays on
-1.54.x. It is a new capability, so it opens the next MINOR when it does start.
+**Deferred by the owner (asked 1.54.18); started at 1.55.0** (#85), which
+opened the MINOR. 6.3 follows as 1.55.x patches.
 
 ### 6.3 The machine-readable log
 

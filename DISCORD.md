@@ -1,13 +1,13 @@
-# ⚔️ Aegis: Exchange v1.54.35
+# ⚔️ Aegis: Exchange v1.55.0
 
 ## ✨ New
+- **`/aex cd` — every alt's profession cooldowns**, anywhere, ready ones first; a login line when one is ready
 - **Mouse wheel on any number** — prices by 1c/1s/1g, stacks, sliders (Shift ×10); never leaks to keybinds
 - **Post All, your way** — full stacks, singles, a fixed size or **Smart** (the stack size that nets most, max N auctions); skips anything worth more at a vendor; most valuable first; **blacklist**
 - **Searches read every page** — *Wizard Oil* finds every grade, Projectile → Bullet lists every ammo type, not just page 1
 - **History is a dashboard** — gold chart, highs & lows, top sale & buy, **Sales · Expenses · Profit**
-- **Ledger window** — **Items** (sold, bought, avg prices & profit) and **Transactions**
-- **Receipt** on the Buy tab — everything bought this session
-- Price lines on items **clicked in chat**
+- **Ledger window** — per-item profit and every transaction
+- Price lines on **chat links**
 - **Remove all** on the Crafting tab
 
 ## 🛠️ Fixed
