@@ -14120,6 +14120,7 @@ function ui.ScanMailSales()
     local external = A.MailScanningExternal and A.MailScanningExternal()
     if not GetInboxNumItems then return end
     local n = GetInboxNumItems() or 0
+    local changed = false   -- did this pass log anything new?
     local i = 1
     while i <= n do
         local _, _, sender, subject, money, _, daysLeft = GetInboxHeaderInfo(i)
@@ -14157,6 +14158,7 @@ function ui.ScanMailSales()
                 -- size, what the mail paid is what says which one sold.
                 local qty = A.db.MatchPosting(item, nil, money)
                 A.db.RecordTxn("sale", item, money, A.db.IdFromName(item), qty)
+                changed = true
             end
         end
         -- An auction that came back unsold stops waiting for a sale mail.
@@ -14169,11 +14171,18 @@ function ui.ScanMailSales()
             if not A.db.WasSeen(ekey) then
                 A.db.MarkSeen(ekey)
                 A.db.ExpirePosting(back)
+                changed = true
             end
         end
         i = i + 1
     end
-    if ui.selectedSubTab == "History" then ui.RefreshHistory() end
+    -- Repaint only when something was actually logged AND the window is up.
+    -- This used to repaint the whole History tab on every pass, even with
+    -- nothing new and the window closed -- and passes arrive in storms.
+    if changed and ui.selectedSubTab == "History"
+       and ui.frame and ui.frame:IsShown() then
+        ui.RefreshHistory()
+    end
 end
 
 function ui.BuildHistoryTab()
@@ -19396,8 +19405,17 @@ end)
 
 -- The mailbox updated (opened one, or took mail): log any AH sale mail so the
 -- History tab tracks income even when the AH window isn't open.
-A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+-- MAIL_INBOX_UPDATE STORMS (dozens of fires in a few frames while attachments
+-- resolve), so the handler only arms a driver frame; the scan runs at most
+-- ONCE per rendered frame. HARD RULE 16, same shape as sell.mailDirty.
+ui.mailScanDriver = CreateFrame("Frame", "AegisExchangeMailScan")
+ui.mailScanDriver:Hide()
+ui.mailScanDriver:SetScript("OnUpdate", function()
+    ui.mailScanDriver:Hide()   -- hide FIRST: re-fires during the scan re-arm it
     ui.ScanMailSales()
+end)
+A.RegisterEvent("MAIL_INBOX_UPDATE", function()
+    ui.mailScanDriver:Show()
 end)
 
 -- At a merchant: offer to sell everything marked on the Vendor list.
