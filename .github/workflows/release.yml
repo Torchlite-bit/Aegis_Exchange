@@ -123,4 +123,5 @@ jobs:
           DISCORD_PING_ROLE_ID: ${{ vars.DISCORD_PING_ROLE_ID }}
           ADDON_TITLE: "Aegis: Exchange"
           ADDON_COLOUR: "9E1B1B"
+          ADDON_LOGO_URL: "https://raw.githubusercontent.com/Torchlite-bit/Aegis_Exchange/main/.github/discord-logo.png"
         run: python3 .github/discord_changelog.py RELEASE_NOTES.md

@@ -12,6 +12,7 @@ Environment (the workflow sets these):
   DISCORD_PING_ROLE_ID  optional repository variable: a role to mention; nobody is pinged otherwise
   ADDON_TITLE           the addon's name, e.g. "Aegis: Courier"
   ADDON_COLOUR          the post's colour, as hex
+  ADDON_LOGO_URL        the addon's logo, shown small in the post (a lasting address: .github/discord-logo.png on GitHub)
   GITHUB_REF_NAME, GITHUB_SERVER_URL, GITHUB_REPOSITORY   set by GitHub Actions
 
 The webhook address is a password for that channel: it is never printed.
@@ -28,7 +29,7 @@ DESCRIPTION_MAX = 4000            # Discord allows 4096 in an embed's descriptio
 WEBHOOK = re.compile(r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/(?:v\d+/)?webhooks/\d+/[\w-]+")
 
 
-def message(title, tag, notes, url, colour, role_id=None):
+def message(title, tag, notes, url, colour, role_id=None, logo=None):
     text = notes.strip() or "{} {}".format(title, tag)
     if len(text) > DESCRIPTION_MAX:
         more = "\n\n… [Read the rest]({})".format(url)
@@ -39,6 +40,9 @@ def message(title, tag, notes, url, colour, role_id=None):
         # Nobody is mentioned unless a role is named: an "@everyone" in a changelog stays text.
         "allowed_mentions": {"parse": []},
     }
+    if logo:
+        body["embeds"][0]["thumbnail"] = {"url": logo}
+        body["avatar_url"] = logo
     if role_id:
         body["content"] = "<@&{}>".format(role_id)
         body["allowed_mentions"] = {"parse": [], "roles": [role_id]}
@@ -82,7 +86,8 @@ def main(argv=None):
     notes_file = argv[0] if argv else "RELEASE_NOTES.md"
     with open(notes_file, encoding="utf-8") as handle:
         notes = handle.read()
-    message_id = post(webhook, message(title, tag, notes, url, colour, role_id), thread_id, repository)
+    logo = os.environ.get("ADDON_LOGO_URL", "").strip() or None
+    message_id = post(webhook, message(title, tag, notes, url, colour, role_id, logo), thread_id, repository)
     print("Posted {} {} to Discord: message {}.".format(title, tag, message_id))
     return 0
 
