@@ -257,6 +257,13 @@ local SETTING_DEFAULTS = {
     -- thing Aegis actually knew about the item sat behind a checkbox nobody
     -- had been told about.
     tipDisenchantRows = true,
+    -- One chat line at login naming every profession cooldown that is ready,
+    -- on any character (ROADMAP 6.2). Toggled from the /aex cd window.
+    cdReminder     = true,
+    -- The live file for other tools (ROADMAP 6.3). Does nothing at all
+    -- without SuperWoW, so on by default costs a stock client nothing.
+    -- Toggled with /aex live.
+    liveFile       = true,
 }
 
 -- Read a user setting, falling back to its default when unset.
@@ -604,6 +611,137 @@ function db.Inventories()
     if not bucket then bucket = {}; realms[key] = bucket end
     if not bucket.inventory then bucket.inventory = {} end
     return bucket.inventory
+end
+
+-- ---- profession cooldowns (ROADMAP Phase 6, issue #85) -------------------
+--
+-- realms[realm].cooldowns[character] =
+--     { class = "MAGE",
+--       recipes = { [recipe] = { ready = epoch, prof = "Alchemy", item = id } } }
+--
+-- PER REALM, like inventory: the alts you can log onto from here.
+--
+-- THE READY TIME, NEVER THE TIME REMAINING. "2 hours left" means nothing the
+-- moment you log out, which is exactly when this feature is read -- from a
+-- different character. `time() + remaining`, stored once.
+function db.Cooldowns()
+    if not db.account then return nil end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.cooldowns then bucket.cooldowns = {} end
+    return bucket.cooldowns
+end
+
+-- This character's record, created on demand, with its class token kept for
+-- the name colour -- nothing on 1.12 can ask an offline character's class.
+function db.MyCooldowns(class)
+    local all = db.Cooldowns()
+    local who = db.CharKey()
+    if not all or not who then return nil end
+    local rec = all[who]
+    if not rec then rec = { recipes = {} }; all[who] = rec end
+    if not rec.recipes then rec.recipes = {} end
+    if class and class ~= "" then rec.class = class end
+    return rec
+end
+
+-- Which recipes HAVE a cooldown, by name, account-wide.
+--
+-- LEARNED, NOT LISTED. A recipe joins the moment any character is seen with it
+-- on cooldown, and from then on every character whose window lists it can say
+-- "ready now" -- which is the state worth knowing about, and the one the
+-- client cannot report (a ready recipe has no cooldown to read). A typed table
+-- of cooldown recipes would be English-only and would have to be right about
+-- Turtle's changes; this is neither.
+function db.CooldownRecipes()
+    if not db.account then return {} end
+    if not db.account.cdRecipes then db.account.cdRecipes = {} end
+    return db.account.cdRecipes
+end
+
+-- Take one recipe off one character's list. Returns true when it was there.
+function db.ForgetCooldown(who, recipe)
+    local all = db.Cooldowns()
+    local rec = all and who and all[who]
+    if not rec or not rec.recipes or not rec.recipes[recipe] then return false end
+    rec.recipes[recipe] = nil
+    -- THAT character's file, which may not be the one playing: a forget is
+    -- the one change made from somewhere else.
+    if A.live then A.live.Changed(who) end
+    return true
+end
+
+-- ---- what each character has made (ROADMAP 6.3, issue #85) ---------------
+--
+-- realms[realm].crafts[character] = { { t = epoch, id = 12360,
+--                                       item = "Arcanite Bar", n = 1 }, ... }
+--
+-- Oldest first, CAPPED, and kept only for the live file -- the one place a
+-- craft is worth remembering past the session. craft.made is the in-memory
+-- counter the Crafting tab reads, and it stays that.
+db.CRAFTS_MAX = 100
+
+function db.CraftLog(who)
+    if not db.account then return {} end
+    local realms = db.account.realms
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms and realms[key]
+    local all = bucket and bucket.crafts
+    return (all and who and all[who]) or {}
+end
+
+function db.RecordCraft(itemId, item, n, now)
+    local who = db.CharKey()
+    if not db.account or not who or not itemId then return end
+    local realms = db.account.realms
+    if not realms then realms = {}; db.account.realms = realms end
+    local key = db.realmKey or db.RealmKey()
+    local bucket = realms[key]
+    if not bucket then bucket = {}; realms[key] = bucket end
+    if not bucket.crafts then bucket.crafts = {} end
+    local log = bucket.crafts[who]
+    if not log then log = {}; bucket.crafts[who] = log end
+    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end
+    table.insert(log, { t = now or time(), id = itemId, item = item, n = n })
+    while table.getn(log) > db.CRAFTS_MAX do
+        table.remove(log, 1)
+    end
+    if A.live then A.live.Changed(who) end
+end
+
+-- What the cooldown window and the login line read: invented while demo mode
+-- is on -- consulted instead of the store, never written to it.
+function db.CooldownSource(now)
+    if db.demo then return db.DemoCooldowns(now) end
+    return db.Cooldowns() or {}
+end
+
+-- The demo's cooldowns: the demo characters, with every state the list can
+-- draw -- ready a while, ready now, minutes, hours, days. Relative to NOW, so
+-- the list reads the same whenever it is opened.
+function db.DemoCooldowns(now)
+    now = now or time()
+    local c = db.DEMO_CHARS
+    local out = {}
+    out[c[1]] = { class = "MAGE", recipes = {
+        ["Transmute: Arcanite"] = { ready = now - 2 * 86400, prof = "Alchemy" },
+        ["Mooncloth"] = { ready = now + 2 * 3600 + 14 * 60, prof = "Tailoring" },
+    } }
+    out[c[2]] = { class = "ROGUE", recipes = {
+        ["Transmute: Arcanite"] = { ready = now + 26 * 3600, prof = "Alchemy" },
+    } }
+    out[c[3]] = { class = "PRIEST", recipes = {
+        ["Mooncloth"] = { ready = now - 600, prof = "Tailoring" },
+    } }
+    out[c[4]] = { class = "DRUID", recipes = {
+        ["Transmute: Iron to Gold"] = { ready = now + 38 * 60, prof = "Alchemy" },
+        ["Mooncloth"] = { ready = now + 3 * 86400 + 5 * 3600, prof = "Tailoring" },
+    } }
+    return out
 end
 
 function db.CharKey()
@@ -1262,7 +1400,13 @@ function db.ClearItems()
     if not db.account then return end
     if not db.account.realms then return end
     local key = db.realmKey or db.RealmKey()
-    db.account.realms[key] = nil
+    -- THE PRICES, NOT THE REALM. This wiped the whole realm bucket, which was
+    -- the price table when it was written -- and then every per-realm store
+    -- moved in beside it: what each character carries, their coin, what
+    -- disenchanting has given, their cooldowns and what they made. "Clear
+    -- price data" took all of it.
+    local bucket = db.account.realms[key]
+    if bucket then bucket.items = nil end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1296,12 +1440,14 @@ function db.RecordTxn(kind, item, amount, itemId, qty)
     -- string cannot become a divisor later.
     local n = tonumber(qty)
     if n and n > 0 then n = math.floor(n) else n = nil end
+    local who = db.CharKey()
     table.insert(led, { t = time(), kind = kind, item = item or "?",
-        amount = amount, id = itemId, qty = n, who = db.CharKey() })
+        amount = amount, id = itemId, qty = n, who = who })
     -- Prune oldest beyond the cap.
     while table.getn(led) > LEDGER_MAX do
         table.remove(led, 1)
     end
+    if A.live then A.live.Changed(who) end
 end
 
 function db.Ledger()
@@ -2923,6 +3069,335 @@ A.RegisterEvent("AUCTION_HOUSE_CLOSED", function() db.StartHarvest() end)
 
 function db.HarvestRunning()
     return harvester:IsShown() and true or false
+end
+
+-- ---------------------------------------------------------------------------
+-- The live file: cooldowns and recent trades for tools outside the game
+-- (ROADMAP 6.3, issue #85)
+-- ---------------------------------------------------------------------------
+--
+-- "A text log file that is written to live (not on logout) ... that can be
+-- consumed by other tools." SavedVariables cannot be that: the client writes
+-- them at logout and /reload and never in between. SuperWoW's
+-- ExportFile("name", "text") can -- it writes <WoW>\imports\name.txt on the
+-- spot. Without SuperWoW there is no ExportFile, and none of this runs.
+--
+-- ONE FILE PER CHARACTER, holding that character's cooldowns and its last
+-- live.EVENTS_MAX crafts, sales and buys. Per character because imports\ is
+-- one folder for every account on the PC: two clients writing one shared file
+-- would each overwrite the other, and a tool that reads every
+-- AegisExchange-*.txt sees every alt on every account.
+--
+-- WHAT IT COSTS, which is the question this was built around:
+--   * ExportFile rewrites the WHOLE file each call (append is SuperWoW 3.0
+--     only), on the game's main thread. So the file is SMALL -- a few KB, never
+--     the history -- and written ONLY WHEN SOMETHING CHANGES: no timer.
+--   * A burst is one write. Twenty buyouts in a row mark the file twenty times
+--     and write it once, live.QUIET seconds after the last -- or live.MAX_WAIT
+--     after the first, so a steady stream still lands.
+--   * NEVER IN COMBAT. A write that comes due mid-fight waits for
+--     PLAYER_REGEN_ENABLED.
+--   * Nothing is kept for it in memory but the craft log (db.CRAFTS_MAX per
+--     character). The text is built, handed over and dropped.
+--   * Every write is timed, and /aex diag prints the figures -- measured on the
+--     player's machine rather than assumed here.
+local live = {}
+A.live = live
+
+live.FORMAT = 1
+live.EVENTS_MAX = 100
+live.QUIET = 2          -- seconds after the last change
+live.MAX_WAIT = 10      -- ...but no later than this after the first
+live.LOGIN_DELAY = 15   -- the session's first write, clear of the login rush
+live.pending = {}       -- character -> true: whose files are due
+live.stats = { writes = 0, failures = 0, slowest = 0 }
+
+function live.Available()
+    return type(ExportFile) == "function"
+end
+
+function live.Enabled()
+    return live.Available() and db.Setting("liveFile") ~= false
+end
+
+-- The name handed to ExportFile, which adds the ".txt" itself. Realm AND
+-- character: the same name on two realms is two characters. Only what Windows
+-- refuses in a file name is taken out.
+function live.FileName(realm, who)
+    local function clean(s)
+        return (string.gsub(tostring(s or ""), "[%c\\/:%*%?\"<>|]", ""))
+    end
+    return "AegisExchange-" .. clean(realm) .. "-" .. clean(who)
+end
+
+-- One field. A tab or line break inside an item name would split a record, so
+-- neither survives; nil is the empty field, which the header says is unknown.
+function live.Field(v)
+    if v == nil then return "" end
+    return (string.gsub(tostring(v), "[\t\r\n]", " "))
+end
+
+-- One TAB-separated line. Lua 5.0 varargs: `arg`, and arg.n so that a nil in
+-- the middle still leaves its empty field.
+function live.Line(...)
+    local parts = {}
+    local i = 1
+    while i <= arg.n do
+        parts[i] = live.Field(arg[i])
+        i = i + 1
+    end
+    return table.concat(parts, "\t")
+end
+
+-- This character's last `max` crafts, sales and buys, OLDEST FIRST, so the file
+-- reads as a log. Walks the ledger from its newest end and stops once it has
+-- enough. Entries from before v1.53.7 carry no character and are left out --
+-- they are nobody's in particular (see db.RecordTxn). PURE.
+function live.Events(ledger, crafts, who, max)
+    local out = {}
+    ledger = ledger or {}
+    crafts = crafts or {}
+    local found = 0
+    local i = table.getn(ledger)
+    while i >= 1 and found < max do
+        local e = ledger[i]
+        if e.who == who then
+            local kind = e.kind
+            if kind == "sale" and db.IsVendorSale(e) then kind = "vendor" end
+            table.insert(out, { kind = kind, t = e.t, id = e.id, item = e.item,
+                                n = e.qty, copper = e.amount, seq = i })
+            found = found + 1
+        end
+        i = i - 1
+    end
+    local n = table.getn(crafts)
+    local j = n
+    while j >= 1 and j > n - max do
+        local c = crafts[j]
+        table.insert(out, { kind = "craft", t = c.t, id = c.id, item = c.item,
+                            n = c.n, seq = LEDGER_MAX + j })
+        j = j - 1
+    end
+    table.sort(out, function(a, b)
+        if a.t ~= b.t then return a.t < b.t end
+        return a.seq < b.seq
+    end)
+    while table.getn(out) > max do
+        table.remove(out, 1)
+    end
+    return out
+end
+
+-- The whole file, as text. `c` is { name, realm, class, recipes }, the recipes
+-- as db.Cooldowns keeps them. PURE.
+function live.Build(c, ledger, crafts, now, version)
+    local out = {
+        "# Aegis: Exchange live file, format " .. live.FORMAT
+            .. ". Rewritten whenever something changes.",
+        "# Fields are separated by TABs; an empty field is unknown.",
+        "# Times are Unix epoch seconds. Money is in copper.",
+        "# character  name  realm  class  written  addon-version",
+        "# cooldown   recipe  profession  ready  itemId",
+        "# craft      time  itemId  item  count",
+        "# sale|buy|vendor  time  itemId  item  count  copper",
+        live.Line("character", c.name, c.realm, c.class, now, version),
+    }
+    local names = {}
+    for name, r in pairs(c.recipes or {}) do
+        if r.ready then table.insert(names, name) end
+    end
+    table.sort(names)
+    local k = 1
+    while k <= table.getn(names) do
+        local r = c.recipes[names[k]]
+        table.insert(out, live.Line("cooldown", names[k], r.prof, r.ready, r.item))
+        k = k + 1
+    end
+    local ev = live.Events(ledger, crafts, c.name, live.EVENTS_MAX)
+    k = 1
+    while k <= table.getn(ev) do
+        local e = ev[k]
+        if e.kind == "craft" then
+            table.insert(out, live.Line("craft", e.t, e.id, e.item, e.n))
+        else
+            table.insert(out, live.Line(e.kind, e.t, e.id, e.item, e.n, e.copper))
+        end
+        k = k + 1
+    end
+    return table.concat(out, "\n") .. "\n"
+end
+
+-- A millisecond clock for the timing. debugprofilestop where the client has
+-- it; GetTime otherwise, which is coarser, and /aex diag says which.
+function live.Clock()
+    if type(debugprofilestop) == "function" then
+        return debugprofilestop, "debugprofilestop"
+    end
+    return function() return GetTime() * 1000 end, "GetTime"
+end
+
+function live.InCombat()
+    return UnitAffectingCombat and UnitAffectingCombat("player") and true or false
+end
+
+-- Something in `who`'s file changed. O(1): a flag and a due time -- this is
+-- called from db.RecordTxn, inside the mail scan. `delay` overrides
+-- live.QUIET (the login write uses it).
+function live.Changed(who, delay)
+    who = who or db.CharKey()
+    if not who or not live.Enabled() then return end
+    live.pending[who] = true
+    local now = GetTime()
+    if not live.first then live.first = now end
+    local due = now + (delay or live.QUIET)
+    if delay then
+        -- A longer wait never puts off a write that is already due sooner.
+        if live.due and live.due < due then due = live.due end
+    elseif due > live.first + live.MAX_WAIT then
+        due = live.first + live.MAX_WAIT
+    end
+    live.due = due
+    if live.driver then live.driver:Show() end
+end
+
+-- Write one character's file now. Returns true when ExportFile took it.
+function live.WriteChar(who)
+    if not live.Enabled() or not db.account or not who then return false end
+    local clock, clockName = live.Clock()
+    local t0 = clock()
+    local realm = db.realmKey or db.RealmKey()
+    local rec = (db.Cooldowns() or {})[who] or {}
+    local class = rec.class
+    if not class and who == db.CharKey() and UnitClass then
+        local _, token = UnitClass("player")
+        class = token
+    end
+    local text = live.Build({ name = who, realm = realm, class = class,
+                              recipes = rec.recipes },
+                            db.Ledger(), db.CraftLog(who), time(), A.version)
+    local t1 = clock()
+    local name = live.FileName(realm, who)
+    local ok, err = pcall(ExportFile, name, text)
+    local t2 = clock()
+    local st = live.stats
+    st.clock = clockName
+    st.file = name
+    st.bytes = string.len(text)
+    st.buildMs = t1 - t0
+    st.writeMs = t2 - t1
+    if st.writeMs > st.slowest then st.slowest = st.writeMs end
+    if not ok then
+        st.failures = st.failures + 1
+        st.err = tostring(err)
+        -- ONCE A SESSION, and then quiet: a failing write would otherwise
+        -- repeat on every sale.
+        if not live.warned and DEFAULT_CHAT_FRAME then
+            live.warned = true
+            DEFAULT_CHAT_FRAME:AddMessage("Aegis: could not write the live file ("
+                .. st.err .. "). /aex live turns it off.")
+        end
+        return false
+    end
+    st.writes = st.writes + 1
+    st.err = nil
+    return true
+end
+
+-- Every file that is due, now.
+function live.WriteDue()
+    local due = live.pending
+    live.pending = {}
+    live.due, live.first = nil, nil
+    for who in pairs(due) do live.WriteChar(who) end
+end
+
+-- ...unless in combat, where nothing is written and nothing is lost: the due
+-- list stands until PLAYER_REGEN_ENABLED wakes the driver again.
+function live.Flush()
+    if live.InCombat() then return false end
+    live.WriteDue()
+    return true
+end
+
+-- The driver: shown while a write is due, idle the rest of the time.
+live.driver = CreateFrame("Frame", "AegisExchangeLiveFile")
+live.driver:Hide()
+live.driver:SetScript("OnUpdate", function()
+    if not live.due then live.driver:Hide() return end
+    if GetTime() < live.due then return end
+    -- Hidden FIRST either way: in combat it sleeps until the fight ends, and a
+    -- change made while it writes re-arms it.
+    live.driver:Hide()
+    live.Flush()
+end)
+
+A.RegisterEvent("PLAYER_REGEN_ENABLED", function()
+    if live.due then live.driver:Show() end
+end)
+
+-- The session's first write: the file has to exist, and be current, before
+-- anything changes -- another character may have forgotten a cooldown of
+-- this one's, and a tool started now has nothing else to read. Once a session.
+A.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    if live.loggedIn then return end
+    live.loggedIn = true
+    live.Changed(nil, live.LOGIN_DELAY)
+end)
+
+-- Logging out inside the quiet time would lose the last change. Combat does
+-- not matter any more.
+A.RegisterEvent("PLAYER_LOGOUT", function()
+    if live.due then live.WriteDue() end
+end)
+
+-- /aex live, /aex live on, /aex live off. Returns the line to print.
+function live.Command(word)
+    if not live.Available() then
+        return "Aegis: the live file needs SuperWoW, whose ExportFile writes it."
+            .. " Without it nothing is written."
+    end
+    local on
+    if word == "on" then on = true
+    elseif word == "off" then on = false
+    elseif word == "" then on = db.Setting("liveFile") == false
+    else return "Aegis: " .. live.DiagLine() end
+    db.SetSetting("liveFile", on)
+    if not on then
+        -- Anything already due is dropped by live.WriteChar, which asks again.
+        return "Aegis: live file OFF. A file already written stays where it is."
+    end
+    local who = db.CharKey()
+    live.Changed(who)
+    return "Aegis: live file ON \226\128\148 imports\\"
+        .. live.FileName(db.realmKey or db.RealmKey(), who)
+        .. ".txt, rewritten whenever something changes."
+end
+
+-- One line for /aex diag.
+function live.DiagLine()
+    if not live.Available() then
+        return "live file: off (no SuperWoW ExportFile)"
+    end
+    if db.Setting("liveFile") == false then
+        return "live file: off (/aex live to turn it on)"
+    end
+    local st = live.stats
+    local s = "live file: on"
+    if st.file then s = s .. " -> imports\\" .. st.file .. ".txt" end
+    s = s .. "  writes=" .. st.writes
+    if st.bytes then
+        s = s .. string.format("  last %.1f KB: built %.2f ms, written %.2f ms"
+            .. "  slowest write %.2f ms  (clock: %s)", st.bytes / 1024,
+            st.buildMs, st.writeMs, st.slowest, tostring(st.clock))
+    end
+    if st.failures > 0 then
+        s = s .. "  FAILED " .. st.failures .. "x: " .. tostring(st.err)
+    end
+    if live.due then
+        s = s .. (live.InCombat() and "  (write waiting for combat to end)"
+                  or "  (write due)")
+    end
+    return s
 end
 
 -- Register the bootstrap with the load queue.

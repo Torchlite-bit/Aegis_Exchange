@@ -18,6 +18,66 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.55.1]
+
+### Added
+- **A live file for other tools (needs SuperWoW).** Each character keeps a
+  small text file in `<WoW>\imports\`, named
+  `AegisExchange-<Realm>-<Character>.txt`. It holds that character's
+  profession cooldowns (when each is ready) and its **last 100 crafts, sales
+  and buys**, with prices. It is rewritten within a few seconds whenever one of
+  those changes, so a tool outside the game can read it while you play.
+  - **Cheap by design:** written only when something changes, never on a
+    timer. A burst (twenty buyouts) is one write, about two seconds after the
+    last. It **never writes during combat**: the write waits for the fight to
+    end. The file is a few KB. The only thing kept for it in memory is each
+    character's last 100 crafts.
+  - **`/aex diag`** prints the size of the last write and how long it took on
+    your machine.
+  - **`/aex live`** turns it off, or back on. Without SuperWoW nothing happens
+    at all.
+  - Format: one record per line, fields separated by tabs, times in Unix
+    seconds, money in copper. The file's header lines describe each record.
+  - Opening a profession window on cooldowns Aegis already knows doesn't
+    rewrite the file. Only a cooldown that actually moved does.
+
+### Fixed
+- **"Clear price data" wiped more than prices.** On this realm it also
+  cleared every character's gold history (the History chart), what each one
+  carries, disenchant results and profession cooldowns. It now clears prices
+  only.
+
+*The rest of #85 (thanks again, EirikAskheim).*
+
+---
+
+## [1.55.0]
+
+### Added
+- **Profession cooldowns across your characters — `/aex cd`.** A small window,
+  usable anywhere (not just at the auction house), listing every cooldown on
+  every character of your account on this realm: **ready ones first**, then the
+  soonest — *Transmute: Arcanite — ready now*, *Mooncloth — in 2h 14m*. Names
+  are in class colour.
+  - **It fills itself.** Opening a profession window on a character reads its
+    cooldowns, and crafting updates them. Do that once on each alt.
+  - **One chat line at login** when anything is ready, naming who and what:
+    *"2 profession cooldowns are ready: Bronn (Transmute: Arcanite), Merrily
+    (Mooncloth)"*. Nothing ready, nothing printed. A box in the window turns it
+    off.
+  - A recipe joins the list once **any** of your characters is seen with it on
+    cooldown. After that, an alt with it ready shows **ready now**, even if
+    that alt has never been on cooldown for it.
+  - Right-click a row to forget it.
+  - **`/aex demo`** fills it with made-up alts, so you can see every state.
+  - Characters on a *second* WoW account can't be listed: an addon can only
+    read its own account's saved data.
+
+*Thanks to EirikAskheim for the request (#85). The log file for other tools,
+also asked for there, comes next.*
+
+---
+
 ## [1.54.35]
 
 ### Added
@@ -6593,6 +6653,8 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.55.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.55.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.35]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.34]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.33]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

@@ -19978,8 +19978,345 @@ local FLIP_LINES = 10
 
 SLASH_AEGISEXCHANGE1 = "/aex"
 SLASH_AEGISEXCHANGE2 = "/aegisexchange"
+-- ---------------------------------------------------------------------------
+-- Profession cooldowns across characters: /aex cd (ROADMAP Phase 6, #85)
+-- ---------------------------------------------------------------------------
+--
+-- "Which alt do I log onto, and when?" -- answered in a small window that opens
+-- ANYWHERE, on the model of /aex shop, because the main window only opens at an
+-- auction house and a cooldown list you can only read at an auctioneer is not
+-- one you can check from wherever you logged in.
+--
+-- Fed by the profession window (A.craft.ReadCooldownWindow) whenever one is
+-- open, on any character, and read from any character after. One table for
+-- the layout numbers (CLAUDE.md 12a).
+local CDL = {
+    w = 340, row_h = 18, rows_max = 16,
+    top = 44,       -- title and the "who this covers" line
+    bot = 46,       -- the reminder box and the hint under the rows
+    pad = 8,
+    who_w = 92,     -- the character column
+    ready_w = 74,   -- the ready column, right-aligned
+}
+
+-- The capture: a flag set by the events below, flushed here once a frame at
+-- most. TRADE_SKILL_UPDATE fires repeatedly while a window settles, and the
+-- read walks the whole recipe list -- HARD RULE 16.
+function ui.MarkCooldownsDirty()
+    ui.cdDirty = true
+    if ui.cdDriver then ui.cdDriver:Show() end
+end
+
+-- Read the open profession window into this character's record. Returns true
+-- when a window was there to read.
+function ui.CaptureCooldowns()
+    if not A.craft or not A.craft.ReadCooldownWindow or not A.db.account then
+        return false
+    end
+    local known = A.db.CooldownRecipes()
+    local rows, prof = A.craft.ReadCooldownWindow(known)
+    if not rows then return false end
+    local rec = A.db.MyCooldowns(A.sell and A.sell.PlayerClass
+        and A.sell.PlayerClass())
+    if not rec then return false end
+    -- The live file only when something MOVED: a profession window opened
+    -- on cooldowns already known is not a write.
+    if A.craft.ApplyCooldownScan(rec, rows, prof, known, time()) and A.live then
+        A.live.Changed(A.db.CharKey())
+    end
+    return true
+end
+
+ui.cdDriver = CreateFrame("Frame", "AegisExchangeCooldownScan")
+ui.cdDriver:Hide()
+ui.cdDriver:SetScript("OnUpdate", function()
+    ui.cdDriver:Hide()          -- FIRST, as ui.mailScanDriver: a re-fire re-arms
+    if not ui.cdDirty then return end
+    ui.cdDirty = false
+    if ui.CaptureCooldowns() then ui.RefreshCooldownWindow() end
+end)
+
+-- O(1) handlers: a flag and a Show. A craft re-reads the window (the client
+-- may not send TRADE_SKILL_UPDATE before you close it); the read is a no-op
+-- when no window is open. A "You create:" line alone never STARTS a cooldown:
+-- a Gold Bar comes from both a transmute and a smelt, and only the window
+-- knows which you did.
+A.RegisterEvent("TRADE_SKILL_SHOW", function() ui.MarkCooldownsDirty() end)
+A.RegisterEvent("TRADE_SKILL_UPDATE", function() ui.MarkCooldownsDirty() end)
+A.RegisterEvent("CHAT_MSG_LOOT", function()
+    if A.craft and A.craft.ParseCreate and A.craft.ParseCreate(arg1) then
+        ui.MarkCooldownsDirty()
+    end
+end)
+
+-- The login line, or nil: every ready cooldown on every character of this
+-- realm, read from wherever you logged in. Nil with the reminder off.
+function ui.CooldownLoginLine(now)
+    if A.db.Setting("cdReminder") == false then return nil end
+    now = now or time()
+    local rows = A.craft.CooldownRows(A.db.CooldownSource(now), now,
+                                      A.db.CharKey())
+    local text = A.craft.ReminderText(rows, now)
+    if not text then return nil end
+    return "Aegis: " .. text .. " \226\128\148 /aex cd"
+end
+
+-- ONCE PER SESSION. PLAYER_ENTERING_WORLD fires on every loading screen, and a
+-- reminder per instance portal is a reminder nobody reads.
+A.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    if ui.cdReminded then return end
+    ui.cdReminded = true
+    local line = ui.CooldownLoginLine()
+    if line then ChatMsg(line) end
+end)
+
+StaticPopupDialogs["AEGIS_EXCHANGE_FORGET_COOLDOWN"] = {
+    text = "Forget %s's %s?",
+    button1 = "Forget", button2 = "Cancel",
+    OnAccept = function()
+        local f = ui.cdForget
+        ui.cdForget = nil
+        if f and A.db.ForgetCooldown(f.who, f.recipe) then
+            ui.RefreshCooldownWindow()
+        end
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+
+function ui.BuildCooldownWindow()
+    if ui.cdFrame then return ui.cdFrame end
+    local f = CreateFrame("Frame", "AegisExchangeCooldowns", UIParent)
+    f:SetWidth(CDL.w)
+    f:SetHeight(CDL.top + CDL.bot + CDL.row_h)
+    f:SetPoint("CENTER", UIParent, "CENTER", -260, 0)
+    f:SetFrameStrata("DIALOG")
+    f:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(C.panelBG[1], C.panelBG[2], C.panelBG[3], 0.95)
+    f:SetBackdropBorderColor(C.border[1], C.border[2], C.border[3])
+    f:EnableMouse(true)
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function() f:StartMoving() end)
+    f:SetScript("OnDragStop", function()
+        f:StopMovingOrSizing()
+        ui.SaveCooldownPoint()
+    end)
+    -- "in 14m" goes stale; repaint every half minute while it is up. A few
+    -- rows of text, never a read of anything.
+    f:SetScript("OnUpdate", function()
+        ui.cdTick = (ui.cdTick or 0) + (arg1 or 0)
+        if ui.cdTick >= 30 then
+            ui.cdTick = 0
+            ui.RefreshCooldownWindow()
+        end
+    end)
+    f:Hide()
+    ui.cdFrame = f
+    ui.SwallowWheel(f)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", CDL.pad, -8)
+    title:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    title:SetText("Profession cooldowns")
+    ui.cdTitle = title
+
+    local close = ui.MakeButton(f, "quiet")
+    close:SetWidth(20); close:SetHeight(18)
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -CDL.pad, -8)
+    close:SetText("X")
+    close:SetScript("OnClick", function() ui.HideCooldownWindow() end)
+
+    -- WHO THIS COVERS, said rather than implied: an empty row for an alt on
+    -- your other WoW account would otherwise read as "nothing to craft".
+    local sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sub:SetPoint("TOPLEFT", f, "TOPLEFT", CDL.pad, -26)
+    sub:SetPoint("RIGHT", f, "RIGHT", -CDL.pad, 0)
+    sub:SetJustifyH("LEFT")
+    sub:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+    sub:SetText("This WoW account's characters on this realm")
+
+    ui.cdEmpty = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ui.cdEmpty:SetPoint("TOPLEFT", f, "TOPLEFT", CDL.pad, -CDL.top)
+    ui.cdEmpty:SetPoint("RIGHT", f, "RIGHT", -CDL.pad, 0)
+    ui.cdEmpty:SetJustifyH("LEFT")
+    ui.cdEmpty:SetTextColor(C.text[1], C.text[2], C.text[3])
+    ui.cdEmpty:SetText("Nothing yet \226\128\148 open a profession window once"
+        .. " on each character.")
+
+    ui.cdRows = {}
+    local i = 1
+    while i <= CDL.rows_max do
+        local row = CreateFrame("Button", nil, f)
+        row:SetHeight(CDL.row_h)
+        row.aegisNoSkin = true
+        row:SetPoint("TOPLEFT", f, "TOPLEFT",
+                     CDL.pad, -(CDL.top + (i - 1) * CDL.row_h))
+        row:SetPoint("TOPRIGHT", f, "TOPRIGHT",
+                     -CDL.pad, -(CDL.top + (i - 1) * CDL.row_h))
+        ui.AddRowChrome(row, i)
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row.who = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.who:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.who:SetWidth(CDL.who_w)
+        row.who:SetJustifyH("LEFT")
+        row.ready = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.ready:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+        row.ready:SetWidth(CDL.ready_w)
+        row.ready:SetJustifyH("RIGHT")
+        row.recipe = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.recipe:SetPoint("LEFT", row.who, "RIGHT", 4, 0)
+        row.recipe:SetPoint("RIGHT", row.ready, "LEFT", -4, 0)
+        row.recipe:SetJustifyH("LEFT")
+        row:SetScript("OnEnter", function()
+            local e = row.entry
+            if not e then return end
+            GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
+            GameTooltip:SetText(e.recipe, C.gold[1], C.gold[2], C.gold[3])
+            GameTooltip:AddLine(e.who .. (e.prof and (" \226\128\148 " .. e.prof)
+                or ""), 1, 1, 1)
+            GameTooltip:AddLine(A.craft.ReadyText(e.ready, time()), 0.8, 0.8, 0.8)
+            GameTooltip:AddLine("Right-click: forget it", 0.6, 0.6, 0.6)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        row:SetScript("OnClick", function()
+            local e = row.entry
+            -- Demo rows are invented: there is nothing real to forget.
+            if not e or arg1 ~= "RightButton" or A.db.demo then return end
+            ui.cdForget = { who = e.who, recipe = e.recipe }
+            StaticPopup_Show("AEGIS_EXCHANGE_FORGET_COOLDOWN", e.who, e.recipe)
+        end)
+        row:Hide()
+        ui.cdRows[i] = row
+        i = i + 1
+    end
+
+    local remind = ui.MakeCheckBox(f, 14, "AegisExchangeCooldownRemind")
+    remind:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", CDL.pad, 24)
+    remind:SetLabel("Tell me at login when one is ready", C.text)
+    remind:SetScript("OnClick", function()
+        A.db.SetSetting("cdReminder", remind:GetChecked() and true or false)
+    end)
+    ui.cdRemind = remind
+
+    local hint = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", CDL.pad, 9)
+    hint:SetPoint("RIGHT", f, "RIGHT", -CDL.pad, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("A recipe joins the list once any of your characters is seen"
+        .. " with it on cooldown.")
+    return f
+end
+
+function ui.RefreshCooldownWindow()
+    if not ui.cdFrame or not ui.cdFrame:IsVisible() then return end
+    local now = time()
+    local rows = A.craft.CooldownRows(A.db.CooldownSource(now), now,
+                                      A.db.CharKey())
+    local n = table.getn(rows)
+    if n > CDL.rows_max then n = CDL.rows_max end
+    local show = n
+    if show < 1 then show = 1 end
+    -- SIZED TO WHAT IT HOLDS, like the shopping list: it sits beside things.
+    ui.cdFrame:SetHeight(CDL.top + CDL.bot + show * CDL.row_h)
+    if n == 0 then ui.cdEmpty:Show() else ui.cdEmpty:Hide() end
+    if A.db.demo then
+        ui.cdTitle:SetText("Profession cooldowns |cffe64c4c(demo)|r")
+    else
+        ui.cdTitle:SetText("Profession cooldowns")
+    end
+    local i = 1
+    while i <= CDL.rows_max do
+        local row, e = ui.cdRows[i], (i <= n) and rows[i] or nil
+        if e then
+            row.entry = e
+            local cc = RAID_CLASS_COLORS and e.class and RAID_CLASS_COLORS[e.class]
+            row.who:SetText(e.who)
+            if cc then row.who:SetTextColor(cc.r, cc.g, cc.b)
+            else row.who:SetTextColor(C.text[1], C.text[2], C.text[3]) end
+            row.recipe:SetText(e.recipe)
+            row.recipe:SetTextColor(C.text[1], C.text[2], C.text[3])
+            row.ready:SetText(A.craft.ReadyText(e.ready, now))
+            if e.ready <= now then
+                row.ready:SetTextColor(C.income[1], C.income[2], C.income[3])
+            else
+                row.ready:SetTextColor(C.goldDim[1], C.goldDim[2], C.goldDim[3])
+            end
+            row:Show()
+        else
+            row.entry = nil
+            row:Hide()
+        end
+        i = i + 1
+    end
+    ui.cdRemind:SetChecked(A.db.Setting("cdReminder") ~= false and 1 or nil)
+end
+
+function ui.SaveCooldownPoint()
+    if not ui.cdFrame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s then s = {}; A.db.char.ui = s end
+    local ok, point, _, relPoint, x, y = pcall(function()
+        return ui.cdFrame:GetPoint(1)
+    end)
+    if not ok or not point then return end
+    s.cdPoint, s.cdRel = point, relPoint or point
+    s.cdX, s.cdY = math.floor(x or 0), math.floor(y or 0)
+end
+
+function ui.RestoreCooldownPoint()
+    if not ui.cdFrame or not A.db or not A.db.char then return end
+    local s = A.db.char.ui
+    if not s or not s.cdPoint then return end
+    local sw = UIParent and UIParent:GetWidth() or 0
+    local sh = UIParent and UIParent:GetHeight() or 0
+    if not ui.PointIsReachable(s.cdPoint, s.cdRel, s.cdX, s.cdY,
+                               sw, sh, CDL.w, ui.cdFrame:GetHeight() or 0) then
+        return
+    end
+    ui.cdFrame:ClearAllPoints()
+    ui.cdFrame:SetPoint(s.cdPoint, UIParent, s.cdRel, s.cdX, s.cdY)
+end
+
+function ui.ShowCooldownWindow()
+    ui.BuildCooldownWindow()
+    ui.RestoreCooldownPoint()
+    ui.cdFrame:Show()
+    -- A profession window open right now is the freshest source there is.
+    ui.CaptureCooldowns()
+    ui.RefreshCooldownWindow()
+end
+
+function ui.HideCooldownWindow()
+    if ui.cdFrame then ui.cdFrame:Hide() end
+end
+
+function ui.ToggleCooldownWindow()
+    ui.BuildCooldownWindow()
+    if ui.cdFrame:IsVisible() then ui.HideCooldownWindow()
+    else ui.ShowCooldownWindow() end
+end
+
 SlashCmdList["AEGISEXCHANGE"] = function(msg)
     local cmd = string.lower(msg or "")
+    -- Profession cooldowns, anywhere. The WHOLE word, so it can never be read
+    -- out of some other command's argument.
+    if string.find(cmd, "^%s*cd%s*$") then
+        ui.ToggleCooldownWindow()
+        return
+    end
+    -- The live file for other tools (SuperWoW only): live, live on, live off.
+    -- The whole word, like cd.
+    local _, _, liveArg = string.find(cmd, "^%s*live%s*(%a*)%s*$")
+    if liveArg and A.live then
+        ChatMsg(A.live.Command(liveArg))
+        return
+    end
     -- Matched against the ORIGINAL msg, not the lowered copy: an item link
     -- carries a hex colour code and a name, and lowering it breaks both.
     local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
@@ -20031,6 +20368,9 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
         ChatMsg("  demo=" .. tostring(A.db.demo and true or false))
+        -- What the live file costs, MEASURED: the size, and how long the last
+        -- build and write took on this machine (ROADMAP 6.3).
+        if A.live then ChatMsg("  " .. A.live.DiagLine()) end
         -- WHICH dressing-room API this client has, if either. A check box
         -- that silently does nothing is the failure this line exists to make
         -- reportable in one word.
@@ -20274,6 +20614,9 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
                 .. " so the quality colours have something to show \226\128\148"
                 .. " with some reagents part-gathered and invented prices"
                 .. " on every line.")
+            ChatMsg("  /aex cd lists invented profession cooldowns for the"
+                .. " same characters \226\128\148 ready, minutes, hours and"
+                .. " days away.")
             ChatMsg("  The LEDGER is invented too \226\128\148 six months of"
                 .. " one trader's buying and selling across 34 real items, so"
                 .. " both its views, the stat blocks and the IN / OUT / NET"
@@ -20304,6 +20647,7 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         if ui.shopFrame and ui.shopFrame:IsVisible() then
             ui.RefreshShopWindow()
         end
+        ui.RefreshCooldownWindow()
         return
     end
     -- THE SHOPPING LIST, ANYWHERE. The main window only opens at an auction

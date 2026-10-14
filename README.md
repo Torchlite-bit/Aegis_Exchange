@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.54.35)
+# Aegis: Exchange (v1.55.1)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -219,6 +219,43 @@ are left.
 - It closes when you leave — unless you opened it yourself. Turn the pop-up off
   on the Aegis tab.
 
+### ⏳ Profession cooldowns — which alt to log onto
+
+**`/aex cd`** opens a small window, anywhere, listing every profession cooldown
+on every character of your account on this realm — **ready ones first**, then
+the soonest: *Transmute: Arcanite — ready now*, *Mooncloth — in 2h 14m*.
+
+- **It fills itself.** Open a profession window on each character once and its
+  cooldowns are read from there; craft and they update.
+- **One chat line at login** when anything is ready, naming who and what. Turn
+  it off with the box in the window.
+- A recipe joins the list once any of your characters is seen with it on
+  cooldown — after that, an alt with it ready shows **ready now**.
+- Right-click a row to forget it.
+
+> Characters on a *second* WoW account can't be seen — an addon can only read
+> its own account's saved data.
+
+#### 📄 A live file for other tools (with SuperWoW)
+
+With **SuperWoW** installed, each character keeps a small text file in your
+WoW folder, `imports\AegisExchange-<Realm>-<Character>.txt`. It holds that
+character's **cooldowns** (when each one is ready) and its **last 100 crafts,
+sales and buys**, with prices. It is rewritten within a few seconds whenever one
+of them changes, so a program outside the game can read it while you play. The
+`imports` folder is shared by every account on the PC, so a tool reading every
+`AegisExchange-*.txt` sees your alts on all of them.
+
+- **Cheap by design.** It's written only when something changes, never on a
+  timer, and a burst of twenty buyouts is one write. It never writes during
+  combat; the write waits for the fight to end. The file is a few KB.
+- **`/aex diag`** shows the size of the last write and how long it took on your
+  machine.
+- **`/aex live`** turns it off, or back on. Without SuperWoW nothing is written.
+
+The file's first lines say how to read it: one record per line, fields
+separated by tabs, times in Unix seconds, money in copper.
+
 ### 📈 History — where did all the gold go?
 
 **The chart gets the whole tab:** your **account's gold** over 24h, 7d, 30d, 3m
@@ -383,6 +420,8 @@ but **rename the folder to exactly `Aegis_Exchange`** — GitHub's ZIP unpacks a
 | Talk to an auctioneer | The Aegis window opens |
 | `/aex` or the **Blizzard UI** button | Hand the session back to the stock AH |
 | `/aex shop` | The crafting shopping list, anywhere |
+| `/aex cd` | Every character's profession cooldowns, anywhere |
+| `/aex live` | Turn the live file for other tools off or on (SuperWoW only) |
 | `/aex flips` | What the last scan found **below vendor price** |
 | `/aex demo` | Fill the chart, Ledger, Receipt and Crafting tab with invented data to see them working. Nothing is saved; `/reload` clears it |
 | `/aex diag <shift-click an item>` | Everything Aegis knows about that item, and how |
@@ -452,7 +491,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.54.35`) — quote it.
+1. Check the **version** in the window's title bar (`v1.55.1`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.
