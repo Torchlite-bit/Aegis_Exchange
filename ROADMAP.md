@@ -5854,6 +5854,13 @@ feature with a hard constraint in front of it.
 > building 6.3's live half**, and keep the SavedVariables log as the path for
 > everyone without it. A SuperWoW badge in the README returns only when code
 > actually calls it (see CLAUDE.md).
+>
+> **VERIFIED (v1.55.1)** against SuperWoW's own wiki: Features says
+> *"ExportFile("filename", "text") creates a txt file in gamedirectory\imports
+> and writes text in it"*; the Changelog dates it to **1.3** and lists
+> `AppendText` under 3.0, unreleased. The live half is built (6.3). Code now
+> calls `ExportFile`, so the SuperWoW badge test in CLAUDE.md is met. Adding
+> one is the owner's call.
 
 **A 1.12 addon cannot write a file.** No `io`, no `os`, no `require` — and no
 DLL closes that gap: ClassicAPI's manifest backports 550+ functions across 45
@@ -5981,9 +5988,45 @@ cooldowns. A client limit, not a design choice — say so in the window rather
 than letting an empty row imply there is nothing to craft.
 
 **Deferred by the owner (asked 1.54.18); started at 1.55.0** (#85), which
-opened the MINOR. 6.3 follows as 1.55.x patches.
+opened the MINOR. 6.3 shipped at 1.55.1, as the live file.
 
 ### 6.3 The machine-readable log
+
+> **BUILT AS A LIVE FILE, v1.55.1. The SavedVariables log below was NOT
+> built,** by the owner's decision. Asked whether the full log should live in
+> saved data, the owner said *"ram usage is limited"*. Settled: no long
+> history in memory. The in-game ledger already keeps the last 500 trades,
+> and a tool can read that from saved data after logout.
+>
+> **As built** (`A.live`, end of `core/db.lua`):
+> - **One file per character**, `imports\AegisExchange-<Realm>-<Character>`
+>   (SuperWoW adds `.txt`). It holds that character's cooldowns and its last
+>   `live.EVENTS_MAX` (100) crafts, sales and buys, oldest first. TAB-separated, one
+>   record per line, with a header naming the format version and every
+>   record's fields. Pre-1.53.7 ledger entries have no character and are left
+>   out.
+> - **Crafts needed a store**, `realms[realm].crafts[char]`, capped at
+>   `db.CRAFTS_MAX` (100) and fed by the existing `CHAT_MSG_LOOT` create
+>   parse. It's in the existing `AegisExchangeDB`, so no new SavedVariables
+>   and no restart.
+> - **When it writes is the cost, so that is what is tested:**
+>   `live.Changed` is O(1) (a flag and a due time) because `db.RecordTxn`
+>   calls it from inside the mail scan. A burst is one write `live.QUIET`
+>   (2s) after the last change, or `live.MAX_WAIT` (10s) after the first.
+>   It never writes in combat: the driver sleeps until
+>   `PLAYER_REGEN_ENABLED`. Pending writes are flushed on `PLAYER_LOGOUT`.
+>   One write per session at login, `live.LOGIN_DELAY` (15s) in.
+>   `craft.ApplyCooldownScan` now reports whether anything moved
+>   (`craft.CD_SLACK`), so opening a profession window doesn't rewrite the file.
+> - **Measured, not assumed:** each write is timed with `debugprofilestop`
+>   where the client has it, `GetTime` otherwise. `/aex diag` prints size,
+>   build time, write time, the slowest write, and which clock it used.
+> - `/aex live [on|off]` is setting `liveFile`, on by default (a no-op
+>   without SuperWoW).
+> - **Unverified on a real client:** whether `ExportFile` creates `imports\`
+>   when it is missing (a failure is caught, printed once a session, and
+>   shown in `/aex diag`), and the real cost of a write.
+> - Tests: `tests/units/livefile_test.lua`.
 
 For the "consumed by other tools" half. **A separate SavedVariables file**,
 declared in the `.toc` (restart release), never the main DB:

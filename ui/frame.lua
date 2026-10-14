@@ -20019,7 +20019,11 @@ function ui.CaptureCooldowns()
     local rec = A.db.MyCooldowns(A.sell and A.sell.PlayerClass
         and A.sell.PlayerClass())
     if not rec then return false end
-    A.craft.ApplyCooldownScan(rec, rows, prof, known, time())
+    -- The live file only when something MOVED: a profession window opened
+    -- on cooldowns already known is not a write.
+    if A.craft.ApplyCooldownScan(rec, rows, prof, known, time()) and A.live then
+        A.live.Changed(A.db.CharKey())
+    end
     return true
 end
 
@@ -20306,6 +20310,13 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
         ui.ToggleCooldownWindow()
         return
     end
+    -- The live file for other tools (SuperWoW only): live, live on, live off.
+    -- The whole word, like cd.
+    local _, _, liveArg = string.find(cmd, "^%s*live%s*(%a*)%s*$")
+    if liveArg and A.live then
+        ChatMsg(A.live.Command(liveArg))
+        return
+    end
     -- Matched against the ORIGINAL msg, not the lowered copy: an item link
     -- carries a hex colour code and a name, and lowering it breaks both.
     local _, _, deArgs = string.find(msg or "", "^%s*[dD][eE]%s+(.+)$")
@@ -20357,6 +20368,9 @@ SlashCmdList["AEGISEXCHANGE"] = function(msg)
             ChatMsg("  chart fill=not drawn yet (open the History tab)")
         end
         ChatMsg("  demo=" .. tostring(A.db.demo and true or false))
+        -- What the live file costs, MEASURED: the size, and how long the last
+        -- build and write took on this machine (ROADMAP 6.3).
+        if A.live then ChatMsg("  " .. A.live.DiagLine()) end
         -- WHICH dressing-room API this client has, if either. A check box
         -- that silently does nothing is the failure this line exists to make
         -- reportable in one word.

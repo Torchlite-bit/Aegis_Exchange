@@ -4336,7 +4336,7 @@ end
     # Ledger entries written with no character, so the per-character
     # breakdown has nothing to break down.
     ('ledger-txn-unattributed', 'core/db.lua',
-     '        amount = amount, id = itemId, qty = n, who = db.CharKey() })',
+     '        amount = amount, id = itemId, qty = n, who = who })',
      '        amount = amount, id = itemId, qty = n })',
      'purse'),
 
@@ -7466,8 +7466,8 @@ end""",
      "histstats"),
 
     ("recordtxn-drops-the-quantity", "core/db.lua",
-     "        amount = amount, id = itemId, qty = n, who = db.CharKey() })",
-     "        amount = amount, id = itemId, who = db.CharKey() })",
+     "        amount = amount, id = itemId, qty = n, who = who })",
+     "        amount = amount, id = itemId, who = who })",
      "histstats"),
 
     # A.RecordExternalTxn dropped every field it did not name, and Courier is
@@ -8732,8 +8732,8 @@ end""",
     # "2 hours left" stored is meaningless the moment you log out -- which is
     # when this is read, from another character.
     ("cooldown-stores-time-remaining", "core/buy.lua",
-     "            rec.recipes[r.name] = { ready = now + math.ceil(rem), prof = prof,",
-     "            rec.recipes[r.name] = { ready = math.ceil(rem), prof = prof,",
+     "            local ready = now + math.ceil(rem)",
+     "            local ready = math.ceil(rem)",
      "cooldowns"),
 
     ("cooldown-ready-a-second-early", "core/buy.lua",
@@ -8872,6 +8872,166 @@ end""",
      "    ui.cdFrame = f\n",
      "cooldowns"),
 
+    # ---- the live file for other tools (ROADMAP 6.3, #85) -----------------
+    # What it costs is WHEN it writes: never inline, once per burst, never in
+    # combat. "ram usage is limited" -- the owner's condition for building it.
+    ("live-writes-inline", "core/db.lua",
+     "    live.due = due\n    if live.driver then live.driver:Show() end",
+     "    live.due = due\n    live.WriteChar(who)",
+     "livefile"),
+
+    ("live-no-quiet-time", "core/db.lua",
+     "    local due = now + (delay or live.QUIET)",
+     "    local due = now",
+     "livefile"),
+
+    ("live-stream-never-lands", "core/db.lua",
+     "    elseif due > live.first + live.MAX_WAIT then",
+     "    elseif false then",
+     "livefile"),
+
+    ("live-writes-in-combat", "core/db.lua",
+     "    if live.InCombat() then return false end\n    live.WriteDue()",
+     "    live.WriteDue()",
+     "livefile"),
+
+    ("live-combat-loses-the-write", "core/db.lua",
+     "    if live.due then live.driver:Show() end",
+     "",
+     "livefile"),
+
+    ("live-driver-polls-through-combat", "core/db.lua",
+     "    live.driver:Hide()\n    live.Flush()",
+     "    if live.Flush() then live.driver:Hide() end",
+     "livefile"),
+
+    ("live-logout-loses-the-last-change", "core/db.lua",
+     "    if live.due then live.WriteDue() end",
+     "",
+     "livefile"),
+
+    ("live-login-write-every-loading-screen", "core/db.lua",
+     "    if live.loggedIn then return end\n",
+     "",
+     "livefile"),
+
+    ("live-login-puts-off-a-due-write", "core/db.lua",
+     "        if live.due and live.due < due then due = live.due end\n",
+     "",
+     "livefile"),
+
+    ("live-ledger-change-not-marked", "core/db.lua",
+     "        table.remove(led, 1)\n    end\n    if A.live then A.live.Changed(who) end",
+     "        table.remove(led, 1)\n    end",
+     "livefile"),
+
+    ("live-file-has-everyones-trades", "core/db.lua",
+     "        if e.who == who then\n            local kind = e.kind",
+     "        if true then\n            local kind = e.kind",
+     "livefile"),
+
+    ("live-file-newest-first", "core/db.lua",
+     "        if a.t ~= b.t then return a.t < b.t end\n        return a.seq < b.seq",
+     "        if a.t ~= b.t then return a.t > b.t end\n        return a.seq < b.seq",
+     "livefile"),
+
+    ("live-cap-drops-the-newest", "core/db.lua",
+     "    while table.getn(out) > max do\n        table.remove(out, 1)",
+     "    while table.getn(out) > max do\n        table.remove(out)",
+     "livefile"),
+
+    ("live-unknown-count-written-as-one", "core/db.lua",
+     "n = e.qty, copper = e.amount, seq = i",
+     "n = e.qty or 1, copper = e.amount, seq = i",
+     "livefile"),
+
+    ("live-tab-splits-a-record", "core/db.lua",
+     '"[\\t\\r\\n]", " "',
+     '"[\\r\\n]", " "',
+     "livefile"),
+
+    ("live-file-name-without-realm", "core/db.lua",
+     '    return "AegisExchange-" .. clean(realm) .. "-" .. clean(who)',
+     '    return "AegisExchange-" .. clean(who)',
+     "livefile"),
+
+    ("live-vendor-lump-as-a-sale", "core/db.lua",
+     '            if kind == "sale" and db.IsVendorSale(e) then kind = "vendor" end\n',
+     "",
+     "livefile"),
+
+    ("live-demo-ledger-reaches-the-file", "core/db.lua",
+     "db.Ledger(), db.CraftLog(who), time(), A.version)",
+     "db.LedgerSource(), db.CraftLog(who), time(), A.version)",
+     "livefile"),
+
+    ("live-failure-every-sale", "core/db.lua",
+     "            live.warned = true\n",
+     "",
+     "livefile"),
+
+    ("live-ignores-the-setting", "core/db.lua",
+     '    return live.Available() and db.Setting("liveFile") ~= false',
+     "    return live.Available()",
+     "livefile"),
+
+    # Turned off with a write already due: live.WriteChar asks the setting
+    # again, so nothing reaches the file.
+    ("live-off-still-writes-what-was-due", "core/db.lua",
+     "    if not live.Enabled() or not db.account or not who then return false end",
+     "    if not db.account or not who then return false end",
+     "livefile"),
+
+    ("live-runs-without-superwow", "core/db.lua",
+     '    return type(ExportFile) == "function"',
+     "    return true",
+     "livefile"),
+
+    ("live-clock-ignores-debugprofilestop", "core/db.lua",
+     '    if type(debugprofilestop) == "function" then',
+     "    if false then",
+     "livefile"),
+
+    ("forget-writes-the-wrong-file", "core/db.lua",
+     "    -- the one change made from somewhere else.\n    if A.live then A.live.Changed(who) end",
+     "    -- the one change made from somewhere else.\n    if A.live then A.live.Changed() end",
+     "livefile"),
+
+    ("craft-never-logged", "core/buy.lua",
+     "        A.db.RecordCraft(id, util.ItemNameFromLink(arg1), n)\n",
+     "",
+     "livefile"),
+
+    ("craft-log-uncapped", "core/db.lua",
+     "    while table.getn(log) > db.CRAFTS_MAX do\n        table.remove(log, 1)\n    end\n",
+     "",
+     "livefile"),
+
+    ("cooldown-reread-is-a-change", "core/buy.lua",
+     "               or math.abs(cur.ready - ready) > craft.CD_SLACK",
+     "               or cur.ready ~= ready",
+     "livefile"),
+
+    ("cooldown-change-never-reported", "core/buy.lua",
+     "        i = i + 1\n    end\n    return changed\nend",
+     "        i = i + 1\n    end\n    return false\nend",
+     "livefile"),
+
+    ("capture-marks-every-window-read", "ui/frame.lua",
+     "    if A.craft.ApplyCooldownScan(rec, rows, prof, known, time()) and A.live then",
+     "    A.craft.ApplyCooldownScan(rec, rows, prof, known, time())\n    if A.live then",
+     "livefile"),
+
+    ("clear-prices-clears-the-realm", "core/db.lua",
+     "    if bucket then bucket.items = nil end",
+     "    db.account.realms[key] = nil",
+     "livefile"),
+
+    ("diag-without-the-live-line", "ui/frame.lua",
+     '        if A.live then ChatMsg("  " .. A.live.DiagLine()) end\n',
+     "",
+     "livefile"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",
@@ -8935,6 +9095,7 @@ SUITES = {
     "mailscan": "tests/units/mailscan_test.lua",
     "wheel": "tests/units/wheel_test.lua",
     "cooldowns": "tests/units/cooldowns_test.lua",
+    "livefile": "tests/units/livefile_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

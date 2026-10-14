@@ -3828,6 +3828,11 @@ function craft.ReadCooldownWindow(known)
     return rows, prof
 end
 
+-- How far a re-read may move a stored ready time and still be the same
+-- cooldown. `now + ceil(remaining)` lands a second either side between two
+-- reads of one cooldown; a real change moves it by hours.
+craft.CD_SLACK = 2
+
 -- Fold one window read into a character's record. PURE: `rec`, and `known`,
 -- are the tables it writes; nothing is read from the client.
 --
@@ -3836,10 +3841,14 @@ end
 --   no remaining    if the recipe is known to have one: it is READY. A ready
 --                   time already in the past is kept -- "ready since".
 --                   Otherwise an ordinary recipe, and nothing is stored.
+--
+-- Returns true when the record CHANGED -- what decides whether the live file
+-- is due a write.
 function craft.ApplyCooldownScan(rec, rows, prof, known, now)
-    if not rec or not rows then return end
+    if not rec or not rows then return false end
     known = known or {}
     if not rec.recipes then rec.recipes = {} end
+    local changed = false
     local i = 1
     while i <= table.getn(rows) do
         local r = rows[i]
@@ -3847,16 +3856,28 @@ function craft.ApplyCooldownScan(rec, rows, prof, known, now)
         local rem = tonumber(r.remaining)
         if rem and rem > 0 then
             known[r.name] = true
-            rec.recipes[r.name] = { ready = now + math.ceil(rem), prof = prof,
-                                    item = r.itemId or (cur and cur.item) }
+            local ready = now + math.ceil(rem)
+            -- THE SAME COOLDOWN READ TWICE is not a change. Two reads a minute
+            -- apart land a second either side of each other, and a stored
+            -- time that moved by one second would rewrite the live file every
+            -- time a profession window opened.
+            if not cur or not cur.ready or cur.prof ~= prof
+               or math.abs(cur.ready - ready) > craft.CD_SLACK
+               or (r.itemId and cur.item ~= r.itemId) then
+                rec.recipes[r.name] = { ready = ready, prof = prof,
+                                        item = r.itemId or (cur and cur.item) }
+                changed = true
+            end
         elseif known[r.name] then
             if not cur or not cur.ready or cur.ready > now then
                 rec.recipes[r.name] = { ready = now, prof = prof,
                                         item = r.itemId or (cur and cur.item) }
+                changed = true
             end
         end
         i = i + 1
     end
+    return changed
 end
 
 -- Every character's cooldowns, soonest first: { who, class, recipe, prof,
@@ -3951,6 +3972,9 @@ A.RegisterEvent("CHAT_MSG_LOOT", function()
     local id, n = craft.ParseCreate(arg1)
     if id then
         craft.RecordMade(id, n)
+        -- The live file's craft log (ROADMAP 6.3). The name is read off the
+        -- link in the line itself, never asked of GetItemInfo.
+        A.db.RecordCraft(id, util.ItemNameFromLink(arg1), n)
         -- The UI hangs a FLAG-SETTER here, never a repaint. This handler is on
         -- a chat event that prints a line per item, so a big loot lands
         -- several of them in a few frames -- HARD RULE 16, and the same shape
