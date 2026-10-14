@@ -8552,6 +8552,62 @@ end""",
      "        A.db.RecordTxn(\"sale\", \"Vendor sold (\" .. sold .. \" stacks)\",",
      "postbook"),
 
+    # ---- the mailbox scan under a MAIL_INBOX_UPDATE storm (#107) ----------
+    # The freeze itself: a scan -- and a History repaint -- per fire, dozens of
+    # fires in a few frames on the first mailbox of a session.
+    ("mail-scan-inline-per-fire", "ui/frame.lua",
+     "A.RegisterEvent(\"MAIL_INBOX_UPDATE\", function()\n    ui.mailScanDriver:Show()\nend)",
+     "A.RegisterEvent(\"MAIL_INBOX_UPDATE\", function()\n    ui.ScanMailSales()\nend)",
+     "mailscan"),
+
+    # A driver that never idles scans the whole inbox every frame, forever.
+    ("mail-driver-never-idles", "ui/frame.lua",
+     "    ui.mailScanDriver:Hide()   -- hide FIRST: re-fires during the scan re-arm it\n",
+     "",
+     "mailscan"),
+
+    # Hidden AFTER the scan, a fire that lands during it is swallowed.
+    ("mail-driver-hides-after-the-scan", "ui/frame.lua",
+     "    ui.mailScanDriver:Hide()   -- hide FIRST: re-fires during the scan re-arm it\n"
+     "    ui.ScanMailSales()",
+     "    ui.ScanMailSales()\n    ui.mailScanDriver:Hide()",
+     "mailscan"),
+
+    ("mail-driver-starts-armed", "ui/frame.lua",
+     "ui.mailScanDriver = CreateFrame(\"Frame\", \"AegisExchangeMailScan\")\n"
+     "ui.mailScanDriver:Hide()\n",
+     "ui.mailScanDriver = CreateFrame(\"Frame\", \"AegisExchangeMailScan\")\n",
+     "mailscan"),
+
+    ("history-repaints-with-nothing-new", "ui/frame.lua",
+     "    if changed and ui.selectedSubTab == \"History\"",
+     "    if ui.selectedSubTab == \"History\"",
+     "mailscan"),
+
+    # The window is closed at a mailbox; the tab it last showed is not.
+    ("history-repaints-with-the-window-closed", "ui/frame.lua",
+     "    if changed and ui.selectedSubTab == \"History\"\n"
+     "       and ui.frame and ui.frame:IsShown() then",
+     "    if changed and ui.selectedSubTab == \"History\" then",
+     "mailscan"),
+
+    ("history-repaints-on-any-tab", "ui/frame.lua",
+     "    if changed and ui.selectedSubTab == \"History\"\n"
+     "       and ui.frame and ui.frame:IsShown() then",
+     "    if changed and ui.frame and ui.frame:IsShown() then",
+     "mailscan"),
+
+    ("new-sale-is-not-news", "ui/frame.lua",
+     "A.db.RecordTxn(\"sale\", item, money, A.db.IdFromName(item), qty)\n"
+     "                changed = true\n",
+     "A.db.RecordTxn(\"sale\", item, money, A.db.IdFromName(item), qty)\n",
+     "mailscan"),
+
+    ("expiry-is-not-news", "ui/frame.lua",
+     "                A.db.ExpirePosting(back)\n                changed = true\n",
+     "                A.db.ExpirePosting(back)\n",
+     "mailscan"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",
@@ -8612,6 +8668,7 @@ SUITES = {
     "gather": "tests/units/gather_test.lua",
     "blacklist": "tests/units/blacklist_test.lua",
     "postall": "tests/units/postall_test.lua",
+    "mailscan": "tests/units/mailscan_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here

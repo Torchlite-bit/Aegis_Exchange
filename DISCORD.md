@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.54.33
+# ⚔️ Aegis: Exchange v1.54.34
 
 ## ✨ New
 - **Post All, your way** — full stacks, singles, a fixed size or **Smart** (the stack size that nets most, max N auctions); skips anything worth more at a vendor; most valuable first; **blacklist**
@@ -6,12 +6,12 @@
 - **History is a dashboard** — full-tab gold chart, High · Low · Sold · Bought · Top Sale · Top Buy, and **Sales · Expenses · Profit** blocks
 - **Ledger window** — **Items** (sold, bought, avg prices & profit) and **Transactions**
 - **Receipt** on the Buy tab — everything bought this session
-- Grouped results count items too: `8 auctions, 129 items`
 - Price lines on items **clicked in chat**
-- **Remove all** on the Crafting tab, and Remove now works down the list
+- **Remove all** on the Crafting tab
 
 ## 🛠️ Fixed
 - **Disenchant values rebuilt from the server's own loot table** — epics have a value, weapons answer at every level, the 5% Brilliant Shard is back for ilvl 51–65 greens, shields & off-hands priced right
+- **Opening a mailbox could freeze the game** the first time in a session
 - **Sell tab showed no listings** for items your client hadn't seen yet
 - **Ledger Items showed ? for sales** booked by Courier or from mixed stack sizes
 - **Post All panel & Vendor list** let the Sell tab show through — solid now
