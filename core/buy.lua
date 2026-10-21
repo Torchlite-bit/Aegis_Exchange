@@ -2530,6 +2530,60 @@ function buy.BatchCost(rows)
     return total, n
 end
 
+-- What a selection comes to, ITEM BY ITEM: { name, itemId, quality, texture,
+-- count, auctions, total, unit }, alphabetical, plus the item count across
+-- all of them. PURE.
+--
+-- THE SAME ROWS buy.BatchCost prices -- a buyout, and not your own -- so the
+-- count is what the Buyout button would actually get you for the money shown
+-- beside it.
+--
+-- IN ITEMS, NOT CHARGES. row.count was converted once, when the page was read
+-- (util.ItemUnits): five Wizard Oils are five, not twenty-five.
+--
+-- BY NAME, NOT ID. "Green Iron Bracers of the Monkey" and "...of the Eagle"
+-- share an item id and are different things to buy.
+function buy.SelectionItems(rows)
+    local byName, list, units = {}, {}, 0
+    local i = 1
+    while i <= table.getn(rows or {}) do
+        local r = rows[i]
+        if r.buyout and r.buyout > 0 and not r.mine then
+            local key = r.name or tostring(r.itemId)
+            local e = byName[key]
+            if not e then
+                e = { name = key, itemId = r.itemId, quality = r.quality,
+                      texture = r.texture, count = 0, auctions = 0, total = 0 }
+                byName[key] = e
+                table.insert(list, e)
+            end
+            local n = tonumber(r.count) or 1
+            if n < 1 then n = 1 end
+            e.count = e.count + n
+            e.auctions = e.auctions + 1
+            e.total = e.total + r.buyout
+            units = units + n
+        end
+        i = i + 1
+    end
+    local k = 1
+    while k <= table.getn(list) do
+        list[k].unit = math.floor(list[k].total / list[k].count)
+        k = k + 1
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list, units
+end
+
+-- The selection in a few words: "19 Clam Meat" for one item, "59 items of 3
+-- kinds" for several, nil for nothing.
+function buy.SelectionPhrase(list, units)
+    local k = table.getn(list or {})
+    if k == 0 then return nil end
+    if k == 1 then return units .. " " .. list[1].name end
+    return units .. " items of " .. k .. " kinds"
+end
+
 -- Start a batch buyout of `rows`. Returns (true) or (false, reason).
 -- The search text that means "this item and nothing else".
 --
