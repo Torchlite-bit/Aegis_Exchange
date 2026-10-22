@@ -6674,6 +6674,8 @@ ui.GrowBuyRows = function(n)
     ui.buyCheckTotal:SetJustifyH("LEFT")
     ui.buyCheckTotal:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
     ui.buyCheckTotal:Hide()
+    -- ...and the hover over it that lists the selection item by item.
+    ui.BuildCheckTip(panel)
 
     local bidBtn = ui.MakeButton(panel, "quiet", "AegisExchangeBuyBidButton")
     bidBtn:SetWidth(58); bidBtn:SetHeight(21)
@@ -6813,6 +6815,9 @@ function ui.SetBuyView(name)
         if w then if overlay then w:Hide() else w:Show() end end
         i = i + 1
     end
+    -- The hover over the tally line goes where the line goes -- and only
+    -- when there is a selection on it.
+    ui.SyncCheckTip(not overlay)
     if ui.buyHeaders then
         for _, h in pairs(ui.buyHeaders) do
             if overlay then h:Hide() else h:Show() end
@@ -8409,6 +8414,116 @@ function ui.GatherPageText(g)
         .. (g.totalPages or 1)
 end
 
+-- The line beside the action bar while rows are ticked: how many, how many
+-- ITEMS that is, and what it costs. PURE.
+--
+-- THE ITEMS WERE THE MISSING THIRD. "2 selected" said nothing about whether
+-- that was a stack of 5 and a stack of 20 or two singles -- and the count is
+-- what you are actually shopping for. `phrase` is buy.SelectionPhrase's: one
+-- item named, several counted, the breakdown on hover (ui.ShowCheckTip).
+--
+-- When you cannot afford it, say WHY Buyout is greyed. A greyed button with no
+-- reason is the thing this addon has shipped twice, and both times it read as
+-- broken.
+function ui.CheckTotalText(nChecked, phrase, total, money)
+    local head = nChecked .. " selected"
+    if phrase then head = head .. " \226\128\162 " .. phrase end
+    if total <= money then
+        return head .. " \226\128\148 " .. util.FormatMoneyGold(total)
+    end
+    return "|cffff5555" .. head .. " \226\128\148 need "
+        .. util.FormatMoney(total - money, false) .. " more|r"
+end
+
+-- The selection item by item, for the tooltip: { left, right, quality, kind }.
+-- One line per item -- its count, what it all costs, and the price EACH when
+-- there is more than one -- then a total when there is more than one item. A
+-- long mixed selection stops at ui.CHECK_TIP_MAX lines and says how many
+-- more. PURE.
+ui.CHECK_TIP_MAX = 15
+
+function ui.CheckTipLines(list, units)
+    local out = {}
+    local n = table.getn(list or {})
+    local total = 0
+    local i = 1
+    while i <= n do
+        local e = list[i]
+        total = total + e.total
+        if i <= ui.CHECK_TIP_MAX then
+            local right = util.FormatMoney(e.total, true)
+            if e.count > 1 then
+                right = right .. "  |cff9d9d9d(" .. util.FormatMoney(e.unit, false)
+                    .. " each)|r"
+            end
+            table.insert(out, { kind = "item", left = e.count .. " " .. e.name,
+                                right = right, quality = e.quality })
+        end
+        i = i + 1
+    end
+    if n > ui.CHECK_TIP_MAX then
+        table.insert(out, { kind = "more",
+                            left = "...and " .. (n - ui.CHECK_TIP_MAX) .. " more" })
+    end
+    if n > 1 then
+        table.insert(out, { kind = "total", left = "Total: " .. units .. " items",
+                            right = util.FormatMoney(total, true) })
+    end
+    return out
+end
+
+function ui.ShowCheckTip(owner)
+    local list, units = A.buy.SelectionItems(ui.buyChecked or {})
+    if table.getn(list) == 0 then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+    GameTooltip:SetText("Selected")
+    local lines = ui.CheckTipLines(list, units)
+    local i = 1
+    while i <= table.getn(lines) do
+        local l = lines[i]
+        if l.kind == "item" then
+            local r, g, b = ui.QualityColor(l.quality)
+            GameTooltip:AddDoubleLine(l.left, l.right, r, g, b, 1, 1, 1)
+        elseif l.kind == "more" then
+            GameTooltip:AddLine(l.left, 0.6, 0.6, 0.6)
+        else
+            GameTooltip:AddDoubleLine(l.left, l.right, C.gold[1], C.gold[2],
+                                      C.gold[3], 1, 1, 1)
+        end
+        i = i + 1
+    end
+    GameTooltip:Show()
+end
+
+-- A font string cannot take the mouse, so an invisible frame sits over the
+-- tally line and owns the hover. Shown only while there is a selection to
+-- list: hidden, it cannot catch a click meant for anything else.
+function ui.BuildCheckTip(panel)
+    local tip = CreateFrame("Frame", "AegisExchangeBuyCheckTip", panel)
+    tip:SetPoint("LEFT", ui.buyCheckTotal, "LEFT", 0, 0)
+    tip:SetHeight(16)
+    tip:SetWidth(20)
+    tip:EnableMouse(true)
+    tip:SetScript("OnEnter", function() ui.ShowCheckTip(tip) end)
+    tip:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    tip:Hide()
+    ui.buyCheckTip = tip
+end
+
+-- Show the hover frame exactly when the tally line is on screen with a
+-- selection on it, and size it to the text. `on` is whether the caller just
+-- showed the line -- told, not asked of the font string.
+function ui.SyncCheckTip(on)
+    local tip, fs = ui.buyCheckTip, ui.buyCheckTotal
+    if not tip or not fs then return end
+    if on and table.getn(ui.buyChecked or {}) > 0 then
+        tip:SetWidth(math.max(fs:GetStringWidth() or 0, 20))
+        tip:Show()
+    else
+        tip:Hide()
+    end
+end
+
 -- The count mirrors "Buyout (3)" beside it on purpose: the pair reads as two
 -- things you can do to ONE selection rather than two adjacent buttons.
 function ui.ClearButtonState(nChecked)
@@ -8449,24 +8564,18 @@ function ui.RefreshBuyActionBar()
             ui.buyBuyoutBtn:Disable()
         end
         if ui.buyCheckTotal then
-            if afford then
-                ui.buyCheckTotal:SetText(nChecked .. " selected \226\128\148 "
-                    .. util.FormatMoneyGold(total))
-            else
-                -- Say WHY it is disabled. A greyed button with no reason is
-                -- the thing this addon has shipped twice and both times it
-                -- read as broken.
-                ui.buyCheckTotal:SetText("|cffff5555" .. nChecked
-                    .. " selected \226\128\148 need "
-                    .. util.FormatMoney(total - money, false) .. " more|r")
-            end
+            local list, units = A.buy.SelectionItems(ui.buyChecked)
+            ui.buyCheckTotal:SetText(ui.CheckTotalText(nChecked,
+                A.buy.SelectionPhrase(list, units), total, money))
             ui.buyCheckTotal:Show()
         end
+        ui.SyncCheckTip(true)
         ui.buyBidBtn:Disable()
         return
     end
 
     if ui.buyCheckTotal then ui.buyCheckTotal:Hide() end
+    ui.SyncCheckTip(false)
     ui.buyBuyoutBtn:SetText("Buyout")
     local s = ui.buySel
     if s and s.mine then
@@ -9321,8 +9430,11 @@ function ui.ConfirmBatchBuyout()
     local detail = string.format(
         "Total %s, leaving %s.\n\nThis buys all %d immediately and cannot be undone.",
         util.FormatMoney(total), util.FormatMoney(money - total), buyable)
+    -- WHAT, not just how many: "4 auction(s) (19 Clam Meat)".
+    local phrase = A.buy.SelectionPhrase(A.buy.SelectionItems(sel))
     StaticPopup_Show("AEGIS_EXCHANGE_BUYOUT_BATCH",
-        buyable .. " auction(s)", detail)
+        buyable .. " auction(s)" .. (phrase and (" (" .. phrase .. ")") or ""),
+        detail)
 end
 
 function ui.DoBatchBuyout()

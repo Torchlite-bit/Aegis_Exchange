@@ -18,6 +18,25 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.55.2]
+
+### Added
+- **Ticked auctions count their items.** The line beside Buyout used to say
+  *2 selected — 89s 1c* whether that was two singles or a stack of 5 and a
+  stack of 20. It now says what you're getting: *2 selected • 25 Clam Meat —
+  89s 1c*.
+  - **A mix of items** reads *59 items of 3 kinds*. **Hover the line** for
+    each one: how many, what they cost in total, and the price each.
+  - Counted in **items**: five Wizard Oils are five, not twenty-five charges.
+    Only what Buyout would actually buy is counted, so not your own
+    auctions or bid-only ones.
+  - The **Buy all** confirmation names it too: *Buy 4 auction(s) (19 Clam
+    Meat)?*
+- **SuperWoW badge** in the README, beside the other optional DLLs. Aegis now
+  uses it for the live file.
+
+---
+
 ## [1.55.1]
 
 ### Added
@@ -6653,6 +6672,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.55.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.54.35]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

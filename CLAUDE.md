@@ -356,23 +356,26 @@ are done in practice — **imitate the approach, do not copy code blindly**:
   owner.** It is grouped deliberately:
   1. Discord (`5865F2`), then the 1.18.1 servers — Raven (`1e1e1e`), Octo WoW
      purple (`8A2BE2`), Capy WoW brown (`8B5A2B`).
-  2. The two OPTIONAL DLLs, on their own row: **ClassicAPI** green (`3fb950`,
-     "Recommended") and **AuctionQueryThrottle** orange (`ff8c00`, "Highly
-     Recommended"), followed by a `<sub>` caption saying Aegis runs on a stock
-     client and naming what each one buys.
+  2. The OPTIONAL DLLs, on their own row: **ClassicAPI** green (`3fb950`,
+     "Recommended"), **AuctionQueryThrottle** orange (`ff8c00`, "Highly
+     Recommended") and **SuperWoW** blue (`58a6ff`, "Optional"), followed by a
+     `<sub>` caption saying Aegis runs on a stock client and naming what each
+     one buys.
 
   **The Client badge was removed** (`c79c6e`, "WoW 1.12 vanilla). It restated
   what the server badges and the intro already say, and the row it sat in is now
   the optional-DLL row, where a client badge does not belong.
 
-  **ClassicAPI earned its badge in code and nothing else has.** SuperWoW,
-  Nampower and UnitXP_SP3 badges used to sit here; a grep of `core/` and `ui/`
-  finds no calls to any of them, so they were removed rather than imply a
-  relationship. `C_Item` IS called (`util.ClientSellPrice`,
-  `util.ClientItemLevel`), which is why ClassicAPI came back. Same test for
-  anything else: a code change that actually depends on it, or no badge.
+  **A badge is earned in code.** SuperWoW, Nampower and UnitXP_SP3 badges
+  used to sit here; a grep of `core/` and `ui/` found no calls to any of them,
+  so they were removed rather than imply a relationship. `C_Item` IS called
+  (`util.ClientSellPrice`, `util.ClientItemLevel`), which is why ClassicAPI
+  came back. **SuperWoW came back at v1.55.1** for the same reason: the live
+  file (`A.live`, `core/db.lua`) calls its `ExportFile`. Nampower and
+  UnitXP_SP3 still have no caller and no badge. Same test for anything else:
+  a code change that actually depends on it, or no badge.
 
-  **Nothing is Required.** Both DLLs are optional and the addon states what it
+  **Nothing is Required.** All three DLLs are optional and the addon states what it
   loses without them — do not reinstate a "Required" badge.
 
   There is **no version badge** — but the **H1 carries the version**

@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.55.1)
+# Aegis: Exchange (v1.55.2)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -9,12 +9,15 @@
 
 [![ClassicAPI](https://img.shields.io/badge/ClassicAPI-Recommended-3fb950?style=flat-square&labelColor=555)](https://github.com/brues-code/ClassicAPI)
 [![AuctionQueryThrottle](https://img.shields.io/badge/AuctionQueryThrottle-Highly%20Recommended-ff8c00?style=flat-square&labelColor=555)](https://github.com/brues-code/AuctionQueryThrottle)
+[![SuperWoW](https://img.shields.io/badge/SuperWoW-Optional-58a6ff?style=flat-square&labelColor=555)](https://github.com/balakethelock/SuperWoW)
 
-<sub>**Aegis runs on a stock client.** Two optional DLLs make it better, and
-neither is required: **AuctionQueryThrottle** makes scans much faster, and
+<sub>**Aegis runs on a stock client.** Three optional DLLs make it better, and
+none is required: **AuctionQueryThrottle** makes scans much faster;
 **ClassicAPI** gives exact item levels and vendor prices — without it, disenchant
 values are estimated from the level needed to equip an item and are labelled
-*(approx)*.
+*(approx)*; and **SuperWoW** lets Aegis keep a
+[live file](#-a-live-file-for-other-tools-with-superwow) of your cooldowns and
+trades for tools outside the game.
 </sub>
 
 The stock 1.12 auction house is three text boxes and a prayer. Aegis replaces it
@@ -63,6 +66,10 @@ instead of forty rows of Mana Potion.
 - **Left-click** a row to open it and see every auction underneath — seller,
   stack, time left, price. No new search; the listings are already in hand.
 - **Right-click** to search that item alone, all of it, not just this page.
+- **Tick several auctions** and **Buyout** buys them all in one go. The line
+  beside it says what you've picked, in items, not just auctions:
+  *4 selected • 19 Clam Meat — 1g 64s 73c*. A mix reads *59 items of 3 kinds*;
+  hover it for each item's count, total and price each.
 
 Two columns are the reason to be here: **Unit** (price per item, so a stack of
 20 compares with a stack of 1) and **% Mkt** — **green under market, red over**.
@@ -491,7 +498,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.55.1`) — quote it.
+1. Check the **version** in the window's title bar (`v1.55.2`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

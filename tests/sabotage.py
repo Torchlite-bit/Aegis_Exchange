@@ -9032,6 +9032,98 @@ end""",
      "",
      "livefile"),
 
+    # ---- the selection, item by item (Buy tab tally) ---------------------
+    # "a stack of 5 and a stack of 20" is 25 of a thing, not "2 selected".
+    ("selection-counts-auctions-not-items", "core/buy.lua",
+     "            e.count = e.count + n\n",
+     "            e.count = e.count + 1\n",
+     "selection"),
+
+    ("selection-counts-charges", "core/buy.lua",
+     "            local n = tonumber(r.count) or 1\n            if n < 1 then n = 1 end\n            e.count",
+     "            local n = tonumber(r.charges or r.count) or 1\n            if n < 1 then n = 1 end\n            e.count",
+     "selection"),
+
+    ("selection-merges-by-item-id", "core/buy.lua",
+     "            local key = r.name or tostring(r.itemId)",
+     "            local key = tostring(r.itemId or r.name)",
+     "selection"),
+
+    ("selection-counts-your-own", "core/buy.lua",
+     "        if r.buyout and r.buyout > 0 and not r.mine then\n            local key",
+     "        if r.buyout and r.buyout > 0 then\n            local key",
+     "selection"),
+
+    ("selection-counts-bid-only", "core/buy.lua",
+     "        if r.buyout and r.buyout > 0 and not r.mine then\n            local key",
+     "        if not r.mine then\n            local key",
+     "selection"),
+
+    ("selection-in-tick-order", "core/buy.lua",
+     "    table.sort(list, function(a, b) return a.name < b.name end)\n    return list, units",
+     "    return list, units",
+     "selection"),
+
+    ("selection-unit-rounds-up", "core/buy.lua",
+     "        list[k].unit = math.floor(list[k].total / list[k].count)",
+     "        list[k].unit = math.ceil(list[k].total / list[k].count)",
+     "selection"),
+
+    ("phrase-names-one-of-a-mix", "core/buy.lua",
+     "    if k == 1 then return units .. \" \" .. list[1].name end",
+     "    if k >= 1 then return units .. \" \" .. list[1].name end",
+     "selection"),
+
+    ("tally-without-the-items", "ui/frame.lua",
+     "    if phrase then head = head .. \" \\226\\128\\162 \" .. phrase end\n",
+     "",
+     "selection"),
+
+    ("tally-short-of-gold-says-nothing", "ui/frame.lua",
+     "    local head = nChecked .. \" selected\"\n    if phrase then",
+     "    local head = nChecked .. \" selected\"\n    money = total\n    if phrase then",
+     "selection"),
+
+    ("tip-each-on-a-single", "ui/frame.lua",
+     "            if e.count > 1 then\n                right = right",
+     "            if true then\n                right = right",
+     "selection"),
+
+    ("tip-total-skips-the-unlisted", "ui/frame.lua",
+     "        total = total + e.total\n        if i <= ui.CHECK_TIP_MAX then\n",
+     "        if i <= ui.CHECK_TIP_MAX then\n            total = total + e.total\n",
+     "selection"),
+
+    ("tip-uncapped", "ui/frame.lua",
+     "        if i <= ui.CHECK_TIP_MAX then\n            local right",
+     "        if true then\n            local right",
+     "selection"),
+
+    ("tip-total-for-one-item", "ui/frame.lua",
+     "    if n > 1 then\n        table.insert(out, { kind = \"total\"",
+     "    if n > 0 then\n        table.insert(out, { kind = \"total\"",
+     "selection"),
+
+    ("tip-items-uncoloured", "ui/frame.lua",
+     "            GameTooltip:AddDoubleLine(l.left, l.right, r, g, b, 1, 1, 1)",
+     "            GameTooltip:AddDoubleLine(l.left, l.right, 1, 1, 1, 1, 1, 1)",
+     "selection"),
+
+    ("tip-frame-catches-clicks-when-empty", "ui/frame.lua",
+     "    if on and table.getn(ui.buyChecked or {}) > 0 then",
+     "    if true then",
+     "selection"),
+
+    ("tip-frame-left-up-over-saved-searches", "ui/frame.lua",
+     "    ui.SyncCheckTip(not overlay)",
+     "    ui.SyncCheckTip(true)",
+     "selection"),
+
+    ("confirm-says-how-many-not-what", "ui/frame.lua",
+     "    local phrase = A.buy.SelectionPhrase(A.buy.SelectionItems(sel))\n",
+     "    local phrase = nil\n",
+     "selection"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",
@@ -9096,6 +9188,7 @@ SUITES = {
     "wheel": "tests/units/wheel_test.lua",
     "cooldowns": "tests/units/cooldowns_test.lua",
     "livefile": "tests/units/livefile_test.lua",
+    "selection": "tests/units/selection_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
