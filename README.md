@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.55.2)
+# Aegis: Exchange (v1.55.3)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -212,6 +212,12 @@ and a small `v` means a **vendor sells it cheaper**.
 
 That profit line also appears **on the profession window itself**, live, and
 works with the AH closed.
+
+**Mats are costed where they're cheapest.** A reagent a vendor sells — an
+Imbued Vial, Rune Thread, a dye — counts at the vendor's price when that beats
+the auction house. Aegis learns a vendor's prices the first time you **open
+that merchant**, so visit one once. The recipe's hover names which reagents
+were priced at a vendor.
 
 ### 🛍️ The shopping list, anywhere
 
@@ -498,7 +504,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.55.2`) — quote it.
+1. Check the **version** in the window's title bar (`v1.55.3`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.

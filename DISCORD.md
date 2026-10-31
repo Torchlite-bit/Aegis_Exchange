@@ -1,4 +1,4 @@
-# ⚔️ Aegis: Exchange v1.55.2
+# ⚔️ Aegis: Exchange v1.55.3
 
 ## ✨ New
 - **`/aex cd` — every alt's profession cooldowns**, anywhere, ready ones first; a login line when one is ready
@@ -14,9 +14,10 @@
 
 ## 🛠️ Fixed
 - **Disenchant values rebuilt from the server's own loot table**
+- **Crafting profit costed vendor reagents at AH prices** — now the cheaper of the two
 - **Opening a mailbox could freeze the game** the first time in a session
 - **Sell tab showed no listings** for items your client hadn't seen yet
-- **Ledger Items showed ? for sales** booked by Courier or from mixed stack sizes
+- **Ledger Items showed ? for some sales**
 - **Post All panel & Vendor list** were see-through
 - **Disenchant line said "?"** when one material had no price
 - **Buying again after a buyout** said *no longer available* until you searched again

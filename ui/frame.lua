@@ -11084,7 +11084,7 @@ function ui.ShowCraftRowTooltip(owner, e)
         GameTooltip:AddLine((e.made or 0) .. " of " .. (e.want or 0)
             .. " made this session", 0.8, 0.75, 0.6)
         if p then
-            local cost, costOk = cr.CostOf(p)
+            local cost, costOk, _, atVendor = cr.CostOf(p)
             local value, valueOk = cr.ValueOf(p)
             if costOk then
                 GameTooltip:AddLine("Mats " .. util.FormatMoney(cost, true)
@@ -11092,6 +11092,12 @@ function ui.ShowCraftRowTooltip(owner, e)
             elseif cost > 0 then
                 GameTooltip:AddLine("Mats " .. util.FormatMoney(cost, true)
                     .. "+ per craft", 0.8, 0.75, 0.6)
+            end
+            -- Which reagents a merchant was cheaper for, so a cost lower than
+            -- the auction house's is explained rather than doubted.
+            local vendorNote = cr.VendorNote and cr.VendorNote(atVendor)
+            if vendorNote then
+                GameTooltip:AddLine(vendorNote, 0.55, 0.52, 0.45, 1)
             end
             if valueOk then
                 GameTooltip:AddLine("Sells " .. util.FormatMoney(value, true)

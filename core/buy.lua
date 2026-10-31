@@ -3262,6 +3262,22 @@ function craft.VendorUnit(itemId)
     return nil
 end
 
+-- What one reagent costs to BUY, and where: the cheaper of a merchant and the
+-- auction house. Returns source ("vendor" / "ah"), unit -- or nil.
+--
+-- THE RULE THE SHOPPING LIST ALREADY USED, now used for the recipe's own cost
+-- too. craft.CostOf read the auction house only, so an Imbued Vial a vendor
+-- sells for a fixed price was costed at whatever the AH asked -- the profit on
+-- the profession window and the recipe's hover said one thing while the
+-- Crafting tab's Cost, built from the shopping list, said another. Nobody buys
+-- a reagent at the dearer of two places.
+--
+-- A vendor price exists only once a merchant selling it has been OPENED
+-- (db.SetVendorBuy). Until then this is the auction house, as before.
+function craft.ReagentUnit(itemId)
+    return craft.CheaperSource(craft.VendorUnit(itemId), craft.MarketUnit(itemId))
+end
+
 -- The demo's recipes as a WORKING COPY, made once per demo session.
 --
 -- A COPY, because the demo can now be edited: the stepper changes a recipe's
@@ -3409,26 +3425,38 @@ local function ResolveId(itemId, name)
     return nil
 end
 
--- Total cost to buy this recipe's reagents at the best known unit price.
--- Returns (copperTotal, complete, missingNames): complete is false (and the
--- name is listed in missingNames) when a reagent has no recorded price yet.
+-- "At vendor price: Imbued Vial, Crystal Vial" for the reagents craft.CostOf
+-- priced at a merchant, or nil when there were none. PURE.
+function craft.VendorNote(names)
+    if not names or table.getn(names) == 0 then return nil end
+    return "At vendor price: " .. table.concat(names, ", ")
+end
+
+-- Total cost to buy this recipe's reagents, each where it is cheapest
+-- (craft.ReagentUnit). Returns (copperTotal, complete, missingNames,
+-- vendorNames): complete is false (and the name is listed in missingNames)
+-- when a reagent has no recorded price yet; vendorNames are the reagents
+-- priced at a merchant, so a hover can say so.
 function craft.CostOf(project)
-    local total, complete, missing = 0, true, {}
-    if not project or not project.reagents then return 0, false, missing end
+    local total, complete, missing, atVendor = 0, true, {}, {}
+    if not project or not project.reagents then
+        return 0, false, missing, atVendor
+    end
     local i = 1
     while i <= table.getn(project.reagents) do
         local r = project.reagents[i]
         local id = ResolveId(r.itemId, r.name)
-        local unit = craft.MarketUnit(id)
+        local src, unit = craft.ReagentUnit(id)
         if unit then
             total = total + unit * (r.count or 1)
+            if src == "vendor" then table.insert(atVendor, r.name) end
         else
             complete = false
             table.insert(missing, r.name)
         end
         i = i + 1
     end
-    return total, complete, missing
+    return total, complete, missing, atVendor
 end
 
 -- What it costs to CRAFT one of `itemId`, from the recipes captured on the
