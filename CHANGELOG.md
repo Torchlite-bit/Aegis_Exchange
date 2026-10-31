@@ -18,6 +18,30 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.55.3]
+
+### Fixed
+- **Crafting profit priced vendor reagents at the auction house.** A reagent a
+  merchant sells, like the Imbued Vial in a Brilliant Mana Oil, was costed at
+  whatever the AH asked, even when a vendor sells it for less. Mats are now
+  costed where they're cheapest, vendor or AH, everywhere a recipe's cost
+  shows:
+  - the profit line on the profession window;
+  - the recipe's hover on the Crafting tab, which now also names the
+    reagents priced at a vendor (*At vendor price: Imbued Vial*);
+  - the craft cost on item tooltips.
+
+  The Crafting tab's shopping list already worked this way. Now the recipe and
+  the list agree.
+  - A reagent that **no auction lists** but a vendor sells is now priced at
+    all, so its recipe's profit shows instead of *price the mats*.
+  - Aegis learns a merchant's prices when you **open that merchant**. Until
+    you've visited one that sells the reagent, the AH price is used, as before.
+
+*Thanks to Dagnar on Discord for the report.*
+
+---
+
 ## [1.55.2]
 
 ### Added
@@ -6672,6 +6696,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.55.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

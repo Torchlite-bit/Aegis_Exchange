@@ -9124,6 +9124,52 @@ end""",
      "    local phrase = nil\n",
      "selection"),
 
+    # ---- a recipe's reagents, each where it is cheapest ------------------
+    # The shopping list bought at the cheaper of vendor and AH; the recipe's
+    # own cost read the AH only, so an Imbued Vial was costed at an AH markup.
+    ("recipe-cost-ignores-the-vendor", "core/buy.lua",
+     "    return craft.CheaperSource(craft.VendorUnit(itemId), craft.MarketUnit(itemId))",
+     "    return craft.CheaperSource(nil, craft.MarketUnit(itemId))",
+     "reagentcost"),
+
+    ("recipe-cost-takes-the-vendor-even-dearer", "core/buy.lua",
+     "    return craft.CheaperSource(craft.VendorUnit(itemId), craft.MarketUnit(itemId))",
+     "    local v = craft.VendorUnit(itemId)\n    if v then return \"vendor\", v end\n"
+     "    return craft.CheaperSource(nil, craft.MarketUnit(itemId))",
+     "reagentcost"),
+
+    ("recipe-cost-reads-the-ah-only-again", "core/buy.lua",
+     "        local src, unit = craft.ReagentUnit(id)\n",
+     "        local src, unit = nil, craft.MarketUnit(id)\n",
+     "reagentcost"),
+
+    ("vendor-note-never-names-one", "core/buy.lua",
+     "            if src == \"vendor\" then table.insert(atVendor, r.name) end\n",
+     "",
+     "reagentcost"),
+
+    ("vendor-note-names-every-reagent", "core/buy.lua",
+     "            if src == \"vendor\" then table.insert(atVendor, r.name) end",
+     "            if src then table.insert(atVendor, r.name) end",
+     "reagentcost"),
+
+    ("vendor-note-says-nothing-at-length", "core/buy.lua",
+     "    if not names or table.getn(names) == 0 then return nil end\n"
+     "    return \"At vendor price: \"",
+     "    if not names then return nil end\n"
+     "    return \"At vendor price: \"",
+     "reagentcost"),
+
+    ("sale-valued-at-a-vendor-asking-price", "core/buy.lua",
+     "    local id = ResolveId(project.itemId, project.name)\n    local unit = craft.MarketUnit(id)",
+     "    local id = ResolveId(project.itemId, project.name)\n    local _, unit = craft.ReagentUnit(id)",
+     "reagentcost"),
+
+    ("recipe-hover-without-the-vendor-note", "ui/frame.lua",
+     "                GameTooltip:AddLine(vendorNote, 0.55, 0.52, 0.45, 1)\n",
+     "",
+     "reagentcost"),
+
     ("panel-opens-with-stale-options", "ui/frame.lua",
      "    if not ui.blFrame then return end\n    ui.RefreshPostAllOptions()\n",
      "    if not ui.blFrame then return end\n",
@@ -9189,6 +9235,7 @@ SUITES = {
     "cooldowns": "tests/units/cooldowns_test.lua",
     "livefile": "tests/units/livefile_test.lua",
     "selection": "tests/units/selection_test.lua",
+    "reagentcost": "tests/units/reagentcost_test.lua",
     # definitions.py is deliberately ABSENT. It compares against a git ref and
     # the throwaway copy below has no .git, so every file is skipped as "new"
     # and the lint exits 0 having checked nothing -- it looked green here
