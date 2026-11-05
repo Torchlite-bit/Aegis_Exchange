@@ -336,8 +336,18 @@ function sell.BagCounts(force)
     return sell.bagCounts
 end
 
--- Read the bank and remember it. Only meaningful while the bank frame is open,
--- so it is called from BANKFRAME_OPENED -- the one moment the client answers.
+-- Read the bank and remember it.
+--
+-- WRITING IS CONDITIONAL, exactly as it is for the bags, and for the same
+-- reason -- see sell.SnapshotWritable. The bank containers answer ONLY while
+-- the frame is open, so a walk taken a moment too late returns {} and an
+-- unguarded write turns a real count into none. That is not a hypothetical:
+-- this function used to write whatever it found, which was safe only because
+-- BANKFRAME_OPENED was its single caller. The moment anything else called it
+-- -- a close, a slot change, a flush one frame behind the player walking away
+-- -- it became a way to erase the whole bucket.
+--
+-- Returns the counts, and whether they were stored.
 -- The player's class TOKEN ("MAGE"), or nil.
 --
 -- Its own function because of a Lua trap that cost this file two nil classes:
@@ -352,11 +362,48 @@ function sell.PlayerClass()
 end
 
 function sell.SnapshotBank()
-    local counts = sell.CountContainers(sell.BANK_CONTAINERS)
+    local counts, slots = sell.CountContainers(sell.BANK_CONTAINERS)
+    if not sell.SnapshotWritable(slots) then return counts, false end
     if A.db and A.db.SetInventoryBucket then
         A.db.SetInventoryBucket("bank", counts, sell.PlayerClass())
+        return counts, true
     end
-    return counts
+    return counts, false
+end
+
+-- ---------------------------------------------------------------------------
+-- Keeping the bank current FOR THE WHOLE VISIT
+-- ---------------------------------------------------------------------------
+--
+-- THE BUG THIS EXISTS FOR. BANKFRAME_OPENED fires before the player has moved
+-- anything, so a snapshot taken there records the state they ARRIVED in. Every
+-- deposit and withdrawal for the rest of the visit then went unrecorded, and
+-- the tooltip kept answering with the pre-visit number until the next visit
+-- overwrote it. Reported with a screenshot: 203 where the player could count
+-- 215, the twelve missing ones being exactly what had just been deposited.
+--
+-- The bags half of that same tooltip was RIGHT, which is what made the report
+-- so sharp -- bags are read live, so only the bank number lagged. And the mail
+-- bucket already had the answer written in its own handler: "take one last
+-- look, so what is recorded is the state you left rather than the state you
+-- arrived in". The bank was the one bucket doing the opposite.
+--
+-- HARD RULE 16 is why this is a flag and not a walk in the handler. Both
+-- events below storm -- PLAYERBANKSLOTS_CHANGED as the client resolves item
+-- data for a bank it has not seen this session, BAG_UPDATE always -- and the
+-- work is a seven-container walk. That is the freeze shape, so the handlers
+-- set a boolean and the driver does the walk at most once a frame.
+sell.bankOpen  = false
+sell.bankDirty = false
+
+-- Re-read the bank if something changed it. O(1) when nothing did.
+--
+-- Returns true if a walk happened, false if there was nothing to do.
+function sell.FlushBank()
+    if not sell.bankDirty then return false end
+    sell.bankDirty = false
+    sell.SnapshotBank()
+    return true
 end
 
 -- May a walk that saw `slots` container slots be WRITTEN to the DB?
@@ -2711,9 +2758,18 @@ sell.invDriver:SetScript("OnUpdate", function()
     -- flush's return instead would leave the driver running one extra frame
     -- after every flush, for no work.
     sell.FlushInventory()
+    -- The bank rides the same frame, and for the same reason the mail does:
+    -- the events that dirty it storm, so the walk belongs here rather than in
+    -- a handler. O(1) per tick when the player is nowhere near a bank, which
+    -- is almost always.
+    sell.FlushBank()
     -- The armed arrival snapshot rides the same frame. Both are O(1) per tick:
     -- a flag test and a clock comparison.
     local busy = sell.StepBagSnapshot(GetTime and GetTime() or 0)
+    -- bankDirty is deliberately NOT tested here: FlushBank has already cleared
+    -- it a few lines up, so it is false every time we reach this and a test of
+    -- it would be dead code. What keeps the bank honest is that every handler
+    -- which sets the flag also Shows this frame.
     if not sell.mailDirty and not busy then sell.invDriver:Hide() end
 end)
 
@@ -2746,12 +2802,60 @@ if A.RegisterEvent then
     A.RegisterEvent("BAG_UPDATE", function()
         sell.bagsDirty   = true
         sell.bagTouchedAt = GetTime and GetTime() or 0
+        -- THE BANK BAGS (5..10) REPORT THROUGH THIS EVENT, not through
+        -- PLAYERBANKSLOTS_CHANGED -- that one covers only the bank's own
+        -- slots, container -1. So a deposit into a bank bag is invisible
+        -- unless this marks it.
+        --
+        -- Gated on the bank actually being open, because this event fires for
+        -- every loot, trade, sale and move the player makes all session, and
+        -- away from a bank the walk it would invite answers nothing anyway.
+        --
+        -- AND IT MUST WAKE THE DRIVER. bagsDirty gets away without one because
+        -- sell.BagCounts rebuilds lazily when somebody asks; nothing ever asks
+        -- for the bank, so a dirty flag with a sleeping driver is a flush that
+        -- never happens. This was wrong in the first draft of the fix and the
+        -- sabotage run is what caught it.
+        if sell.bankOpen then
+            sell.bankDirty = true
+            sell.invDriver:Show()
+        end
     end)
-    -- The bank is open, which is the only moment the client will tell us what
-    -- is in it. Fires once per visit.
+    -- The bank is open, which is the only window in which the client will tell
+    -- us what is in it. Fires once per visit, and everything below keeps that
+    -- window honest until it shuts.
     A.RegisterEvent("BANKFRAME_OPENED", function()
+        sell.bankOpen = true
         sell.SnapshotBank()
         sell.SnapshotBags()
+    end)
+    -- A bank slot changed: container -1, the bank's own slots. Marked, not
+    -- walked -- see sell.FlushBank.
+    --
+    -- NOT gated on bankOpen, unlike BAG_UPDATE. This event is the bank's own
+    -- and cannot fire when the bank is unreadable, so gating it could only
+    -- ever lose a change if the open/close bookkeeping drifted. The write is
+    -- guarded at the other end regardless.
+    A.RegisterEvent("PLAYERBANKSLOTS_CHANGED", function()
+        sell.bankDirty = true
+        sell.invDriver:Show()
+    end)
+    -- Walking away: take one last look, the same thing MAIL_CLOSED does.
+    --
+    -- INLINE, where the mail's equivalent defers to the driver, and the
+    -- difference is deliberate. The mailbox's contents survive the frame
+    -- closing; the bank's do not, and a walk one frame late can come back
+    -- empty. It fires once per visit, so there is no storm to coalesce.
+    --
+    -- This is only a BACKSTOP. The per-change flushes above are what actually
+    -- keep the count right, so the bucket is already correct by the time this
+    -- runs and nothing depends on the client still answering here. If it does
+    -- not, SnapshotWritable refuses the write and the good count stands.
+    A.RegisterEvent("BANKFRAME_CLOSED", function()
+        sell.bankDirty = false
+        sell.SnapshotBank()
+        sell.SnapshotBags()
+        sell.bankOpen = false
     end)
     -- Leaving the world: keep what this character is carrying, so the others
     -- can see it. PLAYER_LEAVING_WORLD covers logout, exit and a zone change.

@@ -240,6 +240,62 @@ or silent breakage on the 1.12 / Lua 5.0 client.
 
 ---
 
+## The inventory buckets — what is live and what is a memory
+
+Only ONE of the four places an item can be is readable on demand:
+
+| bucket | readable                                      |
+| ------ | --------------------------------------------- |
+| bags   | **live** — containers 0..4 always answer       |
+| bank   | containers −1 and 5..10, bank frame open ONLY  |
+| ah     | your own auctions, auction house open ONLY     |
+| mail   | attachments, at the mailbox ONLY               |
+
+So three of the four are memories of a visit, and **a memory presented as a
+fact is how a player walks to the bank for something that is not there.**
+
+1. **A VISIT IS A WINDOW, NOT A MOMENT.** The `*_OPENED` event fires before the
+   player has touched anything, so a snapshot taken only there records the
+   state they ARRIVED in and every move they make for the rest of the visit is
+   lost. That shipped as the bank reporting 203 where the player could count
+   215 — the twelve missing ones being exactly what had just been deposited.
+   `MAIL_CLOSED`'s handler had the principle written in it the whole time:
+   *take one last look, so what is recorded is the state you left rather than
+   the state you arrived in.*
+   - Re-read on the events that signal a CHANGE, for as long as the window is
+     open, and read once more on the way out.
+   - **The bank speaks through TWO events, not one.** `PLAYERBANKSLOTS_CHANGED`
+     covers container −1, the bank's own slots. The purchased bank bags (5..10)
+     report through `BAG_UPDATE` like any other container. Listening to only
+     the bank-sounding one loses every deposit into a bank bag.
+   - Both of those storm, and the work is a seven-container walk, so it is
+     hard rule 16's dirty-flag-plus-flush — never a walk in the handler.
+   - **A dirty flag must also WAKE the driver.** `bagsDirty` gets away without
+     one because `sell.BagCounts` rebuilds lazily when somebody asks; nothing
+     ever asks for the bank, so a flag set against a sleeping frame is a flush
+     that never happens. This was wrong in the first draft of the fix and only
+     the sabotage run caught it.
+   - Gate the `BAG_UPDATE` half on the bank actually being open. That event
+     fires for every loot, trade and sale all session, and away from a bank the
+     walk it would invite answers nothing anyway.
+
+2. **NO SLOTS IS NOT AN EMPTY BUCKET — IT IS AN UNANSWERED QUESTION, AND A
+   QUESTION MUST NEVER OVERWRITE AN ANSWER.** `CountContainers` returns the
+   slot count as its second value precisely so this can be told apart, and
+   `sell.SnapshotWritable` is the whole of the rule. Every writer passes
+   through it, bags and bank alike.
+   - It was added for the bags bucket after two characters vanished from the
+     account-wide tooltip: `PLAYER_ENTERING_WORLD` fires at a moment the
+     containers cannot answer, `{}` overwrote a good snapshot, and a character
+     holding none of anything is dropped from the rows entirely.
+   - The bank went unguarded for far longer and was only ever safe by
+     accident — it had a single caller, at the one moment that always answers.
+     Adding any second caller makes the guard mandatory, because a walk taken a
+     frame after the player stepped away comes back empty and would turn a real
+     count into zero.
+
+---
+
 ## Turtle WoW specifics
 
 Turtle exposes a global **`TURTLE_WOW_VERSION`** — use it to detect Turtle

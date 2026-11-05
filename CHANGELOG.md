@@ -18,6 +18,36 @@ printed in the window title bar — quote it in bug reports.
 
 ---
 
+## [1.55.4]
+
+### Fixed
+- **Deposits and withdrawals made during a bank visit were not counted.**
+  Reported with a screenshot: the tooltip said 203 where the player could count
+  215, the twelve missing ones being exactly what had just been deposited.
+  - The bank was read **once, when the bank frame opened** — which is before
+    you've moved anything. So what got stored was the state you *arrived* in,
+    and everything you did for the rest of the visit went unrecorded until the
+    next visit overwrote it.
+  - The bank is now re-read whenever it actually changes, for as long as it's
+    open: when a bank slot changes, and when a bank bag changes. Those are two
+    different signals on 1.12 — the bank's own slots and the purchased bank
+    bags report through different events — and both are covered.
+  - It's also read once more as you walk away, so the last thing you did is in
+    there even if nothing announced it.
+  - The bags half of the same tooltip was always right, because bags are read
+    live. That's why the report was so precise about which number was wrong.
+
+### Changed
+- **A bank reading that comes back empty can no longer erase what's stored.**
+  The bank containers only answer while the bank frame is open; a reading taken
+  a moment too late comes back as "nothing", which is indistinguishable from an
+  empty bank. Those are now refused rather than written, the same protection
+  the bags snapshot has had since 1.53.x. Nothing could trigger this before —
+  there was only one caller, at the one safe moment — but re-reading during the
+  visit adds several, and an unguarded write is how a real count becomes zero.
+
+---
+
 ## [1.55.3]
 
 ### Fixed
@@ -6696,6 +6726,7 @@ that was there before moved behind one **Advanced** button. `/reload`.
 [1.25.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.24.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.23.0]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
+[1.55.4]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.3]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.2]: https://github.com/Torchlite-bit/Aegis_Exchange/releases
 [1.55.1]: https://github.com/Torchlite-bit/Aegis_Exchange/releases

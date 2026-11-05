@@ -1,4 +1,4 @@
-# Aegis: Exchange (v1.55.3)
+# Aegis: Exchange (v1.55.4)
 
 **A clean, fast auction house for vanilla WoW (1.12).**
 
@@ -504,7 +504,7 @@ real bugs in a throwaway copy and requires the suites to catch every one.
 
 ## Something broken?
 
-1. Check the **version** in the window's title bar (`v1.55.3`) — quote it.
+1. Check the **version** in the window's title bar (`v1.55.4`) — quote it.
 2. **`/aex diag <shift-click an item>`** prints everything Aegis knows about that
    item and every step it took. If a tooltip line is missing, it says why.
 3. `/aex debug` turns on a scanner trace if a scan misbehaves.
