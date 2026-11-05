@@ -127,6 +127,131 @@ H.eq("it is you", rows[1].you, true)
 H.eq("...and your class was recorded", rows[1].class, "MAGE")
 
 -- ---------------------------------------------------------------------------
+H.section("a deposit made DURING the visit is counted")
+-- ---------------------------------------------------------------------------
+--
+-- REPORTED AS "when depositing/taking items from the bank, the amount is not
+-- added/reduced in the cache -- it seems the amounts are only updated when
+-- opening the bank, not when closing. So all item-moves done during the latest
+-- visit are missing."
+--
+-- Exactly right, and the open-time snapshot is why. BANKFRAME_OPENED fires
+-- BEFORE the player has moved anything, so what gets stored is the state they
+-- arrived in -- and nothing wrote the bucket again for the rest of the visit.
+-- The mail bucket already had the answer in its own handler: "take one last
+-- look, so what is recorded is the state you left rather than the state you
+-- arrived in." The bank was the one place that did the opposite.
+--
+-- The bags half of the same tooltip was RIGHT, which is what made the report
+-- so precise: bags are read live, so only the bank number lagged.
+
+W.SetBags({
+    [0]  = { { link = SILK, count = 57 } },
+    [-1] = { { link = SILK, count = 158 } },
+})
+W.FireEvent(A.frame, "BANKFRAME_OPENED")
+sell.bagsDirty = true
+rows, total = db.InventoryRows(4306, sell.BagCounts())
+H.eq("on arrival the bank holds what it held", rows[1].bank, 158)
+
+-- DEPOSIT INTO THE BANK'S OWN SLOTS (container -1). The client signals that
+-- with PLAYERBANKSLOTS_CHANGED and nothing else, so this path has to stand on
+-- its own -- firing both events together is how the first version of this test
+-- let two broken handlers pass.
+W.SetBags({
+    [0]  = { { link = SILK, count = 45 } },
+    [-1] = { { link = SILK, count = 170 } },
+})
+W.FireEvent(A.frame, "PLAYERBANKSLOTS_CHANGED", 1)
+H.check("a bank slot change wakes the driver", sell.invDriver:IsVisible())
+-- COALESCED, not walked in the handler: PLAYERBANKSLOTS_CHANGED storms while
+-- the client resolves item data for a bank it has not seen this session, and
+-- the work is a seven-container walk. Hard rule 16. One tick is the flush.
+W.Tick(sell.invDriver)
+
+sell.bagsDirty = true
+rows, total = db.InventoryRows(4306, sell.BagCounts())
+H.eq("the bank follows the deposit", rows[1].bank, 170)
+H.eq("...and the bags follow it down", rows[1].bags, 45)
+H.eq("...so the total is the one the player can count", total, 215)
+
+-- DEPOSIT INTO A BANK BAG (5..10), which is a different signal entirely: the
+-- purchased bank bags report through BAG_UPDATE, NOT through
+-- PLAYERBANKSLOTS_CHANGED -- that one covers only container -1. A fix that
+-- listened to the bank event alone would lose every deposit into a bank bag.
+W.SetBags({
+    [0]  = { { link = SILK, count = 20 } },
+    [-1] = { { link = SILK, count = 170 } },
+    [5]  = { { link = SILK, count = 25 } },
+})
+W.FireEvent(A.frame, "BAG_UPDATE", 5)
+H.check("a bank-bag deposit wakes the driver too", sell.invDriver:IsVisible())
+W.Tick(sell.invDriver)
+
+sell.bagsDirty = true
+rows, total = db.InventoryRows(4306, sell.BagCounts())
+H.eq("the bank bag is counted into the bank", rows[1].bank, 195)
+H.eq("...and is NOT counted as bags", rows[1].bags, 20)
+H.eq("...and the total is unchanged by moving them", total, 215)
+
+-- A WITHDRAWAL, the other half of the report.
+W.SetBags({
+    [0]  = { { link = SILK, count = 95 } },
+    [-1] = { { link = SILK, count = 120 } },
+})
+W.FireEvent(A.frame, "PLAYERBANKSLOTS_CHANGED", 1)
+W.Tick(sell.invDriver)
+sell.bagsDirty = true
+rows, total = db.InventoryRows(4306, sell.BagCounts())
+H.eq("a withdrawal comes off the bank too", rows[1].bank, 120)
+H.eq("...and the total still adds up", total, 215)
+
+-- ---------------------------------------------------------------------------
+H.section("the bank is only re-read while the bank is OPEN")
+-- ---------------------------------------------------------------------------
+--
+-- The containers answer ONLY while the frame is open. Once it is closed the
+-- walk returns nothing, and nothing must never be allowed to overwrite a real
+-- count -- that is sell.SnapshotWritable, and it was already the fix for an
+-- identical bug on the bags bucket.
+
+W.FireEvent(A.frame, "BANKFRAME_CLOSED")
+-- The client drops the bank containers the moment you walk away.
+W.SetBags({ [0] = { { link = SILK, count = 95 } } })
+
+-- BAG_UPDATE fires for every loot, trade, sale and move for the rest of the
+-- session. Away from a bank it must NOT dirty the bank: the walk it would
+-- invite answers nothing, and asking for one on that event is the freeze shape
+-- hard rule 16 exists for.
+sell.bankDirty = false
+sell.invDriver:Hide()
+W.FireEvent(A.frame, "BAG_UPDATE", 0)
+H.eq("a bag change away from the bank does not dirty the bank",
+     sell.bankDirty, false)
+H.check("...and does not wake the driver for it",
+        not sell.invDriver:IsVisible())
+
+W.Tick(sell.invDriver)
+sell.bagsDirty = true
+rows, total = db.InventoryRows(4306, sell.BagCounts())
+H.eq("so the bank count is left alone", rows[1].bank, 120)
+H.eq("...and the live bags still answer", rows[1].bags, 95)
+
+-- Belt and braces: a snapshot taken with the containers gone refuses to write.
+local _, stored = sell.SnapshotBank()
+H.eq("an unanswerable bank walk is not written", stored, false)
+rows = db.InventoryRows(4306, sell.BagCounts())
+H.eq("...so the last good count survives", rows[1].bank, 120)
+
+-- Restore the fixture the sections below were written against.
+W.SetBags({
+    [0]  = { { link = SILK, count = 3 } },
+    [-1] = { { link = SILK, count = 25 } },
+})
+W.FireEvent(A.frame, "BANKFRAME_OPENED")
+W.FireEvent(A.frame, "BANKFRAME_CLOSED")
+
+-- ---------------------------------------------------------------------------
 H.section("live bags beat the snapshot, and only for you")
 -- ---------------------------------------------------------------------------
 

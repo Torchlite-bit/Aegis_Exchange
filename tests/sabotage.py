@@ -3686,6 +3686,68 @@ end
      "    if n > 1 then return false end",
      "inventory"),
 
+    # ---- the bank, kept current for the whole visit (v1.55.4) ------------
+
+    # THE REPORTED BUG, restored. BANKFRAME_OPENED fires before the player has
+    # moved anything, so with no other writer the bucket records the state they
+    # arrived in and every deposit made during the visit is lost.
+    ("bank-not-reread-during-visit", "core/sell.lua",
+     "    sell.FlushBank()",
+     "    local _ = sell",
+     "inventory"),
+
+    # ...and the same, one step upstream: the slot change never marks it.
+    ("bank-ignores-slot-changes", "core/sell.lua",
+     """    A.RegisterEvent("PLAYERBANKSLOTS_CHANGED", function()
+        sell.bankDirty = true
+        sell.invDriver:Show()
+    end)""",
+     "    local _ = sell",
+     "inventory"),
+
+    # The bank BAGS (5..10) report through BAG_UPDATE, not through
+    # PLAYERBANKSLOTS_CHANGED, so dropping this loses every deposit into one.
+    ("bank-misses-bank-bag-deposits", "core/sell.lua",
+     """        if sell.bankOpen then
+            sell.bankDirty = true
+            sell.invDriver:Show()
+        end""",
+     "        local _ = sell",
+     "inventory"),
+
+    # The write guard removed. A walk taken once the containers have gone
+    # returns {}, and an unguarded write turns a real count into none -- the
+    # identical bug SnapshotWritable was added for on the bags bucket.
+    ("bank-snapshot-writes-an-unanswered-walk", "core/sell.lua",
+     """    local counts, slots = sell.CountContainers(sell.BANK_CONTAINERS)
+    if not sell.SnapshotWritable(slots) then return counts, false end""",
+     "    local counts = sell.CountContainers(sell.BANK_CONTAINERS)",
+     "inventory"),
+
+    # Dirtying the bank on EVERY bag update rather than only at a bank. Away
+    # from the bank that walk answers nothing, and with the guard gone it is
+    # a bucket-erasing one -- but even guarded it is a seven-container walk
+    # on an event that fires all session, which is hard rule 16's whole point.
+    ("bank-dirtied-away-from-the-bank", "core/sell.lua",
+     """        if sell.bankOpen then
+            sell.bankDirty = true
+            sell.invDriver:Show()
+        end""",
+     """        sell.bankDirty = true
+        sell.invDriver:Show()""",
+     "inventory"),
+
+    # A dirty bank that never wakes the driver. Nothing ever ASKS for the bank
+    # the way BagCounts is asked for the bags, so a flag with a sleeping frame
+    # is a flush that never happens.
+    ("bank-dirty-never-wakes-the-driver", "core/sell.lua",
+     """        if sell.bankOpen then
+            sell.bankDirty = true
+            sell.invDriver:Show()
+        end""",
+     "        if sell.bankOpen then sell.bankDirty = true end",
+     "inventory"),
+
     # ---- the cart, and demo recipes (v1.53.13) ---------------------------
 
     # The cart placed by a frame-relative offset instead of chained off the
